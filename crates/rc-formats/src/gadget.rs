@@ -1,7 +1,6 @@
 //! RAC1 gadget classes: Ratchet's hand-held weapons and gadgets (the wrench among them). Spec:
-//! docs/formats/moby_rac1.md section 0.4. Mirrors `src/core/gadget.{h,cpp}`; the golden test in
-//! `tests/golden.rs` compares every parsed field against `gadget_dump.bin` written by the C++
-//! extractor (`rc_extract gadget`).
+//! docs/formats/moby_rac1.md section 0.4. Ported from the retired C++ reference extractor
+//! (git 2230812); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! Layout. The core index header's `gadget_count` (+0x80) / `gadget_offset` (+0x84) give a table of
 //! [`GadgetEntry`] records (0x10 bytes: `offset_in_asset_wad`, `class_number` = o_class,
@@ -35,7 +34,7 @@ use crate::wad;
 /// Size of each of the game's two gadget decompression buffers; every class on the disc fits.
 pub const GADGET_BUFFER_SIZE: usize = 0x18000;
 
-/// Ratchet's moby class (class slot 0; its sequences come from `core/ratchet_seq`).
+/// Ratchet's moby class (class slot 0; its sequences are the core blocks `ratchet_seq/NNN`).
 pub const RATCHET_O_CLASS: i32 = 0;
 /// The wrench, a gadget-table class on every level (gadget definition 8 in the game's table).
 pub const WRENCH_O_CLASS: i32 = 71;

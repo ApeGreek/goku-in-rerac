@@ -346,8 +346,7 @@ mod tests {
     /// spawn; the native cuboid test agrees with the water port's PS2-float one on a grid of points.
     #[test]
     fn novalis_cuboids() {
-        let path = rc_formats::test_data::root().join("levels/01/gameplay_ntsc.dec");
-        let Ok(g) = std::fs::read(path) else { eprintln!("skipped: no extracted/levels/01"); return };
+        let Some(g) = rc_formats::test_data::gameplay(1) else { eprintln!("skipped: no extracted/levels/01"); return };
         let v = rc_formats::volumes::parse_volumes(&g).unwrap();
         let spawn = [162.53032, 136.39348, 60.5];
         // Checkpoint 805 (instance 906) pvar+0 = 54 contains the spawn; the mission cuboid 42 (730 / 790 / 737 /

@@ -1,6 +1,6 @@
 //! Package P1 (docs/plan/hero_states.md §3): the surface ids each level's collision uses, against the surface
 //! rules that level's own `HeroSurfaceReaction` compiles (`rc_game::hero::surface::LEVEL_RULES`). Skipped when
-//! `extracted/` (the `rc_extract` output) is absent.
+//! `extracted/` (the extracted game data) is absent.
 
 use rc_formats::moby_anim::{parse_sequence, MobyAnimClass, MobySequence};
 use rc_formats::{collision, level};
@@ -18,7 +18,7 @@ type Uses = (BTreeMap<u8, usize>, BTreeMap<u8, Vec<i32>>);
 /// The surface ids of level `n`'s world mesh and moby class collision blobs.
 fn surfaces(n: usize) -> Option<Uses> {
     let dir = rc_formats::test_data::root().join(format!("levels/{n:02}"));
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(n as u32)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
     let core = level::parse_level_core(&idx, data.len()).ok()?;
     let mesh = collision::parse_collision(&core, &data).ok()?;
@@ -68,17 +68,16 @@ struct Lv {
 
 fn level_data(n: usize) -> Option<Lv> {
     let dir = rc_formats::test_data::root().join(format!("levels/{n:02}"));
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(n as u32)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let settings = std::fs::read(dir.join("gameplay/level_settings.bin")).ok()?;
+    let settings = rc_formats::test_data::gameplay_section(n as u32, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).ok()?;
     let mesh = collision::parse_collision(&core, &data).ok()?;
     let death_z = f32::from_le_bytes(settings[0x28..0x2c].try_into().unwrap());
-    let cdir = dir.join("core");
-    let blob = std::fs::read(cdir.join("moby_class/0000.bin")).ok()?;
+    let blob = rc_formats::test_data::core_block(n as u32, "moby_class/0000")?;
     let class = rc_formats::moby::parse_moby_class(&blob).ok()?;
     let seqs: Vec<Option<MobySequence>> = (0..256)
-        .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+        .map(|i| rc_formats::test_data::core_block(n as u32, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(&b, 0).ok()))
         .collect();
     Some(Lv { mesh, ratchet: MobyAnimClass::new(&class, seqs), death_z })
 }

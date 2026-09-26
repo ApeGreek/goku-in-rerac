@@ -3,16 +3,17 @@
 A faithful reimplementation of Ratchet & Clank (2002, PS2) in Rust on Bevy, run from the
 owner's own disc, extracted once from their disc image. This is a personal project: it is not
 redistributed, and nothing from the disc (assets, code, dumps, savestates) is stored in this
-repository. Everything disc-derived lives in git-ignored directories (`extracted/`, `ghidra/`,
-`decomp/export/`) or in the user's own data folder.
+repository. Everything disc-derived lives in git-ignored directories (`extracted/`, `decomp/export/`) or in
+the user's own data folder; the committed verification tables hold only sizes, counts and hashes.
 
 | Path | What it is |
 |---|---|
-| `crates/rc-formats` | Disc and level format readers plus bit-exact ports of load-time passes (lighting, animation), golden-tested against the C++ extractor |
+| `crates/rc-formats` | Disc and level format readers plus bit-exact ports of load-time passes (lighting, animation), golden-tested against committed snapshot hashes (`data/loader_snapshots.tsv`) |
 | `crates/rc-engine` | Bevy app (the `randcrw` executable): level viewer replaying the game's per-frame render decisions (LOD, culling, fog, sky) |
 | `crates/rc-game` | Game logic ports (collision queries so far) |
 | `crates/rc-trace` | PCSX2 harness: compares our results with the game's EE RAM (savestate or PINE) |
-| `src/core`, `tools/extract` | C++ format oracle and extractor (`rc_extract`), the reference the Rust ports are checked against |
+| `crates/rc-extract`, `crates/rc-data` | `randcrw-extract` (Tier 0 archive, checked against `data/scus_971_99.tsv`; Tier 2 exports) and the Tier 1 engine cache |
+| `tools/package` | Release packaging (`package.sh`) |
 | `decomp/` | Ghidra naming/export scripts and name tables (the exports themselves are ignored) |
 | `docs/formats`, `docs/plan` | Format specs, reverse-engineering notes, roadmap and decisions |
 
@@ -23,21 +24,18 @@ Rust comes from Homebrew's rustup; put it on `PATH` first:
 ```
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 cargo dev                        # run the engine (Bevy dynamically linked, fast relink)
-cargo test -p rc-formats         # unit + golden tests (golden ones skip without extracted/)
+cargo test --workspace           # all tests (the ones that need game data skip without extracted/)
 cargo run --release -p rc-engine # release / profiling build
 ```
 
 `cargo dev` and `cargo dev-build` are aliases in `.cargo/config.toml` (`-p rc-engine --features dev`).
 The crate is `rc-engine`; its executable is `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
 
-The C++ extractor (CMake + Ninja):
-
-```
-cmake -S . -B build -G Ninja && cmake --build build
-./build/tests/rc_tests
-./build/tools/extract/rc_extract info
-./build/tools/extract/rc_extract unpack   # writes extracted/
-```
+The loaders' golden tests (`crates/rc-formats/tests/golden.rs`) compare what the Rust loaders produce for all 19
+levels with `crates/rc-formats/data/loader_snapshots.tsv` (per test, level and section: item count, byte count,
+SHA-1). The table was generated while the output was byte-identical to the C++ reference extractor, retired on
+2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo test -p
+rc-formats --test golden` rewrites the rows of the tests that ran.
 
 ## Game data
 
@@ -56,8 +54,8 @@ The data folder is chosen in this order:
 
 1. `--data-dir <folder>` (also `--data-dir=<folder>`), how the launcher starts the game;
 2. `RC_DATA_DIR`;
-3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (the C++ `rc_extract unpack`
-   tree, same layout).
+3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (a `randcrw-extract`
+   data folder, same layout).
 
 The folder must exist and hold `toc.bin`, and for 1 and 2 also the extractor's
 `extract-info.json` with a matching `data_format` (the development tree may lack it: one
@@ -86,8 +84,11 @@ launcher's "Export assets…" runs the same command. Layout and what is lossy: `
 §5.5; how mods will use them: `docs/plan/mods.md` §2.1a.
 
 Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
-`rc_formats::test_data::root()`), because they also use the C++-derived files it holds (`.dec`,
-dumps, `core/` and `gameplay/` splits, `overlay.elf`); they skip when it is absent.
+`rc_formats::test_data::root()`); they read only Tier 0 files, so any `randcrw-extract` data folder works, and they
+skip when it is absent. Decompressed lumps, core blocks (`moby_class/NNNN`, `ratchet_seq/NNN`, …) and gameplay
+sections (`level_settings`, …) come from the Rust loaders (`rc_formats::test_data`). An `extracted/` tree written by
+the retired C++ extractor still works; its extra files (`.dec`, `*_dump.bin`, `core/` and `gameplay/` splits,
+`overlay.elf`, PNG/OBJ previews, `vu/`) are no longer read.
 
 Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/randcrw/settings.toml`
 (macOS), `$XDG_CONFIG_HOME/randcrw/` (Linux) or `%APPDATA%\randcrw\` (Windows); an older

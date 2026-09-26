@@ -111,7 +111,7 @@ Every 2D primitive is a small packet appended at `DAT_001611c0` in the main VIF1
 | large | 0x21d070, right 0x21d518, centre 0x21d6d8 | 3 | 0x1c3d10 |
 
 Glyph table: 232 entries × `{u8 u, u8 v, s8 y_off, s8 advance}` indexed by the byte value (data in the overlay's
-`.data`; dump from `overlay.elf`). Atlas cells are 16×16 in a 256×128 texture. `len = -1` = to NUL.
+`.data`; dumped at the time from the C++ `overlay.elf`, now read from `overlay.bin` with `font::read_overlay`). Atlas cells are 16×16 in a 256×128 texture. `len = -1` = to NUL.
 
 ### 3.2 `FontPrint` 0x21ccf0 (boot 0x1f62b0) per byte `c` [H]
 1. If `DAT_0015f460 == 0`, colour slot 0 (`0x16ccb8[0]`) = caller colour.
@@ -248,7 +248,7 @@ banner was found in HUD code (the landing cutscene may carry one) [L].
 
 ## In the port (2026-09-27)
 
-**Formats** (`crates/rc-formats`, oracle `src/core/hud.cpp` + `rc_extract hud` → `levels/NN/hud_dump.bin`):
+**Formats** (`crates/rc-formats`; first verified against the C++ oracle's `rc_extract hud` dump, retired 2026-09-27):
 * `hud.rs`: `parse_header` / `parse_hud(header, banks)` → icons, frames, palettes, textures, banks; `icon_index`,
   `icon_frame` (= `GetIconFrame` with every bank resident), `frame_size`, `decode_frame` (scaled alpha, as every
   level texture) and `decode_frame_raw` (GS alpha, what the renderer samples). **Correction to §1.2**: every
@@ -263,10 +263,11 @@ banner was found in HUD code (the landing cutscene may carry one) [L].
   in every overlay.
 * `strings.rs`: `parse_strings(gameplay, lang)` (+0x10 + 4·lang), `find_index` / `lookup` (first match,
   "Paradox!" fallback), `display` (control codes as `\xNN`).
-* Golden `hud_fonts_and_strings_match_cpp_for_every_level`: 19 levels, 6242 frames (11,147,008 texels), all
-  tables, glyph tables + addresses, 28,416 English messages byte-identical to C++; the 11 standard levels
+* Golden `hud_fonts_and_strings_for_every_level`: 19 levels, 6242 frames (11,147,008 texels), all
+  tables, glyph tables + addresses, 28,416 English messages (byte-identical to C++ when the committed snapshot hashes
+  were generated); the 11 standard levels
   (00–04, 08, 09, 11, 12, 14, 17) equal the global `hud_header` / `hud_banks`, the other 8 do not; a flipped
-  texel byte and a changed glyph advance are both rejected.
+  texel byte and a changed glyph advance both reach the snapshot.
 
 **Game** (`crates/rc-game/src/hud.rs`): `HudState::tick(Inputs{hp, max_hp, bolts, weapon, lang}) -> Vec<Draw>`.
 Slot machine as §4.1 plus what the code adds: `queue_animation_update` zeroes the slot's timer and ramps when a

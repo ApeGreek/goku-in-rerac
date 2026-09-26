@@ -14,8 +14,10 @@ fn extracted() -> Option<PathBuf> {
 fn normal_table_boot_copy_matches_level01_overlay() {
     let Some(root) = extracted() else { return; };
     let boot = NormalTable::from_elf(&std::fs::read(root.join("boot/SCUS_971.99")).unwrap(), BOOT_NORMAL_TABLE_VADDR).unwrap();
-    // level01's LightTfrags (0x2a8e40) DMAs from 0x166500.
-    let ov = NormalTable::from_elf(&std::fs::read(root.join("levels/01/overlay.elf")).unwrap(), 0x0016_6500).unwrap();
+    // level01's LightTfrags (0x2a8e40) DMAs from 0x166500, in the overlay's own copy of the table.
+    let sections = rc_formats::font::parse_overlay_sections(&std::fs::read(root.join("levels/01/overlay.bin")).unwrap()).unwrap();
+    let bytes = rc_formats::font::read_overlay(&sections, 0x0016_6500, 256 * 8).expect("normal table in the overlay");
+    let ov = NormalTable(std::array::from_fn(|i| std::array::from_fn(|k| u32::from_le_bytes(bytes[8 * i + 4 * k..][..4].try_into().unwrap()))));
     assert_eq!(boot, ov);
     assert_eq!(boot.0[0], [1.0f32.to_bits(), 0]);
     assert_eq!(boot.0[64][1], 1.0f32.to_bits());
@@ -30,7 +32,7 @@ fn light_records_match_tfrag_layout_in_every_level() {
         let gameplay = wad::decompress(&std::fs::read(dir.join("gameplay_ntsc.bin")).unwrap()).unwrap();
         let bank: LightBank = tfrag_light::parse_light_bank(&gameplay).unwrap();
         assert!(bank.count >= 1 && bank.count <= 12, "level {i}: {} lights", bank.count);
-        let core_data = std::fs::read(dir.join("core_data.dec")).unwrap();
+        let core_data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
         let core = level::parse_level_core(&std::fs::read(dir.join("core_index.bin")).unwrap(), core_data.len()).unwrap();
         let block = tfrag::tfrag_block(&core, &core_data).unwrap();
         let table_offset = Buf(block).i32(0).unwrap() as usize;

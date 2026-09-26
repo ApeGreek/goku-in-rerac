@@ -4,7 +4,7 @@ relocation-tolerant hash of their MIPS code, so shared engine code is
 identified once and boot-ELF names propagate to every overlay.
 
 Function starts come from Ghidra (list_functions); bodies are taken from the
-raw ELF bytes we extracted, with the next function start as the end. The hash
+raw bytes we extracted (boot ELF, level overlay lumps), with the next function start as the end. The hash
 masks the fields that differ between links of the same source: jal/j targets,
 lui immediates, and $gp-relative offsets.
 
@@ -29,6 +29,23 @@ def elf_text(path):
         typ, flags, addr, off, size = struct.unpack_from("<IIIII", d, shoff + i * shentsize + 4)
         if typ == 1 and addr:
             out[addr] = d[off:off + size]
+    return out
+
+def overlay_text(path):
+    """{addr: bytes} of every PROGBITS section of a raw level overlay lump (extracted/levels/NN/overlay.bin):
+    16-byte headers `dest, size, type, entry`, each followed by `size` bytes, until the entry point changes
+    (rc_formats::font::parse_overlay_sections)."""
+    d = open(path, "rb").read()
+    out, pos, entry = {}, 0, None
+    while pos + 16 <= len(d):
+        dest, size, typ, ep = struct.unpack_from("<IIII", d, pos)
+        if entry is None:
+            entry = ep
+        elif ep != entry:
+            break
+        if typ == 1 and dest:
+            out[dest] = d[pos + 16:pos + 16 + size]
+        pos += 16 + size
     return out
 
 def read_words(sections, start, end):
@@ -71,8 +88,10 @@ def norm_hash(code):
 clusters = collections.defaultdict(list)   # hash -> [(program, addr, name, size)]
 names_by_prog = {}
 for prog in programs:
-    path = os.path.join(ROOT, "extracted/boot/SCUS_971.99") if prog == "SCUS_971.99" else os.path.join(ROOT, "ghidra/import", prog)
-    sections = elf_text(path)
+    if prog == "SCUS_971.99":
+        sections = elf_text(os.path.join(ROOT, "extracted/boot/SCUS_971.99"))
+    else:
+        sections = overlay_text(os.path.join(ROOT, f"extracted/levels/{prog[5:7]}/overlay.bin"))
     if prog != "SCUS_971.99":
         post("open_program", path=f"/levels/{prog}")
     funcs = get("list_functions", program=prog, limit=20000)

@@ -1,5 +1,5 @@
 //! Every moby class collision blob of all 19 levels parses (`rc_formats::moby_collision`), with the
-//! per-kind counts pinned. Skipped when `extracted/` (the `rc_extract` output) is absent.
+//! per-kind counts pinned. Skipped when `extracted/` is absent.
 
 use rc_formats::{level, moby_collision};
 
@@ -10,7 +10,8 @@ fn every_level_moby_collision_blob_parses() {
     let mut levels = 0;
     for lv in 0..19 {
         let dir = root.join(format!("{lv:02}"));
-        let (Ok(data), Ok(idx)) = (std::fs::read(dir.join("core_data.dec")), std::fs::read(dir.join("core_index.bin"))) else { continue };
+        let (Ok(data), Ok(idx)) = (std::fs::read(dir.join("core_data.bin")), std::fs::read(dir.join("core_index.bin"))) else { continue };
+        let data = rc_formats::wad::decompress(&data).unwrap();
         levels += 1;
         let core = level::parse_level_core(&idx, data.len()).unwrap();
         for (oc, c) in moby_collision::parse_level(&core, &data).unwrap_or_else(|e| panic!("level {lv}: {e}")) {

@@ -1,5 +1,5 @@
 //! New game → Veldin start → Veldin→Novalis transition → Novalis start, against the disc's own tables and
-//! save template (`docs/plan/game_state.md` §4). Skipped when `extracted/` (the `rc_extract` output, never
+//! save template (`docs/plan/game_state.md` §4). Skipped when `extracted/` (the extracted game data, never
 //! shipped with the repo) is absent. With the user's ISO (`RC_ISO` or the default path) the disc reader's
 //! `save_game` lump is also checked against `extracted/global/save_game.bin`.
 

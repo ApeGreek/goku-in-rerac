@@ -17,7 +17,7 @@
 use crate::hero_trace::{Hex, Sample, Trace};
 use anyhow::{bail, Context, Result};
 use rc_formats::moby_anim::{parse_sequence, parse_sequences, MobyAnimClass, MobySequence};
-use rc_formats::{collision, gameplay, level};
+use rc_formats::{collision, gameplay, level, wad};
 use rc_game::follow_camera::{CamInput, Camera};
 use rc_game::hero::anim::RatchetAnim;
 use rc_game::hero::physics;
@@ -44,25 +44,24 @@ impl HeroLevel {
     pub fn load(extracted: &Path, n: u32) -> Result<HeroLevel> {
         let dir = extracted.join(format!("levels/{n:02}"));
         let rd = |f: &str| std::fs::read(dir.join(f)).with_context(|| format!("reading {}/{f}", dir.display()));
-        let data = rd("core_data.dec")?;
+        let data = wad::decompress(&rd("core_data.bin")?)?;
         let idx = rd("core_index.bin")?;
-        let gp = rd("gameplay_ntsc.dec")?;
-        let settings = rd("gameplay/level_settings.bin")?;
+        let gp = wad::decompress(&rd("gameplay_ntsc.bin")?)?;
+        let settings = gameplay::section(&gp, "level_settings")?.context("no level settings section")?;
         let core = level::parse_level_core(&idx, data.len())?;
         let mesh = collision::parse_collision(&core, &data)?;
         let instances = gameplay::parse_moby_instances(&gp)?;
         let r = instances.iter().find(|m| m.o_class == 0).context("no Ratchet instance on the level")?;
         let death_z = f32::from_le_bytes(settings[0x28..0x2c].try_into().unwrap());
-        let cdir = dir.join("core");
-        let blob = std::fs::read(cdir.join("moby_class/0000.bin")).context("Ratchet's class")?;
-        let class = rc_formats::moby::parse_moby_class(&blob)?;
+        let blob = core.block(&data, "moby_class/0000").context("Ratchet's class")?;
+        let class = rc_formats::moby::parse_moby_class(blob)?;
         let seqs: Vec<Option<MobySequence>> = (0..256)
-            .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+            .map(|i| core.block(&data, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(b, 0).ok()))
             .collect();
         let class_of = |o: u32| -> Option<MobyAnimClass> {
-            let b = std::fs::read(cdir.join(format!("moby_class/{o:04}.bin"))).ok()?;
-            let c = rc_formats::moby::parse_moby_class(&b).ok()?;
-            Some(MobyAnimClass::new(&c, parse_sequences(&b, &c).ok()?))
+            let b = core.block(&data, &format!("moby_class/{o:04}"))?;
+            let c = rc_formats::moby::parse_moby_class(b).ok()?;
+            Some(MobyAnimClass::new(&c, parse_sequences(b, &c).ok()?))
         };
         let packs = [(2, 607u32), (3, 608), (4, 609)].into_iter().filter_map(|(i, o)| Some((i, o as i16, class_of(o)?))).collect();
         Ok(HeroLevel { n, mesh, ratchet: MobyAnimClass::new(&class, seqs), death_z, spawn: (r.position, r.rotation[2]), packs, clank: class_of(601) })

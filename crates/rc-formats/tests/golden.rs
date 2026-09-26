@@ -1,7 +1,12 @@
-//! Golden tests against the verified C++ extractor's output in `extracted/`.
+//! Golden tests of the Rust loaders on all 19 levels: every section they used to compare byte for byte with the
+//! retired C++ reference extractor's dumps is now hashed into the committed snapshot table
+//! (`data/loader_snapshots.tsv`, `tests/snapshot/mod.rs`), and the structural invariants are checked directly.
 //! They are skipped when the extraction is not present (the data never ships with the repo).
 
+mod snapshot;
+
 use rc_formats::{level, texture, toc, wad};
+use snapshot::{lv, Snap};
 use std::path::PathBuf;
 
 fn extracted() -> Option<PathBuf> {
@@ -10,7 +15,7 @@ fn extracted() -> Option<PathBuf> {
 }
 
 #[test]
-fn toc_level_table_matches_cpp() {
+fn toc_level_table() {
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
     let toc_bytes = std::fs::read(root.join("toc.bin")).unwrap();
     assert_eq!(toc_bytes.len(), toc::TOC_SIZE);
@@ -25,23 +30,54 @@ fn toc_level_table_matches_cpp() {
     }
 }
 
-#[test]
-fn wad_decompression_matches_cpp_for_every_level() {
-    let Some(root) = extracted() else { return; };
+/// Every WAD lump of the archive (`global/**` and the top level of `levels/NN/`; scene regions hold several WADs
+/// and are covered by the scene test): the Tier 0 path without the `.bin` extension, its snapshot scope and key.
+fn wad_lumps(root: &std::path::Path) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.join("global")];
     for i in 0..19 {
-        let comp = std::fs::read(root.join(format!("levels/{i:02}/core_data.bin"))).unwrap();
-        let expected = std::fs::read(root.join(format!("levels/{i:02}/core_data.dec"))).unwrap();
-        let got = wad::decompress(&comp).unwrap();
-        assert!(got == expected, "level {i}: core_data differs from the C++ oracle");
+        for e in std::fs::read_dir(root.join(format!("levels/{i:02}"))).unwrap().flatten() {
+            if e.path().is_file() { stack.push(e.path()); }
+        }
     }
+    while let Some(p) = stack.pop() {
+        if p.is_dir() { stack.extend(std::fs::read_dir(&p).unwrap().flatten().map(|e| e.path())); continue; }
+        if p.extension().is_none_or(|x| x != "bin") { continue; }
+        let mut magic = [0u8; 3];
+        let is_wad = std::fs::File::open(&p).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut magic)).is_ok() && &magic == b"WAD";
+        if !is_wad { continue; }
+        let rel = p.strip_prefix(root).unwrap().with_extension("").to_string_lossy().replace('\\', "/");
+        let (scope, key) = match rel.strip_prefix("levels/") { Some(r) => (r[..2].to_string(), r[3..].to_string()), None => ("global".into(), rel.clone()) };
+        out.push((rel, scope, key));
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn wad_decompression_for_every_lump() {
+    let Some(root) = extracted() else { return; };
+    let mut snap = Snap::new("wad");
+    let lumps = wad_lumps(&root);
+    let (mut n, mut bytes) = (0usize, 0usize);
+    for (rel, scope, key) in &lumps {
+        let got = wad::decompress(&std::fs::read(root.join(format!("{rel}.bin"))).unwrap()).unwrap();
+        snap.add(scope, key, &got);
+        n += 1;
+        bytes += got.len();
+    }
+    eprintln!("wad: {n} lumps decompressed, {:.1} MiB", bytes as f64 / (1 << 20) as f64);
+    snap.finish();
 }
 
 #[test]
 fn core_index_blocks_tile_the_data() {
     let Some(root) = extracted() else { return; };
+    let mut snap = Snap::new("core_blocks");
     for i in 0..19 {
         let idx = std::fs::read(root.join(format!("levels/{i:02}/core_index.bin"))).unwrap();
-        let dec_len = std::fs::metadata(root.join(format!("levels/{i:02}/core_data.dec"))).unwrap().len() as usize;
+        let data = wad::decompress(&std::fs::read(root.join(format!("levels/{i:02}/core_data.bin"))).unwrap()).unwrap();
+        let dec_len = data.len();
         let core = level::parse_level_core(&idx, dec_len).unwrap();
         assert_eq!(core.header.assets_decompressed_size as usize, dec_len);
         let mut blocks = core.blocks.clone();
@@ -49,67 +85,63 @@ fn core_index_blocks_tile_the_data() {
         let covered: usize = blocks.iter().map(|b| b.size).sum();
         assert_eq!(covered, dec_len, "level {i}: blocks must cover the data exactly");
         for w in blocks.windows(2) { assert!(w[0].offset + w[0].size <= w[1].offset, "level {i}: overlapping blocks"); }
-        // spot check one block against the C++ split
-        let tf = blocks.iter().find(|b| b.name == "tfrags").unwrap();
-        assert_eq!(tf.size as u64, std::fs::metadata(root.join(format!("levels/{i:02}/core/tfrags.bin"))).unwrap().len());
+        let names: std::collections::BTreeSet<&str> = core.blocks.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names.len(), core.blocks.len(), "level {i}: block names are unique");
+        // The block list (name, offset, size) in index order; the bytes are the core data's (wad snapshot).
+        for b in &core.blocks {
+            snap.add(&lv(i), "core.blocks", &[b.name.as_bytes(), &(b.offset as u64).to_le_bytes(), &(b.size as u64).to_le_bytes()].concat());
+            assert_eq!(core.block(&data, &b.name).unwrap().len(), b.size);
+        }
     }
+    snap.finish();
 }
 
-/// Reads `textures/rgba.bin` written by `rc_extract textures`: "RCTX" u32 count, then
-/// per texture u32 name_len, name, u32 width, u32 height, width*height*4 RGBA bytes.
-fn read_rgba_dump(bytes: &[u8]) -> Vec<(String, u32, u32, &[u8])> {
-    let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-    assert_eq!(&bytes[..4], b"RCTX");
-    let count = u32_at(4) as usize;
-    let mut out = Vec::with_capacity(count);
-    let mut o = 8;
-    for _ in 0..count {
-        let n = u32_at(o) as usize;
-        let name = String::from_utf8(bytes[o + 4..o + 4 + n].to_vec()).unwrap();
-        o += 4 + n;
-        let (w, h) = (u32_at(o), u32_at(o + 4));
-        o += 8;
-        let len = w as usize * h as usize * 4;
-        out.push((name, w, h, &bytes[o..o + len]));
-        o += len;
-    }
-    assert_eq!(o, bytes.len(), "trailing bytes in rgba.bin");
-    out
-}
-
+/// The gameplay file's pointer-table sections (`gameplay::sections`), which tests read `level_settings` through.
 #[test]
-fn textures_match_cpp_for_every_level() {
+fn gameplay_sections_for_every_level() {
+    let Some(root) = extracted() else { return; };
+    let mut snap = Snap::new("gameplay_sections");
+    for i in 0..19 {
+        let gp = wad::decompress(&std::fs::read(root.join(format!("levels/{i:02}/gameplay_ntsc.bin"))).unwrap()).unwrap();
+        let secs = rc_formats::gameplay::sections(&gp).unwrap();
+        assert!(secs.windows(2).all(|w| w[0].1.end == w[1].1.start) && secs.last().unwrap().1.end == gp.len(), "level {i}: sections tile the file");
+        assert!(secs.iter().any(|s| s.0 == "level_settings"), "level {i}: no level settings");
+        for (name, r) in &secs {
+            snap.add(&lv(i), "gameplay.sections", &[name.as_bytes(), &(r.start as u64).to_le_bytes(), &(r.len() as u64).to_le_bytes()].concat());
+        }
+    }
+    snap.finish();
+}
+
+/// Every level texture (tfrag, moby, tie, shrub tables and shrub billboards) decoded to RGBA, in table order:
+/// per table and level the key, size and pixels of each texture are one snapshot item.
+#[test]
+fn textures_for_every_level() {
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
-    if !root.join("levels/00/textures/rgba.bin").exists() { eprintln!("skipped: run `rc_extract textures` to write rgba.bin"); return; }
+    let mut snap = Snap::new("textures");
     let mut per_table = std::collections::BTreeMap::<&str, usize>::new();
     let mut total = 0;
     for i in 0..19 {
-        let lv = root.join(format!("levels/{i:02}"));
-        let idx = std::fs::read(lv.join("core_index.bin")).unwrap();
-        let data = std::fs::read(lv.join("core_data.dec")).unwrap();
-        let gs = std::fs::read(lv.join("gs_ram.bin")).unwrap();
-        let dump = std::fs::read(lv.join("textures/rgba.bin")).unwrap();
+        let dir = root.join(format!("levels/{i:02}"));
+        let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
+        let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
+        let gs = std::fs::read(dir.join("gs_ram.bin")).unwrap();
         let core = level::parse_level_core(&idx, data.len()).unwrap();
         let got = texture::parse_textures(&core, &data, &gs).unwrap();
-        let want = read_rgba_dump(&dump);
-        assert_eq!(got.len(), want.len(), "level {i}: texture count");
-        for (g, (name, w, h, rgba)) in got.iter().zip(&want) {
-            assert_eq!(&g.key(), name, "level {i}: texture order/naming");
-            assert!(lv.join(format!("textures/{name}.png")).exists(), "level {i}: {name}.png missing");
-            assert_eq!((g.texture.width, g.texture.height), (*w, *h), "level {i} {name}: size");
-            if g.texture.rgba != *rgba {
-                let p = g.texture.rgba.iter().zip(rgba.iter()).position(|(a, b)| a != b).unwrap();
-                panic!("level {i} {name}: first RGBA mismatch at byte {p}: rust {} vs c++ {}", g.texture.rgba[p], rgba[p]);
-            }
+        for g in &got {
+            let t = &g.texture;
+            assert_eq!(t.rgba.len(), t.width as usize * t.height as usize * 4, "level {i} {}: RGBA size", g.key());
             *per_table.entry(g.table.name()).or_default() += 1;
+            snap.add(&lv(i), &format!("texture.{}", g.table.name()), &[g.key().as_bytes(), &t.width.to_le_bytes(), &t.height.to_le_bytes(), &t.rgba].concat());
         }
         total += got.len();
     }
-    eprintln!("textures byte-identical to C++: {total} {per_table:?}");
+    eprintln!("textures: {total} {per_table:?}");
     assert_eq!(total, 9104, "retail disc total (docs/formats/textures_rac1.md 12b)");
+    snap.finish();
 }
 
-/// Section names of one tfrag record in `tfrag_dump.bin` (written by `rc_extract tfrag`, see tools/extract/main.cpp).
+/// Section names of one tfrag record (the layout of the retired C++ `tfrag_dump.bin`; one snapshot row each).
 const TFRAG_SECTIONS: [&str; 25] = [
     "header", "vu", "origin", "tier_counts", "positions", "vertex_info",
     "parent_indices_lod01", "unk_indices_2_lod01", "parent_indices_lod0", "unk_indices_2_lod0",
@@ -118,7 +150,7 @@ const TFRAG_SECTIONS: [&str; 25] = [
     "triangles_lod0", "triangles_lod1", "triangles_lod2", "world_positions",
 ];
 
-/// Serialises a Rust-parsed tfrag exactly like the C++ dump does, one byte vector per section.
+/// Serialises a Rust-parsed tfrag, one byte vector per section.
 fn tfrag_sections(t: &rc_formats::tfrag::Tfrag) -> Vec<Vec<u8>> {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::tfrag::tfrag_triangles;
@@ -144,36 +176,25 @@ fn tfrag_sections(t: &rc_formats::tfrag::Tfrag) -> Vec<Vec<u8>> {
 }
 
 #[test]
-fn tfrags_match_cpp_for_every_level() {
+fn tfrags_for_every_level() {
     use rc_formats::tfrag;
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let mut snap = Snap::new("tfrag");
     let (mut n_tfrags, mut n_vinfo, mut n_pos, mut n_tris) = (0usize, 0usize, 0usize, [0usize; 3]);
     let (mut n_kicks, mut n_kick_loads) = (0usize, 0usize);
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("tfrag_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no tfrag_dump.bin; run `rc_extract tfrag --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, tfrag parse.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
         let core = level::parse_level_core(&idx, data.len()).unwrap();
         let block = tfrag::tfrag_block(&core, &data).unwrap();
         let tfrags = tfrag::parse_tfrags(block).unwrap();
-
-        assert_eq!(&dump[..4], b"RCTF");
-        let count = u32::from_le_bytes(dump[4..8].try_into().unwrap()) as usize;
-        assert_eq!(tfrags.len(), count, "level {i}: tfrag count");
-        assert_eq!(&dump[8..24], &block[..16], "level {i}: block header");
-        let mut pos = 24;
+        snap.add(&lv(i), "tfrag.block_header", &block[..16]);
         for (ti, t) in tfrags.iter().enumerate() {
-            for (name, ours) in TFRAG_SECTIONS.iter().zip(tfrag_sections(t)) {
-                let len = u32::from_le_bytes(dump[pos..pos + 4].try_into().unwrap()) as usize;
-                let theirs = &dump[pos + 4..pos + 4 + len];
-                pos += 4 + len;
-                assert!(ours == theirs, "level {i} tfrag {ti}: {name} differs ({} vs {} bytes)", ours.len(), len);
-            }
+            for (name, ours) in TFRAG_SECTIONS.iter().zip(tfrag_sections(t)) { snap.add(&lv(i), &format!("tfrag.{name}"), &ours); }
             assert_eq!(t.positions.len(), t.header.vert_count as usize, "level {i} tfrag {ti}: vert_count");
-            // Structural invariants the renderer relies on (independent of the C++ oracle):
+            // Structural invariants the renderer relies on:
             // each vertex-info tier is [one per position] ++ [extra], the extra range's count and
             // VU address are the "unknown" header lanes, and index arrays are sized by those counts.
             let v = t.vu;
@@ -205,17 +226,17 @@ fn tfrags_match_cpp_for_every_level() {
                 }
             }
         }
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in tfrag_dump.bin");
         n_tfrags += tfrags.len();
     }
     // Spec 2.6: kicks that also load an ad-gif (VU1 L81 `ibgez vi13, L82`).
     assert_eq!((n_kick_loads, n_kicks), (12_221, 28_838), "kick records that load an ad-gif / all kick records");
     eprintln!("tfrags: 19 levels, {n_tfrags} tfrags, {n_pos} positions, {n_vinfo} vertex-info entries, triangles LOD0/1/2 = {n_tris:?}, \
-               {n_kick_loads}/{n_kicks} kicks load an ad-gif, all sections byte-identical");
+               {n_kick_loads}/{n_kicks} kicks load an ad-gif");
+    snap.finish();
 }
 
-/// Serialises one Rust-parsed moby packet exactly like the C++ `moby_dump.bin` writer, one byte
-/// vector per section (see `cmd_moby` in tools/extract/main.cpp).
+/// Serialises one Rust-parsed moby packet, one byte vector per section (the layout of the retired C++
+/// `moby_dump.bin`; one snapshot row each).
 fn moby_packet_sections(p: &rc_formats::moby::MobySubmesh) -> Vec<Vec<u8>> {
     use bytemuck::{bytes_of, cast_slice};
     let mut recs = Vec::new();
@@ -247,10 +268,11 @@ const MOBY_PACKET_SECTIONS: [&str; 13] = [
 ];
 
 #[test]
-fn mobys_match_cpp_for_every_level() {
+fn mobys_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::moby;
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let mut snap = Snap::new("moby");
     // The game's normal table (boot ELF 0x165500, 256 x (cos, sin), skinning doc 1/4) agrees with
     // moby_normal's axis convention: entry a is (x, y) of the normal with azimuth a, elevation 0.
     let elf = std::fs::read(root.join("boot/SCUS_971.99")).unwrap();
@@ -267,8 +289,6 @@ fn mobys_match_cpp_for_every_level() {
     let mut n_skin = [0usize; 4];
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("moby_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no moby_dump.bin; run `rc_extract moby --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, moby parse.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
@@ -276,19 +296,9 @@ fn mobys_match_cpp_for_every_level() {
         let mut classes = moby::parse_level_mobys(&core, &data).unwrap();
         classes.sort_by_key(|c| c.o_class);
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCMB");
-        assert_eq!(classes.len(), u32_at(4) as usize, "level {i}: class count");
-        let mut pos = 8;
-        let section = |pos: &mut usize| -> &[u8] {
-            let len = u32_at(*pos) as usize;
-            *pos += 4 + len;
-            &dump[*pos - len..*pos]
-        };
         for lc in &classes {
             let (o, mc) = (lc.o_class, &lc.class);
-            assert_eq!(u32_at(pos) as i32, o, "level {i}: class order");
-            pos += 4;
+            snap.add(&lv(i), "moby.o_class", &o.to_le_bytes());
             let h = &mc.header;
             let class_secs: [(&str, Vec<u8>); 5] = [
                 ("header", bytes_of(h).to_vec()),
@@ -298,16 +308,14 @@ fn mobys_match_cpp_for_every_level() {
                 ("packet_counts", cast_slice(&[mc.high_lod.len() as u32, mc.low_lod.len() as u32, mc.metal.len() as u32]).to_vec()),
             ];
             for (name, ours) in class_secs {
-                let theirs = section(&mut pos);
-                assert!(ours == theirs, "level {i} class {o}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                snap.add(&lv(i), &format!("moby.{name}"), &ours);
             }
             for (li, list) in [&mc.high_lod, &mc.low_lod, &mc.metal].into_iter().enumerate() {
-                for (pi, p) in list.iter().enumerate() {
+                for p in list {
                     for (name, ours) in MOBY_PACKET_SECTIONS.iter().zip(moby_packet_sections(p)) {
-                        let theirs = section(&mut pos);
-                        assert!(ours == theirs, "level {i} class {o} list {li} packet {pi}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                        snap.add(&lv(i), &format!("moby.packet.{name}"), &ours);
                     }
-                    // Invariants the renderer relies on (independent of the C++ oracle).
+                    // Invariants the renderer relies on.
                     assert_eq!(moby::moby_triangles(p).unwrap(), p.triangles);
                     assert_eq!(p.unresolved_duplicates, 0, "level {i} class {o}: unresolved duplicate");
                     assert!(p.rgba_multiplier_records().iter().flatten().all(|&m| m == 0x80), "level {i} class {o}: multiplier != 0x80");
@@ -331,19 +339,20 @@ fn mobys_match_cpp_for_every_level() {
             }
             for j in 1..mc.skeleton.trans.len() { assert!(mc.skeleton.parent(j).unwrap() < j, "level {i} class {o}: joint {j} parent not earlier"); }
         }
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in moby_dump.bin");
         n_classes += classes.len();
     }
     eprintln!("mobys: 19 levels, {n_classes} classes, packets high/low/metal = {n_packets:?}, {n_verts} vertices ({n_dupes} duplicates), \
-               triangles high/low/metal = {n_tris:?}, skins by joint count 1/2/3 = {:?}, all sections byte-identical", &n_skin[1..]);
+               triangles high/low/metal = {n_tris:?}, skins by joint count 1/2/3 = {:?}", &n_skin[1..]);
+    snap.finish();
 }
 
 #[test]
-fn ties_match_cpp_for_every_level() {
+fn ties_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::tie::{self, TiePacket};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
-    // Serialises one Rust-parsed packet exactly like the C++ `tie_dump.bin` writer (`cmd_tie` in tools/extract/main.cpp).
+    let mut snap = Snap::new("tie");
+    // Serialises one Rust-parsed packet, one byte vector per section (the layout of the retired C++ `tie_dump.bin`).
     fn packet_sections(p: &TiePacket) -> Vec<Vec<u8>> {
         let mut draws = Vec::new();
         for d in &p.draws {
@@ -386,8 +395,6 @@ fn ties_match_cpp_for_every_level() {
     let (mut n_classes, mut n_packets, mut n_verts, mut n_fat, mut n_tris, mut n_inst, mut n_draws) = (0usize, [0usize; 3], 0usize, 0usize, [0usize; 3], 0usize, 0usize);
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("tie_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no tie_dump.bin; run `rc_extract tie --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, tie parse; instances from the gameplay file.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
@@ -397,28 +404,17 @@ fn ties_match_cpp_for_every_level() {
         let gameplay = wad::decompress(&std::fs::read(dir.join("gameplay_ntsc.bin")).unwrap()).unwrap();
         let instances = tie::parse_tie_instances(&gameplay).unwrap();
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCTI");
-        assert_eq!(classes.len(), u32_at(4) as usize, "level {i}: class count");
-        let mut pos = 8;
-        let section = |pos: &mut usize| -> &[u8] {
-            let len = u32_at(*pos) as usize;
-            *pos += 4 + len;
-            &dump[*pos - len..*pos]
-        };
         for lc in &classes {
             let (o, tc) = (lc.o_class, &lc.class);
-            assert_eq!(u32_at(pos) as i32, o, "level {i}: class order");
-            pos += 4;
+            snap.add(&lv(i), "tie.o_class", &o.to_le_bytes());
             let class_secs: [(&str, Vec<u8>); 4] = [
                 ("header", bytes_of(&tc.header).to_vec()), ("header_ext", tc.header_ext.clone()),
                 ("normals", cast_slice(&tc.normals).to_vec()), ("ad_gifs", cast_slice(&tc.ad_gifs).to_vec()),
             ];
             for (name, ours) in class_secs {
-                let theirs = section(&mut pos);
-                assert!(ours == theirs, "level {i} class {o}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                snap.add(&lv(i), &format!("tie.{name}"), &ours);
             }
-            // Invariants independent of the C++ oracle.
+            // Invariants.
             let h = &tc.header;
             assert_eq!(h.o_class, o, "level {i} class {o}: header o_class");
             assert_eq!(h.normals + 0x200, h.ad_gif_ofs, "level {i} class {o}: normals end at the ad-gifs");
@@ -427,8 +423,7 @@ fn ties_match_cpp_for_every_level() {
                 let (mut sv, mut st, mut ns) = (0u32, 0u32, 0u32);
                 for (pi, p) in list.iter().enumerate() {
                     for (name, ours) in PACKET_SECTIONS.iter().zip(packet_sections(p)) {
-                        let theirs = section(&mut pos);
-                        assert!(ours == theirs, "level {i} class {o} lod {lod} packet {pi}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                        snap.add(&lv(i), &format!("tie.packet.{name}"), &ours);
                     }
                     let vu: Strips = p.draws.iter()
                         .map(|d| (d.ad_gif, d.vertices.iter().map(|&v| (p.vertices[v as usize].position, p.vertices[v as usize].st)).collect())).collect();
@@ -449,73 +444,58 @@ fn ties_match_cpp_for_every_level() {
                     n_fat += p.fat.len();
                     n_draws += p.draws.len();
                 }
+                snap.add(&lv(i), "tie.lod_packets", &(list.len() as u32).to_le_bytes());
                 assert_eq!([h.lod_info[lod].strip_vertex_count, h.lod_info[lod].triangle_count, h.lod_info[lod].strip_count], [sv, st, ns], "level {i} class {o}: lod_info {lod}");
             }
         }
-        let n = u32_at(pos) as usize;
-        pos += 4;
-        let theirs = section(&mut pos);
-        assert_eq!(instances.len(), n, "level {i}: instance count");
-        assert!(cast_slice::<_, u8>(&instances) == theirs, "level {i}: instances differ");
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in tie_dump.bin");
+        snap.add(&lv(i), "tie.instances", cast_slice(&instances));
         for inst in &instances { assert!(classes.iter().any(|c| c.o_class == inst.o_class), "level {i}: instance class {} unresolved", inst.o_class); }
         n_classes += classes.len();
         n_inst += instances.len();
     }
     eprintln!("ties: 19 levels, {n_classes} classes, packets LOD0/1/2 = {n_packets:?}, {n_draws} strips, {n_verts} vertices ({n_fat} fat), \
-               triangles LOD0/1/2 = {n_tris:?}, {n_inst} instances, all sections byte-identical");
+               triangles LOD0/1/2 = {n_tris:?}, {n_inst} instances");
+    snap.finish();
 }
 
 #[test]
-fn sky_matches_cpp_for_every_level() {
+fn sky_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::sky;
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let snap = std::cell::RefCell::new(Snap::new("sky"));
     let (mut n_levels, mut n_shells, mut n_gouraud, mut n_clusters, mut n_verts, mut n_tris, mut n_tex) = (0, 0, 0, 0, 0, 0, 0);
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("sky_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no sky_dump.bin; run `rc_extract sky --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, sky parse.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
         let core = level::parse_level_core(&idx, data.len()).unwrap();
         let block = sky::sky_block(&core, &data).unwrap().unwrap_or_else(|| panic!("level {i}: no sky block"));
-        assert!(block == std::fs::read(dir.join("core/sky.bin")).unwrap(), "level {i}: sky block differs from the C++ split");
         let s = sky::parse_sky(&core, &data).unwrap().unwrap();
         let textures = sky::parse_sky_textures(block, &s).unwrap();
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCSK");
-        let mut pos = 4;
-        let section = |pos: &mut usize| -> &[u8] {
-            let len = u32_at(*pos) as usize;
-            *pos += 4 + len;
-            &dump[*pos - len..*pos]
-        };
-        let check = |pos: &mut usize, name: &str, ours: &[u8]| {
-            let theirs = section(pos);
-            assert!(ours == theirs, "level {i}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
-        };
-        check(&mut pos, "header", bytes_of(&s.header));
-        check(&mut pos, "fx_list", &s.fx_list);
-        check(&mut pos, "texture_defs", cast_slice(&s.texture_defs));
-        assert_eq!(u32_at(pos) as usize, s.shells.len(), "level {i}: shell count");
-        pos += 4;
+        // One row per section of the retired C++ `sky_dump.bin` layout, plus its counts and texture sizes.
+        let check = |name: &str, ours: &[u8]| snap.borrow_mut().add(&lv(i), &format!("sky.{name}"), ours);
+        let count = |name: &str, n: u32| snap.borrow_mut().add(&lv(i), &format!("sky.{name}"), &n.to_le_bytes());
+        check("header", bytes_of(&s.header));
+        check("fx_list", &s.fx_list);
+        check("texture_defs", cast_slice(&s.texture_defs));
+        count("shell_count", s.shells.len() as u32);
         for (si, sh) in s.shells.iter().enumerate() {
-            check(&mut pos, "shell", cast_slice(&[sh.cluster_count, sh.flags]));
+            check("shell", cast_slice(&[sh.cluster_count, sh.flags]));
             let headers: Vec<_> = sh.clusters.iter().map(|c| c.header).collect();
-            check(&mut pos, "cluster_headers", cast_slice(&headers));
+            check("cluster_headers", cast_slice(&headers));
             let so = s.header.shells[si] as usize;
             assert!(block[so + 8..so + 0x10].iter().all(|&b| b == 0), "level {i} shell {si}: header padding not zero");
             assert!(sh.flags == 0 || sh.flags == 1, "level {i} shell {si}: flags {}", sh.flags);
             for c in &sh.clusters {
-                check(&mut pos, "vertices", cast_slice(&c.vertices));
-                check(&mut pos, "st", cast_slice(&c.attrs));
-                check(&mut pos, "faces", cast_slice(&c.faces));
+                check("vertices", cast_slice(&c.vertices));
+                check("st", cast_slice(&c.attrs));
+                check("faces", cast_slice(&c.faces));
                 let gs = sky::sky_gs_vertices(sh, c);
-                check(&mut pos, "gs_vertices", cast_slice(&gs));
-                // Invariants independent of the C++ oracle: a shell is all-textured or all-gouraud.
+                check("gs_vertices", cast_slice(&gs));
+                // A shell is all-textured or all-gouraud.
                 assert!(c.faces.iter().all(|f| (f.texture == 0xff) != sh.textured()), "level {i} shell {si}: mixed textured/untextured faces");
                 assert_eq!(c.header.vertex_offset, 0, "level {i}: non-zero vertex_offset");
                 n_verts += c.vertices.len();
@@ -524,29 +504,30 @@ fn sky_matches_cpp_for_every_level() {
             n_clusters += sh.clusters.len();
             n_gouraud += usize::from(!sh.textured());
         }
-        assert_eq!(u32_at(pos) as usize, textures.len(), "level {i}: texture count");
-        pos += 4;
+        count("texture_count", textures.len() as u32);
         for t in &textures {
-            assert_eq!((u32_at(pos), u32_at(pos + 4)), (t.texture.width, t.texture.height), "level {i}: {} size", t.key());
-            pos += 8;
-            check(&mut pos, "texture rgba", &t.texture.rgba);
+            assert_eq!(t.texture.rgba.len(), t.texture.width as usize * t.texture.height as usize * 4, "level {i}: {} RGBA size", t.key());
+            count("texture_size", t.texture.width);
+            count("texture_size", t.texture.height);
+            check("texture rgba", &t.texture.rgba);
             assert!(t.def.width.count_ones() == 1 && t.def.height.count_ones() == 1, "level {i}: {} not a power of two", t.key());
         }
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in sky_dump.bin");
         n_levels += 1;
         n_shells += s.shells.len();
         n_tex += textures.len();
     }
     eprintln!("sky: {n_levels} levels, {n_shells} shells ({n_gouraud} gouraud), {n_clusters} clusters, {n_verts} vertices, \
-               {n_tris} triangles, {n_tex} textures, all sections byte-identical");
+               {n_tris} triangles, {n_tex} textures");
+    snap.into_inner().finish();
 }
 
 #[test]
-fn shrubs_match_cpp_for_every_level() {
+fn shrubs_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::shrub::{self, ShrubPacket};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
-    // Serialises one Rust-parsed packet exactly like the C++ `shrub_dump.bin` writer (`cmd_shrub` in tools/extract/main.cpp).
+    let mut snap = Snap::new("shrub");
+    // Serialises one Rust-parsed packet, one byte vector per section (the layout of the retired C++ `shrub_dump.bin`).
     fn packet_sections(p: &ShrubPacket) -> Vec<Vec<u8>> {
         let mut draws = Vec::new();
         for d in &p.draws {
@@ -585,8 +566,6 @@ fn shrubs_match_cpp_for_every_level() {
     let mut n_pad = 0usize;
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("shrub_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no shrub_dump.bin; run `rc_extract shrub --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, shrub parse; instances from the gameplay file.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
@@ -596,26 +575,16 @@ fn shrubs_match_cpp_for_every_level() {
         let gameplay = wad::decompress(&std::fs::read(dir.join("gameplay_ntsc.bin")).unwrap()).unwrap();
         let instances = shrub::parse_shrub_instances(&gameplay).unwrap();
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCSH");
-        assert_eq!(classes.len(), u32_at(4) as usize, "level {i}: class count");
-        let mut pos = 8;
-        let section = |pos: &mut usize| -> &[u8] {
-            let len = u32_at(*pos) as usize;
-            *pos += 4 + len;
-            &dump[*pos - len..*pos]
-        };
         for lc in &classes {
             let (o, sc) = (lc.o_class, &lc.class);
-            assert_eq!(u32_at(pos) as i32, o, "level {i}: class order");
-            pos += 4;
+            snap.add(&lv(i), "shrub.o_class", &o.to_le_bytes());
+            snap.add(&lv(i), "shrub.packet_count", &(sc.packets.len() as u32).to_le_bytes());
             let bb: Vec<u8> = sc.billboard.map(|b| bytes_of(&b).to_vec()).unwrap_or_default();
             let class_secs: [(&str, Vec<u8>); 3] = [("header", bytes_of(&sc.header).to_vec()), ("normals", cast_slice(&sc.normals).to_vec()), ("billboard", bb)];
             for (name, ours) in class_secs {
-                let theirs = section(&mut pos);
-                assert!(ours == theirs, "level {i} class {o}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                snap.add(&lv(i), &format!("shrub.{name}"), &ours);
             }
-            // Invariants independent of the C++ oracle.
+            // Invariants.
             let h = &sc.header;
             assert_eq!(h.o_class as i32, o, "level {i} class {o}: header o_class");
             assert_eq!((h.instance_count, h.instances_pointer, h.drawn_count, h.scis_count, h.billboard_count), (0, 0, 0, 0, 0), "level {i} class {o}: runtime fields");
@@ -629,8 +598,7 @@ fn shrubs_match_cpp_for_every_level() {
             let mut tex = 0u8;
             for (pi, p) in sc.packets.iter().enumerate() {
                 for (name, ours) in PACKET_SECTIONS.iter().zip(packet_sections(p)) {
-                    let theirs = section(&mut pos);
-                    assert!(ours == theirs, "level {i} class {o} packet {pi}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                    snap.add(&lv(i), &format!("shrub.packet.{name}"), &ours);
                 }
                 let vu: Strips = p.draws.iter()
                     .map(|d| (d.texture, d.vertices.iter().map(|&v| (p.vertices[v as usize].position, p.vertices[v as usize].st)).collect())).collect();
@@ -649,12 +617,7 @@ fn shrubs_match_cpp_for_every_level() {
                 n_tris += tris.len();
             }
         }
-        let n = u32_at(pos) as usize;
-        pos += 4;
-        let theirs = section(&mut pos);
-        assert_eq!(instances.len(), n, "level {i}: instance count");
-        assert!(cast_slice::<_, u8>(&instances) == theirs, "level {i}: instances differ");
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in shrub_dump.bin");
+        snap.add(&lv(i), "shrub.instances", cast_slice(&instances));
         for inst in &instances {
             assert!(classes.iter().any(|c| c.o_class == inst.o_class), "level {i}: instance class {} unresolved", inst.o_class);
             assert_eq!((inst.unused_08, inst.unused_0c, inst.unused_5c, inst.unused_64), (0, 0, 0, [0; 3]), "level {i}: unused instance fields");
@@ -669,7 +632,8 @@ fn shrubs_match_cpp_for_every_level() {
         n_inst += instances.len();
     }
     eprintln!("shrubs: 19 levels, {n_classes} classes ({n_bb} with a billboard record, {n_bb_tex} with a billboard texture), {n_packets} packets, \
-               {n_draws} strips, {n_verts} vertices ({n_pad} padding), {n_tris} triangles, {n_inst} instances, all sections byte-identical");
+               {n_draws} strips, {n_verts} vertices ({n_pad} padding), {n_tris} triangles, {n_inst} instances");
+    snap.finish();
 }
 
 /// One level through the Rust loaders only: core index, WAD-decompressed core data, raw gs_ram, decompressed NTSC gameplay.
@@ -872,7 +836,7 @@ fn instance_classes_and_tie_draw_distances() {
     assert_eq!((n_tie, n_tie_zero, dd_min, dd_max), (44_712, 0, 84, 720), "tie draw distances");
 }
 
-/// The Rust disc reader (`rc_formats::disc`) against `rc_extract unpack`: for all 19 levels every
+/// The Rust disc reader (`rc_formats::disc`) against the extracted Tier 0 archive: for all 19 levels every
 /// `LevelFiles` member and every audio/scene lump is byte-identical to its file under
 /// `extracted/levels/NN/`, the TOC to `toc.bin` and the boot ELF to `boot/SCUS_971.99`.
 /// Needs the user's disc image (`RC_ISO`, else `~/PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso`);
@@ -942,91 +906,84 @@ fn disc_matches_extracted_for_every_level() {
 }
 
 #[test]
-fn collision_matches_cpp_for_every_level() {
+fn collision_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::collision;
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let snap = std::cell::RefCell::new(Snap::new("collision"));
     let (mut n_cells, mut n_verts, mut n_faces, mut n_quads, mut n_tris, mut n_hero, mut n_hero_tris) = (0, 0, 0, 0, 0, 0, 0);
     let mut surfaces = std::collections::BTreeMap::<u8, usize>::new();
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("collision_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no collision_dump.bin; run `rc_extract collision --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, collision parse.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
         let core = level::parse_level_core(&idx, data.len()).unwrap();
         let block = collision::collision_block(&core, &data).unwrap();
-        assert!(block == std::fs::read(dir.join("core/collision.bin")).unwrap(), "level {i}: collision block differs from the C++ split");
         let c = collision::parse_collision(&core, &data).unwrap();
         let tris = collision::collision_triangles(&c);
         let mesh = &block[c.header.mesh as usize..];
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCCL");
-        let mut pos = 4;
-        let count = |pos: &mut usize| { *pos += 4; u32_at(*pos - 4) as usize };
-        let check = |pos: &mut usize, name: &str, ours: &[u8]| {
-            let len = u32_at(*pos) as usize;
-            let theirs = &dump[*pos + 4..*pos + 4 + len];
-            *pos += 4 + len;
-            assert!(ours == theirs, "level {i}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
-        };
+        // One row per section of the retired C++ `collision_dump.bin` layout; its plain words (counts, offsets)
+        // go to "collision.words" in order.
+        let word = |v: u32| snap.borrow_mut().add(&lv(i), "collision.words", &v.to_le_bytes());
+        let check = |name: &str, ours: &[u8]| snap.borrow_mut().add(&lv(i), &format!("collision.{name}"), ours);
         let node_bytes = |h: collision::CollisionNodeHeader, entries: &[u8]| [bytes_of(&h), entries].concat();
-        check(&mut pos, "header", bytes_of(&c.header));
-        check(&mut pos, "root", &node_bytes(c.root.header, cast_slice(&c.root.slabs)));
-        assert_eq!(count(&mut pos), c.slabs.len(), "level {i}: slab count");
+        check("header", bytes_of(&c.header));
+        check("root", &node_bytes(c.root.header, cast_slice(&c.root.slabs)));
+        word(c.slabs.len() as u32);
         for s in &c.slabs {
-            assert_eq!(count(&mut pos), s.offset as usize, "level {i}: slab offset");
-            check(&mut pos, "slab", &node_bytes(s.header, cast_slice(&s.rows)));
+            word(s.offset as usize as u32);
+            check("slab", &node_bytes(s.header, cast_slice(&s.rows)));
         }
-        assert_eq!(count(&mut pos), c.rows.len(), "level {i}: row count");
+        word(c.rows.len() as u32);
         for r in &c.rows {
-            assert_eq!(count(&mut pos), r.offset as usize, "level {i}: row offset");
-            check(&mut pos, "row", &node_bytes(r.header, cast_slice(&r.cells)));
+            word(r.offset as usize as u32);
+            check("row", &node_bytes(r.header, cast_slice(&r.cells)));
         }
-        assert_eq!(count(&mut pos), c.cells.len(), "level {i}: cell count");
+        word(c.cells.len() as u32);
         for cell in &c.cells {
             let rec = [cast_slice::<i16, u8>(&[cell.x, cell.y, cell.z, 0]), &cell.leaf_word.to_le_bytes(), bytes_of(&cell.header)].concat();
-            check(&mut pos, "cell record", &rec);
-            check(&mut pos, "packed vertices", cast_slice(&cell.packed));
-            check(&mut pos, "vertices", cast_slice(&cell.vertices));
-            check(&mut pos, "faces", cast_slice(&cell.faces));
-            check(&mut pos, "quad_v3", &cell.quad_v3);
-            // Independent of the oracle: the raw tree walk finds this cell's leaf word.
+            check("cell record", &rec);
+            check("packed vertices", cast_slice(&cell.packed));
+            check("vertices", cast_slice(&cell.vertices));
+            check("faces", cast_slice(&cell.faces));
+            check("quad_v3", &cell.quad_v3);
+            // The raw tree walk finds this cell's leaf word.
             let w = collision::lookup_cell_word(mesh, cell.x as i32, cell.y as i32, cell.z as i32).unwrap();
             assert_eq!(w, Some(cell.leaf_word), "level {i}: tree walk for {:?}", cell.coords());
             n_verts += cell.vertices.len();
             n_faces += cell.faces.len();
             n_quads += cell.header.quad_count as usize;
         }
-        assert_eq!(count(&mut pos) as i32, c.hero_group_count, "level {i}: hero group count");
+        word(c.hero_group_count as u32);
         for g in &c.hero_groups {
-            check(&mut pos, "hero group", bytes_of(&g.header));
-            check(&mut pos, "hero vertices", cast_slice(&g.vertices));
-            check(&mut pos, "hero triangles", cast_slice(&g.triangles));
-            check(&mut pos, "hero sphere", cast_slice(&g.header.sphere_world()));
+            check("hero group", bytes_of(&g.header));
+            check("hero vertices", cast_slice(&g.vertices));
+            check("hero triangles", cast_slice(&g.triangles));
+            check("hero sphere", cast_slice(&g.header.sphere_world()));
             let world: Vec<[f32; 3]> = g.vertices.iter().map(|v| v.position()).collect();
-            check(&mut pos, "hero world vertices", cast_slice(&world));
+            check("hero world vertices", cast_slice(&world));
             n_hero_tris += g.triangles.len();
         }
-        check(&mut pos, "triangles", cast_slice(&tris));
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in collision_dump.bin");
+        check("triangles", cast_slice(&tris));
         n_cells += c.cells.len();
         n_tris += tris.len();
         n_hero += c.hero_groups.len();
         for (s, n) in c.surface_counts() { *surfaces.entry(s).or_insert(0) += n; }
     }
     eprintln!("collision: 19 levels, {n_cells} cells, {n_verts} vertices, {n_faces} faces ({n_quads} quads), {n_tris} triangles, \
-               {n_hero} hero groups ({n_hero_tris} triangles), all sections byte-identical");
+               {n_hero} hero groups ({n_hero_tris} triangles)");
     eprintln!("collision surface ids ({}): {surfaces:?}", surfaces.len());
+    snap.into_inner().finish();
 }
 
 #[test]
-fn occlusion_matches_cpp_for_every_level() {
+fn occlusion_for_every_level() {
     use bytemuck::cast_slice;
     use rc_formats::{gameplay, occlusion, tfrag, tie};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let snap = std::cell::RefCell::new(Snap::new("occlusion"));
     let fnv = |it: &mut dyn Iterator<Item = u32>| {
         let (mut n, mut h) = (0u32, 2166136261u32);
         for i in it { n += 1; for b in i.to_le_bytes() { h ^= b as u32; h = h.wrapping_mul(16777619); } }
@@ -1035,8 +992,6 @@ fn occlusion_matches_cpp_for_every_level() {
     let (mut n_cells, mut n_masks, mut totals, mut never) = (0usize, 0usize, [0usize; 3], [0usize; 3]);
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let dump = std::fs::read(dir.join("occlusion_dump.bin"))
-            .unwrap_or_else(|_| panic!("level {i}: no occlusion_dump.bin; run `rc_extract occlusion --level {i}`"));
         // Rust path end to end: WAD decompression, core index, block split, grid + mappings, load-time resolution.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
@@ -1056,29 +1011,23 @@ fn occlusion_matches_cpp_for_every_level() {
         let map_len = 0x10 + 8 * (maps.tfrag.len() + maps.tie.len() + maps.moby.len());
         assert!(std::fs::read(dir.join("occlusion.bin")).unwrap()[..map_len] == gp[ofs..ofs + map_len], "level {i}: WAD occlusion lump differs");
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCOC");
-        let mut pos = 4;
-        let val = |pos: &mut usize| { *pos += 4; u32_at(*pos - 4) };
-        let check = |pos: &mut usize, name: &str, ours: &[u8]| {
-            let len = u32_at(*pos) as usize;
-            let theirs = &dump[*pos + 4..*pos + 4 + len];
-            *pos += 4 + len;
-            assert!(ours == theirs, "level {i}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
-        };
-        check(&mut pos, "raw block", &o.raw);
-        assert_eq!(val(&mut pos), o.masks_offset as u32, "level {i}: masks offset");
-        assert_eq!(val(&mut pos), o.z_base as u32 | (o.z_count as u32) << 16, "level {i}: z base/count");
-        check(&mut pos, "cells", cast_slice(&o.cells));
-        assert_eq!(val(&mut pos) as usize, o.masks.len(), "level {i}: mask count");
+        // One row per section of the retired C++ `occlusion_dump.bin` layout; its plain words (offsets, counts,
+        // and per mask and kind the visible-list size and FNV-1a hash) go to "occlusion.words" in order.
+        let word = |v: u32| snap.borrow_mut().add(&lv(i), "occlusion.words", &v.to_le_bytes());
+        let check = |name: &str, ours: &[u8]| snap.borrow_mut().add(&lv(i), &format!("occlusion.{name}"), ours);
+        check("raw block", &o.raw);
+        word(o.masks_offset as u32);
+        word(o.z_base as u32 | (o.z_count as u32) << 16);
+        check("cells", cast_slice(&o.cells));
+        word(o.masks.len() as u32);
         let oct = o.octants.as_ref().map(|v| [cast_slice::<f32, u8>(&v.centre), cast_slice(&v.masks)].concat()).unwrap_or_default();
-        check(&mut pos, "octant override", &oct);
-        assert_eq!([val(&mut pos), val(&mut pos), val(&mut pos)], [maps.tfrag.len(), maps.tie.len(), maps.moby.len()].map(|n| n as u32), "level {i}: mapping counts");
-        check(&mut pos, "mappings", &[cast_slice::<_, u8>(&maps.tfrag), cast_slice(&maps.tie), cast_slice(&maps.moby)].concat());
-        check(&mut pos, "tfrag bits", cast_slice(&lo.tfrag));
-        check(&mut pos, "tie bits", cast_slice(&lo.tie));
-        check(&mut pos, "moby bits", cast_slice(&lo.moby));
-        assert_eq!([val(&mut pos), val(&mut pos), val(&mut pos)], [lo.tfrag_out_of_date as u32, lo.ties_not_found as u32, lo.mobys_not_found as u32], "level {i}: resolution report");
+        check("octant override", &oct);
+        for n in [maps.tfrag.len(), maps.tie.len(), maps.moby.len()] { word(n as u32); }
+        check("mappings", &[cast_slice::<_, u8>(&maps.tfrag), cast_slice(&maps.tie), cast_slice(&maps.moby)].concat());
+        check("tfrag bits", cast_slice(&lo.tfrag));
+        check("tie bits", cast_slice(&lo.tie));
+        check("moby bits", cast_slice(&lo.moby));
+        for v in [lo.tfrag_out_of_date as u32, lo.ties_not_found as u32, lo.mobys_not_found as u32] { word(v); }
         assert!(!lo.tfrag_out_of_date && lo.ties_positional && lo.mobys_not_found == 0, "level {i}: retail data takes the in-date paths");
         let mut per_mask = vec![[0u32; 3]; o.masks.len()];
         let mut ever = [vec![false; lo.tfrag.len()], vec![false; lo.tie.len()], vec![false; lo.moby.len()]];
@@ -1087,13 +1036,13 @@ fn occlusion_matches_cpp_for_every_level() {
             let lists: [Vec<u32>; 3] = [lo.visible_tfrags(&frame).map(u32::from).collect(), lo.visible_ties(&frame).collect(), lo.visible_mobys(&frame).collect()];
             for (k, l) in lists.iter().enumerate() {
                 let (n, h) = fnv(&mut l.iter().copied());
-                assert_eq!([val(&mut pos), val(&mut pos)], [n, h], "level {i}: mask {mi} kind {k} visible list");
+                word(n);
+                word(h);
                 per_mask[mi][k] = n;
                 for &x in l { ever[k][x as usize] = true; }
             }
         }
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in occlusion_dump.bin");
-        // Independent of the oracle: the exact tree walk and the camera → cell mapping find every cell.
+        // The exact tree walk and the camera → cell mapping find every cell.
         for c in &o.cells {
             assert_eq!(o.lookup(c.x as i32, c.y as i32, c.z as i32), Some(c.mask));
             let centre = [c.x, c.y, c.z].map(|v| v as f32 * occlusion::CELL_SIZE + 2.0);
@@ -1107,44 +1056,34 @@ fn occlusion_matches_cpp_for_every_level() {
         n_masks += o.masks.len();
     }
     eprintln!("occlusion: 19 levels, {n_cells} cells, {n_masks} masks; visible entries over all cells tfrag {} tie {} moby {}; \
-               mapped objects never visible from any cell: tfrag {} tie {} moby {}; all sections byte-identical",
+               mapped objects never visible from any cell: tfrag {} tie {} moby {}",
               totals[0], totals[1], totals[2], never[0], never[1], never[2]);
+    snap.into_inner().finish();
 }
 
-/// Gadget classes (docs/formats/moby_rac1.md 0.4) against `gadget_dump.bin` from `rc_extract gadget`: the table
-/// entry, the moby class table entry, the decompressed size, every moby section and the RGBA of every used
-/// texture slot, byte for byte. Also: every class fits the game's 0x18000 buffer, its textures are the moby
+/// Gadget classes (docs/formats/moby_rac1.md 0.4): the table entry, the moby class table entry, the decompressed
+/// size, every moby section and the RGBA of every used texture slot, one snapshot row each (the retired C++
+/// `gadget_dump.bin` layout). Also: every class fits the game's 0x18000 buffer, its textures are the moby
 /// table's (same pixels as `parse_textures`), and Ratchet's hand attachment list resolves to the same joint.
 #[test]
-fn gadgets_match_cpp_for_every_level() {
+fn gadgets_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::{gadget, moby};
     use std::collections::{BTreeSet, HashSet};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let mut snap = Snap::new("gadget");
     let (mut n_classes, mut n_verts, mut n_tris, mut n_tex) = (0usize, 0usize, 0usize, 0usize);
     let mut o_classes = BTreeSet::new();
     let mut blobs = HashSet::new();
     let mut hand_joints = BTreeSet::new();
     for i in 0..19 {
         let lv = load_rust_level(&root, i);
-        let dump = std::fs::read(root.join(format!("levels/{i:02}/gadget_dump.bin")))
-            .unwrap_or_else(|_| panic!("level {i}: no gadget_dump.bin; run `rc_extract gadget --level {i}`"));
         let gadgets = gadget::parse_gadget_classes(&lv.core, &lv.data).unwrap();
         let level_tex = texture::parse_textures(&lv.core, &lv.data, &lv.gs_ram).unwrap();
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCGD");
-        assert_eq!(gadgets.len(), u32_at(4) as usize, "level {i}: gadget count");
-        let mut pos = 8;
-        let section = |pos: &mut usize| -> &[u8] {
-            let len = u32_at(*pos) as usize;
-            *pos += 4 + len;
-            &dump[*pos - len..*pos]
-        };
         for g in &gadgets {
             let (o, mc) = (g.moby.o_class, &g.moby.class);
-            assert_eq!(u32_at(pos) as i32, o, "level {i}: gadget order");
-            pos += 4;
+            snap.add(&snapshot::lv(i), "gadget.o_class", &o.to_le_bytes());
             assert!(g.blob.len() <= gadget::GADGET_BUFFER_SIZE, "level {i} gadget {o}: 0x{:x} bytes", g.blob.len());
             assert_eq!(g.moby.entry.offset_in_asset_wad, 0, "level {i} gadget {o}: moby table entry has geometry");
             let h = &mc.header;
@@ -1168,14 +1107,12 @@ fn gadgets_match_cpp_for_every_level() {
                 ("packet_counts", cast_slice(&[mc.high_lod.len() as u32, mc.low_lod.len() as u32, mc.metal.len() as u32]).to_vec()),
             ];
             for (name, ours) in &class_secs {
-                let theirs = section(&mut pos);
-                assert!(*ours == theirs, "level {i} gadget {o}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                snap.add(&snapshot::lv(i), &format!("gadget.{name}"), ours);
             }
             for (li, list) in [&mc.high_lod, &mc.low_lod, &mc.metal].into_iter().enumerate() {
-                for (pi, p) in list.iter().enumerate() {
+                for p in list {
                     for (name, ours) in MOBY_PACKET_SECTIONS.iter().zip(moby_packet_sections(p)) {
-                        let theirs = section(&mut pos);
-                        assert!(ours == theirs, "level {i} gadget {o} list {li} packet {pi}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
+                        snap.add(&snapshot::lv(i), &format!("gadget.packet.{name}"), &ours);
                     }
                     assert_eq!(moby::moby_triangles(p).unwrap(), p.triangles);
                     assert_eq!(p.unresolved_duplicates, 0, "level {i} gadget {o}: unresolved duplicate");
@@ -1193,12 +1130,10 @@ fn gadgets_match_cpp_for_every_level() {
                     n_verts += p.vertices.len();
                 }
             }
-            let theirs = section(&mut pos);
-            assert!(tex == theirs, "level {i} gadget {o}: textures differ ({} vs {} bytes)", tex.len(), theirs.len());
+            snap.add(&snapshot::lv(i), "gadget.textures", &tex);
             o_classes.insert(o);
             blobs.insert(g.blob.clone());
         }
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in gadget_dump.bin");
         n_classes += gadgets.len();
         assert!(gadgets.iter().any(|g| g.moby.o_class == gadget::WRENCH_O_CLASS), "level {i}: no wrench");
         // Ratchet (class 0) is an ordinary moby class; the hand item hangs off the end of his joint list 0.
@@ -1209,76 +1144,52 @@ fn gadgets_match_cpp_for_every_level() {
     }
     assert_eq!(hand_joints.len(), 1, "Ratchet's hand joint differs between levels: {hand_joints:?}");
     eprintln!("gadgets: 19 levels, {n_classes} classes ({} distinct o_class {:?}, {} distinct decompressed blobs), {n_verts} vertices, \
-               {n_tris} high-LOD triangles, {n_tex} textures, Ratchet hand joint {hand_joints:?}, all sections byte-identical",
+               {n_tris} high-LOD triangles, {n_tex} textures, Ratchet hand joint {hand_joints:?}",
               o_classes.len(), o_classes, blobs.len());
+    snap.finish();
 }
 
-/// `particles_dump.bin` (`rc_extract particles`): part_textures, part_defs (header, offsets, blob, resolved
-/// starts), the decoded particle textures and the FX textures, for every level (docs/plan/particles.md §6).
+/// Particle and FX textures: part_textures, part_defs (header, offsets, blob, resolved starts), the decoded particle
+/// textures and the FX textures, for every level (docs/plan/particles.md §6). Snapshot rows follow the retired C++
+/// `particles_dump.bin` layout: its sections in order under "particles.sections", its plain words under
+/// "particles.words".
 #[test]
-fn particle_textures_match_cpp_for_every_level() {
+fn particle_textures_for_every_level() {
     use bytemuck::cast_slice;
     use rc_formats::particle_tex;
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let snap = std::cell::RefCell::new(Snap::new("particles"));
     let (mut n_part, mut n_fx, mut n_px) = (0usize, 0usize, 0usize);
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let Ok(dump) = std::fs::read(dir.join("particles_dump.bin")) else {
-            eprintln!("skipped: no particles_dump.bin; run `rc_extract particles`");
-            return;
-        };
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
-        let data = std::fs::read(dir.join("core_data.dec")).unwrap();
+        let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
         let core = level::parse_level_core(&idx, data.len()).unwrap();
         let p = particle_tex::parse_particle_textures(&core, &idx, &data).unwrap();
 
-        let u32_at = |o: usize| u32::from_le_bytes(dump[o..o + 4].try_into().unwrap());
-        assert_eq!(&dump[..4], b"RCPT");
-        let mut pos = 4;
-        let section = |pos: &mut usize| -> &[u8] {
-            let len = u32_at(*pos) as usize;
-            *pos += 4 + len;
-            &dump[*pos - len..*pos]
-        };
-        let word = |pos: &mut usize| -> u32 { *pos += 4; u32_at(*pos - 4) };
+        let section = |b: &[u8]| snap.borrow_mut().add(&lv(i), "particles.sections", b);
+        let word = |v: u32| snap.borrow_mut().add(&lv(i), "particles.words", &v.to_le_bytes());
         let starts: Vec<i32> = (0..p.defs.offsets.len()).map(|t| p.defs.start(t).map_or(-1, |s| s as i32)).collect();
-        let secs: [(&str, &[u8]); 5] = [
-            ("part_textures", cast_slice(&p.entries)),
-            ("part_defs header", cast_slice(&p.defs.header)),
-            ("part_defs offsets", cast_slice(&p.defs.offsets)),
-            ("part_defs blob", &p.defs.blob),
-            ("part_defs starts", cast_slice(&starts)),
-        ];
-        for (name, ours) in secs {
-            let theirs = section(&mut pos);
-            assert!(ours == theirs, "level {i}: {name} differs ({} vs {} bytes)", ours.len(), theirs.len());
-        }
-        assert_eq!(word(&mut pos) as usize, p.textures.len(), "level {i}: particle texture count");
+        for b in [cast_slice(&p.entries), cast_slice(&p.defs.header), cast_slice(&p.defs.offsets), &p.defs.blob, cast_slice(&starts)] { section(b); }
+        word(p.textures.len() as u32);
         for (k, t) in p.textures.iter().enumerate() {
-            assert_eq!((word(&mut pos), word(&mut pos)), (t.width, t.height), "level {i} particle texture {k}: size");
-            assert!(section(&mut pos) == t.rgba.as_slice(), "level {i} particle texture {k}: RGBA differs");
+            word(t.width);
+            word(t.height);
+            section(&t.rgba);
+            assert_eq!(t.rgba.len(), t.width as usize * t.height as usize * 4, "level {i} particle texture {k}: RGBA size");
             // Alpha is the level-texture scaling of PS2 0..0x80: only even values below 0xff.
             assert!(t.rgba.chunks(4).all(|px| px[3] == 0xff || px[3] % 2 == 0), "level {i} particle texture {k}: alpha scaling");
             n_px += t.rgba.len() / 4;
         }
-        let theirs = section(&mut pos);
-        assert!(cast_slice::<_, u8>(&p.fx_entries) == theirs, "level {i}: fx_textures entries differ");
-        assert_eq!(word(&mut pos) as usize, p.fx_textures.len(), "level {i}: fx texture count");
-        for (k, t) in p.fx_textures.iter().enumerate() {
-            let present = word(&mut pos) != 0;
-            let (w, h) = (word(&mut pos), word(&mut pos));
-            assert_eq!(present, t.is_some(), "level {i} fx {k}: presence");
-            let rgba = section(&mut pos);
-            match t {
-                Some(t) => {
-                    assert_eq!((w, h), (t.width, t.height), "level {i} fx {k}: size");
-                    assert!(rgba == t.rgba.as_slice(), "level {i} fx {k}: RGBA differs");
-                    n_fx += 1;
-                }
-                None => assert!(rgba.is_empty()),
-            }
+        section(cast_slice::<_, u8>(&p.fx_entries));
+        word(p.fx_textures.len() as u32);
+        for t in &p.fx_textures {
+            word(t.is_some() as u32);
+            word(t.as_ref().map_or(0, |t| t.width));
+            word(t.as_ref().map_or(0, |t| t.height));
+            section(t.as_ref().map_or(&[][..], |t| t.rgba.as_slice()));
+            n_fx += t.is_some() as usize;
         }
-        assert_eq!(pos, dump.len(), "level {i}: trailing bytes in particles_dump.bin");
         // Every level: 81 types, all 32×32, def lists index existing textures.
         assert_eq!(p.defs.header[0] as usize, particle_tex::PART_TYPES, "level {i}: part_defs count");
         assert_eq!(p.defs.header[1] as usize, p.entries.len(), "level {i}: part_defs texture count");
@@ -1293,19 +1204,23 @@ fn particle_textures_match_cpp_for_every_level() {
         }
         n_part += p.textures.len();
     }
-    eprintln!("particle textures: 19 levels, {n_part} particle textures ({n_px} texels), {n_fx} fx textures, all byte-identical to C++");
+    eprintln!("particle textures: 19 levels, {n_part} particle textures ({n_px} texels), {n_fx} fx textures");
+    snap.into_inner().finish();
 }
 
-/// `sound_dump.bin` (`rc_extract sound`): bank header, sounds, grains, sample extents, both decodes of every
-/// sample, the remapped level defs, the map, per-class ids/defs and the music table, for every level and the
-/// global bank (docs/plan/audio.md §2, §6.3). Then the structural and signal checks of §6.3.
+/// Sound banks: bank header, sounds, grains, sample extents, both decodes of every sample, the remapped level defs,
+/// the map, per-class ids/defs and the music table, for every level and the global bank (docs/plan/audio.md §2,
+/// §6.3), one snapshot row per section (the retired C++ `sound_dump.bin` layout). Then the structural and signal
+/// checks of §6.3.
 #[test]
-fn sound_banks_match_cpp_for_every_level() {
+fn sound_banks_for_every_level() {
     use bytemuck::cast_slice;
     use rc_formats::{sound_bank, vag};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let mut snap = Snap::new("sound");
+    const SECTIONS: [&str; 10] = ["header", "sounds", "grains", "vags", "pcm", "pcm_opengoal", "level_defs", "map", "classes", "music"];
 
-    /// The Rust side serialised in the dump's layout.
+    /// The Rust side serialised in the retired C++ `sound_dump.bin` layout, one byte vector per section.
     fn serialise(b: &sound_bank::Bank, defs: Option<(&sound_bank::LevelSounds, [i32; 15])>) -> Vec<Vec<u8>> {
         let w = |v: &mut Vec<u8>, x: u32| v.extend(x.to_le_bytes());
         let h = &b.header;
@@ -1347,22 +1262,6 @@ fn sound_banks_match_cpp_for_every_level() {
         }
         out
     }
-    fn compare(dump: &[u8], ours: &[Vec<u8>]) -> Result<(), String> {
-        if &dump[..4] != b"RCSD" { return Err("bad magic".into()); }
-        let mut pos = 4;
-        for (k, sec) in ours.iter().enumerate() {
-            let len = u32::from_le_bytes(dump[pos..pos + 4].try_into().unwrap()) as usize;
-            let theirs = &dump[pos + 4..pos + 4 + len];
-            if theirs != sec.as_slice() {
-                let first = theirs.iter().zip(sec).position(|(a, b)| a != b);
-                return Err(format!("section {} differs ({} vs {} bytes, first difference at {first:?})", k + 1, sec.len(), len));
-            }
-            pos += 4 + len;
-        }
-        if pos != dump.len() { return Err(format!("{} trailing bytes", dump.len() - pos)); }
-        Ok(())
-    }
-
     let (mut n_sounds, mut n_grains, mut n_vags, mut n_samples, mut n_defs, mut n_class_ids) = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
     let (mut rms_lo, mut rms_hi, mut clipped, mut differing) = (f64::MAX, 0f64, 0usize, 0usize);
     let mut proved_failure = false;
@@ -1370,29 +1269,26 @@ fn sound_banks_match_cpp_for_every_level() {
     let mut count_mismatch = Vec::new();
     for i in 0..=19 {
         let dir = if i == 19 { root.join("global") } else { root.join(format!("levels/{i:02}")) };
-        let Ok(dump) = std::fs::read(dir.join("sound_dump.bin")) else {
-            eprintln!("skipped: no sound_dump.bin in {}; run `rc_extract sound`", dir.display());
-            return;
-        };
         let bank = sound_bank::parse_bank(&std::fs::read(dir.join("sound_bank.bin")).unwrap()).unwrap();
         let level = (i < 19).then(|| {
             let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
-            let data = std::fs::read(dir.join("core_data.dec")).unwrap();
+            let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
             let core = level::parse_level_core(&idx, data.len()).unwrap();
             let defs = sound_bank::parse_level_sounds(&idx, &core, &data).unwrap();
             let music = sound_bank::music_table(&std::fs::read(dir.join("level_header.bin")).unwrap()).unwrap();
             (defs, music)
         });
         let ours = serialise(&bank, level.as_ref().map(|(d, m)| (d, *m)));
-        if let Err(e) = compare(&dump, &ours) { panic!("{}: {e}", dir.display()); }
+        let scope = if i == 19 { "global".to_string() } else { lv(i) };
+        for (name, sec) in SECTIONS.iter().zip(&ours) { snap.add(&scope, &format!("sound.{name}"), sec); }
         if !proved_failure {
-            // The comparison can fail: one flipped PCM bit, one changed def byte.
+            // The snapshot sees one flipped PCM bit and one changed def byte.
             let mut bad = ours.clone();
             bad[4][100] ^= 1;
-            assert!(compare(&dump, &bad).is_err(), "a changed PCM sample went unnoticed");
+            assert_ne!(snapshot::digest(&bad[4..5]), snapshot::digest(&ours[4..5]), "a changed PCM sample went unnoticed");
             let mut bad = ours.clone();
             bad[6][0x1a] ^= 1;
-            assert!(compare(&dump, &bad).is_err(), "a changed def went unnoticed");
+            assert_ne!(snapshot::digest(&bad[6..7]), snapshot::digest(&ours[6..7]), "a changed def went unnoticed");
             proved_failure = true;
         }
 
@@ -1492,19 +1388,20 @@ fn sound_banks_match_cpp_for_every_level() {
     }
     eprintln!("sound banks: 19 levels + global, {n_sounds} sounds, {n_grains} grains, {n_vags} samples ({n_samples} PCM samples, \
                RMS {rms_lo:.0}..{rms_hi:.0}, {clipped} clipped, {differing} differ in the OpenGOAL variant), {n_defs} level defs, \
-               {n_class_ids} class ids, {n_loop_late} loops start after frame 0, class count mismatches (level, class, header, remap) {count_mismatch:?}; all sections byte-identical to C++");
+               {n_class_ids} class ids, {n_loop_late} loops start after frame 0, class count mismatches (level, class, header, remap) {count_mismatch:?}");
+    snap.finish();
 }
 
-/// `hud_dump.bin` (`rc_extract hud`): HUD tables, every decoded frame, the glyph tables (found through the
-/// font wrappers by both sides, with different pattern matchers) and the English messages, for every level
-/// (docs/plan/hud_text.md). Also: the 11 levels with the standard HUD are byte-identical to the global lumps;
-/// the glyph tables are byte-identical everywhere although their addresses move; the comparison rejects a
-/// single flipped byte.
+/// HUD tables, every decoded frame, the glyph tables (found through the font wrappers) and the English messages,
+/// for every level (docs/plan/hud_text.md), one snapshot row per part of the retired C++ `hud_dump.bin` layout.
+/// Also: the 11 levels with the standard HUD are byte-identical to the global lumps; the glyph tables are
+/// byte-identical everywhere although their addresses move; a single flipped byte reaches the snapshot.
 #[test]
-fn hud_fonts_and_strings_match_cpp_for_every_level() {
+fn hud_fonts_and_strings_for_every_level() {
     use bytemuck::cast_slice;
     use rc_formats::{font, hud, strings};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let mut snap = Snap::new("hud");
 
     struct Rust {
         hud: hud::Hud,
@@ -1526,52 +1423,32 @@ fn hud_fonts_and_strings_match_cpp_for_every_level() {
         let msgs = strings::parse_strings(&gameplay, strings::lang::ENGLISH).unwrap();
         Rust { hud, frames, glyphs, addrs, msgs }
     }
-    fn compare(dump: &[u8], r: &Rust) -> Result<(), String> {
-        let u32_at = |o: usize| -> Result<u32, String> {
-            dump.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| "truncated".to_string())
-        };
-        if &dump[..4] != b"RCHD" { return Err("magic".into()); }
-        let mut pos = 4;
-        let section = |pos: &mut usize| -> Result<Vec<u8>, String> {
-            let len = u32_at(*pos)? as usize;
-            *pos += 4 + len;
-            dump.get(*pos - len..*pos).map(|s| s.to_vec()).ok_or_else(|| "truncated section".to_string())
-        };
-        let secs: [(&str, &[u8]); 5] = [
-            ("header", bytemuck::bytes_of(&r.hud.header)),
-            ("icons", cast_slice(&r.hud.icons)),
-            ("frames", cast_slice(&r.hud.frames)),
-            ("palettes", cast_slice(&r.hud.palettes)),
-            ("textures", cast_slice(&r.hud.textures)),
+    /// The Rust side in the retired C++ `hud_dump.bin` layout, as named parts whose concatenation is the whole dump:
+    /// the HUD tables, every decoded frame, the three glyph-table addresses and tables, and the English messages.
+    fn parts(r: &Rust) -> Vec<(&'static str, Vec<u8>)> {
+        let sec = |b: &[u8]| [&(b.len() as u32).to_le_bytes()[..], b].concat();
+        let w = |v: u32| v.to_le_bytes().to_vec();
+        let mut out = vec![
+            ("magic", b"RCHD".to_vec()),
+            ("header", sec(bytemuck::bytes_of(&r.hud.header))),
+            ("icons", sec(cast_slice(&r.hud.icons))),
+            ("frames", sec(cast_slice(&r.hud.frames))),
+            ("palettes", sec(cast_slice(&r.hud.palettes))),
+            ("textures", sec(cast_slice(&r.hud.textures))),
+            ("frame_count", w(r.frames.len() as u32)),
         ];
-        for (name, ours) in secs {
-            if section(&mut pos)? != ours { return Err(format!("{name} differ")); }
-        }
-        let n = u32_at(pos)? as usize;
-        pos += 4;
-        if n != r.frames.len() { return Err(format!("frame count {n} vs {}", r.frames.len())); }
-        for (k, t) in r.frames.iter().enumerate() {
-            let (w, h) = (u32_at(pos)?, u32_at(pos + 4)?);
-            pos += 8;
-            if (w, h) != (t.width, t.height) { return Err(format!("frame {k}: size")); }
-            if section(&mut pos)? != t.rgba { return Err(format!("frame {k}: RGBA differs")); }
-        }
-        for (f, &a) in r.addrs.iter().enumerate() {
-            if u32_at(pos + 4 * f)? != a { return Err(format!("glyph table {f} address")); }
-        }
-        pos += 12;
-        let ours: Vec<u8> = r.glyphs.iter().flat_map(|t| cast_slice::<_, u8>(t).to_vec()).collect();
-        if section(&mut pos)? != ours { return Err("glyph tables differ".into()); }
-        let n = u32_at(pos)? as usize;
-        pos += 4;
-        if n != r.msgs.len() { return Err(format!("message count {n} vs {}", r.msgs.len())); }
-        for (k, m) in r.msgs.iter().enumerate() {
-            if (u32_at(pos)? as i32, u32_at(pos + 4)? as i32) != (m.id, m.help_audio) { return Err(format!("message {k}: id/audio")); }
-            pos += 8;
-            if section(&mut pos)? != m.text { return Err(format!("message {k}: text")); }
-        }
-        if pos != dump.len() { return Err("trailing bytes".into()); }
-        Ok(())
+        for t in &r.frames { out.push(("frame_images", [w(t.width), w(t.height), sec(&t.rgba)].concat())); }
+        out.push(("glyph_addrs", r.addrs.iter().flat_map(|a| a.to_le_bytes()).collect()));
+        out.push(("glyph_tables", sec(&r.glyphs.iter().flat_map(|t| cast_slice::<_, u8>(t).to_vec()).collect::<Vec<u8>>())));
+        out.push(("message_count", w(r.msgs.len() as u32)));
+        for m in &r.msgs { out.push(("messages", [w(m.id as u32), w(m.help_audio as u32), sec(&m.text)].concat())); }
+        out
+    }
+    /// Names of the parts that differ between two serialisations of the same shape.
+    fn changed(a: &[(&'static str, Vec<u8>)], b: &[(&'static str, Vec<u8>)]) -> Vec<&'static str> {
+        let mut out: Vec<&str> = a.iter().zip(b).filter(|(x, y)| x.1 != y.1).map(|(x, _)| x.0).collect();
+        out.dedup();
+        out
     }
 
     let global_header = std::fs::read(root.join("global/hud_header.bin")).ok();
@@ -1581,12 +1458,8 @@ fn hud_fonts_and_strings_match_cpp_for_every_level() {
     let mut novalis = None;
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let Ok(dump) = std::fs::read(dir.join("hud_dump.bin")) else {
-            eprintln!("skipped: no hud_dump.bin; run `rc_extract hud`");
-            return;
-        };
         let r = load(&dir);
-        if let Err(e) = compare(&dump, &r) { panic!("level {i}: {e}"); }
+        for (name, b) in &parts(&r) { snap.add(&lv(i), &format!("hud.{name}"), b); }
         n_frames += r.frames.len();
         n_texels += r.frames.iter().map(|t| t.rgba.len() / 4).sum::<usize>();
         n_msgs += r.msgs.len();
@@ -1604,14 +1477,14 @@ fn hud_fonts_and_strings_match_cpp_for_every_level() {
         if let Some(g) = &global_header {
             let header = std::fs::read(dir.join("hud_header.bin")).unwrap();
             let same = g.starts_with(&header)
-                && (0..hud::BANKS).all(|b| std::fs::read(root.join(format!("global/hud_banks/{b:03}.dec"))).unwrap_or_default() == r.hud.banks[b]);
+                && (0..hud::BANKS).all(|b| std::fs::read(root.join(format!("global/hud_banks/{b:03}.bin"))).ok().and_then(|z| wad::decompress(&z).ok()).unwrap_or_default() == r.hud.banks[b]);
             let standard = [0, 1, 2, 3, 4, 8, 9, 11, 12, 14, 17].contains(&i);
             assert_eq!(same, standard, "level {i}: global-HUD identity");
             n_global += same as usize;
         }
-        if i == 1 { novalis = Some((dump, r)); }
+        if i == 1 { novalis = Some(r); }
     }
-    let (dump, mut r) = novalis.unwrap();
+    let mut r = novalis.unwrap();
     // Novalis: the standard set (hud_text.md §1.3).
     assert_eq!((r.hud.icons.len() - 1, r.frames.len(), r.hud.palettes.len(), r.hud.textures.len()), (56, 326, 42, 236));
     let spin = r.hud.icons[r.hud.icon_index(30031)];
@@ -1621,26 +1494,29 @@ fn hud_fonts_and_strings_match_cpp_for_every_level() {
     assert_eq!(r.msgs.len(), 1521);
     let m = &r.msgs[strings::find_index(&r.msgs, 1000).unwrap()];
     assert!(m.text.starts_with(b"Gadgetron \x0cInfobots\x08") && m.help_audio == 4);
-    // The comparison can fail: one flipped texel byte, one flipped glyph advance.
+    // The snapshot sees one flipped texel byte and one changed glyph advance.
+    let base = parts(&r);
     r.frames[100].rgba[7] ^= 1;
-    assert!(compare(&dump, &r).unwrap_err().contains("frame 100"));
+    assert_eq!(changed(&base, &parts(&r)), ["frame_images"]);
     r.frames[100].rgba[7] ^= 1;
     r.glyphs[2][b'W' as usize].advance += 1;
-    assert_eq!(compare(&dump, &r).unwrap_err(), "glyph tables differ");
+    assert_eq!(changed(&base, &parts(&r)), ["glyph_tables"]);
     eprintln!("hud: 19 levels ({n_global} with the global HUD), {n_frames} frames ({n_texels} texels), {} distinct glyph-table address \
-               triples (tables byte-identical), {n_msgs} English messages; all byte-identical to C++",
+               triples (tables byte-identical), {n_msgs} English messages",
               addrs.len());
+    snap.finish();
 }
 
-/// Scene tables and chunks (`rc_formats::scene`) against `rc_extract scene` (`levels/NN/scene_dump.bin`) for
-/// all 19 levels, NTSC and PAL: the Rust path (level header → `SceneTable`, region file → WAD → chunk parse)
-/// re-serialised in the C++ layout must be byte-identical. Also checks the format invariants of
-/// docs/plan/cutscenes_transitions.md §2 and the Novalis scene 5 values of §4.4.
+/// Scene tables and chunks (`rc_formats::scene`) for all 19 levels, NTSC and PAL: the Rust path (level header →
+/// `SceneTable`, region file → WAD → chunk parse), serialised in the retired C++ `scene_dump.bin` layout, is one
+/// snapshot item per level. Also checks the format invariants of docs/plan/cutscenes_transitions.md §2 and the
+/// Novalis scene 5 values of §4.4.
 #[test]
-fn scenes_match_cpp_for_every_level() {
+fn scenes_for_every_level() {
     use bytemuck::{bytes_of, cast_slice};
     use rc_formats::scene::{self, Region, Scene, SceneChunk, SceneTable};
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
+    let mut snap = Snap::new("scene");
 
     fn w32(d: &mut Vec<u8>, v: u32) { d.extend_from_slice(&v.to_le_bytes()); }
     fn chunk_bytes(d: &mut Vec<u8>, c: &SceneChunk, dec_len: usize) {
@@ -1715,10 +1591,9 @@ fn scenes_match_cpp_for_every_level() {
     let mut all_missing = Vec::new();
     for i in 0..19 {
         let dir = root.join(format!("levels/{i:02}"));
-        let Ok(dump) = std::fs::read(dir.join("scene_dump.bin")) else { eprintln!("skipped: no scene_dump.bin; run `rc_extract scene`"); return; };
         let r = load(&dir);
         let mine = serialise(&r);
-        assert!(mine == dump, "level {i}: scene dump differs from C++ at byte {:#x} (rust {} bytes, C++ {})", first_diff(&mine, &dump), mine.len(), dump.len());
+        snap.add(&lv(i), "scene.serialised", &mine);
         // Invariants (§2) and classes against the level core.
         let idx = std::fs::read(dir.join("core_index.bin")).unwrap();
         let data = wad::decompress(&std::fs::read(dir.join("core_data.bin")).unwrap()).unwrap();
@@ -1760,13 +1635,13 @@ fn scenes_match_cpp_for_every_level() {
         missing.retain(|c| !gadgets.contains(c));
         all_missing.push(missing.clone());
         eprintln!("level {i:02}: {} scenes, {} regions, classes outside the core: {missing:?}", ids.len(), r.scenes.iter().filter(|s| s.region == Region::Ntsc).count() + r.scenes.iter().filter(|s| s.region == Region::Pal).count());
-        if i == 1 { novalis = Some((dump, r)); }
+        if i == 1 { novalis = Some((mine, r)); }
     }
     eprintln!("scene actor classes outside the level core and gadget table: {all_missing:?}");
     assert_eq!((n_scenes, n_regions, n_chunks, n_ticks, n_actors, n_subs, n_cuts), (138, 275, 4081, 348_572, 1004, 4284, 1858), "totals");
 
     // Novalis scene 5, NTSC (§4.4).
-    let (dump, mut r) = novalis.unwrap();
+    let (dump, mut r) = novalis.unwrap(); // Novalis serialised as loaded
     let s = r.scenes.iter().find(|s| s.index == 5 && s.region == Region::Ntsc).unwrap();
     assert_eq!((s.end_tick(), s.chunks.len(), s.audio_start()), (1508, 16, -6));
     assert_eq!(s.actor_classes(), [0, 10, 530, 1365]);
@@ -1787,7 +1662,7 @@ fn scenes_match_cpp_for_every_level() {
     let secs = ((vag.len() - 0x30) / 16 * 28) as f64 / 44056.0;
     assert!((secs - 24.55).abs() < 0.01, "speech 5 = {secs:.3} s");
 
-    // The comparison can fail: one changed camera angle, one changed actor class, one subtitle byte.
+    // The serialisation (and so the snapshot) sees one changed camera angle, one changed actor class, one subtitle byte.
     let k = r.scenes.iter().position(|s| s.index == 5 && s.region == Region::Ntsc).unwrap();
     r.scenes[k].chunks[3].camera[10].angles[1] = 0.5;
     let at = first_diff(&serialise(&r), &dump);
@@ -1801,5 +1676,6 @@ fn scenes_match_cpp_for_every_level() {
     r.scenes[k].chunks[2].subtitles[0].text[0][0] ^= 0x20;
     assert!(serialise(&r) != dump, "an edited subtitle must be caught");
     eprintln!("scenes: 19 levels, {n_scenes} scenes ({n_regions} NTSC/PAL regions), {n_chunks} chunks, {n_ticks} ticks, {n_actors} actors, \
-               {n_subs} subtitle entries, {n_cuts} cuts; byte-identical to C++");
+               {n_subs} subtitle entries, {n_cuts} cuts");
+    snap.finish();
 }

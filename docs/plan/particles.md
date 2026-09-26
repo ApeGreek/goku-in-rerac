@@ -269,7 +269,7 @@ types (collision_queries.md); nothing checked against PCSX2 yet.
 * **Formats** (`rc-formats`, new `particles.rs`): parse `part_textures` (+0x50/+0x54), `part_defs`
   (+0x6c: count 81, per-type byte lists with the "null = blob start" rule) and decode the 32×32 PSMT8
   images + CSM1 palettes from `part_bank` with the existing texture decoder; FX textures likewise from
-  +0x58/+0x5c/`fx_bank`. Golden: add `rc_extract part-textures` to the C++ extractor (same decode
+  +0x58/+0x5c/`fx_bank`. Golden (done, see "In the port"; the C++ side has since been retired): add `rc_extract part-textures` to the C++ extractor (same decode
   routine as level textures) and compare RGBA bytes for all 19 levels; assert Novalis = 41 × 32² and the
   0x1b1f00 packing. Test the def lists against the table printed in §6.
 * **Game** (`crates/rc-game`, `particles` + `rng`): newlib LCG with srand(1234) at level load as one
@@ -288,8 +288,8 @@ types (collision_queries.md); nothing checked against PCSX2 yet.
 
 ## In the port (2026-09-27)
 
-**Files.** `crates/rc-formats/src/particle_tex.rs` (+ C++ oracle `src/core/particle.cpp`, `rc_extract particles`
-→ `extracted/levels/NN/particles_dump.bin` and PNGs under `textures/particle/`, `textures/fx/`);
+**Files.** `crates/rc-formats/src/particle_tex.rs` (first verified against the C++ oracle's `rc_extract particles`
+dump, retired 2026-09-27; now snapshot-tested);
 `crates/rc-game/src/rng.rs`, `crates/rc-game/src/particles.rs`, `crates/rc-game/src/particles/type06.rs`;
 `crates/rc-engine/src/particle_render.rs`, `crates/rc-engine/assets/shaders/particle.wgsl`.
 
@@ -297,7 +297,7 @@ types (collision_queries.md); nothing checked against PCSX2 yet.
 core +0x64), `part_defs` `{81, texture count, data_off = 352, data_size}` + 81 offsets relative to `part_defs`
 (pointer = blob + offset − data_off, 0 → blob start, `ParseParticleTexs`), FX entries `{palette, texture, width,
 height}` in the FX bank (+0x68). All 19 levels: 948 part textures (all 32×32, unk4 0, CLUT alpha ≤ 0x80) and
-1057 FX textures (16..256 px, none absent), byte-identical between Rust and C++ (`particle_textures_match_cpp_for_every_level`;
+1057 FX textures (16..256 px, none absent), byte-identical between Rust and C++ when the snapshot hashes were generated (`particle_textures_for_every_level`;
 it fails on a CLUT offset change or a changed null-offset rule). The 0x1b1f00 words are
 `((bank + palette) << 4 | unk4, (bank + texture) << 4 | log2 side)` (`PartTextureEntry::runtime_words`).
 Novalis texture 0 (the class-27 frame) is a soft grey smoke puff.

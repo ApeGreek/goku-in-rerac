@@ -274,15 +274,16 @@ underwater loop at the camera (flags 0x15). 6 `0x31a128` music box (§4).
 
 ## In the port (2026-09-26)
 
-Code: `rc_formats::{sound_bank, vag}` (C++ oracle `src/core/sound.cpp`, `rc_extract sound`), `rc_game::audio`
+Code: `rc_formats::{sound_bank, vag}` (first verified against the C++ oracle's `rc_extract sound`, retired 2026-09-27), `rc_game::audio`
 (`audio.rs` SPU2 + frame driver, `audio/voices.rs` EE slots + emitters + 989snd voice manager,
 `audio/grain_vm.rs` 989snd block player, `audio/music.rs` music EE + IOP streams), `rc-engine/src/audio_out.rs`
 (bevy_audio output). Tags as above; **T** = checked by a test here.
 
-**Formats (T, golden).** `rc_extract sound` writes `levels/NN/sound_dump.bin` + `global/sound_dump.bin` (bank
-header, sounds, grains, sample extents, both decodes of every sample, remapped level defs, map, per-class ids and
-defs, music table); `sound_banks_match_cpp_for_every_level` compares every section byte for byte and proves the
-comparison can fail (one PCM bit, one def byte). Totals: 19 levels + global, 5392 sounds, 10590 grains, 4806
+**Formats (T, golden).** `sound_banks_for_every_level` (`crates/rc-formats/tests/golden.rs`) serialises, per level
+and for the global bank, the bank header, sounds, grains, sample extents, both decodes of every sample, remapped
+level defs, map, per-class ids and defs and the music table, and checks each section against the committed
+snapshot hashes (`data/loader_snapshots.tsv`; generated while byte-identical to the retired C++ `rc_extract sound`
+dump); it proves a changed PCM bit or def byte reaches the snapshot. Totals: 19 levels + global, 5392 sounds, 10590 grains, 4806
 samples, 56,633,696 PCM samples, 567 level defs, 5550 class ids. Corrections to §2 found on the way:
 - Loop samples come in two shapes: `0, 6, 2…, 3` (293) and `0, 2…, 6, 2…, 3` (297, repeat-flagged frames before
   the loop start); one-shots are `0…, 1` padded with a `7` frame (4216). Every sample starts with a zero frame and
@@ -294,7 +295,7 @@ samples, 56,633,696 PCM samples, 567 level defs, 5550 class ids. Corrections to 
   the map (0 on the disc); the per-class copy writes header-count entries, walking past the class's remap list
   when the header count is larger (level 10 class 1229: 12 defs, 6 ids). Both are reproduced.
 - `sceSdNote2Pitch`'s table equals `trunc(0x8000·2^(k/12))` / `trunc(0x8000·2^(k/1536))` and the 140 u16 in the
-  libsd IRX (irx.dec 0x7e100) (V). The 989snd pan table in the IRX (irx.dec 0x990a4) is
+  libsd IRX (decompressed `global/irx.bin` 0x7e100) (V). The 989snd pan table in the IRX (0x990a4) is
   `trunc(0x3fff·(cos, sin)(k/2°))` except entry 1 = (0x3ffe, 0xb6) (the formula and OpenGOAL give 0x8e); the
   port uses the disc value (V). The LFO sine is `trunc(32767·cos(2πi/2048))` (equal to OpenGOAL's table).
 
@@ -448,7 +449,7 @@ unchanged. Two idle runs give identical traces, PNGs and WAVs.
   blob in the level's class table, so `parse_level_sounds` leaves its defs empty; the loader parks the first
   `min(count, 15)` ids of its remap list at 0x1b02e0 (`LoadLevelCoreData` 0x258128) and `select_world_object_resource_tables`
   0x259788 writes them into the blob's defs (+0x28, count +0x0d) when the gadget loads. `sound_bank::apply_gadget_defs`
-  does the same for every gadget blob (`LevelAudio::from_parts`); the C++ golden output of `parse_level_sounds` is
+  does the same for every gadget blob (`LevelAudio::from_parts`); the golden (snapshot) output of `parse_level_sounds` is
   unchanged. Test `audio::tests::gadget_class_sounds_on_every_level` (21 gadget classes on each of the 19 levels).
 * **Item sounds** (`PlayClassSound(i, 0, item)` in the item's update: the Swingshot's fire 0 / hit 1 / pull 2, the
   wrench's hit `FUN_002bda88()` = 0 here): `HeroSounds::item_sound`, played by the tick right after the item update

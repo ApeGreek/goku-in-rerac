@@ -9,7 +9,7 @@ use rc_trace::novalis_spawn as ns;
 fn novalis_spawn_state_checks() {
     let root = rc_trace::default_extracted();
     let dump = root.join("traces/novalis_spawn_ee.bin");
-    if !dump.exists() || !root.join("levels/01/core_data.dec").exists() { eprintln!("skipped: no savestate dump"); return; }
+    if !dump.exists() || !root.join("levels/01/core_data.bin").exists() { eprintln!("skipped: no savestate dump"); return; }
     let img = EeSource::Raw(dump).load().unwrap();
     let mut out = ns::Out::default();
     // Tie / shrub palettes: shrubs all equal, ties all but one entry (a ±1 on two channels).

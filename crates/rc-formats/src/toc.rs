@@ -95,7 +95,7 @@ pub fn parse_level_header(bytes: &[u8]) -> Result<LevelHeader> {
 
 /// Size of a lump addressed by a bare `Sector32` (spec 2.5), from the first bytes at that sector:
 /// a VAG header gives `0x30 + data_size` (big-endian), a WAD header its compressed size; anything
-/// else is one sector. The bool says whether the size is exact (mirrors `probe_lump` in src/core/toc.cpp).
+/// else is one sector. The bool says whether the size is exact (as the retired C++ `probe_lump`).
 pub fn probe_lump_size(head: &[u8]) -> (u64, bool) {
     if head.len() >= 0x30 && &head[..4] == b"VAGp" {
         (0x30 + u32::from_be_bytes([head[0x0c], head[0x0d], head[0x0e], head[0x0f]]) as u64, true)
@@ -112,7 +112,7 @@ pub fn probe_lump_size(head: &[u8]) -> (u64, bool) {
 pub struct StreamLump { pub name: String, pub sector: u32, pub bytes: u64 }
 
 /// The audio (`bindata`, `music`) and scene lumps of a level, in the order and with the sizes
-/// `level_lumps` in src/core/toc.cpp produces. `probe(sector)` returns `probe_lump_size` of that
+/// the retired C++ `level_lumps` produced. `probe(sector)` returns `probe_lump_size` of that
 /// sector's first bytes. Per scene record k: `speech/KK_<lang>` (one VAG per language, probed size),
 /// then `scene/KK_ntsc` and `scene/KK_pal` (the region's whole sector run, chunks + sentinel;
 /// `crate::scene`).

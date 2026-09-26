@@ -1,6 +1,6 @@
 //! Level textures: 8-bit indexed pixels with a 256-entry RGBA32 CLUT in CSM1
 //! order. Spec: docs/formats/textures_rac1.md (§3, §4, §9, §12, §12b).
-//! Mirrors `src/core/texture.cpp` and the `textures` command of `tools/extract`.
+//! Ported from the retired C++ reference extractor (git 2230812); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 
 use crate::buf::{invalid, Buf, Result};
 use crate::level::{LevelCore, ShrubBillboardInfo};
@@ -57,7 +57,7 @@ pub fn decode_indexed8(indices: &[u8], width: u32, height: u32, clut: &[u8]) -> 
 pub enum TextureTable { Tfrag, Moby, Tie, Shrub, Billboard }
 
 impl TextureTable {
-    /// Directory name used by `rc_extract textures`.
+    /// Short table name (snapshot keys, texture keys, export folders).
     pub fn name(self) -> &'static str {
         match self {
             TextureTable::Tfrag => "tfrag",
@@ -89,7 +89,7 @@ pub struct LevelTexture {
 }
 
 impl LevelTexture {
-    /// The C++ extractor's file stem under `textures/`, e.g. `tfrag/000_128x128_t4`
+    /// The texture's key (the retired C++ extractor's file stem), e.g. `tfrag/000_128x128_t4`
     /// or `billboard/0123_32x64`.
     pub fn key(&self) -> String {
         match self.source {
@@ -136,12 +136,12 @@ pub fn billboard_image<'a>(gs_ram: &'a [u8], b: &ShrubBillboardInfo) -> Result<I
     Ok(IndexedImage { width: b.width as u32, height: b.height as u32, indices: px.bytes(), clut: clut.bytes() })
 }
 
-/// Decodes every texture the C++ `textures` command exports, in the same order:
+/// Decodes every level texture, in table order:
 /// the tfrag, moby, tie and shrub tables, then shrub billboards.
 ///
 /// `core_data` is the whole decompressed core data lump (texture pixels are read
 /// from its `textures` block, bounded as by `LevelCore::blocks`), `gs_ram` the raw gs_ram lump.
-/// Entries with non-positive size or negative offsets are skipped as in C++; any other
+/// Entries with non-positive size or negative offsets are skipped; any other
 /// entry that does not decode is an error (none do on the retail disc).
 pub fn parse_textures(core: &LevelCore, core_data: &[u8], gs_ram: &[u8]) -> Result<Vec<LevelTexture>> {
     let Some(blk) = core.blocks.iter().find(|b| b.name == "textures") else { return invalid("level core has no textures block"); };

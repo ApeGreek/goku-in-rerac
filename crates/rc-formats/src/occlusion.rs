@@ -1,6 +1,6 @@
 //! Precomputed occlusion (potentially-visible sets). Spec: docs/formats/occlusion_rac1.md; the per-frame
-//! rule and the renderer plan: docs/plan/occlusion_culling.md. Mirrors `src/core/occlusion.{h,cpp}`; the
-//! golden test in `tests/golden.rs` compares everything against `occlusion_dump.bin` from the C++ extractor.
+//! rule and the renderer plan: docs/plan/occlusion_culling.md. Ported from the retired C++
+//! reference extractor (git 2230812); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! Three pieces of data take part, all addresses from the level01 overlay:
 //! * the core **occlusion block** (core header 0x0c, pointer `0x15f600`): a z → y → x tree of u16 nodes over

@@ -62,7 +62,7 @@ impl Inputs {
         let dir = extracted.join(format!("levels/{lvl:02}"));
         let rd = |n: &str| std::fs::read(dir.join(n)).with_context(|| format!("reading {}/{n}", dir.display()));
         let gameplay = wad::decompress(&rd("gameplay_ntsc.bin")?)?;
-        let core_data = rd("core_data.dec")?;
+        let core_data = wad::decompress(&rd("core_data.bin")?)?;
         let core = level::parse_level_core(&rd("core_index.bin")?, core_data.len())?;
         Ok(Inputs {
             disc_bank: rc_formats::tfrag_light::parse_light_bank(&gameplay)?,

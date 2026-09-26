@@ -399,7 +399,7 @@ Correctness of the *structural* half of this is well supported: `test_shrub_clas
 
 ### 1.9b Verified on the retail NTSC-U disc (2026-09-26)
 
-`src/core/shrub.cpp` implements §1.2–§1.3b and §1.8; `rc_extract shrub --level N` writes `shrub_dump.bin`, and `crates/rc-formats/src/shrub.rs` matches it byte for byte on all 19 levels (`shrubs_match_cpp_for_every_level`): **551 classes, 5,374 packets, 18,783 strips, 228,383 vertices (68 padding), 190,749 triangles, 25,572 instances, 83 billboards**. Every draw is a triangle strip, every `h` is 0x1000, every texture slot resolves to the shrub texture table, the header runtime fields are 0, and a class has a `ShrubBillboard` record exactly when its core-index billboard texture has `width != 0`. Correction to §1.2: the `ShrubNormal` table is 24 × **8 bytes** (s16 x, y, z, pad), unit length, not 0x180 bytes.
+The retired C++ reference (`src/core/shrub.cpp`) implemented §1.2–§1.3b and §1.8; its `rc_extract shrub --level N` wrote `shrub_dump.bin`, and `crates/rc-formats/src/shrub.rs` matched it byte for byte on all 19 levels (`shrubs_for_every_level`, now against the committed snapshot hashes): **551 classes, 5,374 packets, 18,783 strips, 228,383 vertices (68 padding), 190,749 triangles, 25,572 instances, 83 billboards**. Every draw is a triangle strip, every `h` is 0x1000, every texture slot resolves to the shrub texture table, the header runtime fields are 0, and a class has a `ShrubBillboard` record exactly when its core-index billboard texture has `width != 0`. Correction to §1.2: the `ShrubNormal` table is 24 × **8 bytes** (s16 x, y, z, pad), unit length, not 0x180 bytes.
 
 Instances: 0x08/0x0c/0x5c/0x64–0x6c are 0; matrix `[3][3]` is 0.01 on 25,367 and **0.0** on 205; `dir_lights` is 0–8 or 15 (never uses the blend byte); `draw_distance` 0–512 (mostly 32). The gameplay class list (0x38) is the distinct instance classes in first-appearance order. Class `mode_bits` is 0 (484), 4 (64) or 2 (3): `ShrubProc` skips a class with bit 0 and uses `(mode_bits & 6) >> 1` as a wind-sway mode (EE-side matrix perturbation with the 256-byte table it copies to scratchpad 0x70003b00). `s_class` is 0 everywhere; `mip_distance` is 5 on 531 classes.
 
@@ -597,11 +597,11 @@ Consistent with that, the sky diff test (`test_sky_asset`) compares the header r
 
 ### 2.8b Verified on the retail NTSC-U disc (2026-09-26)
 
-`src/core/sky.cpp` implements §2.2–§2.5. `rc_extract sky --level N` parses levels 0, 1, 5, 9 and 18: 2–7 shells, 50–135 clusters, every face index below its cluster's vertex count and every texture reference below `texture_count`; shell 0 is the untextured (flag bit 0) dome where present. Sky textures decode to sensible PNGs with the same palette rules as level textures. Header colours seen: alpha 0 or 0x80, `clear_screen` 0 or 1.
+The retired C++ reference (`src/core/sky.cpp`) implemented §2.2–§2.5. Its `rc_extract sky --level N` parsed levels 0, 1, 5, 9 and 18: 2–7 shells, 50–135 clusters, every face index below its cluster's vertex count and every texture reference below `texture_count`; shell 0 is the untextured (flag bit 0) dome where present. Sky textures decode to sensible PNGs with the same palette rules as level textures. Header colours seen: alpha 0 or 0x80, `clear_screen` 0 or 1.
 
 ### 2.8c Rust port (2026-09-26)
 
-`crates/rc-formats/src/sky.rs` parses all 19 retail skies byte-identically to `src/core/sky.cpp` (`sky_dump.bin`, golden test `sky_matches_cpp_for_every_level`): 75 shells (15 gouraud), 1700 clusters, 27349 vertices, 26496 triangles, 102 textures. Every shell's 8 padding bytes are zero, `flags` is 0 or 1, `vertex_offset` is 0, all arrays lie inside `data_size`, all texture sizes are powers of two, and no shell mixes textured and 0xFF faces.
+`crates/rc-formats/src/sky.rs` parsed all 19 retail skies byte-identically to the retired C++ `sky.cpp` (`sky_dump.bin`; golden test `sky_for_every_level`, now against the committed snapshot hashes): 75 shells (15 gouraud), 1700 clusters, 27349 vertices, 26496 triangles, 102 textures. Every shell's 8 padding bytes are zero, `flags` is 0 or 1, `vertex_offset` is 0, all arrays lie inside `data_size`, all texture sizes are powers of two, and no shell mixes textured and 0xFF faces.
 
 ### 2.9 Sky unknowns
 

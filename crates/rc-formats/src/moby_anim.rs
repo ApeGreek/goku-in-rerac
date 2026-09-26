@@ -1432,14 +1432,14 @@ mod chain_tests {
     /// Ratchet (class 0) on Novalis with his `ratchet_seq` sequences: the hand chain (joint list 0, ending
     /// at joint 56) evaluated by [`evaluate_chain`] equals the full evaluator's `P_56` (skeleton replaced by
     /// identity) bit for bit on every tick of the first 400 of sequence 0 (none of which has a post-scale on
-    /// joint 56 or equal key indices). Needs `extracted/levels/01/core`; skipped without it.
+    /// joint 56 or equal key indices). Needs `extracted/levels/01`; skipped without it.
     #[test]
     fn ratchet_hand_chain_matches_full_evaluator() {
-        let dir = crate::test_data::root().join("levels/01/core");
-        let Ok(blob) = std::fs::read(dir.join("moby_class/0000.bin")) else { eprintln!("skipped: no extracted level 01"); return };
+        let Some(core) = crate::test_data::core(1) else { eprintln!("skipped: no extracted level 01"); return };
+        let blob = core.block("moby_class/0000").unwrap().to_vec();
         let class = crate::moby::parse_moby_class(&blob).unwrap();
         let seqs: Vec<Option<MobySequence>> = (0..256)
-            .map(|i| std::fs::read(dir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+            .map(|i| core.block(&format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(b, 0).ok()))
             .collect();
         let ac = MobyAnimClass::new(&class, seqs);
         let (chain, _) = crate::gadget::joint_list(&blob, &class.header, crate::gadget::HAND_JOINT_LIST).unwrap();

@@ -1,5 +1,5 @@
 //! Moby collision on Novalis (level 1): the crate stacks after the load pass, a line cast onto a crate, and a
-//! bolt dropped above a crate settling on it. Skipped when `extracted/` (the `rc_extract` output) is absent.
+//! bolt dropped above a crate settling on it. Skipped when `extracted/` (the extracted game data) is absent.
 
 use rc_formats::moby_anim::{parse_sequences, MobyAnimClass};
 use rc_formats::moby_collision::MobyCollision;
@@ -26,9 +26,9 @@ struct Level {
 
 fn load() -> Option<Level> {
     let dir = rc_formats::test_data::root().join("levels/01");
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(1)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
+    let gp = rc_formats::test_data::gameplay(1)?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let instances = gameplay::parse_moby_instances(&gp).unwrap();
@@ -38,7 +38,7 @@ fn load() -> Option<Level> {
     let mut classes = ClassTable::default();
     for (slot, e) in core.moby_classes.iter().enumerate() {
         let oc = e.o_class as i16;
-        let Ok(blob) = std::fs::read(dir.join(format!("core/moby_class/{:04}.bin", e.o_class))) else { continue };
+        let Some(blob) = rc_formats::test_data::core_block(1, &format!("moby_class/{:04}", e.o_class)) else { continue };
         let Ok(c) = rc_formats::moby::parse_moby_class(&blob) else { continue };
         let anim = MobyAnimClass::new(&c, parse_sequences(&blob, &c).unwrap_or_default());
         let mut info = class_info(&c, slot as u8, scheduler::port_update_fn(oc));
@@ -46,7 +46,7 @@ fn load() -> Option<Level> {
         classes.classes.insert(oc, (info, Some(anim)));
     }
     let blobs = rc_formats::moby_collision::parse_level(&core, &data).unwrap();
-    Some(Level { mesh, instances, pvars, gp, classes, spawnable, blobs })
+    Some(Level { mesh, instances, pvars, gp: gp.to_vec(), classes, spawnable, blobs })
 }
 
 /// The table after the loader, the load pass and `ticks` moby-loop ticks (camera at the 344 stack), with moby

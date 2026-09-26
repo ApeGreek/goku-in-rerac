@@ -335,8 +335,8 @@ mod tests {
         for i in 0..19 {
             let dir = root.join(format!("levels/{i:02}"));
             let core_index = std::fs::read(dir.join("core_index.bin")).unwrap();
-            let core_data = std::fs::read(dir.join("core_data.dec")).unwrap();
-            let gameplay = std::fs::read(dir.join("gameplay_ntsc.dec")).unwrap();
+            let core_data = crate::test_data::core_data(i).unwrap();
+            let gameplay = crate::test_data::gameplay(i).unwrap();
             let core = crate::level::parse_level_core(&core_index, core_data.len()).unwrap();
             let classes = crate::tie::parse_level_ties(&core, &core_data).unwrap();
             let insts = crate::tie::parse_tie_instances(&gameplay).unwrap();

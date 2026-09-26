@@ -5,7 +5,7 @@
 
 use rc_formats::{gameplay, level, occlusion::*, tfrag, tie, wad};
 
-/// Visible tfrags per populated cell on level 01, as `rc_extract occlusion` prints them (min, max).
+/// Visible tfrags per populated cell on level 01 (min, max).
 const NOVALIS_TFRAGS_PER_CELL: (usize, usize) = (5, 522);
 
 #[test]

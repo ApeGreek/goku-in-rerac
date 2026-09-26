@@ -127,7 +127,7 @@ i.e. `P_j = P_parent · [R(q)ᵀ·diag(s) | t]`, written over the joint record.
 
 **6.7 Palette** (0x20ed18; the skeleton was DMA'd to SPR 0x1c00): `F.r_i = P.r0·S.r_i.x + P.r1·S.r_i.y + P.r2·S.r_i.z` (i < 3), `F.r3 = P.r0·S.r3.x + P.r1·S.r3.y + P.r2·S.r3.z + P.r3`. **The w column of S is never read**: the disc stores other values there (e.g. 831.39, 1.6e29). The ≤ 0x6f-joint limit keeps SPR 0..0x1bff clear of the skeleton at 0x1c00. Confidence: verified.
 
-## 7. Verification and worked examples (Python over `extracted/levels/01/core/moby_class/*.bin`)
+## 7. Verification and worked examples (Python over the level 01 core blocks `moby_class/NNNN`, then split by the retired C++ extractor)
 
 **Convention check.** For classes 11, 608, 724, 754 and 1365, seq 0 frame 0 run through §6 gives `max |P_j·S_j − I|` ≤ 2e-4 (rotation) and < 1 unit (translation). With the rows transposed the error is 1.1–2.0 and hundreds to 14,834 units. The median joint-origin error against the bind pose (from S⁻¹) is 0.4–1.0 units vs 3,000–12,000 for classes 724/725/754. This pins down the quaternion→matrix formula, the pre-multiplied parent chain, the parent word and packed units.
 

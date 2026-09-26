@@ -1,9 +1,9 @@
-//! Tfrag terrain block. Spec: docs/formats/tfrag_rac1.md. Mirrors `src/core/tfrag.{h,cpp}`
-//! (`parse_tfrags`, `tfrag_triangles`) exactly; the golden test in `tests/golden.rs`
-//! compares every parsed field against a dump written by the C++ extractor.
+//! Tfrag terrain block. Spec: docs/formats/tfrag_rac1.md. Ported from the retired
+//! C++ reference extractor (git 2230812; `parse_tfrags`, `tfrag_triangles`);
+//! `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! Beyond the C++ struct, [`Tfrag`] also carries the mini-sphere array and the
-//! 8-corner cube, which the C++ oracle does not parse (its dump reads them raw).
+//! 8-corner cube, which the C++ reference did not parse.
 
 use crate::buf::{invalid, Buf, Result};
 use crate::level::LevelCore;

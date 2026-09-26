@@ -151,16 +151,17 @@ copied.**
 - `crates/rc-formats/src/disc.rs` is `Disc`. It reads the ToC at sector 1500, the level headers, the boot ELF via
   `SYSTEM.CNF`, and `level(id) → LevelFiles` (11 level-group members). It also provides `level_stream_lumps`
   (music, bindata, speech, scene), `read_lump`, `scene_region`, `scene_speech` and `save_game_lump`.
-  `tests/golden.rs::disc_matches_extracted_for_every_level` proves the level-group bytes identical to the C++ output.
-  **Added by Stage 1a:** `RAC1_GLOBAL_FIELDS` + `Disc::global_lumps` (port of `rac1_global_fields`/`global_lumps` in
-  `src/core/toc.cpp`, including the duplicate-name suffix rule) and `Disc::archive_files` (the whole Tier 0 file
+  `tests/golden.rs::disc_matches_extracted_for_every_level` proves the level-group bytes identical to the Tier 0
+  archive. **Added by Stage 1a:** `RAC1_GLOBAL_FIELDS` + `Disc::global_lumps` (port of the retired C++ reader's
+  `rac1_global_fields`/`global_lumps`, including the duplicate-name suffix rule) and `Disc::archive_files` (the whole Tier 0 file
   plan as byte ranges of the image). `IsoImage::volume_sectors` exposes the PVD size (truncation check). Build
   identification lives in `crates/rc-extract` (§4.1).
 - `crates/rc-formats/src/toc.rs` has the level header, `SceneRecord`, `level_stream_lumps`, `probe_lump_size` and
   `global_sector_range`.
-- The C++ `tools/extract` (`rc_extract info|ls|toc|unpack|<dump cmds>`) is the oracle. `unpack` writes the whole
-  current `extracted/` raw layout, with a `.dec` next to every WAD lump. `info` prints the volume id and
-  `SYSTEM.CNF` only; nothing is hashed.
+- The C++ `tools/extract` (`rc_extract info|ls|toc|unpack|<dump cmds>`) was the oracle until it was retired on
+  2026-09-27 (decisions.md). Its `unpack` wrote the `extracted/` raw layout that Tier 0 keeps, plus a `.dec` next to
+  every WAD lump; the golden tests now check committed snapshot hashes (`crates/rc-formats/data/loader_snapshots.tsv`)
+  and `randcrw-extract` the committed SHA-1 table.
 
 ### 3.2 Engine data access
 *(As before Stage 1b; the cut-over is described in §7.)*
@@ -187,7 +188,7 @@ copied.**
 | Part | Files | Size | Notes |
 |---|---|---|---|
 | Raw lumps (Tier 0 equivalent) | 2,937 | 4,014 MiB | levels 983, global 229, FMVs 2,801 |
-| `.dec` copies, `*_dump.bin` goldens, png/obj previews, `core/`, `gameplay/`, `textures/` splits, `vu/`, `traces/` | many | ~5 GiB | derived dev data; not part of Tier 0 |
+| `.dec` copies, `*_dump.bin` goldens, png/obj previews, `core/`, `gameplay/`, `textures/` splits, `vu/` (written by the retired C++ extractor), `traces/` | many | ~5 GiB | derived dev data; not part of Tier 0; nothing reads the C++-written files since 2026-09-27 |
 
 ## 4. Disc inventory (NTSC-U SCUS_971.99 v1.00)
 
@@ -233,7 +234,7 @@ includes a coverage audit that reports unreferenced non-zero sector runs.
 
 `randcrw-extract` (binary of `crates/rc-extract`; CLI and codes in `docs/plan/launcher_contract.md`) writes the
 Tier 0 archive **directly into the data folder** it is given (`--out`, the launcher's `games/rac1/data/`), in exactly
-the raw layout `rc_extract unpack` writes to `extracted/`:
+the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
 
 ```
 <data>/extract-info.json          written last; its absence = incomplete folder
@@ -288,7 +289,7 @@ the raw layout `rc_extract unpack` writes to `extracted/`:
 
 ### 5.2 Recommendation: (c), the hybrid
 - **Tier 0 archive** = today's raw layout, byte-identical to the C++ `rc_extract unpack` `.bin` files (no `.dec`,
-  no dumps). WAD lumps stay compressed exactly as on disc. This keeps every current golden test valid, and it means
+  no dumps; since the C++ side retired, checked against the committed SHA-1 table). WAD lumps stay compressed exactly as on disc. This keeps every current golden test valid, and it means
   the archive format has no reason to ever change.
 - **Tier 1 cache** = `cache/v<N>/`, written by the extractor's `prepare` step and readable only through `rc-data`:
   - **v1 (Stage 1):** decompressed WADs (`core_data`, `gameplay_ntsc`, HUD banks, scene chunks, global WAD lumps)
@@ -379,7 +380,8 @@ the raw layout `rc_extract unpack` writes to `extracted/`:
   A cold cache (first start after deleting it) loads level 01 up to the window in 191 ms, writing its 5 lumps.
   `prepare` for all 19 levels takes 0.2 s (release, 4 workers); a full `extract` including it 4.7 s.
 - **Fidelity checks:** `crates/rc-data/tests/roundtrip.rs` (all 133 lumps of the 19 levels: lazily built, re-read by
-  a fresh store, `read_lump` and `prepare`'s check all equal `wad::decompress` of Tier 0 and the C++ `.dec`);
+  a fresh store, `read_lump` and `prepare`'s check all equal `wad::decompress` of Tier 0, whose output the rc-formats golden test checks against the committed snapshot
+  hashes);
   `tests/lifecycle.rs` (stale stamp, corrupt lump, unwritable cache, once per process); `RC_SCENE=0
   RC_SCREENSHOT_FRAME=300` on Novalis byte-identical before and after, with a warm and with a cold cache.
 - **For v2+ (E2 and later):** add a kind (`kind.<name> = <version>` in the stamp, files under `<kind>/`), keep
@@ -584,8 +586,9 @@ The engine's current settings path still says `randcre` (`render_settings::setti
 - Settings: `<per-OS config dir>/randcrw/settings.toml`; when it is missing and `…/randcre/settings.toml` exists, the
   old file is copied once (and kept). `RC_SETTINGS_FILE` still overrides; deterministic runs still skip the file.
 - Tests and tools: `rc_formats::test_data::root()` (`RC_EXTRACTED`, else `<workspace>/extracted`) replaces every
-  hard-coded `../../extracted` in `rc-formats`, `rc-game` and `rc-trace` (`default_extracted`). Tests keep the dev
-  tree because they read C++-derived files the archive does not have.
+  hard-coded `../../extracted` in `rc-formats`, `rc-game` and `rc-trace` (`default_extracted`). Since 2026-09-27 the
+  tests read only Tier 0 files (decompressed lumps, core blocks and gameplay sections come from the Rust loaders,
+  `rc_formats::test_data`), so any `randcrw-extract` data folder works as `RC_EXTRACTED`.
 - Verified: a fresh `randcrw-extract extract` (2,937 files, 4.2 s) then the engine with `--data-dir` on it,
   `RC_EXTRACTED` pointed at a bogus path and `RC_ISO` unset: Novalis renders (`RC_SCENE=0`), and the arrival scene
   plays with speech (0–25 s) and the level music after it (WAV capture + `RC_AUDIO_TRACE`).
@@ -622,8 +625,8 @@ workspace **path** crates are fine. Each package reports load times, file counts
 | P1.8 | **FMV demux** (lossless) into Tier 1; doc of the decoder options for U10 | `rc-extract/src/pss.rs`, `docs/plan/cutscenes_transitions.md` §5 append | Demuxed stream sizes add up to the PSS payload; SShd header fields as documented | P1.2 |
 
 Stage 1 is done when a fresh machine with only the ISO can run `rc-extract extract` then `cargo dev`, and after
-deleting the ISO everything the engine currently plays still works. The C++ `tools/extract` stays as the dump oracle
-(decisions.md: it retires once the loaders are all ported).
+deleting the ISO everything the engine currently plays still works. The C++ `tools/extract` was the dump oracle until
+the loaders were all ported; it was retired on 2026-09-27 (decisions.md) in favour of committed snapshot hashes.
 
 ### Stage 2: Launcher
 Superseded in part by the Tauri decision: P2.1/P2.2/P2.4/P2.5 happen in the separate `randcrw-launcher` repo against
@@ -660,7 +663,7 @@ tab → P3.3 importers (PNG → texture with an RGBA renderer path, WAV → PCM 
 | U11 | **`.iso` only for now** (no `.bin`, CHD, CSO). |
 | U12 | Manual updates: **accepted**. Official downloads stay off until the repo is public; a Development source uses local builds. |
 | U13 | Signing later: **accepted**. |
-| U14 | C++ extractor kept as the test oracle: **accepted**. |
+| U14 | C++ extractor kept as the test oracle: **accepted**; **retired 2026-09-27** (decisions.md): replaced by committed Rust snapshot hashes. |
 | — | Everything user-facing is named **randcrw**, never "randcre". |
 
 The original options and recommendations follow for reference.
@@ -682,7 +685,7 @@ The original options and recommendations follow for reference.
 6. **U6 Supported builds:** **NTSC-U v1.00 only.** Other RC1 builds are identified and refused with a message.
    PAL/JP support would need their own address maps; the overlay and ELF VAs differ.
 7. **U7 Hash manifest in the repo:** commit a per-lump size + SHA-1 table for the supported build
-   (`tools/extract/rc1_ntsc_v100.tsv` or in `build_db`). It is verification data only, like the ELF SHA-1 and ISO
+   (`tools/extract/rc1_ntsc_v100.tsv` or in `build_db`; built as `crates/rc-extract/data/scus_971_99.tsv`). It is verification data only, like the ELF SHA-1 and ISO
    SHA-256 already in decisions.md. **Recommend yes.**
 8. **U8 Data locations:** per-OS defaults as in §6.2, user-movable; the dev default stays `<workspace>/extracted`.
    **Recommend yes.**
@@ -697,4 +700,5 @@ The original options and recommendations follow for reference.
     settled.
 13. **U13 Code signing and notarisation:** needs the user's Apple Developer ID. **Defer until packaging.**
 14. **U14 C++ `tools/extract`:** **keep it as the dump oracle** until the loaders are all ported (existing
-    decision). The Rust extractor becomes the only `unpack`.
+    decision). The Rust extractor becomes the only `unpack`. **Retired 2026-09-27** (decisions.md): the loaders are
+    all ported and the golden tests check committed snapshot hashes instead.

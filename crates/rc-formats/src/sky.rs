@@ -1,8 +1,8 @@
 //! The level sky: concentric shells of small indexed-triangle clusters plus the sky's own
 //! 8-bit textures. Spec: docs/formats/shrub_sky_rac1.md part 2; renderer facts from the
-//! decomp in docs/plan/sky_render_notes.md. Mirrors `src/core/sky.{h,cpp}` (`parse_sky`,
-//! `decode_sky_texture`, `sky_gs_vertices`) exactly; the golden test in `tests/golden.rs`
-//! compares every section against `sky_dump.bin` written by `rc_extract sky`.
+//! decomp in docs/plan/sky_render_notes.md. Ported from the retired C++
+//! reference extractor (git 2230812; `parse_sky`, `decode_sky_texture`, `sky_gs_vertices`);
+//! `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! How the game draws it (not Wrench's model): the sky is **not** a VU1 program. The EE builds
 //! GS packets with VU0 macro code and sends them over PATH2 (VIF1 DIRECT):
@@ -272,7 +272,7 @@ pub struct SkyTexture {
 }
 
 impl SkyTexture {
-    /// The C++ extractor's file stem under `textures/`, e.g. `sky/03_128x128`.
+    /// The texture's key (the retired C++ extractor's file stem), e.g. `sky/03_128x128`.
     pub fn key(&self) -> String { format!("sky/{:02}_{}x{}", self.index, self.def.width, self.def.height) }
 }
 
@@ -291,7 +291,7 @@ pub fn sky_texture_image<'a>(block: &'a [u8], sky: &Sky, index: usize) -> Result
     Ok(IndexedImage { width: t.width as u32, height: t.height as u32, indices: px.bytes(), clut: clut.bytes() })
 }
 
-/// Decodes every texture definition in table order (FX textures first), as `rc_extract sky` writes them.
+/// Decodes every texture definition in table order (FX textures first).
 pub fn parse_sky_textures(block: &[u8], sky: &Sky) -> Result<Vec<SkyTexture>> {
     (0..sky.texture_defs.len())
         .map(|index| Ok(SkyTexture { index, def: sky.texture_defs[index], texture: decode_sky_texture(block, sky, index)? }))

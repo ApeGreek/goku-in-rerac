@@ -88,10 +88,10 @@ impl LevelData {
     pub fn load(extracted: &Path, lvl: u32) -> Result<LevelData> {
         let dir = extracted.join(format!("levels/{lvl:02}"));
         let rd = |n: &str| std::fs::read(dir.join(n)).with_context(|| format!("reading {}/{n}", dir.display()));
-        let data = rd("core_data.dec")?;
+        let data = wad::decompress(&rd("core_data.bin")?)?;
         let idx = rd("core_index.bin")?;
         let gp = wad::decompress(&rd("gameplay_ntsc.bin")?)?;
-        let level_settings = rd("gameplay/level_settings.bin")?;
+        let level_settings = gameplay::section(&gp, "level_settings")?.context("no level settings section")?.to_vec();
         let core = level::parse_level_core(&idx, data.len())?;
         let mesh = collision::parse_collision(&core, &data)?;
         let instances = gameplay::parse_moby_instances(&gp)?;
@@ -122,11 +122,10 @@ impl LevelData {
         let ext = |oc: i16| match oc { 27 if lvl == 1 => Some(EMITTER_UPDATE), 751 if has_ripple => Some(RIPPLE_UPDATE), _ => None };
         let mut classes = ClassTable::default();
         let mut joint_lists = HashMap::new();
-        let cdir = dir.join("core");
         for (slot, e) in core.moby_classes.iter().enumerate() {
             let oc = e.o_class as i16;
             let update = scheduler::port_update_fn(oc).or_else(|| ext(oc));
-            let blob = std::fs::read(cdir.join(format!("moby_class/{:04}.bin", e.o_class))).ok();
+            let blob = core.block(&data, &format!("moby_class/{:04}", e.o_class));
             let parsed = blob.as_ref().and_then(|b| rc_formats::moby::parse_moby_class(b).ok().map(|c| (b, c)));
             match parsed {
                 Some((blob, c)) => {
@@ -147,11 +146,11 @@ impl LevelData {
             }
         }
         let coll_blobs = rc_formats::moby_collision::parse_level(&core, &data)?;
-        // Ratchet with his own sequence table (core ratchet_seq/NNN.bin), as tests/hero_novalis.rs.
-        let rblob = std::fs::read(cdir.join("moby_class/0000.bin")).context("Ratchet's class")?;
-        let rclass = rc_formats::moby::parse_moby_class(&rblob)?;
+        // Ratchet with his own sequence table (core blocks ratchet_seq/NNN), as tests/hero_novalis.rs.
+        let rblob = core.block(&data, "moby_class/0000").context("Ratchet's class")?;
+        let rclass = rc_formats::moby::parse_moby_class(rblob)?;
         let seqs: Vec<Option<MobySequence>> = (0..256)
-            .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+            .map(|i| core.block(&data, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(b, 0).ok()))
             .collect();
         let ratchet = MobyAnimClass::new(&rclass, seqs);
         // Class-27 emitters (rc-engine particle_render::load) and the part definitions.

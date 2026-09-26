@@ -252,7 +252,7 @@ mod tests {
 
     fn disc_class() -> Option<(FrameClass, crate::menus::Overlay)> {
         let root = rc_formats::test_data::root().join("levels/01");
-        let blob = std::fs::read(root.join("core/moby_class/1138.bin")).ok()?;
+        let blob = rc_formats::test_data::core_block(1, "moby_class/1138")?;
         let ov = crate::menus::Overlay::parse(&std::fs::read(root.join("overlay.bin")).ok()?).ok()?;
         let class = rc_formats::moby::parse_moby_class(&blob).ok()?;
         let anim = MobyAnimClass::new(&class, moby_anim::parse_sequences(&blob, &class).ok()?);

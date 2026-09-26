@@ -34,14 +34,14 @@ Level overlays may carry additional VU code in their `.data`; not yet checked.
 
 ## Disassembly
 
-`tools/vu/extract_vu.py` writes the program images to `extracted/vu/<id>.bin`;
-`rc_vudis` (`tools/vu/vudis.cpp`, linking the vendored OpenGOAL VU disassembler
-in `third_party/opengoal_vudisasm/`) turns each into `extracted/vu/<id>.txt`
-(`lower | upper` per line, labels `Ln:` at branch targets). All 12 programs
-disassemble completely.
+The listings the format docs cite by line number, `extracted/vu/<id>.txt` (`lower | upper` per line, labels `Ln:` at
+branch targets; images in `extracted/vu/<id>.bin`), were written by the C++-era tools `tools/vu/extract_vu.py` and
+`rc_vudis` (a vendored copy of OpenGOAL's VU disassembler). Both were removed with the C++ reference on 2026-09-27;
+the listings stay in the development `extracted/` tree. All 12 programs disassembled completely. A VU disassembler
+is still needed as a proper dev tool (no Rust one yet).
 
-Upstream OpenGOAL's decode tables lack five instructions that R&C uses. They were
-added to the vendored copy (each change marked `// randcre:`):
+Upstream OpenGOAL's decode tables lack five instructions that R&C uses; the removed vendored copy had them added (a
+new tool needs them too):
 
 | instruction | table / encoding | used by |
 |---|---|---|
@@ -53,11 +53,4 @@ added to the vendored copy (each change marked `// randcre:`):
 
 28259's image spans 0x0000–0x0F6F with a zero-filled gap: instructions 6–399
 (`lq. vf00, 0(vi00) | addx. vf00, vf00, vf00`) are padding, not code. The kind
-argument (`vu0`/`vu1`) does not change the output.
-
-Rebuild and regenerate (from the repo root, with the CMake build dir in `build/`):
-
-```sh
-cmake --build build --target rc_vudis
-for b in extracted/vu/*.bin; do id=$(basename "$b" .bin); k=vu1; case $id in 104691|436083|28259) k=vu0;; esac; build/tools/vu/rc_vudis "$b" $k > "extracted/vu/$id.txt" 2> "extracted/vu/$id.err"; done
-```
+argument (`vu0`/`vu1`) did not change the output.

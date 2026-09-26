@@ -1,7 +1,8 @@
 //! Readers for the on-disc formats of Ratchet & Clank (2002, PS2).
 //!
-//! Every reader here mirrors a verified C++ implementation in `src/core/`
-//! (kept as the test oracle) and the specification in `docs/formats/`.
+//! Every reader here follows the specification in `docs/formats/`. The readers were first verified byte for byte
+//! against a C++ reference extractor, retired on 2026-09-27 (git history at 2230812); the golden tests now
+//! check their output against the committed snapshot table `data/loader_snapshots.tsv` (`tests/golden.rs`).
 
 pub mod buf;
 pub mod wad;
@@ -37,6 +38,7 @@ pub mod water;
 pub mod save_game;
 pub mod scene;
 pub mod volumes;
+pub mod sha1;
 pub mod test_data;
 
 pub use buf::{Buf, FormatError};

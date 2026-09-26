@@ -126,7 +126,7 @@ Checks for the renderer agent:
 
 * Grid layout, cell mapping, lookup and neighbour and previous logic: **verified** from the disassembly of
   0x218e78, 0x218f50, 0x219008 and 0x222160 (`cvt.w.s`) and the decompile. Golden-tested byte-identical
-  against the C++ extractor on 19 levels.
+  against the C++ extractor on 19 levels (retired 2026-09-27; now against the committed snapshot hashes).
 * Load-time match rules (tfrag byte 0x3d, tie `(s16)`/u16 keys, moby spawn id and `occlusion == 0`):
   **verified** from the decompile of `FUN_00255958`. Retail data takes the in-date paths everywhere
   (asserted in the golden test).

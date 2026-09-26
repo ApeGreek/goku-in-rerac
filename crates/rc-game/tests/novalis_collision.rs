@@ -1,5 +1,5 @@
 //! Disc-data checks of the collision queries on Novalis (level 1). Skipped when `extracted/`
-//! (the `rc_extract` output, never shipped with the repo) is absent.
+//! (the extracted game data, never shipped with the repo) is absent.
 
 use rc_formats::{collision, gameplay, level, tfrag};
 use rc_game::collision_query::{cells_for_line, coll_capsule, coll_line, coll_sphere, CollOutput, QueryFlags};
@@ -15,9 +15,9 @@ struct Novalis {
 
 fn novalis() -> Option<Novalis> {
     let dir = rc_formats::test_data::root().join("levels/01");
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(1)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
+    let gp = rc_formats::test_data::gameplay(1)?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let tfrags = tfrag::parse_level_tfrags(&core, &data).unwrap();

@@ -1,5 +1,5 @@
 //! Level message text (help boxes, banners, subtitles) from the `gameplay_ntsc` / `gameplay_pal` file.
-//! Spec: docs/plan/hud_text.md §5. Mirrors `src/core/hud.cpp` (golden: the English block in `hud_dump.bin`).
+//! Spec: docs/plan/hud_text.md §5. Snapshot-tested in `tests/golden.rs` (the English messages, HUD test).
 //!
 //! The gameplay header word at `+0x10 + 4·lang` points to a text block (the level loader 0x255958 copies the
 //! block of the current language to the level heap and relocates it):

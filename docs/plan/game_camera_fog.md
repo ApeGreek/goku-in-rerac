@@ -113,8 +113,8 @@ level with If == In would break the game's Q (none of the 19 levels does).
 
 **Novalis (level 01):** bg (100, 255, 255), FOGCOL (105, 127, 180), Dn 0, Df 245760 (240 game
 units), In 255, If 102 → qw656 = (−0.0199219, 102, 255, 3072), qw661.w = 255. Every level's values
-are in `extracted/levels/NN/gameplay/level_settings.bin`, loaded by `level_load.rs` from
-`gameplay_ntsc.bin`. Confidence: high for formula/values; the blend rounding is medium: the GS manual
+are in the `level_settings` section of each level's gameplay file (`rc_formats::gameplay::section`), loaded by
+`level_load.rs` from `gameplay_ntsc.bin`. Confidence: high for formula/values; the blend rounding is medium: the GS manual
 formula is `(F·C + (255 − F)·FOGCOL) >> 8`, PCSX2's HW renderer uses `trunc(mix(FOGCOL, C, F/255))`;
 the port uses the unquantised `mix(.., F/255)`.
 

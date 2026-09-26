@@ -2,7 +2,7 @@
 
 Precomputed potentially-visible sets for tfrags, tie instances and mobys. Three pieces of data, all read
 from the game code (level01 overlay addresses; boot ELF equivalents in brackets). Code:
-`crates/rc-formats/src/occlusion.rs`, `src/core/occlusion.{h,cpp}`, `rc_extract occlusion --level N`.
+`crates/rc-formats/src/occlusion.rs` (golden test `occlusion_for_every_level` in `crates/rc-formats/tests/golden.rs`).
 Per-frame rule and renderer plan: `docs/plan/occlusion_culling.md`.
 
 Wrench (`src/engine/occlusion.cpp`, `docs/occlusion_culling.md`) was used for orientation only. Its
@@ -83,7 +83,7 @@ Wrench's reading of it as an occlusion index does not apply to retail RAC1 data.
 instance order, which the loader also uses for the runtime array (`0x160fc0`, 0x20 bytes each). Mobys use
 the static gameplay instance order. Shrubs have no occlusion data.
 
-## 4. Retail results (all 19 levels, from `rc_extract occlusion`)
+## 4. Retail results (all 19 levels, from the retired C++ `rc_extract occlusion`)
 
 The load-time checks pass everywhere: no level is out of date for tfrags, ties take the positional
 path, and every moby with `occlusion == 0` finds its record. The mapping moby count equals the number of
@@ -104,11 +104,13 @@ the grid: 83 tfrags, 1435 ties and 22 mobys. Per level these are tfrags 0–19, 
 | 09 | 23817 | 22615 | 10–117 | 22–126 | 2–13 | 0–258 | 1–1108 |
 | 11 | 26726 | 15888 | 91–169 | 90–170 | 32–65 | 2–526 | 5–489 |
 
-(Every level's line is in `rc_extract occlusion` output.)
+(Every level's line was in `rc_extract occlusion` output; the golden test prints the totals.)
 
-## 5. Golden dump (`extracted/levels/NN/occlusion_dump.bin`)
+## 5. Golden snapshot (layout of the retired `occlusion_dump.bin`)
 
-The dump starts with `"RCOC"`. Each section is a u32 length followed by the bytes. In order:
+The golden test records, per level, the sections of the retired C++ dump layout as rows of
+`crates/rc-formats/data/loader_snapshots.tsv` (the dump started with `"RCOC"`; each section was a u32 length followed
+by the bytes; its plain words are the `occlusion.words` row). In order:
 
 1. The raw block, `masks_offset`, and `z_base | z_count << 16`.
 2. The cells (u16 x, y, z, mask).

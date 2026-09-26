@@ -1,7 +1,7 @@
 # World animation: water, texture scroll, fog zones, underwater
 
-Addresses are **level01.elf** unless marked "boot". gp = 0x166c00. Data tables are in the overlay ELF's
-PT_LOAD segments (`extracted/levels/01/overlay.elf` = `ghidra/import/level01.elf`: 0x15ef00+0x3368,
+Addresses are **level01.elf** unless marked "boot". gp = 0x166c00. Data tables are in the overlay's
+loaded sections (`extracted/levels/01/overlay.bin`, `rc_formats::font::read_overlay`: 0x15ef00+0x3368,
 0x166480+0xa5650). NTSC: one game tick = one frame = 1/60 s; `0x15f5cc` = logic tick counter (`++` in `0x2ab960`, frozen in pause modes), `0x15ed60` = 1.0,
 dt `0x15ed6c` = 1/60 (1/50 on PAL). `SetTimeBase` 0x276258 (boot `set_time_base` 0x214970) also writes a second dt copy
 `0x15ed7c` (same values); in level01 only the UV scroller 0x30f208 reads that copy. FX texture *n* = `extracted/levels/01/textures/fx/0nn_*.png` =
@@ -398,11 +398,10 @@ hook for when the hero moby renders), the zone lookup uses the fly camera (no ca
 
 ## 8. Port plan
 
-- **Formats.** Add `rc_formats::overlay_elf`, a PT_LOAD vaddr → bytes reader for the level lump's ELF.
+- **Formats.** Read the tables by address from the overlay lump (`rc_formats::font::read_overlay`).
   Parse the strip descriptor tables (addresses above; per level, since the tables are Novalis-only), the
   751 patch/zone/constant tables, the 760/1848 tables and the env transitions (the gameplay section is
-  already split). Golden: dump them via a tiny `rc_extract` command, or assert the counts and values
-  listed here.
+  already split). Golden: assert the counts and values listed here.
 - **rc-game.** Per tick: the 761 z pulse; the 809 and 1848 scrolls; the 751 zone activation (reuse the
   cuboid test), sim clock, 8-neighbour step, disturbances (hero hooks later) and drips; the fog-zone lookup
   (§5) writing the level fog; the underwater test (reuse `collision_query`). Keep the PS2 float model for

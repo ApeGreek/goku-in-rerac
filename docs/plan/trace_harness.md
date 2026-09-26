@@ -49,7 +49,7 @@ under `extracted/traces/` (git-ignored).
 
 ## 3. Where the tfrag data sits in EE RAM (level01 = Novalis)
 
-Each level is its own executable (`extracted/levels/NN/overlay.elf`) with its own data
+Each level is its own executable (`extracted/levels/NN/overlay.bin`) with its own data
 layout. The addresses below come from the **level01** export (`decomp/export/level01.elf/`).
 Boot-ELF addresses in other docs (e.g. `0x19bdc0`, `0x18cd00`) are *not* valid while a level
 runs.

@@ -9,7 +9,7 @@ the same API. Scripts in `decomp/scripts/` talk to it directly.
 |---|---|
 | `ghidra_http.py` | Minimal GET/POST client for the plugin API |
 | `apply_boot_names.py` | Renames boot ELF functions from `decomp/names/boot_functions.csv` (derived from Lombyte's splat config and semantic header) and records the source path as a plate comment |
-| `import_overlays.py` | Imports `ghidra/import/levelNN.elf` (copies of `extracted/levels/NN/overlay.elf`) as `/overlays/levelNN.elf`, runs analysis, applies Lombyte's boot-match names, saves |
+| `import_overlays.py` | Ghidra level import: being redesigned as a proper dev tool; see the upcoming dev-workflow reorg. |
 | `export_decomp.py <program>` | Dumps every function's decompiled C to `decomp/export/<program>/` with an `index.tsv`, for grepping without the GUI |
 
 Conventions:

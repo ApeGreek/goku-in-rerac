@@ -1,6 +1,6 @@
 //! Moby animation against the retail data (docs/plan/moby_animation.md §1, §7). Skipped when
-//! `extracted/` is absent. Uses the per-class blobs `levels/NN/core/moby_class/NNNN.bin` and
-//! `levels/NN/core/ratchet_seq/NNN.bin` written by `rc_extract`.
+//! `extracted/` is absent. Uses the level core blocks `moby_class/NNNN` and `ratchet_seq/NNN`
+//! (`rc_formats::test_data::core`).
 
 use rc_formats::moby::parse_moby_class;
 use rc_formats::moby_anim::{self, evaluate, parse_sequence, parse_sequences, AnimState, MobyAnimClass};
@@ -11,8 +11,8 @@ fn extracted() -> Option<PathBuf> {
     root.join("toc.bin").exists().then_some(root)
 }
 
-fn load(root: &std::path::Path, level: u32, class: u32) -> MobyAnimClass {
-    let blob = std::fs::read(root.join(format!("levels/{level:02}/core/moby_class/{class:04}.bin"))).unwrap();
+fn load(_root: &std::path::Path, level: u32, class: u32) -> MobyAnimClass {
+    let blob = rc_formats::test_data::core_block(level, &format!("moby_class/{class:04}")).unwrap();
     let c = parse_moby_class(&blob).unwrap();
     let seqs = parse_sequences(&blob, &c).unwrap();
     MobyAnimClass::new(&c, seqs)
@@ -26,13 +26,13 @@ fn at(seq: u8, a: u8, b: u8, t: f32) -> AnimState {
 fn every_sequence_parses_with_consistent_headers() {
     let Some(root) = extracted() else { eprintln!("skipped: no extracted/"); return; };
     let (mut classes, mut seqs, mut frames, mut pairs, mut ratchet, mut same_time) = (0, 0, 0, 0, 0, 0);
+    let _ = root;
     for level in 0..19 {
-        let dir = root.join(format!("levels/{level:02}/core/moby_class"));
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        for e in rd {
-            let blob = std::fs::read(e.unwrap().path()).unwrap();
-            let c = parse_moby_class(&blob).unwrap();
-            let s = parse_sequences(&blob, &c).unwrap_or_else(|err| panic!("level {level} {:?}: {err}", dir));
+        let Some(core) = rc_formats::test_data::core(level) else { continue };
+        for b in core.core.blocks.iter().filter(|b| b.name.starts_with("moby_class/")) {
+            let blob = core.block(&b.name).unwrap();
+            let c = parse_moby_class(blob).unwrap();
+            let s = parse_sequences(blob, &c).unwrap_or_else(|err| panic!("level {level} {}: {err}", b.name));
             let a = MobyAnimClass::new(&c, s);
             classes += 1;
             for j in 0..a.joint_count {
@@ -52,14 +52,10 @@ fn every_sequence_parses_with_consistent_headers() {
                 }
             }
         }
-        let rdir = root.join(format!("levels/{level:02}/core/ratchet_seq"));
-        if let Ok(rd) = std::fs::read_dir(&rdir) {
-            for e in rd {
-                let blob = std::fs::read(e.unwrap().path()).unwrap();
-                let q = parse_sequence(&blob, 0).unwrap();
-                assert!(q.frames.iter().all(|f| f.quats.len() == 111), "Ratchet sequences carry 111 joints");
-                ratchet += 1;
-            }
+        for b in core.core.blocks.iter().filter(|b| b.name.starts_with("ratchet_seq/")) {
+            let q = parse_sequence(core.block(&b.name).unwrap(), 0).unwrap();
+            assert!(q.frames.iter().all(|f| f.quats.len() == 111), "Ratchet sequences carry 111 joints");
+            ratchet += 1;
         }
     }
     eprintln!("{classes} classes, {seqs} sequences, {frames} frames, {pairs} key pairs with rate·Δtime = 8, {same_time} pairs with Δtime = 0, {ratchet} ratchet_seq blobs");

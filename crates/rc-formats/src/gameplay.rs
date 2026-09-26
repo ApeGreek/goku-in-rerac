@@ -262,6 +262,41 @@ pub fn parse_splines(gameplay: &[u8]) -> Result<Vec<Vec<[f32; 4]>>> {
 /// Header pointer 0x00: level settings.
 pub const LEVEL_SETTINGS_POINTER: usize = 0x00;
 
+/// The 37 section pointers at the start of the gameplay file, in pointer order (docs/formats/wad_layouts_rac1.md,
+/// gameplay spec 3.2); the loader-facing constants above and below name the ones the port reads.
+pub const SECTION_NAMES: [&str; 37] = [
+    "level_settings", "directional_lights", "cameras", "sound_instances",
+    "help_us_english", "help_uk_english", "help_french", "help_german", "help_spanish", "help_italian", "help_japanese", "help_korean",
+    "tie_classes", "tie_instances", "shrub_classes", "shrub_instances", "moby_classes", "moby_instances", "moby_groups",
+    "shared_data", "pvar_moby_links", "pvar_table", "pvar_data", "pvar_pointer_fixups",
+    "cuboids", "spheres", "cylinders", "pills", "paths", "grind_paths", "point_light_grid", "point_lights",
+    "env_transitions", "camera_collision_grid", "env_sample_points", "occlusion_mappings", "unused_90",
+];
+
+/// The present sections of a decompressed gameplay file as (name, byte range), in file order: each runs from its
+/// pointer to the next pointer in file order, the last to the end of the file.
+pub fn sections(gameplay: &[u8]) -> Result<Vec<(&'static str, std::ops::Range<usize>)>> {
+    let g = Buf(gameplay);
+    let mut starts = Vec::new();
+    for (i, name) in SECTION_NAMES.iter().enumerate() {
+        let o = g.i32(4 * i)?;
+        if o > 0 { starts.push((o as usize, *name)); }
+    }
+    starts.sort();
+    let mut out = Vec::with_capacity(starts.len());
+    for (k, &(start, name)) in starts.iter().enumerate() {
+        let end = starts.get(k + 1).map_or(gameplay.len(), |s| s.0);
+        if end > gameplay.len() { return invalid(format!("gameplay section {name} runs past the end")); }
+        out.push((name, start..end));
+    }
+    Ok(out)
+}
+
+/// The bytes of one named section (see [`sections`]), or None when the file does not have it.
+pub fn section<'a>(gameplay: &'a [u8], name: &str) -> Result<Option<&'a [u8]>> {
+    Ok(sections(gameplay)?.into_iter().find(|s| s.0 == name).map(|(_, r)| &gameplay[r]))
+}
+
 /// Where the level loader creates the player's ship (`FUN_00255958`, after the camera/sound sections):
 /// if level settings +0x2c (x) > 0, `CreateMoby(0x160548[ship])` gets position = settings +0x2c/+0x30/+0x34
 /// and rotation z (moby+0x48) = settings +0x38; x ≤ 0 means no ship in this level. Returns (position, yaw).

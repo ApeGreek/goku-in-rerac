@@ -1,6 +1,6 @@
 //! The moby scheduler and the ported classes (bolts, crates, grass) on Novalis (level 1): the level's
 //! instances through the loader, the load pass, then 300 ticks with Ratchet standing at his spawn and the
-//! camera where `Game::new` snaps it. Skipped when `extracted/` (the `rc_extract` output) is absent.
+//! camera where `Game::new` snaps it. Skipped when `extracted/` (the extracted game data) is absent.
 
 use rc_formats::moby_anim::{parse_sequences, MobyAnimClass};
 use rc_formats::{collision, gameplay, level};
@@ -14,7 +14,6 @@ use rc_game::particles::Particles;
 use rc_game::ps2v::Pf;
 use rc_game::tick::{Game, GameOptions};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 struct Level {
     mesh: collision::Collision,
@@ -31,10 +30,10 @@ struct Level {
 
 fn load() -> Option<Level> {
     let dir = rc_formats::test_data::root().join("levels/01");
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(1)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
-    let settings = std::fs::read(dir.join("gameplay/level_settings.bin")).ok()?;
+    let gp = rc_formats::test_data::gameplay(1)?;
+    let settings = rc_formats::test_data::gameplay_section(1, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let instances = gameplay::parse_moby_instances(&gp).unwrap();
@@ -48,8 +47,7 @@ fn load() -> Option<Level> {
     let mut classes = ClassTable::default();
     for (slot, e) in core.moby_classes.iter().enumerate() {
         let oc = e.o_class as i16;
-        let path = dir.join(format!("core/moby_class/{:04}.bin", e.o_class));
-        let Ok(blob) = std::fs::read(&path) else { continue };
+        let Some(blob) = rc_formats::test_data::core_block(1, &format!("moby_class/{:04}", e.o_class)) else { continue };
         let Ok(c) = rc_formats::moby::parse_moby_class(&blob) else { continue };
         let seqs = parse_sequences(&blob, &c).unwrap_or_default();
         let anim = MobyAnimClass::new(&c, seqs);
@@ -58,7 +56,7 @@ fn load() -> Option<Level> {
         classes.classes.insert(oc, (info, Some(anim)));
     }
     let coll_blobs = rc_formats::moby_collision::parse_level(&core, &data).unwrap();
-    Some(Level { mesh, instances, pvars, splines, gp, classes, spawnable, death_z, coll_blobs })
+    Some(Level { mesh, instances, pvars, splines, gp: gp.to_vec(), classes, spawnable, death_z, coll_blobs })
 }
 
 /// A MobyProc stand-in for +0x31 (the renderer's "drawn this frame"): drawn when not hidden (`mode & 0x81`),
@@ -212,10 +210,10 @@ fn run(lv: &Level, ticks: u64, verbose: bool, hero_at: Option<[f32; 3]>) -> Run 
 #[test]
 fn novalis_scheduler_300_ticks() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return; };
-    // The level table maps the ported classes to the ported addresses (read from the overlay ELF when present).
-    let elf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ghidra/import/level01.elf");
-    if let Ok(elf) = std::fs::read(elf) {
-        if let Ok(t) = rc_formats::tfrag_light::elf_read(&elf, 0x20bb00, 0x924) {
+    // The level table maps the ported classes to the ported addresses (read from the level overlay).
+    let ov = rc_formats::font::parse_overlay_sections(&std::fs::read(rc_formats::test_data::level_dir(1).join("overlay.bin")).unwrap()).unwrap();
+    {
+        if let Some(t) = rc_formats::font::read_overlay(&ov, 0x20bb00, 0x924) {
             let mut map = BTreeMap::new();
             for e in t.as_chunks::<12>().0 {
                 let oc = i32::from_le_bytes(e[0..4].try_into().unwrap());

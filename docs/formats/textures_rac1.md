@@ -349,13 +349,13 @@ For a shrub billboard, replace steps 3-5 with `ShrubBillboardInfo` and read the 
 
 ## 12b. Verified on the retail NTSC-U disc (2026-09-26)
 
-* `rc_extract textures` decodes 9104 level textures across all 19 levels with the recipe in §12 (8-bit linear indices, CSM1 palette permutation, alpha ×2); spot-checked PNGs are correct (e.g. Novalis tfrag 0 is a clean riveted metal panel).
+* The retired C++ `rc_extract textures` decoded 9104 level textures across all 19 levels with the recipe in §12 (8-bit linear indices, CSM1 palette permutation, alpha ×2); spot-checked PNGs are correct (e.g. Novalis tfrag 0 is a clean riveted metal panel).
 * `TextureEntry.type` values observed on the retail disc: 4 (7375 textures), 3 (1012), 1 (623), 2 (11). So Wrench's "write 3 for everything" is a simplification; the enumeration is still to be recovered from the game code (likely the GS texture-function / mip / clamp selection set up when the entry is bound).
 * Shrub billboards decode from the gs_ram lump with the 0x100-block units as described in §9.
 
 ### Rust loader
 
-`crates/rc-formats/src/texture.rs` (`parse_textures`, `decode_indexed8`, `clut_index`, `scale_alpha`) is a port of `src/core/texture.cpp` plus the table walk of `rc_extract textures`. Pixel data is bounded by the `textures` block of the core-data boundary rule (the same bytes as `extracted/levels/NN/core/textures.bin`). `rc_extract textures` also writes `textures/rgba.bin` (uncompressed RGBA per texture, format in `tools/extract/main.cpp`), and the golden test `textures_match_cpp_for_every_level` checks all 9104 textures of the 19 levels byte-for-byte against it. No disagreement with this document was found.
+`crates/rc-formats/src/texture.rs` (`parse_textures`, `decode_indexed8`, `clut_index`, `scale_alpha`) is a port of the retired C++ reference's texture decoder plus the table walk of its `rc_extract textures`. Pixel data is bounded by the `textures` block of the core-data boundary rule (`LevelCore::block(data, "textures")`). The retired `rc_extract textures` also wrote `textures/rgba.bin` (uncompressed RGBA per texture); the golden test `textures_for_every_level` checked all 9104 textures of the 19 levels byte-for-byte against it and now checks them against the committed snapshot hashes. No disagreement with this document was found.
 
 ## 13. Unknowns
 

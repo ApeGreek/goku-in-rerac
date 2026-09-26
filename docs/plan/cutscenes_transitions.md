@@ -281,7 +281,7 @@ page-menu post-action (`FUN_00276bd0`). What opens that page on Veldin is **not 
 **Formats (`rc-formats::scene`)**
 1. `SceneTable::parse(level_header)` → 15 × {sounds[6], ntsc[71], pal[71]} with sector-difference sizes. Fix
    `disc.rs` `level_stream_lumps` naming to `sceneK/{sound/L, ntsc/N, pal/N}`. This renames extractor output, so
-   update `tools/extract` and its verify step together.
+   update the extractor and its verify step together (then `tools/extract`, now `randcrw-extract` and its SHA-1 table).
 2. `SceneChunk::parse(decompressed)` → header, camera records, actors (class, sequence as a `MobySequence` with
    sequence-relative frame offsets, position track), subtitles.
 3. `SpaceSceneLump` (0x800 table) for `anim_looking_thing_2`, `things` and `transition`[0x14+v].
@@ -317,13 +317,13 @@ a card for now.
 ## In the port (2026-09-27)
 
 **Files.** `crates/rc-formats/src/scene.rs` (`SceneTable`, `parse_scene_chunk`, `Scene::load`), `toc.rs` (`SceneRecord`
-15 × 0x250, lump names), `disc.rs` (`scene_region`, `scene_speech`); C++ `src/core/toc.{h,cpp}`, `tools/extract/main.cpp`
-(`unpack` names, new `scene` command → `levels/NN/scene_dump.bin`); `crates/rc-game/src/scene_player.rs`,
+15 × 0x250, lump names), `disc.rs` (`scene_region`, `scene_speech`); at the time also the C++ `toc` reader and `tools/extract` (`unpack` names,
+a `scene` dump command; retired 2026-09-27); `crates/rc-game/src/scene_player.rs`,
 `crates/rc-game/src/audio/scene.rs`; `crates/rc-engine/src/scene_render.rs`, `assets/shaders/fade.wgsl`, the
 `SceneLayer` hook in `hud_render.rs`.
 
-**Golden** (`tests/golden.rs` `scenes_match_cpp_for_every_level`): the Rust path re-serialised in the C++ dump layout is
-byte-identical for all 19 levels, NTSC and PAL: 138 scenes, 275 regions, 4,081 chunks, 348,572 ticks, 1,004 actors,
+**Golden** (`tests/golden.rs` `scenes_for_every_level`): the Rust path re-serialised in the C++ dump layout was
+byte-identical to the C++ dump for all 19 levels, NTSC and PAL, and is now checked against the committed snapshot hashes: 138 scenes, 275 regions, 4,081 chunks, 348,572 ticks, 1,004 actors,
 4,284 subtitle entries, 1,858 cut ticks. Invariants checked on every chunk: camera table ends at the first actor record,
 last record = the next chunk's first, enough frames for the last shown tick, stable actor classes, track w = 0. Scene
 actor classes outside the level core and gadget table exist on 12 levels (e.g. level 0 {1375, 1472, 1600}); Novalis

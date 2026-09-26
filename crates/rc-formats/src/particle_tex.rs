@@ -1,6 +1,6 @@
 //! Particle textures, particle frame lists (`part_defs`) and FX textures of a level.
-//! Specs: docs/formats/textures_rac1.md §8, docs/plan/particles.md §6. Mirrors `src/core/particle.cpp`
-//! and the `particles` command of `tools/extract` (golden: `particles_dump.bin`).
+//! Specs: docs/formats/textures_rac1.md §8, docs/plan/particles.md §6. Ported from the retired
+//! C++ reference extractor (git 2230812); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! Level load (`ParseParticleTexs`, level01 0x253648 = boot 0x2026c8) reads three core-index tables:
 //!

@@ -2,9 +2,9 @@
 
 How a moby gets its per-class behaviour, what every class placed on Novalis (level 01) does, and which of
 them leave sequence 0. Addresses are **level01.elf** (the in-game engine; "boot" = SCUS_971.99). Sources:
-Ghidra C exports in `decomp/export/level01.elf/`, the class table read from `ghidra/import/level01.elf`,
-instance and pvar data from `extracted/levels/01/gameplay_ntsc.dec`, class blobs from
-`extracted/levels/01/core/`. Twelve update functions are only referenced by pointer and are not defined in
+Ghidra C exports in `decomp/export/level01.elf/`, the class table read from the level 01 overlay (then via the C++ `overlay.elf`, now
+`overlay.bin`), instance and pvar data from the decompressed `levels/01/gameplay_ntsc.bin`, class blobs from the
+level 01 core blocks `moby_class/NNNN`. Twelve update functions are only referenced by pointer and are not defined in
 Ghidra (0x2bb128, 0x2cbda8, 0x2df448, 0x2e30b0, 0x2ece90, 0x2eda00, 0x2f3568, 0x2f6128, 0x300080,
 0x309c98, 0x30a6c8, 0x30d200). The three that are placed on Novalis (0x2bb128, 0x2f6128, 0x309c98) were
 read from raw disassembly. The same is true in every level ELF.

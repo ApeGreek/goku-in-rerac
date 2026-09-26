@@ -1,5 +1,5 @@
 //! The game's three bitmap fonts: glyph tables in the level overlay and the FX textures they index.
-//! Spec: docs/plan/hud_text.md §3.1. Mirrors `src/core/hud.cpp` (golden: `hud_dump.bin`).
+//! Spec: docs/plan/hud_text.md §3.1. Snapshot-tested in `tests/golden.rs` (HUD test).
 //!
 //! A font is an FX texture (`GetEffectTex__Fii(n)`, level01 0x21ae98: n = 1 regular, 2 small, 3 large; 256×128
 //! PSMT8, decoded by [`crate::particle_tex`]) plus a 232-entry [`Glyph`] table indexed by the byte value.
@@ -63,7 +63,7 @@ pub const COLOUR_TABLE: [u32; 8] = [0x8000_0000, 0x80e0_7070, 0x8040_a040, 0x80a
 
 /// One section of a level overlay (`ratchet-executable` layout, docs/formats/wad_layouts_rac1.md §4):
 /// `{u32 dest, u32 size, u32 type, u32 entry}` then `size` bytes; the list ends at the first header whose
-/// entry point differs from the first one (the game's own termination rule, `src/core/level.cpp`).
+/// entry point differs from the first one (the game's own termination rule).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OverlaySection {
     pub dest: u32,

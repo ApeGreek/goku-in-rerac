@@ -1,7 +1,6 @@
 //! Level collision mesh. Spec: docs/formats/collision_rac1.md; runtime queries:
-//! docs/plan/collision_queries.md. Mirrors `src/core/collision.{h,cpp}` (`parse_collision`,
-//! `collision_triangles`) exactly; the golden test in `tests/golden.rs` compares every parsed
-//! field against `collision_dump.bin` written by the C++ extractor (`rc_extract collision`).
+//! docs/plan/collision_queries.md. Ported from the retired C++ reference
+//! extractor (git 2230812; `parse_collision`, `collision_triangles`); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! RAC1 has one collision block per level, at `LevelCoreHeader::collision` in the decompressed
 //! core data. It holds the baked world-space mesh of all static geometry (tfrags plus whatever
@@ -98,7 +97,7 @@ impl CollisionLeafHeader {
 /// A packed cell-relative vertex (u32). Bit fields, all signed two's complement:
 /// X = bits 0..10 at 1/16, Y = bits 10..20 at 1/16, Z = bits 20..32 at 1/64, each relative to
 /// the cell centre. Extraction is by shift pairs (`(w << 22) >> 22`, `(w << 12) >> 22`,
-/// `w >> 20`, arithmetic right shifts on the signed word), as in `src/core/collision.cpp`
+/// `w >> 20`, arithmetic right shifts on the signed word), as in the retired C++ reference
 /// and Wrench's `read_collision_mesh`; the scales are Wrench's, confirmed on the disc by the
 /// collision map coinciding with the tfrag terrain (spec 6b).
 #[repr(transparent)]
@@ -117,7 +116,7 @@ impl PackedCollisionVertex {
         [x as f32 / 16.0, y as f32 / 16.0, z as f32 / 64.0]
     }
     /// World position given the cell centre, computed as `centre + offset` per component in
-    /// f32 like the C++ oracle (every intermediate is exactly representable).
+    /// f32 like the retired C++ reference (every intermediate is exactly representable).
     pub fn world(self, centre: [f32; 3]) -> [f32; 3] {
         let o = self.offset();
         [centre[0] + o[0], centre[1] + o[1], centre[2] + o[2]]
@@ -237,7 +236,7 @@ pub struct HeroGroup {
 }
 
 /// The parsed collision block. Nodes and cells are in tree-walk order (Z, then Y, then X
-/// ascending), which is also the order of the C++ oracle.
+/// ascending), which is also the order of the retired C++ reference.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Collision {
     pub header: CollisionHeader,

@@ -90,6 +90,15 @@ pub struct LevelCore {
     pub blocks: Vec<CoreBlock>,
 }
 
+impl LevelCore {
+    /// The bytes of the first block named `name` (`tfrags`, `sky`, `moby_class/0042`, `ratchet_seq/007`, …) in the
+    /// decompressed core data, or None when the level has no such block.
+    pub fn block<'a>(&self, data: &'a [u8], name: &str) -> Option<&'a [u8]> {
+        let b = self.blocks.iter().find(|b| b.name == name)?;
+        data.get(b.offset..b.offset + b.size)
+    }
+}
+
 fn table<T: Pod>(idx: Buf, r: ArrayRange, what: &'static str) -> Result<Vec<T>> {
     if r.count <= 0 || r.offset <= 0 { return Ok(Vec::new()); }
     if r.count > 100_000 { return invalid(format!("implausible count for {what}")); }

@@ -1,5 +1,5 @@
 //! The on-foot hero, pad and follow camera on Novalis (level 1) collision. Skipped when `extracted/` (the
-//! `rc_extract` output, never shipped with the repo) is absent.
+//! extracted game data, never shipped with the repo) is absent.
 
 use rc_formats::{collision, gameplay, level};
 use rc_game::collision_query::{coll_line, QueryFlags};
@@ -19,20 +19,19 @@ struct Novalis {
 
 fn novalis() -> Option<Novalis> {
     let dir = rc_formats::test_data::root().join("levels/01");
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(1)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
-    let settings = std::fs::read(dir.join("gameplay/level_settings.bin")).ok()?;
+    let gp = rc_formats::test_data::gameplay(1)?;
+    let settings = rc_formats::test_data::gameplay_section(1, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let mobys = gameplay::parse_moby_instances(&gp).unwrap();
     let r = mobys.iter().find(|m| m.o_class == 0)?;
     let death_z = f32::from_le_bytes(settings[0x28..0x2c].try_into().unwrap());
-    let cdir = dir.join("core");
-    let blob = std::fs::read(cdir.join("moby_class/0000.bin")).ok()?;
+    let blob = rc_formats::test_data::core_block(1, "moby_class/0000")?;
     let class = rc_formats::moby::parse_moby_class(&blob).unwrap();
     let seqs: Vec<Option<MobySequence>> = (0..256)
-        .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+        .map(|i| rc_formats::test_data::core_block(1, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(&b, 0).ok()))
         .collect();
     let ratchet = MobyAnimClass::new(&class, seqs);
     Some(Novalis { mesh, ratchet, spawn: r.position, yaw: r.rotation[2], death_z })
@@ -152,10 +151,9 @@ fn novalis_idle_run_jump_and_camera() {
     assert!(coll_line(&n.mesh, pivot, cam, QueryFlags(0xb4)).is_none(), "camera inside the collision mesh");
 }
 
-/// Class `o_class` of level 1 (`core/moby_class/NNNN.bin`) as an anim class.
+/// Class `o_class` of level 1 (core block `moby_class/NNNN`) as an anim class.
 fn level_class(o_class: u32) -> Option<MobyAnimClass> {
-    let dir = rc_formats::test_data::root().join("levels/01/core/moby_class");
-    let blob = std::fs::read(dir.join(format!("{o_class:04}.bin"))).ok()?;
+    let blob = rc_formats::test_data::core_block(1, &format!("moby_class/{o_class:04}"))?;
     let c = rc_formats::moby::parse_moby_class(&blob).ok()?;
     let seqs = rc_formats::moby_anim::parse_sequences(&blob, &c).ok()?;
     Some(MobyAnimClass::new(&c, seqs))

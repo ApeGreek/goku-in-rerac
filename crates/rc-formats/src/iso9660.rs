@@ -1,5 +1,5 @@
 //! Minimal ISO 9660 reader for PS2 disc images. Spec: docs/formats/disc_layout.md section 1.
-//! Mirrors `src/core/iso9660.cpp` (the extractor's reader, kept as the oracle).
+//! Ported from the retired C++ reference extractor's reader (git 2230812).
 //!
 //! RAC1 only puts `SYSTEM.CNF`, the boot ELF and `IOPRP243.IMG` in the filesystem; everything
 //! else is addressed by absolute sector from the TOC, so the reader exposes both the directory

@@ -1,7 +1,6 @@
 //! Tie (instanced static prop) classes and gameplay tie instances. Spec: docs/formats/tie_rac1.md.
-//! Mirrors `src/core/tie.{h,cpp}` (`parse_tie_class`, `tie_triangles`, `parse_tie_instances`)
-//! exactly; the golden test in `tests/golden.rs` compares every parsed field against
-//! `tie_dump.bin` written by the C++ extractor (`rc_extract tie`).
+//! Ported from the retired C++ reference extractor (git 2230812; `parse_tie_class`, `tie_triangles`,
+//! `parse_tie_instances`); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! The packet semantics follow the game, not only Wrench: the EE DMA builder (`TieProc`,
 //! level01 0x2a9a90) fixes what each packet-header byte uploads, and the VU1 program 13507
@@ -827,8 +826,7 @@ mod tests {
     /// data has 720 on all of them).
     #[test]
     fn novalis_draw_distances_are_integers_up_to_720() {
-        let dir = crate::test_data::root().join("levels/01");
-        let Ok(gameplay) = std::fs::read(dir.join("gameplay_ntsc.dec")) else { eprintln!("skipped: no extracted/"); return; };
+        let Some(gameplay) = crate::test_data::gameplay(1) else { eprintln!("skipped: no extracted/"); return; };
         let insts = parse_tie_instances(&gameplay).unwrap();
         assert!(!insts.is_empty());
         for inst in &insts { assert!((0..=720).contains(&inst.draw_distance), "draw distance {}", inst.draw_distance); }

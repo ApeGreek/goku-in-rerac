@@ -404,8 +404,7 @@ mod tests {
     /// called from the bottom end it descends in 4 s of travel plus the 1 s ramp and stops on the last point.
     #[test]
     fn novalis_lift() {
-        let path = rc_formats::test_data::root().join("levels/01/gameplay_ntsc.dec");
-        let Ok(g) = std::fs::read(path) else { eprintln!("skipped: no extracted/levels/01"); return };
+        let Some(g) = rc_formats::test_data::gameplay(1) else { eprintln!("skipped: no extracted/levels/01"); return };
         let inst = rc_formats::gameplay::parse_moby_instances(&g).unwrap();
         let pvars = rc_formats::gameplay::parse_pvars(&g).unwrap();
         let splines = rc_formats::gameplay::parse_splines(&g).unwrap();

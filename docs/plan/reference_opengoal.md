@@ -4,6 +4,10 @@ Checkout: `~/Globals/jak-project`. Read `docs/project-overview.md` and
 `docs/progress-notes/` there for detail. This file records the patterns we
 adopt and the ones we deliberately do differently.
 
+> Written for the C++ plan that was superseded by Rust on Bevy the same day (decisions.md, 2026-09-26). The patterns
+> still apply; the C++ destinations named below (`src/...`, `third_party/`, `vendor.yaml`) were never built or were
+> removed when the C++ reference extractor was retired (2026-09-27).
+
 ## Adopt
 
 | Pattern | Where in jak-project | Our equivalent |

@@ -1,6 +1,6 @@
 //! The Heli-Pack and the Thruster-Pack on Novalis (package P4, `hero/packs.rs`), items granted: the glide off the
 //! spawn's ledge, both long jumps, the stomp, and the back slot's pack models (Heli 607 / Thruster 608 / Hydro 609 in
-//! the lake). Skipped when `extracted/` (the `rc_extract` output) is absent. The scripts use the engine's
+//! the lake). Skipped when `extracted/` (the extracted game data) is absent. The scripts use the engine's
 //! `RC_PLAY_SCRIPT` syntax (tick = gameplay tick after the load), so the same strings drive the engine runs
 //! (`RC_GIVE_ITEMS=2,3` gives both packs, the Thruster-Pack on the back; `RC_GIVE_ITEMS=3,2` the Heli-Pack).
 
@@ -24,27 +24,26 @@ fn dir() -> PathBuf { rc_formats::test_data::root().join("levels/01") }
 
 fn novalis() -> Option<Novalis> {
     let dir = dir();
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(1)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
-    let settings = std::fs::read(dir.join("gameplay/level_settings.bin")).ok()?;
+    let gp = rc_formats::test_data::gameplay(1)?;
+    let settings = rc_formats::test_data::gameplay_section(1, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let mobys = gameplay::parse_moby_instances(&gp).unwrap();
     let r = mobys.iter().find(|m| m.o_class == 0)?;
     let death_z = f32::from_le_bytes(settings[0x28..0x2c].try_into().unwrap());
-    let cdir = dir.join("core");
-    let blob = std::fs::read(cdir.join("moby_class/0000.bin")).ok()?;
+    let blob = rc_formats::test_data::core_block(1, "moby_class/0000")?;
     let class = rc_formats::moby::parse_moby_class(&blob).unwrap();
     let seqs: Vec<Option<MobySequence>> = (0..256)
-        .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+        .map(|i| rc_formats::test_data::core_block(1, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(&b, 0).ok()))
         .collect();
     Some(Novalis { mesh, ratchet: MobyAnimClass::new(&class, seqs), spawn: r.position, yaw: r.rotation[2], death_z })
 }
 
 /// Class `o_class` of level 1 as an anim class.
 fn level_class(o_class: u32) -> Option<MobyAnimClass> {
-    let blob = std::fs::read(dir().join(format!("core/moby_class/{o_class:04}.bin"))).ok()?;
+    let blob = rc_formats::test_data::core_block(1, &format!("moby_class/{o_class:04}"))?;
     let c = rc_formats::moby::parse_moby_class(&blob).ok()?;
     Some(MobyAnimClass::new(&c, parse_sequences(&blob, &c).ok()?))
 }

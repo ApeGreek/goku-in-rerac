@@ -1,4 +1,4 @@
-//! VIF1 command-list parsing. Spec: docs/formats/tfrag_rac1.md 2.1. Mirrors `src/core/vif.{h,cpp}`.
+//! VIF1 command-list parsing. Spec: docs/formats/tfrag_rac1.md 2.1. Ported from the retired C++ reference extractor (git 2230812).
 
 use crate::buf::{invalid, Result};
 

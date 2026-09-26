@@ -4,19 +4,19 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 
 ## 1. The standing rules (from the user)
 
-- The goal is a **faithful reimplementation** in Rust/Bevy of the user's own copy of Ratchet & Clank (2002, PS2, SCUS_971.99): identical behaviour, not a bit-exact C++ port and not emulation. Decompilation (Ghidra + Lombyte) is the behaviour reference; PCSX2 traces are the diagnostic truth test (behaviour is the goal, bit-exactness is not: §3.6); the C++ extractor in `src/core` is a test oracle for loaders.
-- Nothing disc-derived is ever committed. `extracted/`, `ghidra/`, `decomp/export/`, `build-*/`, `target/` are git-ignored. No disc bytes in source or tests; tests read `extracted/` or the ISO at runtime and skip when absent. Nothing has been committed yet (the user never asked; don't commit unless asked).
+- The goal is a **faithful reimplementation** in Rust/Bevy of the user's own copy of Ratchet & Clank (2002, PS2, SCUS_971.99): identical behaviour, not a bit-exact C++ port and not emulation. Decompilation (Ghidra + Lombyte) is the behaviour reference; PCSX2 traces are the diagnostic truth test (behaviour is the goal, bit-exactness is not: §3.6); loaders are regression-tested against committed snapshot hashes (the C++ reference extractor that first verified them was retired on 2026-09-27, decisions.md).
+- Nothing disc-derived is ever committed. `extracted/`, `decomp/export/`, `target/`, `dist/` are git-ignored; committed verification tables hold only sizes, counts and hashes (`crates/rc-extract/data/*.tsv`, `crates/rc-formats/data/loader_snapshots.tsv`). No disc bytes in source or tests; tests read `extracted/` or the ISO at runtime and skip when absent. Nothing has been committed yet (the user never asked; don't commit unless asked).
 - **Build times are sacred.** Never change the Bevy version, `[profile.*]`, `.cargo/config.toml`, workspace dependency versions or Bevy features. Engine builds only via `cargo dev` / `cargo dev-build` (dynamic linking, ~1 s incremental). Warn before anything that could invalidate the Bevy cache. Adding a workspace path crate is fine; adding an external dependency needs a reason and a note.
 - The orchestrator model must not do the work. **Every** code change, build, test, doc edit or investigation goes to an Opus 5.5 subagent (`model: "opus"`, `subagent_type: "general-purpose"`, `run_in_background: true`). Never spawn a Fable subagent. The orchestrator may: write briefs, read reports, send follow-up messages to agents, save its own memory notes, send screenshots to the user, and answer the user's questions.
 - Wrench (`~/Globals/wrench`) is GPL: orientation only, never copy code. OpenGOAL (`~/Globals/jak-project`) and its vendored VU disassembler are ISC and may be mirrored with attribution.
 
 ## 2. Repository map (what exists)
 
-- `crates/rc-formats`: all loaders, golden-tested byte-identical vs the C++ oracle on all 19 levels (wad, toc, level core, textures, tfrag, tie, shrub, sky, moby, gadget, collision, occlusion, particle/FX textures, moby animation, lighting passes, disc/ISO reader, gameplay sections, fog zones, hud/strings/sound-bank/scene in flight). PS2 float model in `tfrag_light::ps2`.
+- `crates/rc-formats`: all loaders, golden-tested on all 19 levels against committed snapshot hashes (`data/loader_snapshots.tsv`, generated while byte-identical to the retired C++ oracle) (wad, toc, level core, textures, tfrag, tie, shrub, sky, moby, gadget, collision, occlusion, particle/FX textures, moby animation, lighting passes, disc/ISO reader, gameplay sections, fog zones, hud/strings/sound-bank/scene in flight). PS2 float model in `tfrag_light::ps2`.
 - `crates/rc-game`: pure gameplay logic, no Bevy: collision kernels, rng, particles, hero controller + pad + follow camera + tick, fog zones, sky stars, water sim, moby runtime; scheduler/menus/game-state/audio/scene player in flight.
 - `crates/rc-engine`: Bevy app. One module per renderer (`tfrag_*`, `tie_*`, `shrub_*`, `moby_*`, `sky_*`, `particle_render`, `water_render`, `hud_*`, …), `gs_state.rs` (GS alpha/depth rules), `determinism.rs` (frame-exact capture), `occlusion.rs`, `fog_state.rs`, `disc_source.rs`. Env switches are listed in `README.md`.
 - `crates/rc-trace`: PCSX2 savestate/PINE comparison harness (`docs/plan/trace_harness.md`).
-- `src/core` + `tools/extract`: the C++ oracle. Each loader port adds a `*_dump.bin` writer there and a golden test in `crates/rc-formats/tests/golden.rs`.
+- `crates/rc-extract`: `randcrw-extract` (Tier 0 archive checked against `data/scus_971_99.tsv`, Tier 1 cache, Tier 2 exports). The C++ oracle (`src/core`, `tools/extract`) was retired on 2026-09-27; a new loader gets a golden test in `crates/rc-formats/tests/golden.rs` that records snapshot rows (`tests/snapshot/mod.rs`).
 - `docs/formats/*`: verified format docs. `docs/plan/*`: one investigation doc per system (player_controller, moby_update_catalogue, particles, hud_text, audio, world_animation, occlusion_culling, collision_queries, game_state, menus, cutscenes_transitions, moby_animation, moby_skinning_lighting, tfrag_lighting, tie_lighting, shrub_lighting, sky_render_notes, game_camera_fog, level_sweep, trace_harness). `docs/plan/roadmap.md` has a dated status block at the top.
 - `decomp/`: Ghidra scripts and names (`decomp/names/*.csv`, `clusters.tsv`); exports in `decomp/export/<program>/`.
 
@@ -26,14 +26,14 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 1. **Investigation (docs-only).** Read-only; produces `docs/plan/<system>.md` with addresses, struct offsets, math, confidence lines per finding, unknowns, and a "Port plan". Always precedes a port of a system nobody has reversed yet.
 2. **Port.** Implements exactly what a doc says, with tests, and appends an "In the port" section to that doc. Ports never guess: when the doc is ambiguous the agent reads the disassembly (Ghidra MCP) and pins it.
 
-Loaders follow a fixed recipe: extend the C++ command to write a raw dump, regenerate for levels 0–18 with `RC_ISO`, Rust golden compare per level, prove the test can fail by breaking one thing and restoring it, report totals.
+Loaders follow a fixed recipe: verify the format against the decomp and the spec, add a golden test that records every parsed section for levels 0–18 into the snapshot table (`RC_SNAPSHOT_WRITE=1 cargo test -p rc-formats --test golden`, rows for that test only), check invariants independent of the loader, prove the test can fail by breaking one thing and restoring it, report totals. Changing an existing loader's output means regenerating its rows, with the reason stated.
 
 Renderers follow a fixed recipe: establish the GS state and math from the decomp, implement, verify with `RC_SCREENSHOT_FRAME=N` captures the agent LOOKS at with Read, check determinism (two runs byte-identical), report fps with `RC_NOVSYNC=1`.
 
 ### 3.2 The brief template
 Every brief carries, in this order:
 - One paragraph of context: what exists, where (file paths, doc names, the exact API names the agent will call, copied from the previous agent's report).
-- **Hard constraints** block: cargo path (`export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`); `cargo dev` only; no Bevy/profile/dep/feature changes; own C++ build dir if it builds the extractor (`cmake -S . -B build-<name> -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo`); **file ownership** (explicit list of files it may create/edit; "minimal insertions, re-read right before each edit" for `main.rs`, `level_load.rs`, `lib.rs`; explicit "do NOT touch" list naming the files other running agents own); no commits; no disc bytes; tests green and clippy clean for its files; Ghidra MCP URL and API gotchas (`decompile_function` takes `address`; pass the program per call; disassembly for asm/VU0 code); Lombyte path.
+- **Hard constraints** block: cargo path (`export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`); `cargo dev` only; no Bevy/profile/dep/feature changes; **file ownership** (explicit list of files it may create/edit; "minimal insertions, re-read right before each edit" for `main.rs`, `level_load.rs`, `lib.rs`; explicit "do NOT touch" list naming the files other running agents own); no commits; no disc bytes; tests green and clippy clean for its files; Ghidra MCP URL and API gotchas (`decompile_function` takes `address`; pass the program per call; disassembly for asm/VU0 code); Lombyte path.
   Every brief also carries these standard lines verbatim:
   - "Use standard floats and native mechanisms; do not add hardware modelling. If a PS2 arithmetic effect is noticeable in play, reproduce the result, not the mechanism, and record it in hardware_fidelity_layers.md."
   - "Do not spawn sub-agents."
@@ -76,7 +76,7 @@ Source: docs/plan/decisions.md, "Native-first fidelity policy (2026-09-27)". The
 ### 4.1 In flight (report expected; what each unblocks)
 | Agent | Owns | Unblocks |
 |---|---|---|
-| HUD port (hud/strings/font loaders, 2D pass, text, HUD state) | `rc-formats/{hud,strings,font}.rs`, `rc-engine/{hud_render,text_render}.rs`, `hud.wgsl`, C++ `hud` cmd | menus draw path, subtitles, banners |
+| HUD port (hud/strings/font loaders, 2D pass, text, HUD state) | `rc-formats/{hud,strings,font}.rs`, `rc-engine/{hud_render,text_render}.rs`, `hud.wgsl` | menus draw path, subtitles, banners |
 | Audio port (bank, VAG, voices, music, mixer) | `rc-formats/{sound_bank,vag}.rs`, `rc-game/audio*`, `rc-engine/audio_out.rs` | scene speech, moby sound triggers |
 | Water surfaces (strips, ripples, foam) | `rc-formats/water.rs`, `rc-game/water.rs`, `rc-engine/water_render.rs` | underwater hooks in `fog_state.rs`, other levels' water |
 | Moby low LOD + chrome/glass + untextured (−1) fix | `rc-engine/moby_render.rs`, `moby_lod.rs`, `moby_metal.wgsl` | frees `moby_render.rs` |

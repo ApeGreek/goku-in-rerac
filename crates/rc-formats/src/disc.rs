@@ -1,10 +1,10 @@
 //! A RAC1 disc image: ISO 9660 filesystem (boot files) + the TOC at sector 1500 + per-level lumps.
 //! Spec: docs/formats/disc_layout.md sections 1-2, docs/formats/wad_layouts_rac1.md 2.3.
 //!
-//! `Disc::level` produces exactly the raw lumps `rc_extract unpack` writes under
-//! `extracted/levels/NN/` (same lump selection, same byte sizes; `tools/extract/main.cpp`
-//! `unpack_level`), so the engine can load straight from the user's disc image and the extracted
-//! tree stays a byte-for-byte oracle (`tests/golden.rs`, `disc_matches_extracted_for_every_level`).
+//! `Disc::level` produces exactly the raw lumps of the Tier 0 archive under `extracted/levels/NN/` (same lump
+//! selection, same byte sizes as the retired C++ extractor's `unpack`), so the engine can load straight from the
+//! user's disc image and the extracted tree stays a byte-for-byte check (`tests/golden.rs`,
+//! `disc_matches_extracted_for_every_level`; `randcrw-extract` checks every file against its SHA-1 table).
 
 use crate::iso9660::{bad, IsoImage, Result, SECTOR_SIZE};
 use crate::level::{parse_level_data_header, ByteRange};
@@ -85,7 +85,7 @@ impl LevelFiles {
     pub fn total_bytes(&self) -> usize { self.files().iter().map(|(_, b)| b.len()).sum() }
 }
 
-/// How a global-header field addresses its lumps (`EntryKind` in src/core/toc.h).
+/// How a global-header field addresses its lumps (`EntryKind` of the retired C++ reader).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlobalKind {
     /// `{sector, sectors}`: whole sectors.
@@ -105,7 +105,7 @@ const SR: GlobalKind = GlobalKind::SectorRange;
 const SBR: GlobalKind = GlobalKind::SectorByteRange;
 const S32: GlobalKind = GlobalKind::Sector32;
 
-/// The RAC1 global header fields in TOC order (`rac1_global_fields` in src/core/toc.cpp, minus the level table).
+/// The RAC1 global header fields in TOC order (as the retired C++ `rac1_global_fields`, minus the level table).
 /// A field with `count == 1` is written as `global/<name>.bin`, else as `global/<name>/NNN.bin`.
 pub const RAC1_GLOBAL_FIELDS: &[GlobalField] = &[
     gf("debug_font", 0x0008, 1, SR),
@@ -174,7 +174,7 @@ impl Disc<File> {
 }
 
 impl<R: Read + Seek> Disc<R> {
-    /// Reads the TOC and every level header it points at (as `read_rac1_toc` in src/core/toc.cpp).
+    /// Reads the TOC and every level header it points at (as the retired C++ `read_rac1_toc`).
     pub fn new(iso: IsoImage<R>) -> Result<Self> {
         let head = iso.read_sectors(TOC_SECTOR as u32, 1)?;
         let hb = Buf(&head);
@@ -234,7 +234,7 @@ impl<R: Read + Seek> Disc<R> {
         Ok(Some(self.iso.read_bytes(r.offset as u64 * SS, r.size as u64 * SS)?))
     }
 
-    /// The level-group lumps of level `id`, exactly as `rc_extract unpack` writes them.
+    /// The level-group lumps of level `id`, exactly as the Tier 0 archive holds them.
     pub fn level(&self, id: u32) -> Result<LevelFiles> {
         let lv = self.toc_level(id)?;
         let h = lv.header;
@@ -267,7 +267,7 @@ impl<R: Read + Seek> Disc<R> {
         })
     }
 
-    /// Every global lump, in TOC order, exactly as `rc_extract unpack` names and sizes them: `name` is the
+    /// Every global lump, in TOC order, exactly as the Tier 0 archive names and sizes them: `name` is the
     /// path under `global/` minus `.bin` (`save_game`, `mpegs/073`). Entries with sector 0 and size 0 are
     /// skipped; a repeated name gets `.2`, `.3`, … (the C++ `seen[name]` rule; unused on the retail disc).
     pub fn global_lumps(&self) -> Result<Vec<StreamLump>> {
@@ -300,7 +300,7 @@ impl<R: Read + Seek> Disc<R> {
         Ok(out)
     }
 
-    /// The complete Tier 0 archive plan: every file `rc_extract unpack` writes as a raw lump (its `.bin`
+    /// The complete Tier 0 archive plan: every file the archive holds as a raw lump (its `.bin`
     /// files and the boot files; none of its derived `.dec`, split, dump or preview files), in its order:
     /// - `boot/<NAME>`: every ISO 9660 file (on RAC1: `SYSTEM.CNF`, the boot ELF, `IOPRP243.IMG`);
     /// - `toc.bin`; `global/…` (`global_lumps`);

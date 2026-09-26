@@ -1,7 +1,7 @@
 //! `parse(Tier 0) == load(Tier 1)` on the real data: for every lump v1 caches in all 19 levels, the bytes the
 //! engine gets through the cache (built lazily, then read back by a fresh store, then by `prepare`'s check) equal
-//! `rc_formats::wad::decompress` of the Tier 0 file, and the C++ oracle's `.dec` copy where the development tree has
-//! one. Skips without the development tree (`RC_EXTRACTED`, else `<workspace>/extracted`); the cache goes to a temp
+//! `rc_formats::wad::decompress` of the Tier 0 file (whose output rc-formats' golden test checks against the committed
+//! snapshot hashes). Skips without the development tree (`RC_EXTRACTED`, else `<workspace>/extracted`); the cache goes to a temp
 //! folder, never into that tree.
 
 use rc_data::cache::{self, Cache, Ensured};
@@ -19,7 +19,7 @@ fn every_cached_lump_equals_fresh_decompression_for_all_19_levels() {
     let dir = std::env::temp_dir().join(format!("rc-data-roundtrip-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let sources = cache::v1_sources(&root).unwrap();
-    let (mut levels, mut lumps, mut bytes, mut oracle) = (0, 0, 0u64, 0);
+    let (mut levels, mut lumps, mut bytes) = (0, 0, 0u64);
     let (mut t_decompress, mut t_cached) = (Duration::ZERO, Duration::ZERO);
     for level in 0..19u32 {
         let prefix = format!("levels/{level:02}/");
@@ -41,11 +41,6 @@ fn every_cached_lump_equals_fresh_decompression_for_all_19_levels() {
             assert_eq!(&cached[..], &fresh[..], "{rel}: read back from the cache");
             assert_eq!(c.read_lump(rel).unwrap(), fresh, "{rel}: read_lump");
             assert_eq!(c.ensure_lump(rel).unwrap(), Ensured::UpToDate(fresh.len() as u64), "{rel}: prepare keeps it");
-            let dec = root.join(rel).with_extension("dec");
-            if let Ok(cpp) = std::fs::read(&dec) {
-                assert_eq!(cpp, fresh, "{rel}: the C++ oracle's {}", dec.display());
-                oracle += 1;
-            }
             lumps += 1;
             bytes += fresh.len() as u64;
         }
@@ -56,7 +51,7 @@ fn every_cached_lump_equals_fresh_decompression_for_all_19_levels() {
     }
     assert_eq!(levels, 19);
     eprintln!(
-        "{levels} levels, {lumps} lumps, {:.1} MiB decompressed, {oracle} also equal to the C++ .dec; \
+        "{levels} levels, {lumps} lumps, {:.1} MiB decompressed; \
          decompress {:.0} ms total vs cached read + check {:.0} ms total",
         bytes as f64 / (1u64 << 20) as f64, t_decompress.as_secs_f64() * 1e3, t_cached.as_secs_f64() * 1e3
     );

@@ -2,7 +2,7 @@
 //! the loader and the scheduler, their collision for the hero's probes (`SharedServices`), Ratchet ticked by
 //! `Game::tick` with the engine's check script `0-130:stick 0.33 -0.94` (docs/plan/triggers.md §7): he runs from
 //! the spawn onto the lift at the plateau's edge, the lift departs and carries him down the cliff to the meadow.
-//! Skipped when `extracted/` (the `rc_extract` output) is absent.
+//! Skipped when `extracted/` (the extracted game data) is absent.
 
 use rc_formats::moby_anim::{parse_sequence, parse_sequences, MobyAnimClass, MobySequence};
 use rc_formats::{collision, gameplay, level};
@@ -32,10 +32,10 @@ struct Level {
 
 fn load() -> Option<Level> {
     let dir = rc_formats::test_data::root().join("levels/01");
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(1)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
-    let settings = std::fs::read(dir.join("gameplay/level_settings.bin")).ok()?;
+    let gp = rc_formats::test_data::gameplay(1)?;
+    let settings = rc_formats::test_data::gameplay_section(1, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let instances = gameplay::parse_moby_instances(&gp).unwrap();
@@ -47,7 +47,7 @@ fn load() -> Option<Level> {
     let mut classes = ClassTable::default();
     for (slot, e) in core.moby_classes.iter().enumerate() {
         let oc = e.o_class as i16;
-        let Ok(blob) = std::fs::read(dir.join(format!("core/moby_class/{:04}.bin", e.o_class))) else { continue };
+        let Some(blob) = rc_formats::test_data::core_block(1, &format!("moby_class/{:04}", e.o_class)) else { continue };
         let Ok(c) = rc_formats::moby::parse_moby_class(&blob) else { continue };
         let anim = MobyAnimClass::new(&c, parse_sequences(&blob, &c).unwrap_or_default());
         let mut info = class_info(&c, slot as u8, scheduler::port_update_fn(oc));
@@ -55,14 +55,13 @@ fn load() -> Option<Level> {
         classes.classes.insert(oc, (info, Some(anim)));
     }
     let coll_blobs = rc_formats::moby_collision::parse_level(&core, &data).unwrap();
-    let cdir = dir.join("core");
-    let blob = std::fs::read(cdir.join("moby_class/0000.bin")).ok()?;
+    let blob = rc_formats::test_data::core_block(1, "moby_class/0000")?;
     let class = rc_formats::moby::parse_moby_class(&blob).unwrap();
     let seqs: Vec<Option<MobySequence>> = (0..256)
-        .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+        .map(|i| rc_formats::test_data::core_block(1, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(&b, 0).ok()))
         .collect();
     let ratchet = MobyAnimClass::new(&class, seqs);
-    Some(Level { mesh, instances, pvars, splines, gp, classes, spawnable, death_z, coll_blobs, ratchet })
+    Some(Level { mesh, instances, pvars, splines, gp: gp.to_vec(), classes, spawnable, death_z, coll_blobs, ratchet })
 }
 
 /// One tick's record: (hero state, hero position, lift position, ground moby, carry flags).

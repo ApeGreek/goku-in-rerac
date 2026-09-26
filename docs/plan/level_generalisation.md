@@ -2,7 +2,7 @@
 
 A read-only audit of the Rust crates (`rc-formats`, `rc-game`, `rc-engine`, `rc-trace`): every place that
 assumes Novalis (level 01), as a checklist for a later generalisation pass. Nothing was changed, built or run.
-The evidence comes from grep, from byte comparisons of `extracted/levels/NN/overlay.elf`, from the per-level
+The evidence comes from grep, from byte comparisons of the level overlays (then the C++ `overlay.elf` copies, now `extracted/levels/NN/overlay.bin`), from the per-level
 `lvl.vtbl` class tables, and from `decomp/names/clusters.tsv`.
 
 ## Background: what moves between levels

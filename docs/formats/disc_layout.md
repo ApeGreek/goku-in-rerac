@@ -217,7 +217,7 @@ the image is never read whole). `crates/rc-formats/src/disc.rs` adds the ToC (2.
 ELF located via `SYSTEM.CNF` (2.6 A, probe B as fallback) and each level's lumps: the data
 container sliced by its ByteRange table (2.11), `gameplay_ntsc`/`gameplay_pal`/`occlusion` as whole
 sector ranges, and the audio/scene lumps sized by the 2.5 probes. The result is byte-identical to
-`rc_extract unpack`'s `extracted/levels/NN/*.bin` for all 19 levels of the NTSC-U disc (a plain
+the Tier 0 archive's `extracted/levels/NN/*.bin` (first written by the retired C++ `rc_extract unpack`) for all 19 levels of the NTSC-U disc (a plain
 2048-byte image, 2,057,664 sectors); see `tests/golden.rs::disc_matches_extracted_for_every_level`.
 
 ---
@@ -408,7 +408,7 @@ mislabels PAL chunks 0–2 as "sounds".
 A chunk's size is the sector difference to the next entry (verified: equals the padded WAD size for all
 4,081 chunks); the chunks of a region are contiguous. The extractor writes each region as one file
 `levels/NN/scene/KK_ntsc.bin` / `KK_pal.bin` (chunks + sentinel) and each speech VAG as
-`levels/NN/speech/KK_<en|fr|de|es|it>.bin` (`rc_formats::toc::level_stream_lumps`, `src/core/toc.cpp`).
+`levels/NN/speech/KK_<en|fr|de|es|it>.bin` (`rc_formats::toc::level_stream_lumps`).
 
 ### 2.5 Deriving sizes for bare `Sector32` pointers
 

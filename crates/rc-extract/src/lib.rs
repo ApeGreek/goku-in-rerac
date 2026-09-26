@@ -1,6 +1,6 @@
 //! `randcrw-extract`: identifies the user's own Ratchet & Clank disc image and writes the Tier 0 archive
-//! (every lump the ToC and the filesystem reference, byte-identical to the disc, in the `extracted/` layout of the
-//! C++ `rc_extract unpack`), so the disc image is never needed again. `prepare` then builds the Tier 1 engine cache
+//! (every lump the ToC and the filesystem reference, byte-identical to the disc, in the `extracted/` layout; every file
+//! is checked against the committed size/SHA-1 table `data/<serial>.tsv`), so the disc image is never needed again. `prepare` then builds the Tier 1 engine cache
 //! from that archive (`rc_data::cache`), and `extract` runs it as its last stage. `export` writes the optional
 //! Tier 2 exports (PNG, WAV, glTF, JSON) from the archive ([`export`]).
 //!
@@ -14,7 +14,8 @@ pub mod extract;
 pub mod identify;
 pub mod json;
 pub mod prepare;
-pub mod sha1;
+/// SHA-1, shared with the loader snapshots (it lives in rc-formats).
+pub use rc_formats::sha1;
 pub mod space;
 pub mod verify;
 mod workers;

@@ -5,15 +5,17 @@
 Summary of the items below; the milestone lists stay the detailed record.
 
 - **Renders** (`cargo dev`, any level via `RC_LEVEL`, read from the disc image or `extracted/`): tfrags with the game's per-frame `TfragProc` LOD/morph/cull and mip chains; ties with `TieProc` LOD, fat-vertex morph, draw-distance cull and per-instance fog; shrubs with the `ShrubProc` draw/fade rules; sky shells with per-level rotation and the game's frame clear; mobys with sequence-0 animation, GPU skinning and lighting.
-- **Golden-tested** (`crates/rc-formats/tests/`, all 19 levels, against the C++ extractor or `extracted/`): disc/ISO reader, TOC, WAD, level core, textures, tfrags, ties, shrubs, sky, mobys, collision, occlusion (`golden.rs`); moby animation (`moby_anim_golden.rs`); tfrag light records (`tfrag_light_golden.rs`). The M3 "port each verified loader" checklist predates most of these.
+- **Golden-tested** (`crates/rc-formats/tests/`, all 19 levels, against the committed snapshot hashes `crates/rc-formats/data/loader_snapshots.tsv` or `extracted/`; the C++ extractor they were first compared with was retired on 2026-09-27): disc/ISO reader, TOC, WAD, level core, textures, tfrags, ties, shrubs, sky, mobys, collision, occlusion (`golden.rs`); moby animation (`moby_anim_golden.rs`); tfrag light records (`tfrag_light_golden.rs`). The M3 "port each verified loader" checklist predates most of these.
 - **Ported bit-exact** (PS2 float model, from the decompiled code): `LightTfrags`, `LightTies`, `LightShrubs`, MobyProc + VU0 104691 moby lighting (GPU path matches the CPU path on 315,913 Novalis vertices), moby `advance`/`evaluate` (`fun_0020d580`/`fun_0020e0e0`, incl. the post-scale bug), `TieProc` LOD/morph/colour weights with the VU1 colour blend. None is yet confirmed against a live PCSX2 run.
+- **C++ reference retired (2026-09-27, decisions.md).** "Golden vs `rc_extract …`" in the items below records what a loader was checked against when it landed; the same checks now run against the committed snapshot hashes (`crates/rc-formats/data/loader_snapshots.tsv`).
 - **Also in the tree, not yet itemised below:** occlusion culling (`rc-engine/src/occlusion.rs`, docs/plan/occlusion_culling.md), collision queries (`crates/rc-game`), the PCSX2 trace harness (`crates/rc-trace`, docs/plan/trace_harness.md).
 - **Next:** first real PCSX2 comparison (needs a BIOS dump and a Novalis savestate); tie/shrub/moby VU1 program analysis; GS blend/alpha/fog/sampling rules in shaders; render gaps (shrub billboards and wind, tie mirror pass, point lights, moby sequence changes/blends and low LOD); Ghidra struct types; global lumps and audio.
 
 Milestones are ordered so that each one produces something checkable.
 
 **Direction (2026-09-26):** faithful reimplementation in Rust on Bevy. The C++
-work in `src/core` and `tools/extract` is the verified format oracle; the Rust
+work in `src/core` and `tools/extract` was the verified format oracle until it was
+retired on 2026-09-27 (decisions.md; snapshot hashes replace it); the Rust
 crates under `crates/` are the product. Milestones M0–M2 are complete and stay
 valid. M3 onward are Rust.
 
@@ -43,7 +45,7 @@ valid. M3 onward are Rust.
 ## M3 — Rust format crate + static level viewer (Bevy)
 - [x] Cargo workspace: `rc-formats` (loaders) and `rc-engine` (Bevy 0.19 app)
 - [x] Rust disc reader: `rc_formats::iso9660` (2048-byte `.iso` and 2352-byte raw images, seek+read only) + `rc_formats::disc` (TOC at sector 1500, boot ELF via SYSTEM.CNF, per-level lumps selected and sized exactly as `rc_extract unpack`). Golden: all 19 levels' 15 level lumps + 1,067 audio/scene lumps (scene regions as one file each since the 15 × 0x250 correction), `toc.bin` and `boot/SCUS_971.99` byte-identical to `extracted/`. The engine loads from the image when present (`RC_ISO`, else the default path; `RC_SOURCE=extracted|iso`), `extracted/` is the fallback (`crates/rc-engine/src/disc_source.rs`). Not yet: global lumps (HUD, help, audio, MPEGs), VAG/PSS decoding
-- [ ] Port each verified loader to `rc-formats` with golden tests against the C++ extractor's output: wad ✓, toc ✓, level core ✓; tfrag, textures, tie, shrub, sky, moby, collision pending
+- [x] Port each verified loader to `rc-formats` with golden tests against the C++ extractor's output: all ported (see the status block); the C++ side was retired on 2026-09-27 and the golden tests now check committed snapshot hashes
 - [x] Texture decoding: 8-bit indexed + CSM1 CLUT + PS2 alpha to PNG (`rc_extract textures`, 9104 textures) — `type` enum still to be recovered
 - [x] Tfrag loader (VIF list walk, all 3 LODs, strips → triangles) validated against header counts on 6 levels; OBJ + top-down raster export
 - [x] Tie class + instance loader validated on 4 levels (GS-packet walk, instance matrices)

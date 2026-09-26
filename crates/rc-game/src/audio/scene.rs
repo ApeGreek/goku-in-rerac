@@ -246,10 +246,10 @@ mod tests {
         let Ok(bank) = std::fs::read(root.join("sound_bank.bin")) else { eprintln!("skipped: no extracted/"); return };
         let rd = |n: &str| std::fs::read(root.join(n)).unwrap();
         let idx = rd("core_index.bin");
-        let data = rd("core_data.dec");
+        let data = rc_formats::test_data::core_data(1).unwrap();
         let core = rc_formats::level::parse_level_core(&idx, data.len()).unwrap();
         let music: [Option<Vec<u8>>; 15] = std::array::from_fn(|k| std::fs::read(root.join(format!("music/{k:03}.bin"))).ok());
-        let audio = LevelAudio::from_parts(&bank, &idx, &core, &data, &rd("gameplay_ntsc.dec"), &rd("level_header.bin"), &music, None).unwrap();
+        let audio = LevelAudio::from_parts(&bank, &idx, &core, &data, &rc_formats::test_data::gameplay(1).unwrap(), &rd("level_header.bin"), &music, None).unwrap();
         let speech: Arc<[u8]> = Arc::from(rd("speech/05_en.bin"));
         let input = FrameInput { hero_pos: [162.5, 136.4, 60.5], ..Default::default() };
         let mut sys = AudioSystem::new(audio);

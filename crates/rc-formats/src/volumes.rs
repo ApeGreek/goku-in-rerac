@@ -266,7 +266,6 @@ mod tests {
     /// the inverse of the stored matrix (row-vector convention), and the grind splines are well formed.
     #[test]
     fn all_levels_disc() {
-        let root = crate::test_data::root().join("levels");
         // (cuboids, spheres, cylinders, pills, paths, grind paths) per level 0..18.
         let expect: [(usize, usize, usize, usize, usize, usize); 19] = [
             (14, 0, 0, 0, 42, 0), (83, 0, 0, 0, 82, 0), (86, 0, 3, 0, 32, 0), (74, 1, 5, 0, 112, 3),
@@ -277,7 +276,7 @@ mod tests {
         ];
         let mut seen = 0;
         for (lvl, want) in expect.iter().enumerate() {
-            let Ok(g) = std::fs::read(root.join(format!("{lvl:02}/gameplay_ntsc.dec"))) else { continue };
+            let Some(g) = crate::test_data::gameplay(lvl as u32) else { continue };
             seen += 1;
             let v = parse_volumes(&g).unwrap_or_else(|e| panic!("level {lvl}: {e}"));
             let got = (v.cuboids.len(), v.spheres.len(), v.cylinders.len(), v.pills.len(), v.paths.len(), v.grind_paths.len());

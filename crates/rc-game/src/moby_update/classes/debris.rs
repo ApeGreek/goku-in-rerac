@@ -346,13 +346,14 @@ mod tests {
         for oc in [351i16, 352, 360, 361, 366, 367, 369, 370] { assert_eq!(scheduler::port_update_fn(oc), None, "class {oc}"); }
     }
 
-    /// The level01 class table (read from the overlay ELF when present) maps exactly [`CLASSES`] to 0x2c5218
-    /// and [`FLASH_CLASSES`] to 0x2c22a8.
+    /// The level01 class table (read from the level 01 overlay when `extracted/` is present) maps exactly
+    /// [`CLASSES`] to 0x2c5218 and [`FLASH_CLASSES`] to 0x2c22a8.
     #[test]
     fn level_table_lists_the_shared_classes() {
-        let elf = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ghidra/import/level01.elf");
-        let Ok(elf) = std::fs::read(elf) else { eprintln!("skipped: no level01.elf"); return };
-        let Ok(t) = rc_formats::tfrag_light::elf_read(&elf, 0x20bb00, 0x924) else { return };
+        let path = rc_formats::test_data::level_dir(1).join("overlay.bin");
+        let Ok(ov) = std::fs::read(path) else { eprintln!("skipped: no extracted/levels/01/overlay.bin"); return };
+        let sections = rc_formats::font::parse_overlay_sections(&ov).unwrap();
+        let t = rc_formats::font::read_overlay(&sections, 0x20bb00, 0x924).expect("level class table in the overlay");
         let (mut d, mut f) = (Vec::new(), Vec::new());
         for e in t.as_chunks::<12>().0 {
             let oc = i32::from_le_bytes(e[0..4].try_into().unwrap());

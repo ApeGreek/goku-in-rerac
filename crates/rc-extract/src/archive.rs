@@ -1,5 +1,6 @@
 //! The Tier 0 archive plan: which files to write, from which bytes of the image, with which expected hash.
-//! The file list itself comes from `rc_formats::disc::Disc::archive_files` (the C++ `rc_extract unpack` rules).
+//! The file list itself comes from `rc_formats::disc::Disc::archive_files` (the lump rules of the retired C++
+//! extractor's `unpack`, which the Tier 0 layout keeps).
 
 use crate::build_db::TableEntry;
 use crate::{Code, Error};

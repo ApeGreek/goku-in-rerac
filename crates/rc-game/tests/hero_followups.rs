@@ -3,7 +3,7 @@
 //! (`moby_update::services::HeroFields`), the follow camera swings behind a hanging Ratchet, the moby-ledge flag and
 //! `HeroOnMoby`'s ledge branch. The level runs as the engine ticks it (the loader's static mobys with the headerless
 //! classes, the scheduler's load pass and moby loop, the moby collision; `hero_platform_novalis.rs`'s harness).
-//! Skipped when `extracted/` (the `rc_extract` output) is absent.
+//! Skipped when `extracted/` (the extracted game data) is absent.
 
 use rc_formats::moby_anim::{parse_sequence, parse_sequences, MobyAnimClass, MobySequence};
 use rc_formats::{collision, gameplay, level};
@@ -36,10 +36,10 @@ struct Lv {
 
 fn load(n: u32) -> Option<Lv> {
     let dir = rc_formats::test_data::root().join(format!("levels/{n:02}"));
-    let data = std::fs::read(dir.join("core_data.dec")).ok()?;
+    let data = rc_formats::test_data::core_data(n)?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
-    let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
-    let settings = std::fs::read(dir.join("gameplay/level_settings.bin")).ok()?;
+    let gp = rc_formats::test_data::gameplay(n)?;
+    let settings = rc_formats::test_data::gameplay_section(n, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let instances = gameplay::parse_moby_instances(&gp).unwrap();
@@ -51,7 +51,7 @@ fn load(n: u32) -> Option<Lv> {
     let mut classes = ClassTable::default();
     for (slot, e) in core.moby_classes.iter().enumerate() {
         let oc = e.o_class as i16;
-        let parsed = std::fs::read(dir.join(format!("core/moby_class/{:04}.bin", e.o_class))).ok().and_then(|b| rc_formats::moby::parse_moby_class(&b).ok().map(|c| (b, c)));
+        let parsed = rc_formats::test_data::core_block(n, &format!("moby_class/{:04}", e.o_class)).and_then(|b| rc_formats::moby::parse_moby_class(&b).ok().map(|c| (b, c)));
         if let Some((blob, c)) = parsed {
             let anim = MobyAnimClass::new(&c, parse_sequences(&blob, &c).unwrap_or_default());
             let mut info = class_info(&c, slot as u8, scheduler::port_update_fn(oc));
@@ -65,14 +65,13 @@ fn load(n: u32) -> Option<Lv> {
         }
     }
     let coll_blobs = rc_formats::moby_collision::parse_level(&core, &data).unwrap();
-    let cdir = dir.join("core");
-    let blob = std::fs::read(cdir.join("moby_class/0000.bin")).ok()?;
+    let blob = rc_formats::test_data::core_block(n, "moby_class/0000")?;
     let class = rc_formats::moby::parse_moby_class(&blob).unwrap();
     let seqs: Vec<Option<MobySequence>> = (0..256)
-        .map(|i| std::fs::read(cdir.join(format!("ratchet_seq/{i:03}.bin"))).ok().and_then(|b| parse_sequence(&b, 0).ok()))
+        .map(|i| rc_formats::test_data::core_block(n, &format!("ratchet_seq/{i:03}")).and_then(|b| parse_sequence(&b, 0).ok()))
         .collect();
     let ratchet = MobyAnimClass::new(&class, seqs);
-    Some(Lv { n, mesh, instances, pvars, splines, gp, classes, spawnable, death_z, coll_blobs, ratchet })
+    Some(Lv { n, mesh, instances, pvars, splines, gp: gp.to_vec(), classes, spawnable, death_z, coll_blobs, ratchet })
 }
 
 /// The engine's `RC_PLAY_SCRIPT` syntax (`a-b:stick x y`, `a-b:press B+B`; ranges inclusive).

@@ -37,10 +37,10 @@ pub struct LevelInputs {
 impl LevelInputs {
     pub fn load(extracted: &Path, level: u32) -> Result<LevelInputs> {
         let dir = extracted.join(format!("levels/{level:02}"));
-        let rd = |n: &str| std::fs::read(dir.join(n)).with_context(|| format!("reading {}/{n} (run rc_extract first)", dir.display()));
+        let rd = |n: &str| std::fs::read(dir.join(n)).with_context(|| format!("reading {}/{n} (extract the game data first)", dir.display()));
         let gameplay = wad::decompress(&rd("gameplay_ntsc.bin")?)?;
         let bank = tfrag_light::parse_light_bank(&gameplay)?;
-        let core_data = rd("core_data.dec")?;
+        let core_data = wad::decompress(&rd("core_data.bin")?)?;
         let core = level::parse_level_core(&rd("core_index.bin")?, core_data.len())?;
         let block = tfrag::tfrag_block(&core, &core_data)?.to_vec();
         let block_offset = core.header.tfrags as usize;

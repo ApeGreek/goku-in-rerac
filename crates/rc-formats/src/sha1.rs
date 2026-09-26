@@ -1,5 +1,6 @@
-//! SHA-1 (FIPS 180-4), in-crate so the extractor stays dependency-free. Used only to identify builds and to
-//! check files against the committed size/SHA-1 table; not for anything security-relevant.
+//! SHA-1 (FIPS 180-4), in-workspace so the extractor stays dependency-free. Used only to identify builds, to check
+//! files against the committed size/SHA-1 table (`randcrw-extract`, re-exported as `rc_extract::sha1`) and to hash
+//! the loader snapshots (`data/loader_snapshots.tsv`); not for anything security-relevant.
 
 #[derive(Clone)]
 pub struct Sha1 {
