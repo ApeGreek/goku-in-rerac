@@ -155,8 +155,8 @@ pub struct HeroItems {
     /// A `MobyAnimBlend(hand, seq, frame, ticks)` the state code made (SetState runs without the class
     /// data); applied at the start of [`items_update`], before anything reads the item's animation.
     pub pending_blend: Option<(u8, i32, i32)>,
-    /// Hit sounds the wrench update played (`PlayClassSound(FUN_002bda88(), 0, wrench)`; no moby-sound
-    /// sink for an item that is not in the moby table): counted.
+    /// Hit sounds the wrench update played (`PlayClassSound(FUN_002bda88(), 0, wrench)`, queued in
+    /// `super::fx::HeroFx::item_sounds`): counted.
     pub hit_sounds: u32,
 }
 

@@ -13,15 +13,13 @@
 use anyhow::{Context, Result};
 use rc_formats::tfrag::Tfrag;
 use rc_formats::tfrag_light::{self, NormalTable, BOOT_NORMAL_TABLE_VADDR};
-use rc_formats::wad;
 use std::path::Path;
 
 /// Relights `tfrags` in place. Returns the number of light sets used, or `None` if disabled.
 pub fn light_level_tfrags(root: &Path, index: u32, tfrags: &mut [Tfrag]) -> Result<Option<usize>> {
     if std::env::var("RC_NO_LIGHT").is_ok_and(|v| v != "0") { return Ok(None); }
     let read = |p: &Path| crate::disc_source::read_path(root, p);
-    let gameplay = wad::decompress(&read(&root.join(format!("levels/{index:02}/gameplay_ntsc.bin")))?)
-        .context("decompressing gameplay_ntsc")?;
+    let gameplay = rc_data::level_gameplay(root, index).context("decompressing gameplay_ntsc")?;
     let bank = tfrag_light::parse_light_bank(&gameplay).context("parsing directional lights")?;
     let table = NormalTable::from_elf(&read(&root.join("boot/SCUS_971.99"))?, BOOT_NORMAL_TABLE_VADDR)
         .context("reading the normal table from the boot ELF")?;

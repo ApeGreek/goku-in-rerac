@@ -1,6 +1,7 @@
 //! `randcrw-extract`: identifies the user's own Ratchet & Clank disc image and writes the Tier 0 archive
 //! (every lump the ToC and the filesystem reference, byte-identical to the disc, in the `extracted/` layout of the
-//! C++ `rc_extract unpack`), so the disc image is never needed again.
+//! C++ `rc_extract unpack`), so the disc image is never needed again. `prepare` then builds the Tier 1 engine cache
+//! from that archive (`rc_data::cache`), and `extract` runs it as its last stage.
 //!
 //! Interface: `docs/plan/launcher_contract.md` (CLI, JSON lines, exit codes, `extract-info.json`).
 //! Design: `docs/plan/launcher_extractor.md`. Dependency-free by decision (in-crate SHA-1 and JSON).
@@ -10,6 +11,7 @@ pub mod build_db;
 pub mod extract;
 pub mod identify;
 pub mod json;
+pub mod prepare;
 pub mod sha1;
 pub mod space;
 pub mod verify;
@@ -64,11 +66,12 @@ pub enum Stage {
     Identify,
     Copy,
     Verify,
+    Prepare,
 }
 
 impl Stage {
     pub fn name(self) -> &'static str {
-        match self { Stage::Identify => "identify", Stage::Copy => "copy", Stage::Verify => "verify" }
+        match self { Stage::Identify => "identify", Stage::Copy => "copy", Stage::Verify => "verify", Stage::Prepare => "prepare" }
     }
 }
 

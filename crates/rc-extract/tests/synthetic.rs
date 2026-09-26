@@ -193,7 +193,14 @@ fn identify_extract_verify_on_a_synthetic_rc1_disc() {
     let info = verify::read_info(&out).unwrap();
     assert_eq!((info.disc.as_str(), info.data_format, info.ntsc_only, info.files, info.bytes as u64), ("SCUS_971.99", 1, false, 14, s.bytes));
     let progress: Vec<_> = ev.iter().filter_map(|e| match e { Event::Progress { stage, done, total, .. } => Some((*stage, *done, *total)), _ => None }).collect();
-    assert_eq!(progress.last().unwrap(), &(rc_extract::Stage::Copy, s.bytes, s.bytes));
+    let copy_end = progress.iter().rposition(|p| p.0 == rc_extract::Stage::Copy).unwrap();
+    assert_eq!(progress[copy_end], (rc_extract::Stage::Copy, s.bytes, s.bytes));
+    // Then the prepare stage. The synthetic level lumps are not WAD streams, so the engine cache is not built; that
+    // is one info line, not a failed extraction (the archive is complete, the game builds the cache itself).
+    assert!(progress[copy_end + 1..].iter().all(|p| p.0 == rc_extract::Stage::Prepare) && progress.len() > copy_end + 1, "{progress:?}");
+    let infos: Vec<&String> = ev.iter().filter_map(|e| match e { Event::Info(m) => Some(m), _ => None }).collect();
+    assert!(infos.iter().any(|m| m.starts_with("the engine cache was not built (") && m.contains("not a valid WAD stream")), "{infos:?}");
+    assert!(out.join("cache/v1/stamp.toml").is_file());
 
     // Verify passes, then names a corrupted and a missing file.
     let (_, vs) = verify::verify(&out, &db, 2, None, &mut |_| {}).unwrap();

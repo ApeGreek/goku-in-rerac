@@ -76,6 +76,9 @@ fn extract_matches_cpp_extracted_tree() {
 
     let mut ours = files(&full);
     assert!(ours.remove(INFO_FILE));
+    // The Tier 1 engine cache `extract` ends with (rc-data's own tests check its contents).
+    assert!(ours.iter().any(|p| p == "cache/v1/stamp.toml"));
+    ours.retain(|p| !p.starts_with("cache/"));
     let theirs = cpp_raw_lumps(&cpp);
     let only_ours: Vec<_> = ours.difference(&theirs).collect();
     let only_theirs: Vec<_> = theirs.difference(&ours).collect();

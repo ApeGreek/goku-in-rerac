@@ -152,7 +152,7 @@ impl Plugin for MobyAttachPlugin {
 pub(crate) fn load_blobs() -> Result<(Vec<u8>, Vec<gadget::GadgetClass>)> {
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
     let read = |name: &str| crate::disc_source::level_file(&root, index, name);
-    let data = rc_formats::wad::decompress(&read("core_data.bin")?).context("decompressing core_data")?;
+    let data = rc_data::level_core_data(&root, index).context("decompressing core_data")?;
     let core = rc_formats::level::parse_level_core(&read("core_index.bin")?, data.len()).context("parsing core index")?;
     let blk = core.blocks.iter().find(|b| b.name == "moby_class/0000").ok_or_else(|| anyhow!("no moby_class/0000 block"))?;
     let ratchet = data.get(blk.offset..blk.offset + blk.size).ok_or_else(|| anyhow!("moby_class/0000 out of range"))?.to_vec();

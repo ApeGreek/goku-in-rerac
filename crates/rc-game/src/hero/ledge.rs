@@ -48,7 +48,9 @@
 //! the camera auto-yaws behind the hero at 12°/tick: [`Hero::ledge_camera_yaw`] computes the game's value, which
 //! the follow camera's type-0 update takes (`follow_camera.rs`, the tweaks right after its platform carry).
 //!
-//! Not ported: the climb's voice line (0x1c physics, `0x236738(4, 0)` at key 10 when 0x1404f8 = 3), gravity modes ≠ 0
+//! The climb's voice line (0x1c physics, `0x236738(4, 0)` at key 10 when 0x1404f8 = 3: the Thruster-Pack's; the
+//! game has no other) goes through the hero's sound queue (`super::packs::flush_sounds`, after the physics).
+//! Not ported: gravity modes ≠ 0
 //! in the wall jump
 //! (Magneboots walls, P5), `HeroLean`. The platform carry of a hang on a moving ledge (0x13f848) is P1's.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -346,7 +348,16 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
 /// Per-state physics (0x2370b8 cases 0x11 / 0x1c (the jump case), 0x18 / 0x19, 0x1a / 0x1b).
 pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, _rng: &mut Rng) -> bool {
     match h.state {
-        0x11 | 0x1c => h.phys_jump_anim(env, anim.view().frame),
+        0x11 | 0x1c => {
+            // The jump case's first test: climbing (0x1c) with Clank shown and the Thruster-Pack as the back item
+            // (0x1404f8 = 3), the anim passing frame 10 → the climb's voice `0x236738(4, 0)` (the Heli-Pack or no pack:
+            // no voice).
+            let v = anim.view();
+            if h.state == 0x1c && h.back_slot.clank_hidden == 0 && h.back_slot.slot.id == 3 && super::boots::passed(&v, 10.0) {
+                h.packs.sounds.push(super::packs::SoundCmd::Voice { index: 4, flags: 0 });
+            }
+            h.phys_jump_anim(env, v.frame)
+        }
         0x18 | 0x19 => hang_physics(h),
         0x1a | 0x1b => shimmy_physics(h, env, &anim.view()),
         _ => return false,

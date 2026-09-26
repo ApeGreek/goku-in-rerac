@@ -60,10 +60,10 @@
 //! 30); the rope (drawn by `0x2dba30`, [`Rope`]) waves with an amplitude 0.28 that decays ×0.9 (pull) / ×0.4
 //! (swing) per tick; below 0.168 the hook holds (pull: SetState 0x25; swing: 0x13fcec = 1). Afterwards it
 //! retracts at 80 u/s. Item anims 1 (idle), 3 (fire), 4 (hooked); class sounds 0 (fire), 1 (hit), 2 (pull), queued
-//! in [`SwingItem::sounds`] (not played: the item has no moby-sound sink, as the wrench's hit sounds). In the look
+//! in [`SwingItem::sounds`] and played right after the item's update (`super::gadgets::flush_item_sounds`). In the look
 //! stance it turns 1 into 0x1e (its aiming beams `0x20fb60` are not drawn).
 //!
-//! **Not ported:** the targets' glint particles (type 60: the spawn's draw is made, the particle not created) and
+//! The targets' glints are type-60 particles (`moby_update::classes::swing_target`). **Not ported:**
 //! their camera hint `0x2eb4c0` (the camera's look-at record 0x167100); the targeted swing from a grind rail
 //! (0x13f904); the stats / help counters 0x1416e0..0x1416e4 (0x13fcd8 is kept); the look-stance aiming beams.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]

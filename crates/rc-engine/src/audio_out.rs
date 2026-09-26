@@ -30,7 +30,8 @@
 //! - `RC_AUDIO_WAV=path`: also write the first 10 s of the mix as a 16-bit 48 kHz stereo WAV (on reaching
 //!   10 s, or whatever was rendered when the app exits earlier); `RC_AUDIO_WAV_SECONDS=n` changes the length.
 //! - `RC_AUDIO_TRACE=1`: one line per 60 output frames: music stream voices playing / held, speech, the main
-//!   music player's state and track, the cutscene volumes, the pending resume.
+//!   music player's state and track, the cutscene volumes, the pending resume; and one line per class sound played
+//!   (tick, class, index, flags, the slot it got or −1).
 //! - `RC_AUDIO_MUSIC` / `RC_AUDIO_SFX`: the options menu volumes 0..=1024 (0x15edec / 0x15edf0; defaults 716 and
 //!   1024 from the boot data), e.g. `RC_AUDIO_MUSIC=0` to hear or record the effects alone.
 
@@ -216,6 +217,12 @@ impl AudioOut {
             }
         }
         self.buf.clear();
+        if self.trace {
+            for (tick, class, index, flags, slot) in self.system.play_log.as_mut().map(std::mem::take).unwrap_or_default() {
+                let who = match class { 0 => "Ratchet", 0x47 => "wrench", 0xd0 => "Swingshot", _ => "moby" };
+                println!("audio trace: tick {tick}: class sound {index} of class {class} ({who}), flags {flags:#x} -> slot {slot}");
+            }
+        }
         if self.trace && self.done.is_multiple_of(60) {
             let s = &self.system;
             let (music, held) = s.music_voices();
@@ -246,6 +253,7 @@ impl Plugin for AudioOutPlugin {
         let limit = wav_frames();
         let wav = std::env::var_os("RC_AUDIO_WAV").filter(|v| !v.is_empty()).map(|p| WavCapture { path: p.into(), frames: Vec::with_capacity(limit), limit, written: false });
         let trace = std::env::var("RC_AUDIO_TRACE").is_ok_and(|v| v.trim() == "1");
+        if trace { system.play_log = Some(Vec::new()); }
         app.add_audio_source::<MixerStream>()
             .insert_resource(AudioOut { system, ring, wav, done: 0, buf: Vec::new(), last_report: 0, trace })
             .add_systems(Startup, start_output)

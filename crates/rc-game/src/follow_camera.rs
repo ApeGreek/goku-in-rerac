@@ -1554,4 +1554,29 @@ mod tests {
         assert!(0.0 < placed && placed < turned);
         assert!((yaw - placed).abs() < 0.5, "the view follows the placed offset");
     }
+
+    /// The stomp's shake (0.2 along up for 40 ticks): the first update applies 0.2·cos(78)·(39/40)² ≈ −0.163, the
+    /// offset buzzes with a period of π ticks inside a quadratically shrinking envelope, reaches 0 on the 40th update
+    /// and resets the envelope after it; only the position moves.
+    #[test]
+    fn shake_envelope() {
+        let mut s = Shake { amp: Pf::f(0.2), timer: 40, ..Shake::default() };
+        let up = [Pf::ZERO, Pf::ZERO, Pf::ONE, Pf::ZERO];
+        let mut offs = Vec::new();
+        for _ in 0..41 {
+            let mut p = [Pf::f(10.0), Pf::f(20.0), Pf::f(30.0), Pf::ZERO];
+            s.step(&mut p, up);
+            offs.push(p[2].to_f32() - 30.0);
+            assert_eq!((p[0].to_f32(), p[1].to_f32()), (10.0, 20.0));
+        }
+        assert!((offs[0] + 0.1631).abs() < 2e-4, "{}", offs[0]);
+        assert!(offs.iter().all(|o| o.abs() <= 0.2));
+        assert!(offs[1] > 0.1, "{}", offs[1]);
+        assert_eq!((offs[39], offs[40]), (0.0, 0.0));
+        assert_eq!((s.timer, s.max), (0, 0));
+        // The tick's request path: the camera's record takes amplitude and timer.
+        let mut c = Camera::default();
+        c.request_shake(ShakeRequest { axis: ShakeAxis::Forward, amp: 0.4, ticks: 30 });
+        assert_eq!((c.shake[1].amp, c.shake[1].timer, c.shake[0].timer), (Pf::f(0.4), 30, 0));
+    }
 }

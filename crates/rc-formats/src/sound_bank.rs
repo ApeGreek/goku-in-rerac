@@ -387,6 +387,31 @@ pub fn parse_level_sounds(core_index: &[u8], core: &LevelCore, core_data: &[u8])
     Ok(LevelSounds { level_defs, map, classes })
 }
 
+/// The hand items' class sound defs: a gadget class (the wrench, the Swingshot, every weapon: the core's gadget table,
+/// `crate::gadget`) has no blob in the level's class table, so [`parse_level_sounds`] leaves its defs empty and the
+/// loader parks the first `min(count, 15)` ids of its remap list at 0x1b02e0 (`LoadLevelCoreData` 0x258128; the rest
+/// −1). When the gadget is loaded (`select_world_object_resource_tables` 0x259788) its blob's defs (header +0x0d
+/// count, +0x28 pointer) take them: def j's `index` = parked id j when that is not negative (s16), else the blob's
+/// own. `gadgets` = `(o_class, decompressed blob)` of every gadget class; classes that have a level blob are left
+/// alone.
+pub fn apply_gadget_defs(sounds: &mut LevelSounds, gadgets: &[(i32, &[u8])]) -> Result<()> {
+    for &(o, blob) in gadgets {
+        let Some(c) = sounds.classes.iter_mut().find(|c| c.o_class == o && c.header_count.is_none()) else { continue };
+        let b = Buf(blob);
+        let n = b.u8(0x0d)?;
+        let ptr = b.i32(0x28)?;
+        let mut defs: Vec<SoundDef> = if n > 0 && ptr > 0 { b.pod_slice(ptr as usize, n as usize, "gadget sound defs")? } else { Vec::new() };
+        let parked = c.bank_ids.len().min(15);
+        for (j, d) in defs.iter_mut().enumerate().take(parked) {
+            let id = c.bank_ids[j];
+            if (id as i16) >= 0 { d.index = id; }
+        }
+        c.defs = defs;
+        c.header_count = Some(n);
+    }
+    Ok(())
+}
+
 /// Who owns a sound id request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SoundOwner {

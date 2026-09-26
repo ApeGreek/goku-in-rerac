@@ -58,8 +58,9 @@
 //!
 //! **Not ported** (cosmetic, recorded as [`SurfaceEvent`]s for the engine where it can use them): the body leans
 //! of 0x2f / 0x31 (joint records 0x17a680 / 0x17ab00 and their spring settings, as the walk's), the sinking
-//! floor's sand particles (`0x22b140(4, 2)` and the 6-draw `0x286cb0` spawn: they draw the game's `rand`, so the
-//! stream diverges from the PS2 while sinking, as with the swim particles), level 15's lava splash 0x217450 on
+//! floor's bubbles `0x22b140(4, 2)` (type 34 at Ratchet's joint points 0x17 / 0x16: the hero update has no joint
+//! lists, so their draws are missing and the stream diverges from the PS2 while sinking; the sand puff `0x286cb0`
+//! itself is ported, through `super::fx::dust`), level 15's lava splash 0x217450 on
 //! 0x7b, the Hologuise end 0x231450 before the surface states (mode 3 is not in the port). Landing on a slippery
 //! floor goes through the landing picker (jump.rs, P3 / P4): its leading L00 test (0x2293a8: slippery and
 //! |eff.xy| > 0.5·dt → 0x2f) is not in the port's picker; the idle / walk / stop entries it picks redirect to 0x2f
@@ -429,7 +430,7 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
 }
 
 /// Per-state physics; false = not ported (the hero freezes).
-pub(super) fn physics(h: &mut Hero, env: &Env, _anim: &mut dyn AnimCtl, _rng: &mut Rng) -> bool {
+pub(super) fn physics(h: &mut Hero, env: &Env, _anim: &mut dyn AnimCtl, rng: &mut Rng) -> bool {
     match h.state {
         0x2f => {
             // L00 0x21c438: the slide move, then gravity (in the air from the displacement, 25·dt²; on the
@@ -442,7 +443,7 @@ pub(super) fn physics(h: &mut Hero, env: &Env, _anim: &mut dyn AnimCtl, _rng: &m
                 h.gravity_from(Pf::ZERO, DT2 * Pf::b(0x4316_0000));
             }
         }
-        0x31 => sinking_floor(h, env),
+        0x31 => sinking_floor(h, env, rng),
         0x68 => {
             // L00 0x21f710: held by the liquid, sinking at 1 u/s, 0.25 u/s once deeper than (n + 1)/2.
             h.vel = V0;
@@ -530,13 +531,29 @@ pub(super) fn after_transitions(h: &mut Hero, moby: &crate::moby_runtime::Moby, 
 // ------------------------------------------------------------------------------------------------
 // 0x31: the sinking floor (0x23a7cc).
 
-fn sinking_floor(h: &mut Hero, _env: &Env) {
+fn sinking_floor(h: &mut Hero, _env: &Env, rng: &mut Rng) {
     // The loop sound in slot 2 (level 15: 0x1d), played while the slot's voice is free.
     if h.surf.voice == -1 {
         h.surf.events.push(SurfaceEvent::LoopSound(if h.idle.level == 0xf { 0x1d } else { 6 }));
         h.surf.voice = 0;
     }
-    // Level ≠ 15: the sand particles (0x22b140(4, 2), 0x286cb0) are not ported.
+    // Level ≠ 15: the sand. First `0x22b140(4, 2)`: four type-34 bubbles at Ratchet's joint points 0x17 / 0x16 (not
+    // ported: the hero update has no joint lists; their 40 draws are missing, so the stream still differs from the
+    // PS2 while sinking). Then one puff of sand `PartType47Spawn(randf(37800, 75600), pos, vel)` 0x286cb0 around the
+    // feet (±0.25, −0.1..0.4) moving with 0.9 of the displacement ± 0.7 u/s, rising 1..2 u/s.
+    if h.idle.level != 0xf {
+        let dtf = DTF;
+        let p0 = to_f32x3(h.pos);
+        let x = p0[0] + rng.randf(-0.25, 0.25);
+        let y = p0[1] + rng.randf(-0.25, 0.25);
+        let z = p0[2] + rng.randf(-0.1, 0.4);
+        let d = to_f32x3(h.disp);
+        let (vx, vy) = (d[0] * 0.9 + rng.randf(dtf * -0.7, dtf * 0.7), d[1] * 0.9 + rng.randf(dtf * -0.7, dtf * 0.7));
+        let vz = d[2] * 0.9 + rng.randf(dtf, dtf + dtf);
+        let size = rng.randf(f32::from_bits(0x4713_a800), f32::from_bits(0x4793_a800));
+        let w = h.pos[3].to_f32();
+        super::fx::dust(h, rng, size, [x, y, z, w], [vx, vy, vz, h.disp[3].to_f32() * 0.9]);
+    }
     let push = to_f32x3(h.platform);
     let pl = (push[0] * push[0] + push[1] * push[1] + push[2] * push[2]).sqrt();
     h.target_yaw = if DTF * 0.5 < pl { Pf::f(push[1].atan2(push[0])) } else { h.rot[2] };

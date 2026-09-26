@@ -15,11 +15,13 @@
 //!   `table[byte0](rec)` for every record whose byte1 bit 7 is clear, in index order. Records created during
 //!   the pass above the old hw wait a tick; ones created in a hole ahead of the cursor run this tick.
 //! * **Type table** (`RegisterPartTypes` 0x27d4e0 → 0x1b2300, 81 entries): [`Particles::table`]. Ported: type 6
-//!   ([`type06`], class-27 emitters), 11 ([`type11`], TNT sparks), 13 ([`type13`], crate-break dust) and 53
-//!   ([`type53`], bolt-pickup sparkle); a record of any other type kills itself on its first update and is
+//!   ([`type06`], class-27 emitters), 11 ([`type11`], TNT sparks), 13 ([`type13`], crate-break dust), 25
+//!   ([`type25`], grind / cable sparks), 34 ([`type34`], bubbles), 47 ([`type47`], dust / sand puffs), 53 ([`type53`], bolt-pickup and cable
+//!   sparkles) and 60 ([`type60`], glints); a record of any other type kills itself on its first update and is
 //!   counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
 //! * **RNG.** Updates draw from the `&mut Rng` given to [`Particles::update_parts`] (the game's one stream), in
-//!   pool order; only type 11 draws (its split spawns five children and its phase changes draw one value).
+//!   pool order; only types 11 (its split spawns five children and its phase changes draw one value) and 34 (a
+//!   bubble near the surface draws one value a tick) draw.
 //!
 //! **Tick placement.** Game-state update 0x2a4080: moby updates (0x2793d8, where the class-27 emitters spawn)
 //! → level callbacks 0x2a1a18 → hero 0x228870 → `UpdateParts` → camera → render. The engine has no gameplay
@@ -38,7 +40,11 @@
 pub mod type06;
 pub mod type11;
 pub mod type13;
+pub mod type25;
+pub mod type34;
+pub mod type47;
 pub mod type53;
+pub mod type60;
 
 use crate::ps2v::{self, F};
 use crate::rng::Rng;
@@ -288,6 +294,13 @@ pub struct Particles {
     /// 0x167240: the camera position as the previous tick's camera update left it (type 11 shrinks sparks
     /// within 10 units of it). The engine sets it before [`Particles::update_parts`].
     pub camera: [F; 3],
+    /// The level's collision mesh for the updates that test lines against the world (type 25's `CollLine_Fix`);
+    /// None: they never hit.
+    pub coll: Option<std::sync::Arc<rc_formats::collision::Collision>>,
+    /// 0x13f3d0: the hero position (the attached glints of type 60 follow it), set by the particle hook.
+    pub hero: [f32; 3],
+    /// 0x167258: the camera yaw as the previous tick's camera update left it (type 34's wobble), set by the hook.
+    pub cam_yaw: f32,
 }
 
 impl Particles {
@@ -297,8 +310,12 @@ impl Particles {
         table[6] = Some(type06::update as UpdateFn);
         table[11] = Some(type11::update as UpdateFn);
         table[13] = Some(type13::update as UpdateFn);
+        table[25] = Some(type25::update as UpdateFn);
+        table[34] = Some(type34::update as UpdateFn);
+        table[47] = Some(type47::update as UpdateFn);
         table[53] = Some(type53::update as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3] }
+        table[60] = Some(type60::update as UpdateFn);
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0 }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -455,6 +472,7 @@ mod tests {
         assert_eq!(s.pool.count, 0);
         assert_eq!(s.stats.unported_kills[56], 1);
         assert_eq!(s.stats.unported_kills[59], 1);
+        assert!(s.table[25].is_some() && s.table[47].is_some() && s.table[60].is_some());
     }
 
     #[test]

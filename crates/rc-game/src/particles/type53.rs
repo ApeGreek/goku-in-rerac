@@ -17,6 +17,41 @@ const FIVE: F = 0x40a0_0000;
 const K2: F = 0x4000_0000;
 const K1021: F = 0x447f_4000;
 
+/// The record `PartType53Spawn` 0x287328 fills (`b8` = the rotation: 0 / 0x20 / `randi(0xff)` for a3 = 0 / 1 /
+/// other, drawn by the caller), for the record `r` of type 53 with texture `def` = `def[53][0]`.
+#[allow(clippy::too_many_arguments)]
+pub fn fill(r: &mut super::Record, def: u8, s12: F, s13: F, s14: F, pos: [F; 4], life: i32, rgba: u32, b8: u8, t0: i8, vel: [F; 3]) {
+    let k: F = 0x484d_1400;
+    for (c, &p) in pos.iter().enumerate() { rec::set_f(r, 0x10 + 4 * c, p); }
+    rec::set_u32(r, 4, rgba);
+    r[3] = 0x48;
+    rec::set_f(r, 0x18, ps2v::add(pos[2], 0x3d4c_cccd));
+    r[1] = 0;
+    r[9] = 0x20;
+    r[2] = def;
+    rec::set_i16(r, 0xa, life as i16);
+    let sz = ps2v::mul(s12, k);
+    rec::set_f(r, 0xc, sz);
+    r[8] = b8;
+    rec::set_i16(r, 0x28, life as i16);
+    rec::set_f(r, 0x20, sz);
+    r[0x2a] = t0 as u8;
+    rec::set_f(r, 0x24, ps2v::mul(s13, k));
+    r[0x2b] = (rgba >> 24) as u8;
+    rec::set_f(r, 0x38, s14);
+    for (c, &v) in vel.iter().enumerate() { rec::set_f(r, 0x2c + 4 * c, v); }
+}
+
+/// `PartType53Spawn` 0x287328 with its rotation `b8` already drawn (a3 0 / 1 draw nothing). None when the pool is
+/// full.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn(sys: &mut Particles, s12: F, s13: F, s14: F, pos: [F; 4], life: i32, rgba: u32, b8: u8, t0: i8, vel: [F; 3]) -> Option<usize> {
+    let i = sys.create_part(0x35)?;
+    let def = sys.def_first(0x35);
+    fill(&mut sys.pool.recs[i], def, s12, s13, s14, pos, life, rgba, b8, t0, vel);
+    Some(i)
+}
+
 /// Update 0x2874b8 (no RNG). With a = +0x20 (spawn size), b = +0x24, N = +0x2b, L = +0x28 (life), t = timer and
 /// d = L − t:
 /// * d < 6 (the first five updates): f = d/5, size = `b + ((a + b)·0.5 − b)·f`, A = `N + (N/2 − N)·f` (b → the

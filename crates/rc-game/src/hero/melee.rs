@@ -26,14 +26,16 @@ use rc_formats::moby_anim;
 
 /// The melee table at 0x17c0a8 (stride 0x2c, indexed by 0x13fdb0): `[kind (0 ground combo, 1 jump attack, 2
 /// comet), step, chain-before, input-ref, chain-from, jump-after, idle-after, hit-from, hit-to, +0x24,
-/// +0x28]`, frames of Ratchet's sequence. Rows 0..2 = combo swings 0x17..0x19, 3 = comet 0x1a, 4 = jump attack 0x2b.
-pub const COMBO: [[i32; 11]; 6] = [
+/// +0x28]`, frames of Ratchet's sequence. Rows 0..2 = combo swings 0x17..0x19, 3 = comet 0x1a, 4 = jump attack 0x2b,
+/// 5 / 6 = the Magneboots swings 0x5c / 0x5d (0x70; row 6 read from level01 memory 0x17c0a8 + 6·0x2c).
+pub const COMBO: [[i32; 11]; 7] = [
     [0, 0, 33, 19, 26, 24, 31, 17, 23, 17, 24],
     [0, 1, 25, 7, 12, 13, 23, 8, 13, 6, 12],
     [0, 2, 0, 16, 23, 19, 21, 12, 16, 9, 23],
     [2, 0, 99, 83, 88, 87, 91, 99, 99, 99, 99],
     [1, 0, 99, 32, 28, 28, 30, 1, 28, 22, 25],
     [0, 0, 33, 19, 26, 24, 31, 18, 22, 17, 24],
+    [0, 1, 25, 7, 17, 18, 23, 8, 13, 6, 12],
 ];
 const C_KIND: usize = 0;
 const C_STEP: usize = 1;
@@ -52,6 +54,10 @@ const YAW_SENTINEL: Pf = Pf::b(0x47c3_4f80);
 const AIM_TURN: Pf = Pf::b(0x4170_2845);
 /// Wrench class (moby +0xa6).
 pub const WRENCH_CLASS: i16 = 0x47;
+/// The wrench's hit sound, `FUN_002bda88()`: class sound 1 when the moby of the last line hit (0x1742d8) has mode
+/// bit 0x20 and the record its first pvar word points to has +9 = 1, else 0. The port has no pointer records in
+/// the pvars, so it always plays 0 (**L**: the targets of the ported classes do not set mode 0x20).
+pub const WRENCH_HIT_SOUND: i32 = 0;
 
 /// The melee fields of the hero block (0x13fd40..0x13fdcc).
 #[derive(Clone, Copy, Debug, Default)]
@@ -122,7 +128,7 @@ pub fn apply_melee_stats(melee: &mut Melee, gs: &mut crate::game_state::GameStat
 }
 
 impl Hero {
-    fn combo_row(&self) -> &'static [i32; 11] { &COMBO[(self.melee.combo.clamp(0, 5)) as usize] }
+    fn combo_row(&self) -> &'static [i32; 11] { &COMBO[(self.melee.combo.clamp(0, 6)) as usize] }
 
     /// `FUN_002351d0(range, cone, cone2)`: unless already aimed, aim at the stick direction when the stick is
     /// past 0.5, else the facing; then the target search `0x22e238(range, aim, cone, cone2)` over the
@@ -557,6 +563,7 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         if hero.melee.hit == 0 {
             hero.melee.hit = 1;
             hero.items.hit_sounds += 1;
+            hero.fx.item_sounds.push(WRENCH_HIT_SOUND);
         }
     }
     let mut v2 = vsub(tip, hand);
@@ -569,6 +576,7 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     if hits.sphere(table, r, c, 0, ignore, &tmpl).is_some() && hero.melee.hit == 0 {
         hero.melee.hit = 1;
         hero.items.hit_sounds += 1;
+        hero.fx.item_sounds.push(WRENCH_HIT_SOUND);
     }
 }
 
@@ -585,7 +593,7 @@ pub fn frame_of(v: &AnimView) -> Pf { Pf::f(v.frame) }
 
 /// The hit window of the in-hand wrench update: not blending and `frame` in the row's [hit-from, hit-to].
 pub fn in_hit_window(combo: i32, frame: Pf, blending: bool) -> bool {
-    let row = &COMBO[combo.clamp(0, 5) as usize];
+    let row = &COMBO[combo.clamp(0, 6) as usize];
     !(blending || frame < Pf::from_i32(row[C_HIT_FROM]) || Pf::from_i32(row[C_HIT_TO]) < frame)
 }
 

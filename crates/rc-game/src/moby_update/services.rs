@@ -1243,27 +1243,23 @@ impl<'a> World<'a> {
         let Some(i) = self.part(0x35) else { return };
         let def = self.particles.as_ref().map(|p| p.def_first(0x35)).unwrap_or(0);
         let b8 = match a3 { 0 => 0, 1 => 0x20, _ => self.rng.randi(0xff) as u8 };
-        let k = Pf::b(0x484d_1400);
         let r = &mut self.particles.as_deref_mut().unwrap().pool.recs[i];
-        use crate::particles::rec;
-        for c in 0..4 { rec::set_f(r, 0x10 + 4 * c, pos[c].0); }
-        rec::set_u32(r, 4, rgba);
-        r[3] = 0x48;
-        rec::set_f(r, 0x18, (pos[2] + Pf::b(0x3d4c_cccd)).0);
-        r[1] = 0;
-        r[9] = 0x20;
-        r[2] = def;
-        rec::set_i16(r, 0xa, life as i16);
-        let sz = s12 * k;
-        rec::set_f(r, 0xc, sz.0);
-        r[8] = b8;
-        rec::set_i16(r, 0x28, life as i16);
-        rec::set_f(r, 0x20, sz.0);
-        r[0x2a] = t0 as u8;
-        rec::set_f(r, 0x24, (s13 * k).0);
-        r[0x2b] = (rgba >> 24) as u8;
-        rec::set_f(r, 0x38, s14.0);
-        for c in 0..3 { rec::set_f(r, 0x2c + 4 * c, vel[c].0); }
+        crate::particles::type53::fill(r, def, s12.0, s13.0, s14.0, pos.map(|x| x.0), life, rgba, b8, t0, [vel[0].0, vel[1].0, vel[2].0]);
+    }
+
+    /// `PartType60Spawn(size, pos, vel, rgba, life, rot, attach)` 0x288588 (the glint; no draw: `rot` is the caller's
+    /// draw): refused outside [2, 1021]³, else a record when one is free (counted as a type-60 spawn).
+    #[allow(clippy::too_many_arguments)]
+    pub fn part60(&mut self, size: f32, pos: [f32; 4], vel: [f32; 4], rgba: u32, life: u16, rot: u8, attach: i32) {
+        let hero = crate::hero::physics::to_f32x3(self.hero.pos);
+        let Some(p) = self.particles.as_deref_mut() else { return };
+        let (created, failed) = (p.stats.created, p.stats.create_failed);
+        p.hero = hero;
+        crate::particles::type60::spawn(p, size, pos, vel, rgba, life, rot, attach);
+        if (p.stats.created, p.stats.create_failed) != (created, failed) {
+            if p.stats.create_failed != failed { self.svc.fx.part_failed += 1; }
+            *self.svc.fx.part_spawns.entry(60).or_default() += 1;
+        }
     }
 
     // (The effect mobys' spawners, `DebrisSpawn` 0x2c5080 and `FlashSpawn` 0x2c20e0, live with their updates in

@@ -67,6 +67,16 @@ extraction incomplete), code 4 (data format mismatch or unreadable `extract-info
 (`--data-dir` without a value). `--version-json` prints the contract line and exits without
 touching any data.
 
+**Engine cache (Tier 1).** `extract` ends by building `<data folder>/cache/v1/` (stage `prepare`,
+about 0.2 s, 440 MiB): every level's core data, gameplay file and HUD banks, WAD-decompressed once,
+plus `stamp.toml`. `randcrw-extract prepare --out <data folder>` rebuilds or refreshes it from the
+archive alone (no disc). The engine reads lumps through `rc-data` (once per process each); when the
+cache is missing, stale (stamp: cache version, converter versions, `extract-info.json` hash) or a
+lump is corrupt (XXH64 trailer), it rebuilds what it needs on the fly with one log line per lump,
+and falls back to in-memory decompression when the folder cannot be written. The development
+`extracted/` tree therefore gets `extracted/cache/v1/` on the first `cargo dev`. The folder can be
+deleted at any time. `RC_CACHE=0` skips it; `RC_PERF_LOG=1` prints where each lump came from.
+
 Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
 `rc_formats::test_data::root()`), because they also use the C++-derived files it holds (`.dec`,
 dumps, `core/` and `gameplay/` splits, `overlay.elf`); they skip when it is absent.
@@ -101,6 +111,8 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 |---|---|
 | `RC_DATA_DIR` | Game data folder when `--data-dir` is not given (see "Game data") |
 | `RC_EXTRACTED` | Development data tree (default `<repo>/extracted`); the engine's fallback when neither `--data-dir` nor `RC_DATA_DIR` is set, and the tests' root |
+| `RC_CACHE` | `0`: do not use or write the engine cache `<data>/cache/v1` (decompress in memory, once per process) |
+| `RC_PERF_LOG` | `1`: print one line per game-data lump request (engine cache, memory or decompressed; MiB, ms) |
 | `RC_LEVEL` | Level index to load (default 1, Novalis) |
 | `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target, game units) |
 | `RC_SCREENSHOT` | Save a screenshot to this path, then exit |

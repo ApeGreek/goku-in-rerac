@@ -5,7 +5,7 @@
 //! The call chain is the one `crates/rc-formats/tests/golden.rs` verifies byte-for-byte.
 
 use anyhow::{Context, Result};
-use rc_formats::{level, texture, tfrag, wad};
+use rc_formats::{level, texture, tfrag};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -85,13 +85,12 @@ pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
 
     let t0 = Instant::now();
     let core_index = read("core_index.bin")?;
-    let core_data_wad = read("core_data.bin")?;
     let gs_ram = read("gs_ram.bin")?;
-    let gameplay_wad = read("gameplay_ntsc.bin")?;
     t.read = t0.elapsed();
 
     let t0 = Instant::now();
-    let core_data = wad::decompress(&core_data_wad).context("decompressing core_data")?;
+    // Decompressed once per process, from the Tier 1 engine cache when it is there (rc_data).
+    let core_data = rc_data::level_core_data(root, index).context("decompressing core_data")?;
     t.decompress = t0.elapsed();
 
     let t0 = Instant::now();
@@ -109,7 +108,7 @@ pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
     t.parse_textures = t0.elapsed();
     let tfrag_lod = crate::tfrag_lod::load(&core, &core_data, &gs_ram)?;
 
-    let gameplay = wad::decompress(&gameplay_wad).context("decompressing gameplay_ntsc")?;
+    let gameplay = rc_data::level_gameplay(root, index).context("decompressing gameplay_ntsc")?.to_vec();
     let fog = crate::game_camera::LevelFog::parse(&gameplay).context("parsing level settings")?;
     let background = crate::game_camera::level_background(&gameplay).context("parsing level settings")?;
     let mobys = crate::moby_render::load_mobys(root, &core, &core_data, &gameplay).context("loading mobys")?;

@@ -448,7 +448,11 @@ impl LevelAudio {
     ) -> rc_formats::buf::Result<Self> {
         use rc_formats::sound_bank as sb;
         let bank = Arc::new(sb::parse_bank(sound_bank)?);
-        let sounds = sb::parse_level_sounds(core_index, core, core_data)?;
+        let mut sounds = sb::parse_level_sounds(core_index, core, core_data)?;
+        // The hand items' (gadget classes') defs from their own blobs, as the game applies them when one is loaded.
+        let gadgets = rc_formats::gadget::parse_gadget_classes(core, core_data)?;
+        let blobs: Vec<(i32, &[u8])> = gadgets.iter().map(|g| (g.moby.o_class, g.blob.as_slice())).collect();
+        sb::apply_gadget_defs(&mut sounds, &blobs)?;
         let instances = sb::parse_sound_instances(gameplay)?;
         let instance_pvars = instances.iter().map(|s| sb::pvar_block(gameplay, s.pvar_index)).collect::<rc_formats::buf::Result<Vec<_>>>()?;
         let table = sb::music_table(level_header)?;
@@ -461,6 +465,9 @@ impl LevelAudio {
         Ok(LevelAudio { bank, sounds, instances, instance_pvars, music, env_points, collision: collision.map(Arc::new) })
     }
 }
+
+/// One logged class sound play: `(tick, sound class, class sound index, flags, slot)`.
+pub type ClassPlay = (u64, i16, i32, u32, i32);
 
 /// Per-frame input from the game.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -504,6 +511,9 @@ pub struct AudioSystem {
     pub stats: AudioStats,
     /// Mode-2 scene audio: speech voice, music pause / resume, cutscene volumes ([`scene`]).
     pub scene: scene::SceneAudio,
+    /// The class sounds played since the caller last drained it, when logging (the engine's `RC_AUDIO_TRACE`):
+    /// `(tick, sound class, class sound index, flags, slot)`; None: not logged.
+    pub play_log: Option<Vec<ClassPlay>>,
     started: bool,
     snd_cmds: Vec<SndCommand>,
     stream_cmds: Vec<StreamCommand>,
@@ -538,6 +548,7 @@ impl AudioSystem {
             music_option: 0x2cc,
             stats: AudioStats::default(),
             scene: scene::SceneAudio::default(),
+            play_log: None,
             started: false,
             snd_cmds: Vec::new(),
             stream_cmds: Vec::new(),
@@ -748,6 +759,44 @@ mod tests {
         for _ in 0..56 * 5 { v.run(); }
         assert!(v.active());
         assert!(v.stream_remaining() <= 56);
+    }
+
+    /// Every level's gadget classes (the hand items) get their class sound defs from their blobs with the parked
+    /// remap: the wrench on every level, the Swingshot (0xd0) wherever it is in the gadget table, every remapped id
+    /// a sound of the bank (skipped without `extracted/`).
+    #[test]
+    fn gadget_class_sounds_on_every_level() {
+        use rc_formats::sound_bank as sb;
+        let mut seen = 0;
+        for level in 0..19 {
+            let root = rc_formats::test_data::root().join(format!("levels/{level:02}"));
+            let Ok(bank) = std::fs::read(root.join("sound_bank.bin")) else { continue };
+            let rd = |n: &str| std::fs::read(root.join(n)).unwrap();
+            let idx = rd("core_index.bin");
+            let data = rd("core_data.dec");
+            let core = rc_formats::level::parse_level_core(&idx, data.len()).unwrap();
+            let bank = sb::parse_bank(&bank).unwrap();
+            let mut sounds = sb::parse_level_sounds(&idx, &core, &data).unwrap();
+            let gadgets = rc_formats::gadget::parse_gadget_classes(&core, &data).unwrap();
+            let before = sounds.def(sb::SoundOwner::Class(71), 0).is_some();
+            let blobs: Vec<(i32, &[u8])> = gadgets.iter().map(|g| (g.moby.o_class, g.blob.as_slice())).collect();
+            sb::apply_gadget_defs(&mut sounds, &blobs).unwrap();
+            assert!(!before, "level {level}: the wrench had defs before");
+            let n_sounds = bank.sounds.len();
+            let mut report = Vec::new();
+            for g in &gadgets {
+                let Some(c) = sounds.classes.iter().find(|c| c.o_class == g.moby.o_class) else { continue };
+                for (j, d) in c.defs.iter().enumerate().take(c.bank_ids.len().min(15)) {
+                    assert!((d.index as usize) < n_sounds, "level {level} class {} def {j}: id {} of {n_sounds}", c.o_class, d.index);
+                }
+                report.push((c.o_class, c.defs.len()));
+            }
+            assert!(sounds.def(sb::SoundOwner::Class(71), 0).is_some(), "level {level}: no wrench sound");
+            if gadgets.iter().any(|g| g.moby.o_class == 0xd0) { assert!(sounds.def(sb::SoundOwner::Class(0xd0), 2).is_some(), "level {level}: Swingshot"); }
+            eprintln!("level {level}: gadget classes (o_class, defs) {report:?}");
+            seen += 1;
+        }
+        eprintln!("{seen} levels checked");
     }
 
     /// Novalis from `extracted/` (skipped when absent): 10 s at the spawn, listener a few units behind

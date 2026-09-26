@@ -47,7 +47,8 @@
 //!   rows).
 //!
 //! **Not ported** (cosmetic, and like the swim's effects they draw from `rand`, so the stream diverges from the
-//! PS2 in these states only): the wake / bubble particles of 0x75 / 0x76 (`0x22ac40`, `0x22b140`), 0x82's
+//! PS2 in these states only): 0x75's surface wake (`0x22ac40`: type-45 ripples, flat quads the particle renderer does
+//! not draw yet; 0x76's bubbles `0x22b140(n, 0)` are ported: `super::fx::bubbles`), 0x82's
 //! bubbles (the drowned physics as in `swim`), 0x3c's and 0x7c's fire (`0x209ec8`, L00 `0x217450`), 0x7f's
 //! bubble moby (class 0x52a, `CreateMoby` + its class sound); 0x7c's level-6 fog colour (0x141644 / 0x141648);
 //! the help-flag clear `0x225938` and the level-15 flag 0x15f5a4 of the death sequence; the game mode 0x15f5c4
@@ -453,6 +454,8 @@ pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut
             h.gravity_from(z, Pf::b(0x3b83_126f));
         }
         0x75 | 0x76 | 0x7f => {
+            // 0x76 (hurt under water): a burst of bubbles `0x22b140(min(10 − timer/3, 8), 0)`, fewer each 3 ticks.
+            if h.state == 0x76 { super::fx::bubbles(h, rng, (10 - h.timer / 3).min(8)); }
             h.vel[2] = Pf::ZERO;
             let l = len2(h.vel);
             let mut v = h.vel;

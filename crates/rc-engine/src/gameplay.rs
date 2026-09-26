@@ -326,8 +326,7 @@ fn moby_collision_blobs(index: u32) -> anyhow::Result<Vec<(i32, rc_formats::moby
     use anyhow::Context;
     let root = crate::level_load::extracted_root();
     let idx = crate::disc_source::level_file(&root, index, "core_index.bin").context("core index")?;
-    let wad = crate::disc_source::level_file(&root, index, "core_data.bin").context("core data")?;
-    let data = rc_formats::wad::decompress(&wad).context("decompressing core data")?;
+    let data = rc_data::level_core_data(&root, index).context("decompressing core data")?;
     let core = rc_formats::level::parse_level_core(&idx, data.len()).context("parsing core index")?;
     Ok(rc_formats::moby_collision::parse_level(&core, &data)?)
 }
@@ -520,7 +519,7 @@ fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<Hash
     if wanted.is_empty() { return Ok(out); }
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
     let read = |name: &str| crate::disc_source::level_file(&root, index, name);
-    let data = rc_formats::wad::decompress(&read("core_data.bin")?).context("decompressing core_data")?;
+    let data = rc_data::level_core_data(&root, index).context("decompressing core_data")?;
     let core = rc_formats::level::parse_level_core(&read("core_index.bin")?, data.len()).context("parsing core index")?;
     for c in wanted {
         let name = format!("moby_class/{:04}", c.o_class);
@@ -1089,11 +1088,14 @@ fn tick(
         }
         n_active = sched.tick(&mut w);
     };
-    let mut parts = |_: &Hero, cam: &CameraView, rng: &mut Rng, _: u64| {
+    let mut parts = |hero: &Hero, cam: &CameraView, rng: &mut Rng, _: u64| {
         if let Some(sim) = parts_cell.borrow_mut().as_deref_mut() {
             // 0x167240 as the previous tick's camera update left it (the type-11 sparks read it), and the game's
             // one rand stream.
             sim.sys.camera = [cam.pos[0].0, cam.pos[1].0, cam.pos[2].0];
+            sim.sys.cam_yaw = cam.yaw().to_f32();
+            // The particles the hero update spawned (sparks, sand, …: rc_game::hero::fx), in its order.
+            rc_game::hero::fx::create_particles(hero, &mut sim.sys);
             crate::particle_render::update_parts(sim, Some(rng));
         }
         // FUN_00220928, right after UpdateParts.
@@ -1183,7 +1185,7 @@ fn tick(
         let s = &p.ratchet.state;
         println!(
             "tick {:5}: state {:#04x} pos {:.4?} yaw {:+.4} air {:3} | anim {}:{} -> {}:{} t {:.3} | cam {:.3?} | {:?} | rng {:#010x} \
-             mobys {n_active} bolts {} free {} dyn {}/{} parts {} grass seq1 {} | hand {}:{} {:?} combo {} hit {} fr {:.2} tip {:.3?} | back {} | snd {} | hp {} inv {}",
+             mobys {n_active} bolts {} free {} dyn {}/{} parts {} grass seq1 {} | hand {}:{} {:?} combo {} hit {} fr {:.2} tip {:.3?} | back {} | snd {} | hp {} inv {} | shake {:.4} {:.4}",
             p.game.counter - 2, h.state, h.position(), h.yaw().to_f32(), h.air_ticks, s.seq_a, s.frame_a, s.seq_b, s.frame_b, s.t,
             report.camera.pos_f32(), report.hero, p.game.rng.state, p.svc.counters.bolts, p.game.mobys.free_slots,
             p.dynamic.drawn, p.dynamic.live, particles.as_ref().map_or(0, |s| s.sys.pool.count),
@@ -1192,7 +1194,7 @@ fn tick(
             h.melee.combo, h.melee.hit, p.ratchet.frame.to_f32(), rc_game::hero::physics::to_f32x3(h.melee.tip),
             h.back.as_ref().map_or("-".to_string(), |b| format!("pack {}:{} clank {}:{}", b.pack.anim.seq_b, b.pack.anim.frame_b, b.clank.anim.seq_b, b.clank.anim.frame_b)),
             audio_cell.borrow().as_ref().map_or("-".to_string(), |a| { let st = a.stats(); format!("{} plays, class {}/{}", st.plays, st.class_slots, st.class_sounds) }),
-            h.health, h.f510
+            h.health, h.f510, p.game.camera.shake[0].offset.to_f32(), p.game.camera.shake[1].offset.to_f32()
         );
     }
     // The swim's ripple disturbances (`RippleDisturb` 0x2b82a8 on every patch); splashes, bubbles and swim sounds

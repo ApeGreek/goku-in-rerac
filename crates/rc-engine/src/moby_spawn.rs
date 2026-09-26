@@ -48,7 +48,7 @@ use rc_formats::moby_anim::{self, MobyAnimClass};
 use rc_formats::moby_spawn::{self, ChangeAt, SpawnEnv, SpawnState};
 use rc_formats::occlusion::OcclBits;
 use rc_formats::tfrag_light::ps2;
-use rc_formats::{level, wad};
+use rc_formats::level;
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -84,7 +84,7 @@ impl Env<'_> {
         self.triangles.get_or_init(|| {
             let load = || -> Result<Vec<CollisionTriangle>> {
                 let read = |n: &str| crate::disc_source::level_file(self.root, self.index, n);
-                let core_data = wad::decompress(&read("core_data.bin")?).context("decompressing core_data")?;
+                let core_data = rc_data::level_core_data(self.root, self.index).context("decompressing core_data")?;
                 let core = level::parse_level_core(&read("core_index.bin")?, core_data.len())?;
                 Ok(collision::collision_triangles(&collision::parse_collision(&core, &core_data)?))
             };
@@ -141,7 +141,7 @@ pub fn apply_load_pass(root: &Path, index: u32, level: &mut LoadedLevel) -> Resu
         let states = m.instances.iter().map(|i| { let mut s = SpawnState::plain(i.o_class, anim_of(i.o_class)); s.runs_load_pass = false; s }).collect();
         return Ok(MobySpawn { enabled: false, states, ship: None });
     }
-    let gameplay = wad::decompress(&crate::disc_source::level_file(root, index, "gameplay_ntsc.bin")?).context("decompressing gameplay_ntsc")?;
+    let gameplay = rc_data::level_gameplay(root, index).context("decompressing gameplay_ntsc")?;
     // The loader's spawn test with a direct boot's save bytes (a first visit on a new game: all zero, what
     // crate::gameplay's game state has; that module repeats the test with the game state itself). Records it
     // rejects are not created: hidden here; the pvar moby links and moby positions use the runtime indices.

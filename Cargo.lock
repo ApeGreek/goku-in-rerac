@@ -4375,11 +4375,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rc-data"
+version = "0.1.0"
+dependencies = [
+ "rc-formats",
+]
+
+[[package]]
 name = "rc-engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
+ "rc-data",
  "rc-formats",
  "rc-game",
 ]
@@ -4388,6 +4396,7 @@ dependencies = [
 name = "rc-extract"
 version = "0.1.0"
 dependencies = [
+ "rc-data",
  "rc-formats",
 ]
 

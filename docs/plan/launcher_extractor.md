@@ -3,7 +3,8 @@
 Status: **decided 2026-09-26** (user's picks in §9; they override the original recommendations where they differ).
 **Built:** Stage 1a, the Rust extractor `randcrw-extract` (`crates/rc-extract`, §4.1), and Stage 1b, the engine
 cut-over (§7: the engine reads only the data folder; `--data-dir`, `RC_DATA_DIR`, `--version-json`; settings under
-`randcrw`). The launcher ↔ game interface is `docs/plan/launcher_contract.md`. Mods get a separate, shorter doc: `docs/plan/mods.md`.
+`randcrw`). **P1.5, the Tier 1 engine cache v1** (§5.4: `randcrw-extract prepare`, `crates/rc-data`), is built too.
+The launcher ↔ game interface is `docs/plan/launcher_contract.md`. Mods get a separate, shorter doc: `docs/plan/mods.md`.
 
 **Names.** The project is **randcrw**. Everything user-facing uses `randcrw` (binaries, data folders, window titles);
 only the repository folder keeps the old name `randcre`.
@@ -50,8 +51,9 @@ Surprises found while surveying (details in §3):
    The ELF and the 19 overlays must stay in the archive. They are RC1's equivalent of OpenGOAL's decompiled data.
 4. **One level load decompresses `core_data` 5 to 8 times** (`level_load`, `fog_state`, `menu_render`, `gameplay`
    twice, `moby_attach`, `moby_spawn`), and `gameplay_ntsc` 4 times. Each `core_data` decompress takes about
-   40 ms (level_sweep.md). A decompressed cache (Tier 1 v1) removes roughly 150–300 ms per load. This is an
-   estimate; the P1.5 package measures it.
+   40 ms (level_sweep.md). A decompressed cache (Tier 1 v1) removes roughly 150–300 ms per load. **Measured (P1.5,
+   §5.4):** 8 / 6 / 6 `core_data` and 4 `gameplay_ntsc` decompressions per load on levels 01 / 05 / 16 before; one
+   cache read per lump after, and the load up to the window drops from 285 / 196 / 192 ms to 147 / 100 / 106 ms.
 5. **The NTSC disc carries PAL copies** of every FMV (1,333 MiB) and every scene region (85 MiB). Tier 0 is about
    4.0 GiB, the same as the 4.2 GB ISO. Dropping PAL-only data gives about 2.6 GiB (decision U2).
 6. **About 15 test sites hard-code `CARGO_MANIFEST_DIR/../../extracted`** in `rc-game` and `rc-trace`.
@@ -323,6 +325,65 @@ the raw layout `rc_extract unpack` writes to `extracted/`:
 - **FMV:** demuxing PSS into the MPEG-2 elementary stream plus the SShd ADPCM is lossless and cheap. The decoder is
   a separate decision (U10).
 
+### 5.4 Tier 1 as built (v1, P1.5, 2026-09-26)
+- **Code.** `crates/rc-data` (no Bevy, no external crates; depends on `rc-formats` only) holds the cache format and
+  the engine-side store. `randcrw-extract prepare` (`crates/rc-extract/src/prepare.rs`) builds the cache with the
+  same code. A crate rather than an engine module, so the extractor does not link the engine and the cache tests
+  build in seconds.
+- **Content.** Every WAD lump the engine used to decompress on each load: per level `core_data`, `gameplay_ntsc`,
+  `hud_bank_0..4` (133 lumps, 438 MiB of decompressed data, 439 MiB on disk for the full disc). The bytes are exactly
+  `rc_formats::wad::decompress` of the Tier 0 file: nothing is converted, so no PS2 detail can be lost; the
+  golden-tested parsers still run on them. Not in v1: WAD streams decompressed inside parsers (63 gadget classes per
+  load, about 5 ms; scene chunks when a scene starts) and `gameplay_pal` (the NTSC game never reads it).
+- **Layout** (a kind's files mirror their Tier 0 path under `<kind>/`; E2 exports can mirror the same way):
+  ```
+  <data>/cache/v1/stamp.toml
+  <data>/cache/v1/wad/levels/NN/core_data.lump
+  <data>/cache/v1/wad/levels/NN/gameplay_ntsc.lump
+  <data>/cache/v1/wad/levels/NN/hud_bank_B.lump
+  ```
+- **Lump file:** the decompressed bytes from offset 0 (memory-mappable, usable by tools as is), then a 48-byte
+  little-endian trailer: magic `RCWLUMP1`, kind version (u32), reserved (u32 0), payload length, payload XXH64,
+  source length, source XXH64 (u64 each). XXH64 is in-crate (reference vectors tested); checking a 23 MiB core
+  costs about 5 ms, against 40 ms to decompress it.
+- **Stamp** (`stamp.toml`, `key = value` lines, no dependency): `cache_version = 1`, `game = "rac1"`,
+  `tier0_manifest = "extract-info.json:xxh64:<hex>"` (or `"none"` for a development tree without that file),
+  `kind.wad = 1`, and the informational `written_by`. Any mismatch of the first four makes the whole cache stale.
+  The committed SHA-1 table was not used because the runtime does not carry it; `extract-info.json` names the disc,
+  data format, extractor version and NTSC-only flag, and the table fixes the file contents for those.
+- **Checks on every read:** trailer magic, kind version, payload length, payload XXH64 (corruption), Tier 0 source
+  length (a swapped source). `prepare` also compares the source XXH64, since it reads the sources anyway.
+- **Writes** are `<file>.<pid>.partial` + rename; `prepare` deletes leftover `.partial` files and other
+  `cache/v<N>` folders.
+- **Engine API** (`rc_data`): `level_core_data(root, NN)`, `level_gameplay(root, NN)`, `hud_bank(root, NN, B)` and
+  `wad_lump(root, rel)` return `Arc<[u8]>`. Each lump is produced once per process (a mutex-guarded map), from
+  memory, else the cache, else Tier 0; a lump built from Tier 0 is written to the cache with one log line
+  (`rc-data: cached levels/01/core_data.bin (22.8 MiB; decompressed in 41 ms, written in 5 ms)`). A missing cache is
+  created and a stale one emptied first (one line each); an unwritable folder switches to in-memory decompression
+  (one line). `RC_CACHE=0` never touches the disk; `RC_PERF_LOG=1` prints every request; `rc_data::stats()` counts
+  them. The engine builds lazily in every build type, not only in dev; the launcher prebuilds at install.
+- **Call sites switched** (the decompress lines only): `level_load` (core data, gameplay), `tfrag_light`,
+  `fog_state` (both), `moby_spawn` (gameplay, ground-probe core data), `hud_render` (banks), `menu_render`,
+  `moby_attach::load_blobs` (twice per load: its own setup and `gameplay`), `gameplay` (collision blobs, joint
+  lists). `LoadTimings::decompress` (the `WAD` figure in the load line) now measures the cache read.
+- **Measured** (dev build, M-series; before/after built from the same tree, runs with `--data-dir` on a fresh
+  extraction, `RC_SCENE=0`):
+
+  | Level | `core_data` / `gameplay` decompressions per load | Load up to the window | Level loader (`load`) | Frame 60 reached |
+  |---|---|---|---|---|
+  | 01 | 8 / 4 → 0 / 0 (1 cache read each; 1 / 1 on a cold cache) | 285 → 147 ms | 77 → 36 ms | 2,120 → 1,751 ms |
+  | 05 | 6 / 4 → 0 / 0 | 196 → 100 ms | 72 → 32 ms | 2,011 → 1,693 ms |
+  | 16 | 6 / 4 → 0 / 0 | 192 → 106 ms | 73 → 36 ms | 1,949 → 1,710 ms |
+
+  A cold cache (first start after deleting it) loads level 01 up to the window in 191 ms, writing its 5 lumps.
+  `prepare` for all 19 levels takes 0.2 s (release, 4 workers); a full `extract` including it 4.7 s.
+- **Fidelity checks:** `crates/rc-data/tests/roundtrip.rs` (all 133 lumps of the 19 levels: lazily built, re-read by
+  a fresh store, `read_lump` and `prepare`'s check all equal `wad::decompress` of Tier 0 and the C++ `.dec`);
+  `tests/lifecycle.rs` (stale stamp, corrupt lump, unwritable cache, once per process); `RC_SCENE=0
+  RC_SCREENSHOT_FRAME=300` on Novalis byte-identical before and after, with a warm and with a cold cache.
+- **For v2+ (E2 and later):** add a kind (`kind.<name> = <version>` in the stamp, files under `<kind>/`), keep
+  Tier 0 paths as the key, and add its round-trip test. Tier 2 exports are a separate tree (not under `cache/`).
+
 ## 6. Launcher options
 
 | | A. Tauri app (OpenGOAL's choice) | B. Launcher screen inside the Bevy game binary | C. Separate Rust native GUI: egui/eframe (or iced/Slint) |
@@ -354,9 +415,9 @@ recommendation C, egui in this repo).
     not supported yet", with serial and hash shown for a report.
   - Unknown build: refused, with the DB-row text to copy (OpenGOAL's pattern).
 - **Extraction (as built):** `randcrw-extract extract --iso <image> --out <root>/games/rac1/data --json`, with progress
-  by bytes (`identify`, `copy`), an ETA and Cancel (= kill the process). There is no staging folder: the extractor is
-  crash-safe in place (`*.partial` files, `extract-info.json` last; contract clarification 7). Later, `prepare` builds
-  Tier 1.
+  by bytes (`identify`, `copy`, `prepare`), an ETA and Cancel (= kill the process). There is no staging folder: the
+  extractor is crash-safe in place (`*.partial` files, `extract-info.json` after the archive; contract clarification
+  7). The last stage, `prepare`, builds Tier 1 (§5.4; contract clarification 17).
   - Measured (§4.1): 3–8 s for 4 GiB on the dev machine.
 - **Done:** "Your disc image is no longer needed." Then Play, Verify files (re-hash against the manifest), Rebuild
   cache, Open data folder, Move data folder, Uninstall.
@@ -377,7 +438,7 @@ runtime never compute it; they receive paths (`--out`, `--data-dir`/`RC_DATA_DIR
 ```
 <root>/versions/<source>/<version>/   one game build: randcrw-manifest.json, runtime, extractor
 <root>/games/rac1/data/               Tier 0 archive (§4.1) + extract-info.json
-<root>/games/rac1/data/cache/v<N>/    Tier 1 (later, P1.5)
+<root>/games/rac1/data/cache/v1/      Tier 1 engine cache (§5.4): stamp.toml, wad/levels/NN/*.lump
 <root>/logs/, <root>/settings/
 ```
 The engine's current settings path still says `randcre` (`render_settings::settings_path`); the engine cut-over
@@ -469,7 +530,7 @@ workspace **path** crates are fine. Each package reports load times, file counts
 | P1.2 | **Done (Stage 1a) except the `audit` subcommand**; no staging dir, `manifest.tsv` or `buildinfo.toml` (replaced by the committed table and `extract-info.json`, contract). Original scope: **`crates/rc-extract`** (lib + bin, no Bevy). `extract(iso, out, opts, progress, cancel) → Manifest` writes Tier 0: boot files, `toc.bin`, global lumps, the 19 level groups, streams. Parallel reader and writer threads (std only). Staging dir + atomic rename. `manifest.tsv` + `buildinfo.toml`. `ExtractError` codes. Subcommands `identify`, `extract`, `verify`, `audit` (sector coverage map) | `crates/rc-extract/**`, workspace `Cargo.toml` members (+1 line) | Synthetic mini-ISO end-to-end (`iso9660::tests::mini_iso`); real disc: every file byte-equal to the C++ `extracted/` `.bin` (2,937 files); a flipped byte fails `verify` and names the file; cancelling leaves no archive; wall time reported; audit report of unreferenced sectors | P1.1 |
 | P1.3 | **`crates/rc-data`** (no Bevy). Root resolution (`--data`, `RC_DATA_DIR`, `RC_EXTRACTED` alias, per-OS default, workspace `extracted/` in dev), flat-archive detection, `read(rel)`, `level_file`, manifest and stamp checks, `test_root()` for tests | `crates/rc-data/**`, workspace members (+1 line) | Precedence unit tests; flat vs launcher layout; stale-stamp detection; missing-data error text | — (parallel with P1.1) |
 | P1.4 | **Done (Stage 1b; §7)** except the 19-level smoke run and the deterministic before/after capture. Original scope: **Engine cut-over.** `disc_source.rs` becomes data-dir-only via `rc-data`; `extracted_root()` → `rc_data`; drop `RC_ISO`/`RC_SOURCE`; clear no-data message and exit code; README env table | `rc-engine/src/disc_source.rs`, `level_load.rs` (`extracted_root` only), `rc-engine/Cargo.toml` (+1 path dep), `README.md` (data section) | No `disc`/`iso9660` use in rc-engine; engine runs with the ISO moved away; music, speech, scenes, ship and save template load from the data dir; `RC_DETERMINISTIC` capture on 01 byte-identical before and after; 19-level smoke run | P1.3 |
-| P1.5 | **Tier 1 v1 cache.** `rc-extract prepare` writes decompressed WADs + `stamp.toml`. `rc-data` serves `level_core_data(NN)`, `level_gameplay(NN)`, `hud_bank` as `Arc<[u8]>`, decompressed once per process and built lazily if the cache is missing or stale. Engine call sites switch from `wad::decompress(read(…))` to these helpers | `rc-extract/src/prepare.rs`, `rc-data` (cache module), engine: `level_load`, `fog_state`, `menu_render`, `gameplay`, `moby_attach`, `moby_spawn`, `tfrag_light`, `hud_render` (the decompress lines only; dispatch only when no other agent owns these files) | Load time before/after on 01, 05, 16; goldens unchanged; deterministic capture identical; stale stamp triggers a rebuild | P1.2, P1.4 |
+| P1.5 | **Done (2026-09-26; §5.4)** with `stamp.toml`, lumps with an XXH64 trailer, and the lazy build in every build type; measured 01/05/16 and capture identity as in §5.4. Original scope: **Tier 1 v1 cache.** `rc-extract prepare` writes decompressed WADs + `stamp.toml`. `rc-data` serves `level_core_data(NN)`, `level_gameplay(NN)`, `hud_bank` as `Arc<[u8]>`, decompressed once per process and built lazily if the cache is missing or stale. Engine call sites switch from `wad::decompress(read(…))` to these helpers | `rc-extract/src/prepare.rs`, `rc-data` (cache module), engine: `level_load`, `fog_state`, `menu_render`, `gameplay`, `moby_attach`, `moby_spawn`, `tfrag_light`, `hud_render` (the decompress lines only; dispatch only when no other agent owns these files) | Load time before/after on 01, 05, 16; goldens unchanged; deterministic capture identical; stale stamp triggers a rebuild | P1.2, P1.4 |
 | P1.6 | **Done (Stage 1b)** with `rc_formats::test_data::root()` instead of `rc_data::test_root()`. Original scope: **Test and tool migration.** `rc-trace` roots and the `rc-game` test paths use `rc_data::test_root()` | `rc-trace/src/{lib.rs, novalis_spawn.rs, tfrag_light_cmp.rs, tie_shrub_cmp.rs, port_sim.rs}`, the listed `rc-game` test modules (path lines only) | `cargo test --workspace` green; tests still skip without data | P1.3 (parallel with P1.4/P1.5) |
 | P1.7 | **Tier 2 exports v1.** Textures and menu images → PNG (in-house stored-deflate PNG writer or the approved `png` crate); VAG → WAV via the existing decoder; text → JSON; tfrag/tie/shrub LOD0 → glTF (hand-written JSON + bin). `rc-extract export` | `rc-extract/src/export/**` | PNG count = texture count per level; WAV sample count = decoder output; glTF structure test | P1.2 (can move after Stage 2) |
 | P1.8 | **FMV demux** (lossless) into Tier 1; doc of the decoder options for U10 | `rc-extract/src/pss.rs`, `docs/plan/cutscenes_transitions.md` §5 append | Demuxed stream sizes add up to the PSS payload; SShd header fields as documented | P1.2 |

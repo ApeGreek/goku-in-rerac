@@ -97,3 +97,14 @@ pub fn after_items(hero: &mut Hero, c: &mut Ctx, data: &ItemData) {
     if let Some(ItemUpdate::Hero(f)) = pending.and_then(hand_item).map(|k| k.update) { f(hero, c, data); }
     if hero.items.slot.item.is_none() || hero.items.slot.id != super::swingshot::SWINGSHOT { super::swingshot::item_gone(hero); }
 }
+
+/// The hand item's class sounds of this tick (`PlayClassSound(index, 0, item)` inside its update: the wrench's hit,
+/// the Swingshot's fire / hit / pull), played through the hero's sound layer right after the item's update (the
+/// tick calls it after [`after_items`]), in the order the update made them. No hand moby: dropped.
+pub fn flush_item_sounds(h: &mut Hero, sounds: &mut dyn super::HeroSounds, rng: &mut crate::rng::Rng) {
+    let mut list = std::mem::take(&mut h.fx.item_sounds);
+    list.append(&mut h.swing.item.sounds);
+    let Some(item) = h.items.slot.item.as_ref() else { return };
+    let (o_class, pos) = (item.o_class, item.position);
+    for index in list { sounds.item_sound(o_class, pos, index, 0, rng); }
+}

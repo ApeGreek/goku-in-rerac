@@ -619,6 +619,10 @@ pub trait HeroSounds {
     /// `release_voice_slot(slot)` when the slot still plays a sound of Ratchet's (`moby`): the stop of a looping
     /// sound the hero started with [`HeroSounds::voice`] (flags 4; [`packs`]).
     fn release(&mut self, _moby: &crate::moby_runtime::Moby, _slot: i32) {}
+    /// `PlayClassSound(index, flags, item)` (0x2a1618) on the hand item (the moby of slot 0x1403e0: class
+    /// `o_class` at `pos`), e.g. the Swingshot's fire / hit / pull and the wrench's hit; returns the sound slot (−1:
+    /// none). Played by the tick right after the hand item's update ([`gadgets::flush_item_sounds`]).
+    fn item_sound(&mut self, _o_class: i16, _pos: [f32; 3], _index: i32, _flags: u32, _rng: &mut crate::rng::Rng) -> i32 { -1 }
 }
 
 /// No sound layer: [`hero_update`].
@@ -647,6 +651,7 @@ pub fn hero_update_with_sounds(
     rng: &mut crate::rng::Rng,
     sounds: &mut dyn HeroSounds,
 ) -> HeroTick {
+    fx::begin(hero);
     let counter = hero.idle.counter;
     hero.idle.counter = counter.wrapping_add(1);
     let (x, y) = (hero.pos[0], hero.pos[1]);
@@ -681,6 +686,8 @@ pub fn hero_update_with_sounds(
     packs::after_transitions(hero, moby, sounds, rng, group);
     surface::after_transitions(hero, moby, sounds, rng, group);
     damage::flush(hero, moby, sounds, rng);
+    // The swim voices and the delayed-voice queue `0x236860` (mode 0, right after the transitions).
+    fx::flush(hero, moby, sounds, rng);
     if hero.mode == 0 { hero.idle_updates(anim.view().seq_b, counter, rng); }
     hero.write_back(moby);
     hero.back_items_update(rng);

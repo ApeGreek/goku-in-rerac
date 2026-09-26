@@ -281,6 +281,9 @@ impl Game {
                     let mut c = crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng };
                     crate::hero::gadgets::after_items(&mut self.hero, &mut c, data);
                 }
+                // The hand item's class sounds (the wrench's hit, the Swingshot's fire / hit / pull), right after its
+                // update.
+                crate::hero::gadgets::flush_item_sounds(&mut self.hero, hero_sounds, &mut self.rng);
             }
         }
         (hooks.particles)(&self.hero, &self.camera.out, &mut self.rng, self.counter);

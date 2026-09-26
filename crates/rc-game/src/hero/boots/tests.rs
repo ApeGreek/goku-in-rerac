@@ -92,7 +92,8 @@ fn grind_along_a_rail() {
     assert!(p[0] - x0 > 8.0 && (p[1] - 410.0).abs() < 0.01 && (p[2] - 100.0).abs() < 0.01, "{p:?}");
     assert!((r.hero.boots.speed - DTF * 12.0).abs() < 1e-5, "speed {}", r.hero.boots.speed / DTF);
     assert!((r.hero.yaw().to_f32() + HALF_PI).abs() < 0.01, "yaw {}", r.hero.yaw().to_f32());
-    assert!(!r.hero.boots.sparks.is_empty());
+    assert!(r.hero.fx.parts.iter().any(|p| matches!(p, crate::hero::fx::PartSpawn::Spark { .. })));
+    assert_eq!(r.hero.packs.loops[0], -1, "no sound layer: the loop is retried every tick");
 }
 
 /// Downhill the slope term adds speed (and the downhill lean anim), uphill it takes it away.
@@ -185,7 +186,7 @@ fn grind_wrench() {
     assert_eq!(r.hero.state, 0x2b);
     assert_eq!(r.anim.calls.last().map(|c| c.1), Some(0x4e));
     tick(&mut r, &coll, &w, n());
-    assert_eq!(r.hero.boots.hits.len(), 1);
+    assert_eq!(r.hero.packs.hits.len(), 1);
     // (□ still in the 7-tick buffer past frame 14 would swing again.)
     run(&mut r, &coll, &w, n(), 7);
     assert_eq!(r.hero.state, 0x2b);

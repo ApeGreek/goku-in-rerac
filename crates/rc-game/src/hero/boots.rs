@@ -51,11 +51,14 @@
 //! speed along it to start), a spring pulls the hands onto it; past the end he flies on and falls (6) after 5
 //! ticks.
 //!
-//! **Not ported** (cosmetic or outside the hero): the grind / cable loop sounds and their voice slot 0x141568; the
-//! camera look-ahead and body-lean joint records (0x17a6e0.., 0x17a798.., 0x17a848.., 0x17a8f8); the type-25 spark
-//! particles themselves (the particle system has no type 25: [`Boots::sparks`] records each spawn with its random
-//! draws made at the game's point, for the particle layer); the grind wrench's hit sphere (radius 1 at the hip,
-//! [`Boots::hits`]: queued, not delivered — the hit sink only takes the jump attack's shockwave); the look-at moby
+//! **Effects** (hero polish): the rail's and the cable's loop (class sound 0 in the hero's sound slot 0x141568,
+//! `super::packs::loop_sound`; released by the grind jump / switch / hurt and by a group change), the type-25 sparks
+//! (`super::fx::spark`: the spawner's draw at the game's point, the particle created by the particle hook), the
+//! grind wrench's hit sphere (radius 1 at the hip, queued with the pack hits and delivered through the hit sink after
+//! the hero update), the cable grab's voice 0xd and sparkle burst `0x2a7e20`.
+//!
+//! **Not ported** (cosmetic or outside the hero): the camera look-ahead and body-lean joint records (0x17a6e0..,
+//! 0x17a798.., 0x17a848.., 0x17a8f8); the look-at moby
 //! 0x13f928 and the moby-armed targeted grind jump (0x13f908 / 0x13f90c / 0x13f8a0, set by no ported class);
 //! level 16's class-0x101 bump; the aim lean with a weapon in hand; the Hologuise / other bodies.
 //!
@@ -91,24 +94,6 @@ const DEG45: f32 = std::f32::consts::FRAC_PI_4;
 
 /// Item ownership (the game state's owned table, mirrored into [`Hero::owned`]): the one read the boots make.
 fn owns(h: &Hero, item: usize) -> bool { h.owned.has(item) }
-
-/// One type-25 spark the grind / cable spawned this tick (`0x2825f8(pos, vel, 0)`): position, velocity (u/tick),
-/// gravity (+0x2c) and the spawner's size draw (`randf(5000, 30000)`, units of 1/210000).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Spark {
-    pub pos: [f32; 3],
-    pub vel: [f32; 3],
-    pub gravity: f32,
-    pub size: f32,
-}
-
-/// The grind wrench's hit sphere (`0x259888(1.0, tmpl, Ratchet, 0x10000, dir)` + `0x214468(1.0, centre, 0x10, …)`):
-/// queued for a hit sink, not delivered by the port yet.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct HitSphere {
-    pub centre: [f32; 3],
-    pub dir: [f32; 3],
-}
 
 /// The boots' fields of the hero block (0x13f850..0x13f96c). Native `f32`.
 #[derive(Clone, Default, PartialEq)]
@@ -170,10 +155,6 @@ pub struct Boots {
     pub cable_yaw: f32,
     pub cable_pitch: f32,
     pub cable_pull: f32,
-    /// Sparks spawned by this tick's physics (drained by the particle layer; see the module doc).
-    pub sparks: Vec<Spark>,
-    /// The grind wrench's queued hit spheres.
-    pub hits: Vec<HitSphere>,
 }
 
 impl std::fmt::Debug for Boots {
@@ -186,7 +167,6 @@ impl std::fmt::Debug for Boots {
             .field("switch", &(self.switching, self.old_rail, self.old_cur, self.switch_ticks))
             .field("hurt", &self.hurt_speed)
             .field("cable", &(self.cable, self.cable_rail, self.cable_cur, self.cable_off, self.cable_speed, self.cable_yaw, self.cable_pull))
-            .field("sparks", &self.sparks.len())
             .finish()
     }
 }
@@ -464,20 +444,12 @@ fn gravity(h: &Hero, src: V4, amount: Pf) -> V4 {
 /// The rows of the melee table the boots use (L00 0x17bc28, stride 0x2c; rows 0 / 1 = the combo's first two,
 /// 5 / 6 the Magneboots swings): `[kind, step, chain-before, input-ref, chain-from, jump-after, idle-after, hit-from,
 /// hit-to, +0x24, +0x28]`.
-const MELEE_ROWS: [[i32; 11]; 7] = [
-    [0, 0, 33, 19, 26, 24, 31, 17, 23, 17, 24],
-    [0, 1, 25, 7, 12, 13, 23, 8, 13, 6, 12],
-    [0, 2, 0, 16, 23, 19, 21, 12, 16, 9, 23],
-    [2, 0, 99, 83, 88, 87, 91, 99, 99, 99, 99],
-    [1, 0, 99, 32, 28, 28, 30, 1, 28, 22, 25],
-    [0, 0, 33, 19, 26, 24, 31, 18, 22, 17, 24],
-    [0, 1, 25, 7, 17, 18, 23, 8, 13, 6, 12],
-];
 const ROW_STEP: usize = 1;
 const ROW_JUMP_AFTER: usize = 5;
 const ROW_IDLE_AFTER: usize = 6;
 
-fn row(h: &Hero) -> &'static [i32; 11] { &MELEE_ROWS[h.melee.combo.clamp(0, 6) as usize] }
+/// The melee table row of the swing (`super::melee::COMBO`, rows 5 / 6 for 0x70).
+fn row(h: &Hero) -> &'static [i32; 11] { &super::melee::COMBO[h.melee.combo.clamp(0, 6) as usize] }
 
 fn hand_is_wrench(h: &Hero) -> bool { h.items.ready_item().is_some_and(|m| m.o_class == super::melee::WRENCH_CLASS) }
 
@@ -647,17 +619,19 @@ pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut
     true
 }
 
-/// A type-25 spark (`0x2825f8`): its spawner's size draw, recorded.
+/// A type-25 spark `0x2825f8(pos, vel, 0)` (vel.w = its gravity) through the hero's particle queue
+/// ([`super::fx::spark`]: the spawner's size draw now).
 fn spark(h: &mut Hero, rng: &mut Rng, pos: V3, vel: V3, gravity: f32) {
-    let size = rng.randf(5000.0, 30000.0);
-    h.boots.sparks.push(Spark { pos, vel, gravity, size });
+    let w = h.pos[3].to_f32();
+    super::fx::spark(h, rng, [pos[0], pos[1], pos[2], w], [vel[0], vel[1], vel[2], gravity], false);
 }
 
 /// The grind case of L00 0x217970 (0x28..0x2b, 0x42).
 fn phys_grind(h: &mut Hero, env: &Env, rng: &mut Rng) {
     let st = h.state;
-    h.boots.sparks.clear();
-    h.boots.hits.clear();
+    // The rail's loop (class sound 0) in the hero's sound slot 0 (0x141568) while riding or swinging on it; the grind
+    // jump, the rail switch and the grind hurt release it (the game tests the slot's owner and state first).
+    if matches!(st, 0x29 | 0x2a | 0x42) { super::packs::release_loop(h, 0); } else { super::packs::loop_sound(h, 0, 0); }
     if st == 0x28 || st == 0x2b {
         let y = h.boots.yaw + rng.randf_sym(0.0, std::f32::consts::FRAC_PI_6);
         let s = rng.randf(DTF * 4.0, DTF * 7.0);
@@ -781,10 +755,14 @@ fn phys_grind(h: &mut Hero, env: &Env, rng: &mut Rng) {
         h.pos = p4(pos, h.pos[3]);
     }
     if st == 0x2b && h.timer < ticks(0x14) {
+        // The wrench's sweep on the rail: `0x259888(1.0, tmpl, Ratchet, 0x10000, dir)` (dir = the rail yaw ±20°..35°)
+        // and `coll_sphere_mobys(1.0, hip, 0x10, Ratchet, tmpl)`, delivered after the hero update with the pack hits.
         let y = h.boots.yaw + rng.randf_sym(0.349_065_85, 0.610_865_2);
-        let mut c = f3(h.pos);
-        c[2] += 0.6;
-        h.boots.hits.push(HitSphere { centre: c, dir: [y.cos(), y.sin(), 0.0] });
+        let mut c = h.pos;
+        c[2] = pf(c[2].to_f32() + 0.6);
+        let dir = [pf(y.cos()), pf(y.sin()), Pf::ZERO, Pf::ZERO];
+        let tmpl = super::packs::template(env, 1.0, 0x1_0000, dir);
+        h.packs.hits.push(super::packs::PackHit::Sphere { r: Pf::ONE, centre: c, flags: 0x10, tmpl });
     }
 }
 
@@ -819,8 +797,9 @@ fn phys_magnet_walk(h: &mut Hero, env: &Env) {
 
 /// The cable slide 0x74 (L00 0x217970 case 0x74).
 fn phys_cable(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng) {
-    h.boots.sparks.clear();
     let hand = hand_point(h);
+    // Sliding (anim 0x66): the cable's loop (class sound 0, hero sound slot 0) and sparks every other tick.
+    if anim.view().seq_b == 0x66 { super::packs::loop_sound(h, 0, 0); }
     if anim.view().seq_b == 0x66 && h.idle.counter & 1 != 0 {
         let base = scl(f3(h.disp), 0.4);
         let y = h.boots.cable_yaw + rng.randf_sym(0.0, std::f32::consts::FRAC_PI_6);
@@ -881,7 +860,14 @@ pub(super) fn transitions(h: &mut Hero, c: &mut Ctx) {
         }
         0x74 => {
             let v = c.anim.view();
-            // (Frame 11 of 0x73: the grab sound and effect `0x2a7e20`, not ported.)
+            // The grab (anim 0x73 passing frame 11): voice 0xd and the sparkle burst `0x2a7e20(0x13f930, 4)` at the
+            // hands' cable point (which the burst jitters in place).
+            if v.seq_b == 0x73 && passed(&v, 11.0) {
+                h.packs.sounds.push(super::packs::SoundCmd::Voice { index: 0xd, flags: 0 });
+                let mut pt = h.boots.cable_pt;
+                super::fx::sparkle_burst(h, c.rng, &mut pt, 4);
+                h.boots.cable_pt = pt;
+            }
             if v.seq_b == 0x73 && v.flags & 2 != 0 { h.set_anim(c.anim, c.rng, blend(0x1e), 0x66, 0); }
             if ticks(5) < h.boots.cable_off {
                 h.set_state(c, 6, true);
@@ -891,6 +877,10 @@ pub(super) fn transitions(h: &mut Hero, c: &mut Ctx) {
         _ => {}
     }
 }
+
+/// `0x211870(f)` (L00; level01 `0x231f18`): Ratchet's key time 0x13fdf8 passed `f` this tick (`f < frame` and
+/// `frame − f ≤` this tick's step 0x13fdfc).
+pub(super) fn passed(v: &super::AnimView, f: f32) -> bool { f < v.frame && v.frame - f <= v.frame_step }
 
 fn pressed(c: &Ctx, mask: u32, n: i32) -> bool { c.env.pad.pressed_within(mask, ticks(n)).is_some() }
 

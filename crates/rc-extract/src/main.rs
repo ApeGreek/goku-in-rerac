@@ -2,7 +2,7 @@
 
 use rc_extract::build_db::{self, BUILDS};
 use rc_extract::extract::{self, Options};
-use rc_extract::{done_json, error_json, identify, mib, verify, Code, Error, Event, DEFAULT_THREADS, EXTRACTOR_VERSION};
+use rc_extract::{done_json, error_json, identify, mib, prepare, verify, Code, Error, Event, DEFAULT_THREADS, EXTRACTOR_VERSION};
 use std::ffi::OsString;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -11,8 +11,9 @@ use std::time::Instant;
 const USAGE: &str = "\
 usage:
   randcrw-extract identify --iso <image> [--json]
-  randcrw-extract extract  --iso <image> --out <data dir> [--ntsc-only] [--json]
+  randcrw-extract extract  --iso <image> --out <data dir> [--ntsc-only] [--json]   (ends with prepare)
   randcrw-extract verify   --out <data dir> [--json]
+  randcrw-extract prepare  --out <data dir> [--json]   (build the engine cache <data dir>/cache/v1 from the archive)
   randcrw-extract table    --iso <image> --output <file.tsv> [--json]   (developer: regenerate the size/SHA-1 table)
 options:
   --json          JSON lines on stdout (launcher mode; docs/plan/launcher_contract.md)
@@ -22,7 +23,7 @@ options:
   randcrw-extract --help | --version";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cmd { Identify, Extract, Verify, Table, Help, Version }
+enum Cmd { Identify, Extract, Verify, Prepare, Table, Help, Version }
 
 #[derive(Debug, PartialEq, Eq)]
 struct Args {
@@ -44,6 +45,7 @@ fn parse_args(argv: &[OsString], env_iso: Option<OsString>) -> Result<Args, Stri
         Some("identify") => Cmd::Identify,
         Some("extract") => Cmd::Extract,
         Some("verify") => Cmd::Verify,
+        Some("prepare") => Cmd::Prepare,
         Some("table") => Cmd::Table,
         Some("--help" | "-h" | "help") => return Ok(a),
         Some("--version" | "-V") => { a.cmd = Cmd::Version; return Ok(a) }
@@ -77,7 +79,7 @@ fn parse_args(argv: &[OsString], env_iso: Option<OsString>) -> Result<Args, Stri
     match a.cmd {
         Cmd::Identify => need(a.iso.is_some(), "--iso (or RC_ISO)")?,
         Cmd::Extract => { need(a.iso.is_some(), "--iso (or RC_ISO)")?; need(a.out.is_some(), "--out")?; }
-        Cmd::Verify => need(a.out.is_some(), "--out")?,
+        Cmd::Verify | Cmd::Prepare => need(a.out.is_some(), "--out")?,
         Cmd::Table => { need(a.iso.is_some(), "--iso (or RC_ISO)")?; need(a.output.is_some(), "--output")?; }
         Cmd::Help | Cmd::Version => {}
     }
@@ -188,6 +190,10 @@ fn run(a: &Args, emit: &mut dyn FnMut(Event)) -> Result<String, Error> {
             let (_, s) = verify::verify(a.out.as_ref().unwrap(), BUILDS, a.threads, None, emit)?;
             Ok(format!("verified {} files, {:.1} MiB: all match", s.files, mib(s.bytes)))
         }
+        Cmd::Prepare => {
+            let p = prepare::prepare(a.out.as_ref().unwrap(), a.threads, None, emit)?;
+            Ok(format!("prepared {} lumps ({} built, {} kept) in {:.1} s", p.lumps, p.built, p.up_to_date, t0.elapsed().as_secs_f64()))
+        }
         Cmd::Table => {
             let (id, rows) = extract::table(a.iso.as_ref().unwrap(), BUILDS, a.threads, emit)?;
             let path = a.output.as_ref().unwrap();
@@ -211,6 +217,8 @@ mod tests {
         assert_eq!((a.cmd, a.iso.as_deref(), a.json), (Cmd::Identify, Some(std::path::Path::new("/x/My Disc.iso")), true));
         let a = args(&["extract", "--iso", "d.iso", "--out", "/data", "--ntsc-only", "--json"]).unwrap();
         assert_eq!((a.cmd, a.out.as_deref(), a.ntsc_only, a.threads), (Cmd::Extract, Some(std::path::Path::new("/data")), true, DEFAULT_THREADS));
+        let a = args(&["prepare", "--out", "/data", "--json"]).unwrap();
+        assert_eq!((a.cmd, a.out.as_deref(), a.json), (Cmd::Prepare, Some(std::path::Path::new("/data")), true));
         let a = args(&["verify", "--out=/data", "--threads=8"]).unwrap();
         assert_eq!((a.cmd, a.out.as_deref(), a.json, a.threads), (Cmd::Verify, Some(std::path::Path::new("/data")), false, 8));
         assert_eq!(args(&["--version"]).unwrap().cmd, Cmd::Version);
@@ -224,7 +232,7 @@ mod tests {
     #[test]
     fn rejects_bad_command_lines() {
         for bad in [
-            &[][..], &["frobnicate"], &["identify"], &["extract", "--iso", "a"], &["verify"], &["identify", "--iso"],
+            &[][..], &["frobnicate"], &["identify"], &["extract", "--iso", "a"], &["verify"], &["prepare"], &["prepare", "--out", "o", "--ntsc-only"], &["identify", "--iso"],
             &["identify", "--iso", "a", "--bogus"], &["verify", "--out", "o", "--ntsc-only"], &["verify", "--out", "o", "--threads", "0"],
             &["table", "--iso", "a"], &["identify", "--iso", "a", "--json=1"],
         ] {

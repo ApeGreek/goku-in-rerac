@@ -1,5 +1,6 @@
 //! `extract`: identify, then copy every Tier 0 file from the image into the data folder, hashing each file while
-//! it is copied and checking it against the build's table, then write `extract-info.json`.
+//! it is copied and checking it against the build's table, then write `extract-info.json`, then build the Tier 1
+//! engine cache (`prepare`, stage `prepare`).
 //!
 //! Crash safety (the launcher cancels by killing the process): `extract-info.json` is removed first and written
 //! last; every file is written as `<name>.partial` and renamed only when complete and hash-checked.
@@ -154,6 +155,16 @@ pub fn extract(iso_path: &Path, out: &Path, builds: &[Build], opts: &Options, em
     let tmp = partial_path(&info);
     fs::write(&tmp, text).map_err(|e| workers::write_error(&tmp, e))?;
     fs::rename(&tmp, &info).map_err(|e| workers::write_error(&info, e))?;
+
+    // Tier 1 after the Tier 0 archive is complete (its stamp hashes `extract-info.json`). The cache is optional and
+    // rebuilt from Tier 0 at any time (the game builds missing lumps itself), so a failure here does not fail the
+    // extraction: one info line says so. Cancelling still cancels.
+    if let Err(e) = crate::prepare::prepare(out, opts.threads, opts.cancel, emit) {
+        if opts.cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) { return Err(e); }
+        emit(Event::Info(format!(
+            "the engine cache was not built ({}); the game builds it on first start, or run `randcrw-extract prepare --out {}`",
+            e.message, out.display())));
+    }
     Ok((id, summary))
 }
 

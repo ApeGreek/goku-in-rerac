@@ -185,13 +185,13 @@ pub fn language() -> u32 { std::env::var("RC_LANG").ok().and_then(|v| v.trim().p
 
 /// Reads `hud_header`, the banks, the overlay's glyph tables, the FX textures and the level text.
 pub fn load(root: &Path, index: u32, core: &rc_formats::level::LevelCore, core_index: &[u8], core_data: &[u8], gameplay: &[u8]) -> Result<LevelHud> {
-    use rc_formats::{font, hud, particle_tex, strings, wad};
+    use rc_formats::{font, hud, particle_tex, strings};
     let read = |name: &str| crate::disc_source::level_file(root, index, name);
     let header = read("hud_header.bin")?;
     let h = hud::parse_header(&header)?;
     let mut banks: [Vec<u8>; hud::BANKS] = Default::default();
     for (b, bank) in banks.iter_mut().enumerate() {
-        if h.bank_size[b] != 0 { *bank = wad::decompress(&read(&format!("hud_bank_{b}.bin"))?).with_context(|| format!("hud bank {b}"))?; }
+        if h.bank_size[b] != 0 { *bank = rc_data::hud_bank(root, index, b).with_context(|| format!("hud bank {b}"))?.to_vec(); }
     }
     let hud = hud::parse_hud(&header, std::array::from_fn(|b| banks[b].as_slice())).context("parsing hud")?;
     let frames = (0..hud.frames.len()).map(|i| hud.decode_frame_raw(i)).collect::<rc_formats::buf::Result<Vec<_>>>()?;

@@ -115,7 +115,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x1e | look stance (mobys) | 0 | four moby classes | 0 | ground case | `0x226f10(1)` | stance.rs (P2) | P |
 | 0x20 | gadget lunge | 6 | fire with a hand item (group < 3, 4, 5) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | melee.rs (later) | E |
 | 0x21 | wrench rebound | 0xa | wrench hit on a flag-2 target | 0 on wrap | speed → 0 by 24·dt², away from 0x13fdb8 | 0x27 + row | melee.rs (later) | – |
-| 0x22 | Thruster stomp | 0xb | R1/R2 in the air (7, 9, 0xd, 0xf, 0xe) with the Thruster | 0x10 (✕ early), 0 on wrap | up to 5.7 u/s (70·dt²) for 12 ticks, held until tick 33, then 100·dt² down; while coming down and airborne `coll_sphere_mobys` (0.8, feet − 0.5, flags 0x10, template 0x30000); camera shake 0x167260 on the ground (not applied) | 0x2a | packs.rs (P4) | P |
+| 0x22 | Thruster stomp | 0xb | R1/R2 in the air (7, 9, 0xd, 0xf, 0xe) with the Thruster | 0x10 (✕ early), 0 on wrap | up to 5.7 u/s (70·dt²) for 12 ticks, held until tick 33, then 100·dt² down; while coming down and airborne `coll_sphere_mobys` (0.8, feet − 0.5, flags 0x10, template 0x30000); camera shake 0x167260 on the ground (`hero::fx::shake`) | 0x2a | packs.rs (P4) | P |
 | 0x23 | melee 0x23 | 6 | hand item | 7 (✕ after frame 19), 0 | aim, SpeedStep(30, 35) | — | melee.rs (later) | E |
 | 0x24 | Swingshot fire | 0xd | ○ at a usable pull target 0x13fcb4 (weapon check case 0xc) | 0x25 / 0x26 (the hand item's update once the hook holds), 0 / 6 (blocked, released), 0 (hand item not the Swingshot) | turn to the target (0.02 / 0.15 / 360°/s), the ground case's braking at 12.6·dt², edge brake | 0x2f loop 10..14 | swingshot.rs (P6) | P |
 | 0x25 | Swingshot pull | 0xd | the hook holds (record +0x08 = 0) | 6 (○ released / braked < 4 u/s; gravity 29, 42·dt²), 0 below 0.3 | speed → 27 u/s at 80·dt², brakes at 42·dt² to stop 1.9 short (`0x26e520` roots), left hand aimed, pitch to the target, sink in the last 30 ticks | 0x30, 10 at the end | swingshot.rs (P6) | P |
@@ -123,7 +123,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x27 / 0x30 | weapon stances | 8 | hand items | 0 (0x30: anim 0x36 wrap) | ground-like (0x30: drag, edge brake, gravity) | idle | (Weapons, later) | – |
 | 0x28 | grind | 0xf | rail contact 0x13f8bc from 0 / 2 / 3 / 6 / jumps | 0x29 (✕), 0x2b (□), 0x42 / 0x16 (hit or blocked), 6 (5 ticks off the rail end) | `crate::spline` nearest / advance on the grind paths (section 0x74), speed 12 u/s ± slope, rail pull spring, sparks type 25 (recorded) | 0x31 / 0x32 by stance, leans 0x4a..0x4d | boots.rs (P5) | P |
 | 0x29 / 0x2a | grind jump / rail switch | 0xf | ✕ / ✕ + stick sideways in 0x29's first 10 ticks (a rail 2..4.5 aside) | 0x28 (landing, raw write 2 ticks later), 6, 0 | grind case + the jump system (h 2.4 (+4.7 booster 0x140638, +0.7 near one Kalebo booster) / 2.5; g 27 / 24·dt²); 0x2a blends old → new rail over 48 ticks | 0x50 / 0x1e, 0x1f | boots.rs (P5) | P |
-| 0x2b | grind wrench | 0xf | □ grinding | 0x29 (✕ after the jump frame), 0x2b, 0x28 (idle frame), 6 | grind case; hit sphere 1.0 at the hip (queued, not delivered) | 0x4e / 0x4f, wrench 0xc / 0xd | boots.rs (P5) | P |
+| 0x2b | grind wrench | 0xf | □ grinding | 0x29 (✕ after the jump frame), 0x2b, 0x28 (idle frame), 6 | grind case; hit sphere 1.0 at the hip (delivered with the pack hits) | 0x4e / 0x4f, wrench 0xc / 0xd | boots.rs (P5) | P |
 | 0x2c | Swingshot swing | 0xe | ○ at a usable swing target 0x13fce0 (better score than the pull target) | 0x2d (○ released after 10 ticks; gravity 27, 7·dt²) | rope 0x13fcf4 springs to record +0x04 (k / d / max +0x24..+0x2c or 0.025 / 0.33 / 11·dt), hooked (0x13fcec): gravity 40·dt², drag, stick pump, speed cap +0x0c, first-swing kick; body lean; anim re-timed to π·√(L / g) | 0x34 / 0x35 | swingshot.rs (P6) | P |
 | 0x2d | fall after a swing | 2 | 0x2c | the fall's transitions (0x1415d4 = 7) | roll / pitch back upright about the point 0.6 up (`0x22a8d8`), then the fall case | 0xb | swingshot.rs (P6) | P |
 | 0x2e | weapon draw walk | 1 | hand item | 0x17 / 0 after frame 28 | — | 0x2e | (Weapons, later) | – |
@@ -189,7 +189,7 @@ Swingshot 5 = **51 in this push**; later: weapons 7 + melee 5 (0x15, 0x20, 0x21,
 | targets | Swingshot targets 0x13fcb4 / 0x13fce0 (+0x78 pvar record), target search in the weapon check | ported (P6): classes 758 / 803 (`classes::swing_target`, level03 0x2d0bd8), `swingshot::Targets` of the run list (`MobySystem::run_list`, the cuboids by `MobySystem::volumes`) through `HeroWorld::swing_targets`; the searches 0x222158 / 0x221ee0 | — |
 | gravity frame | gravity mode 0x141403 (0x248ad8), gravity dir 0x13f5e0, `SetPlanarVel` / TurnTo in mode 1 | ported (P5): the game's rule (`boots::gravity_mode`); mode 1: gravity along −normal, the probe along 0x13f5e0 = −normal, TurnTo in the hero's frame (0x2323d8), SetPlanarVel along the tilted facing, the step snap 0x233588, the frame alignment 0x236358 (also with 0x13f548); mode 2 (level 16's 0x3e) not ported | P5 |
 | timers | FastDecTimer list of 0x23c710 | all counters now in `Hero` and counted down (§5) | all |
-| hero sounds | class sounds of the anim triggers inside 0x247d48; voices `0x236738` / `0x236810`; sound slots 0x141568.. (`0x236798`, released by 0x2283a8 on a group change) | ported (P2): `audio::class_sounds::HeroClassSounds` inside the hero update (`Game::tick_with_hero_sounds`); the surface sounds (follow-ups, `surface::flush`); queued voices 0x236810 not yet | — |
+| hero sounds | class sounds of the anim triggers inside 0x247d48; voices `0x236738` / `0x236810`; sound slots 0x141568.. (`0x236798`, released by 0x2283a8 on a group change) | ported (P2): `audio::class_sounds::HeroClassSounds` inside the hero update (`Game::tick_with_hero_sounds`); the surface sounds (follow-ups, `surface::flush`); the queued voices 0x236810 / 0x236860, the grind / cable loops, the item sounds (hero polish, `hero::fx`) | — |
 
 ## 3. Packages (the "finish Ratchet" push)
 
@@ -348,6 +348,40 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
   part of 0x2283a8).
 - **`HeroOnMoby`** 0x277fb8's ledge branch (group 3 / state 0x1c: the ledge moby 0x13f848).
 - Tests: `tests/hero_followups.rs`, `classes::flow::tests`, `surface::tests::sinking_floor_state`.
+
+### Hero polish (the audiovisual feedback the packages left out)
+**Done (2026-09-26).**
+- **Camera shake, one mechanism** (`follow_camera::Shake`, `ShakeRequest`, `Camera::request_shake`): the records
+  0x167260 (along the camera's up row) and 0x167270 (along forward) that `CameraUpdate` 0x20eca8 applies after the
+  Euler through `0x20e560`: `max = max(max, t)`, `FastDecTimer(t)`, `offset = amp·cos(NormalizeAngle(2t))·(t/max)²`,
+  `0x167240 += setlen(row, offset)`. Requests: hero code `hero::fx::shake` (queued in `Hero::fx.shakes`, applied by
+  the tick after the hero update), classes `World::shake_camera` (`Services::camera_shakes`, applied after the moby
+  loop). The Thruster stomp uses it (0.2 up for 40 ticks, 0x2390a0); the collapsing platform 701 (0x2f93a0 /
+  0x2f949c: 0.4 / 30, 0.1 / 20) and the explosion code (0x273310, 0x273f50, 0x2bfe40, 0x2c3300, 0x2c5b70, 0x304798)
+  will call the same when ported.
+- **Hero effects channel** `hero/fx.rs`: particle spawns with their draws at the game's point, created by the
+  particle hook before `UpdateParts` (docs/plan/particles.md "the hero's particles"); the delayed-voice queue 0x141528
+  (`0x236810` / `0x236860`, after the transitions) and the swim's recorded voices; the hand item's class sounds
+  (`gadgets::flush_item_sounds`, `HeroSounds::item_sound`).
+- **Sounds**: grind / cable loop (slot 0x141568, class sound 0; released by 0x29 / 0x2a / 0x42 and a group change), the
+  ledge climb's voice (0x1c, `0x236738(4, 0)` at frame 10 with the Thruster-Pack as the back item 0x1404f8 = 3 and
+  Clank shown: the game's only climb voice), the cable grab's voice 0xd + sparkle burst `0x2a7e20` (frame 11 of 0x73),
+  the Swingshot's fire / hit / pull and the wrench's hit (gadget class defs: docs/plan/audio.md), the surfacing gasps.
+- **Particles**: grind / cable sparks (type 25), swing target glints (type 60), the sinking floor's sand puff (type 47),
+  the hurt-under-water bubbles of 0x76 (type 34, `0x22b140(min(10 − t/3, 8), 0)`).
+- **Hits**: the grind wrench's sphere (0x259888(1.0, 0x10000) + `coll_sphere_mobys(1.0, hip, 0x10)`) goes with the
+  pack hits through the hit sink after the hero update; `melee::COMBO` has row 6 (the second 0x70 swing, level01
+  0x17c0a8 + 6·0x2c = `[0, 1, 25, 7, 17, 18, 23, 8, 13, 6, 12]`), shared with `hero::boots`.
+- **Not done**: the Thruster flames (class 0xa7 mobys `0x2c9da0`: need the moby-creation path from the hero and the
+  class's update), the Thruster jumps' after-images `0x277428` (ghost draws of Ratchet's pose 2 / 4 / 6 frames back:
+  need a pose history in the moby renderer), the pad vibration `0x248920`, the burn fire `0x209ec8` (type 4
+  unported), bubbles at Ratchet's joint points (`0x22b140` modes 1 / 2, 0x82 / 0x6a: need his joint lists in the hero
+  update), the surface wake `0x22ac40` (type 45 flat quads: renderer kind 1), the Hydro-Pack jets, the crouch slide's
+  voice 0xc and 0x77's voice 0x17, the wrench hit sound's index 1 (`FUN_002bda88` reads a pointer record from the hit
+  moby's pvars).
+- Tests: `follow_camera::tests::shake_envelope`, `hero::fx::tests` (3), `particles::type25::tests` (2), `type34`,
+  `type47`, `type60`, `audio::tests::gadget_class_sounds_on_every_level`; `packs::tests` (stomp request), `boots::tests`
+  (sparks queued, the grind wrench's hit). The `novalis_hero_digest` guard is byte-identical.
 
 ### Later (not in this push)
 Weapons (0x15 comet, 0x17, 0x20, 0x21, 0x23, 0x27, 0x2e, 0x30, 0x38..0x3a, the bomb glove's throw), scripted

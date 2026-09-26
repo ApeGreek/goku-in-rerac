@@ -19,4 +19,6 @@ dev = ["bevy/dynamic_linking"]
 bevy = "0.19"
 rc-formats = { path = "../rc-formats" }
 rc-game = { path = "../rc-game" }
+# Decompressed lumps through the Tier 1 engine cache (once per process).
+rc-data = { path = "../rc-data" }
 anyhow.workspace = true

@@ -318,6 +318,12 @@ alpha doubled), not a GS packet. No PS2 effect was noticeable enough to reproduc
 9. **D3, D1.** Widescreen and high-refresh rendering only after everything above, since culling and gameplay
    tuning depend on them.
 
+The hero polish (`rc-game/src/hero/fx.rs`, the camera shake in `follow_camera.rs`, particle types 25 / 34 / 47 / 60
+in `rc-game/src/particles/`) is native: the new particle updates run in `f32` with `std` trig (the existing types 6 /
+11 / 13 / 53 keep the PS2 model; type 53's record fill is shared, unchanged); the camera shake keeps the camera's `Pf`
+steps (it lives inside the `Pf` follow camera: `fast_cos`, `FastNormalizeAngle`, `FastVecNormalize`). No PS2 effect
+there was noticeable enough to reproduce.
+
 ## Reproduced game quirks (game-logic fidelity, not hardware)
 
 - **Post-scale list re-append bug** (the "dropped-joint scale rule"). the walk keeps A records only up to the first
@@ -330,6 +336,11 @@ alpha doubled), not a GS packet. No PS2 effect was noticeable enough to reproduc
 - **Shrub VU1 6-vertex colour-fetch quirk.** Vertex 3 of a 6-vertex packet reads its colour from address
   `n + 2·vi13`, i.e. from the other buffer's slot (`rc-formats/src/shrub_light.rs` `vu1_colour_address`,
   `vu1_shrub_data`; `shrub_render.rs`, modelled for batch slot 0 only).
+- **Cumulative cable-grab jitter.** `0x2a7e20` (the cable grab's sparkle burst) writes each pair's `randf_sym(0, 0.15)`
+  jitter into its argument, the hand point 0x13f930, so the four pairs drift from each other and the stored point moves
+  (the next physics tick recomputes it) (`rc-game/src/hero/fx.rs` `sparkle_burst`).
+- **Type-47 spin from stale bytes.** `PartType47Spawn` never writes +0x30, the spin its update adds to the rotation:
+  a puff turns at whatever the record's previous occupant left there (`particles/type47.rs`).
 - **C `%` on negatives.** The quick-select ring's `(sel + dir) % n` reaches entry −1 and reads the word before
   the table (`menus/quick_select.rs` `QsTables::entry_m1_icon`). `Rng::randi` uses MIPS `div` remainder semantics
   (`wrapping_rem`).

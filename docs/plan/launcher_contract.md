@@ -62,11 +62,15 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
 4. **Progress.** `done`/`total` are bytes; `total` is fixed for a stage. `file` is the archive-relative path (forward
    slashes) of the file most recently started; for `identify` it is the boot ELF's disc path (`SCUS_971.99`). Lines are
    rate-limited to about 10 per second, and each stage always ends with a line where `done == total`.
-5. **Stages per command.**
+5. **Stages per command.** The contract's `stage` values are `identify|copy|verify`; the game side adds a fourth,
+   **`prepare`** (the Tier 1 engine cache, 2026-09-26). A launcher shows it as its own step ("Prepare game data").
    - `identify`: `identify` (the boot ELF is hashed).
-   - `extract`: `identify`, then `copy`. The SHA-1 of every file is computed while it is copied and checked against the
-     built-in table in the same pass, so `extract` has no separate `verify` stage. A mismatch fails with code 40.
+   - `extract`: `identify`, then `copy`, then `prepare`. The SHA-1 of every file is computed while it is copied and
+     checked against the built-in table in the same pass, so `extract` has no separate `verify` stage. A mismatch
+     fails with code 40. `prepare` runs automatically at the end (clarification 17).
    - `verify`: `verify` (every file is re-read from disk and hashed).
+   - `prepare`: `prepare`. Its `done`/`total` are bytes of the Tier 0 sources processed; `file` is the source's
+     archive path (`levels/NN/core_data.bin`).
 6. **Info lines** are human-readable and not meant to be parsed, with one exception kept stable for bug reports: for an
    unknown R&C build (code 21) one info line starts with `new build DB row: ` followed by a ready-to-paste Rust row for
    `crates/rc-extract/src/build_db.rs`.
@@ -85,8 +89,10 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
 
 ### Extraction behaviour
 7. **Cancelling = killing the process.** The extractor is crash-safe instead of catching signals:
-   - `extract-info.json` is deleted when `extract` starts and written last (temp file + rename), so **a data folder
-     without `extract-info.json` is incomplete** and must not be launched.
+   - `extract-info.json` is deleted when `extract` starts and written after the last archive file (temp file +
+     rename), so **a data folder without `extract-info.json` is incomplete** and must not be launched. The `prepare`
+     stage runs after it (the cache stamp hashes it); killing `extract` during `prepare` leaves a complete archive
+     and a partial cache, which the game or the next `prepare` completes.
    - Each file is written as `<name>.partial` and renamed only after all its bytes are written and its SHA-1 matched.
      A killed run leaves at most a few `.partial` files and never a complete-looking wrong file.
    - Re-running `extract` into the same folder removes stale `.partial` files and rewrites everything. The launcher may
@@ -102,7 +108,8 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
 11. **Verify** reads `extract-info.json` to learn the disc and `ntsc_only`, then checks exactly the table's files.
     Extra files in the folder (logs, caches, mods) are ignored.
 12. **Extra commands and flags** (not used by the launcher): `table` (developer tool that regenerates the committed
-    size/SHA-1 table from a disc), `--threads <n>` (copy/hash workers, default 4), `--help`, `--version`.
+    size/SHA-1 table from a disc), `--threads <n>` (copy/hash/prepare workers, default 4), `--help`, `--version`.
+    `prepare` (clarification 17) is optional for the launcher (its "Rebuild cache" action).
 
 ### Runtime and folders
 13. The extractor and the runtime never compute the per-OS data root; they only receive paths (`--out`,
@@ -126,4 +133,25 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
     so the folder can be copied or moved as a whole, but `randcrw` must not be copied out of it alone.
 16. `<game_data_dir>` (`games/rac1/data/`) holds the Tier 0 archive directly, in the same layout as the development
     `extracted/` tree: `boot/`, `toc.bin`, `global/`, `levels/NN/`, plus `extract-info.json`. See
-    `docs/plan/launcher_extractor.md` §4.1.
+    `docs/plan/launcher_extractor.md` §4.1. `extract` adds `cache/v1/` (clarification 17); `verify` ignores it.
+
+### Engine cache (Tier 1)
+17. **`randcrw-extract prepare --out <game_data_dir> [--json]`** builds `<game_data_dir>/cache/v1/` from the Tier 0
+    archive in that folder. It never reads the disc image, so it is how the launcher rebuilds the cache after a game
+    update ("Rebuild cache"). Output: `progress` lines with `"stage":"prepare"`, `info` lines, one `done` or `error`
+    line, as for every command.
+    - **Content (v1):** every level's `core_data`, `gameplay_ntsc` and HUD banks, WAD-decompressed (133 lumps,
+      about 440 MiB for the full disc), plus `stamp.toml` (cache version, converter version per kind, hash of
+      `extract-info.json`). Layout and file format: `docs/plan/launcher_extractor.md` "Tier 1 as built".
+    - **Incremental:** lumps that are valid and built from the same source bytes are kept; a stale cache (other
+      cache or converter version, other extraction) is emptied and rebuilt; `cache/v<N>` folders of other versions
+      are removed. About 0.2 s either way on the dev machine (release build, 4 workers).
+    - **Codes:** 10 (no `toc.bin`, or a Tier 0 file cannot be read), 30/31 (writing the cache failed / disk full;
+      the free-space check assumes 3 bytes per source byte not yet cached), 40 (a Tier 0 lump is not a valid WAD
+      stream: the archive is damaged; run `verify`), 99.
+    - **Inside `extract`**, a `prepare` failure does not fail the extraction: the archive is complete and the game
+      builds any missing lump itself on first use. One `info` line says so, and `extract` still ends with `done`
+      (exit 0). Cancelling still cancels.
+    - **The runtime** reads the cache through `rc-data` and never requires it: a missing, stale or damaged cache is
+      rebuilt lazily (one log line per lump), and an unwritable folder falls back to in-memory decompression. The
+      runtime exit codes (clarification 14) are unchanged.

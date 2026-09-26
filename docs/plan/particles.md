@@ -455,3 +455,36 @@ are not in Cd. 0x44 particles unchanged (linear mix). Simulation, RNG draws and 
 `120,137,92,60,210,95`): the flyers' trails show as long light-grey streaks across the sky (a formation's loop and
 its climb over the hills, the flyers over the city trailing them); before the fix only a faint line was visible.
 Two runs give byte-identical captures.
+
+## In the port (2026-09-26): the hero's particles (types 25, 34, 47, 60) — hero polish
+
+**Types** (level01 code; standard `f32`): **25** grind / cable spark (`PartType25Spawn` 0x2825f8 / update 0x282760:
+additive, byte9 0x44, RGBA from channels 1.0 cooling R −0.01 / G −0.03 / B −0.05 a tick at alpha 0.6, size
+`randf(5000, 30000)` −100 a tick, life 80, gravity from vel.w; each move is a world line `CollLine_Fix(pos, new, 2)`: on
+a hit the spark sits at the hit point, stops, doubles in size), **34** bubble (0x2840e0 / 0x2842e0: normal blend,
+rises toward 1.3 u/s, wobbles sideways to the camera yaw 0x167258, pops at its level; one `randi(20)` a tick near
+the surface), **47** dust / sand puff (0x286cb0 / 0x286d80: alpha 0x28 + `randi(8)` −2 a tick, +14700 size a tick,
+vel ×0.975, spin from the stale +0x30), **60** glint (0x288588 / 0x288740: refused outside [2, 1021]³, alpha falls
+linearly over the life; the attached variant follows 0x13f3d0). `Particles` gained `coll` (the level mesh for
+type 25; the engine clones the level collision at setup), `hero` and `cam_yaw` (set by the particle hook). Type 53's
+record fill moved to `type53::fill` / `spawn` (used by `World::part53` and the hero), unchanged.
+
+**The hero's spawns** (`rc-game/src/hero/fx.rs`): the hero code makes the spawners' draws at the game's point
+(`fx::spark`, `fx::dust`, `fx::bubbles` = `0x22b140(n, 0)`, `fx::sparkle_burst` = L00 `0x2a7e20`) and queues the
+record (`HeroFx::parts`); the engine's particle hook creates the queue in order right before `UpdateParts`
+(`fx::create_particles`), which gives the game's pool slots (nothing else creates a particle in between). Callers: the
+grind 0x28 / 0x2b and cable 0x74 sparks (`hero::boots`), the cable grab's burst, the sinking floor's sand puff
+(`hero::surface`), the hurt-under-water 0x76 bubbles (`hero::damage`). The swing targets (803) spawn their glints
+through `World::part60` (`moby_update::classes::swing_target`).
+
+**Not ported:** `0x22b140` modes 1 / 2 (bubbles at Ratchet's joint points 0 / 0xe, 0x17 / 0x16: the swim's dives
+0x33 / 0x34 and the sinking floor's four bubbles; the hero update has no joint lists), 0x82's / 0x6a's bubble at joint
+list 4, the swim's splash-countdown bubbles and splashes, the surface wake `0x22ac40` (type 45, a flat quad: kind 1
+is not drawn yet), the burn fire `0x209ec8` (type-25 sparks plus 57 type-4 fire particles every 3..7 ticks; type 4
+unported), the Hydro-Pack's jets. The spawner's own draws are made even when the pool is full (the game skips them
+then; the pool never fills in play).
+
+**Checked on screen** (`RC_SCENE=0 RC_LEVEL=14 RC_GIVE_ITEMS=29 RC_HERO_AT=157.83,262.53,51.4,-1.5565`, frame 60):
+white-hot sparks at the feet on the rail cooling to orange and falling (`RC_PART_STATS`: 55 type-25 alive at tick
+60); Aridia (`RC_LEVEL=2 RC_GIVE_ITEMS=12 RC_HERO_AT=71.00,271.08,47.00,1.571`, frame 50): the swing target's glint
+streaking across it (14–17 type-60 alive). Two runs each: identical PNGs, traces and WAVs.

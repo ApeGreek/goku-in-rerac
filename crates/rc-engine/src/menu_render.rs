@@ -329,7 +329,7 @@ fn load_frame_class(level: &crate::level_load::LoadedLevel, ov: &Overlay) -> any
     let ci = m.classes.iter().position(|c| c.o_class == frame::O_CLASS).ok_or_else(|| anyhow!("class {:#x} is not on this level", frame::O_CLASS))?;
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
     let read = |name: &str| crate::disc_source::level_file(&root, index, name);
-    let data = rc_formats::wad::decompress(&read("core_data.bin")?).context("decompressing core_data")?;
+    let data = rc_data::level_core_data(&root, index).context("decompressing core_data")?;
     let core = rc_formats::level::parse_level_core(&read("core_index.bin")?, data.len()).context("parsing core index")?;
     let name = format!("moby_class/{:04}", frame::O_CLASS);
     let blk = core.blocks.iter().find(|b| b.name == name).ok_or_else(|| anyhow!("no {name} block"))?;

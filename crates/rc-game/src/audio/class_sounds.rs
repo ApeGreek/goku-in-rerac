@@ -19,9 +19,13 @@
 //!   origin = 3 draws every frame, the 6-origin batch per new occluded sound, the sound instances' plays) and its
 //!   800 samples.
 //!
+//! * **The hand item's sounds** (the Swingshot's fire / hit / pull, the wrench's hit: `PlayClassSound(i, 0, item)`):
+//!   [`HeroSounds::item_sound`], played by the tick right after the item's update (`hero::gadgets::flush_item_sounds`),
+//!   with the gadget class's defs (the gadget blobs' defs with their parked remap: [`crate::audio::LevelAudio`]).
+//!
 //! Clank (601) and the back packs (607–609) have no class sound defs on any level (class header +0x0d = 0), so
-//! the triggers of their `MobyAnimAdvance` never play or draw; the hand items' triggers (wrench 71, …) are not
-//! routed (the hero's item code advances them).
+//! the triggers of their `MobyAnimAdvance` never play or draw; the hand items' animation triggers (wrench 71, …) are
+//! not routed (the hero's item code advances them).
 
 use super::voices::{Listener, Owner};
 use super::{AudioSystem, FrameInput};
@@ -65,6 +69,7 @@ impl AudioSystem {
             self.slots.slots[k as usize].class_index = ev.index as u16;
             self.stats.class_slots += 1;
         }
+        if let Some(log) = self.play_log.as_mut() { log.push((ev.tick, ev.sound_class, ev.index, ev.flags, k)); }
         k
     }
 }
@@ -140,6 +145,14 @@ where
     fn voice(&mut self, moby: &crate::moby_runtime::Moby, index: i32, flags: u32, rng: &mut Rng) -> i32 {
         let Some(mut a) = (self.audio)() else { return -1 };
         self.play(&mut a, moby, index, flags, rng)
+    }
+
+    fn item_sound(&mut self, o_class: i16, pos: [f32; 3], index: i32, flags: u32, rng: &mut Rng) -> i32 {
+        let Some(mut a) = (self.audio)() else { return -1 };
+        // The hand item is not in the moby table: the slot's owner is Ratchet's moby (the item hangs in his hand;
+        // the sound follows him), privileged like the game's 0x1403e0 owner; the defs are the item class's.
+        let ev = SoundEvent { index, flags, moby: self.hero, o_class, sound_class: o_class, pos, tick: self.counter };
+        a.play_class_sound(&ev, Some(self.hero), &self.listener, rng)
     }
 
     fn release(&mut self, _moby: &crate::moby_runtime::Moby, slot: i32) {

@@ -311,6 +311,8 @@ fn setup(
     rng.srand(LEVEL_SEED);
     let mut sys = Particles::new(defs, owners);
     sys.pool.level_init();
+    // The world mesh the sparks' lines test (type 25).
+    sys.coll = level.0.collision.clone().map(std::sync::Arc::new);
     let stats = std::env::var("RC_PART_STATS").is_ok_and(|v| v.trim() == "1");
     println!(
         "particles: {} part textures, {} fx textures, {} class-27 emitters (instances {:?})",

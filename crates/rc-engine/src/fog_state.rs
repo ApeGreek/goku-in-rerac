@@ -57,10 +57,10 @@ pub struct FogLevelData {
 pub fn load(root: &Path, index: u32) -> Result<FogLevelData> {
     let t0 = Instant::now();
     let read = |name: &str| crate::disc_source::level_file(root, index, name);
-    let gameplay = rc_formats::wad::decompress(&read("gameplay_ntsc.bin")?).context("decompressing gameplay_ntsc")?;
+    let gameplay = rc_data::level_gameplay(root, index).context("decompressing gameplay_ntsc")?;
     let zones = rc_formats::gameplay::parse_fog_zones(&gameplay).context("parsing fog zones")?;
     let core_index = read("core_index.bin")?;
-    let core_data = rc_formats::wad::decompress(&read("core_data.bin")?).context("decompressing core_data")?;
+    let core_data = rc_data::level_core_data(root, index).context("decompressing core_data")?;
     let core = rc_formats::level::parse_level_core(&core_index, core_data.len()).context("parsing core index")?;
     let mesh = match rc_formats::collision::parse_collision(&core, &core_data) {
         Ok(m) => Some(m),

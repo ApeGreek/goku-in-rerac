@@ -441,3 +441,27 @@ unchanged. Two idle runs give identical traces, PNGs and WAVs.
 * The EE frames of a scene draw from the game's stream (3 per frame for the occlusion origin), as the game's
   mode-2 `sound_update` does; the engine's scene does not run the mobys, so the stream after a scene still differs
   from the game's.
+
+## The hero's loops, item sounds and delayed voices (2026-09-26, hero polish)
+
+* **Gadget class sound defs.** A hand item's class (wrench 71, Swingshot 0xd0, every weapon of the gadget table) has no
+  blob in the level's class table, so `parse_level_sounds` leaves its defs empty; the loader parks the first
+  `min(count, 15)` ids of its remap list at 0x1b02e0 (`LoadLevelCoreData` 0x258128) and `select_world_object_resource_tables`
+  0x259788 writes them into the blob's defs (+0x28, count +0x0d) when the gadget loads. `sound_bank::apply_gadget_defs`
+  does the same for every gadget blob (`LevelAudio::from_parts`); the C++ golden output of `parse_level_sounds` is
+  unchanged. Test `audio::tests::gadget_class_sounds_on_every_level` (21 gadget classes on each of the 19 levels).
+* **Item sounds** (`PlayClassSound(i, 0, item)` in the item's update: the Swingshot's fire 0 / hit 1 / pull 2, the
+  wrench's hit `FUN_002bda88()` = 0 here): `HeroSounds::item_sound`, played by the tick right after the item update
+  (`hero::gadgets::flush_item_sounds`). The slot's owner is Ratchet's moby (the item is not in the moby table; it is in
+  his hand), privileged as the game's 0x1403e0 owner.
+* **Loops** in the hero's slots 0x141568 + 4n (`packs::loop_sound`): the grind / cable (n 0, class sound 0), besides
+  the packs (3 / 4) and the sinking floor (surface.rs, n 2). **Voices**: the ledge climb's (4, Thruster only), the cable
+  grab's (0xd), the swim's `SwimEvent::Sound` (3 / 0x11), and the delayed-voice queue 0x141528 (`0x236810` /
+  `0x236860`: the surfacing gasps 7 / 8), all through `HeroSounds::voice` (`hero::fx::flush` after the transitions).
+* **Position of the draws.** The loop / voice / item sounds' pitch-bend draws are made where the port plays them (after
+  the physics, after the transitions, after the item update), not inline at the game's call; within those steps the
+  other draws of the step come first. Only the first tick of a loop and the one-shots are affected.
+* **`RC_AUDIO_TRACE=1`** now also logs each class sound play (`AudioSystem::play_log`): tick, class, index, flags, slot.
+  Measured: Oltanis grind, tick 6 `class sound 0 of class 0, flags 0x4 -> slot 0`, effects-only RMS ≈ 1700 from 0.1 s on
+  (`scratchpad/hero_polish/grind_sfx.wav`); Aridia ○ at a swing target, tick 61 `class sound 0 of class 208` and tick
+  69 `class sound 1 of class 208`.

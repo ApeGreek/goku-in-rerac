@@ -189,7 +189,7 @@ pub fn deliver_hits(h: &mut Hero, table: &mut MobyTable, hero_moby: MobyId, sink
 }
 
 /// `FUN_0026e808(damage, tmpl, Ratchet, flags, dir)`: the hero's hit template.
-fn template(env: &Env, damage: f32, flags: u32, dir: V4) -> HitTemplate {
+pub(super) fn template(env: &Env, damage: f32, flags: u32, dir: V4) -> HitTemplate {
     HitTemplate { dir, attacker: env.hero_moby, flags, damage: p(damage), w20: 1, ..Default::default() }
 }
 
