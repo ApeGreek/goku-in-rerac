@@ -1,0 +1,142 @@
+// Shrub pass: instanced class meshes, colour = the instance's LightShrubs palette entry, GS TFX = MODULATE,
+// GS fog (one F per instance), ShrubProc's draw-distance and fade rules. Rust side: shrub_render.rs;
+// lighting: rc_formats::shrub_light.
+//
+// Instance data (`insts[mesh tag]`): the class -> Bevy-world matrix (the game's column-major instance
+// matrix with game_to_bevy applied after it; the mesh is already in class units x scale / 1024, which is
+// exactly how the VU1 matrix ShrubProc builds applies to the raw s16 positions), the bounding-sphere
+// centre with the run-time draw distance D in w, the instance origin with the billboard fade distance F
+// in w (-1 = class without a billboard), and the 24 packed RGBA8 palette entries (0x80 = 1.0).
+//
+// ShrubProc rules (level01 0x29cdf0, shrub_render.rs module doc), z = view depth of the centre:
+// * D - z < 0: the instance is not drawn;
+// * no billboard: vertex alpha = min(trunc((D - z) * 4096), 0x8000) >> 8 (fades over the last 8 units);
+// * billboard class: z < F: alpha 0x80; F <= z < F + 8: alpha (0x8000 - trunc((z - F) * 4096)) >> 8
+//   (the mesh half of the cross-fade); beyond (and F = 0): billboard only (shrub_billboard.wgsl).
+// * wind sway (`sway[mesh tag]`, rewritten every frame by shrub_render::update_sway from
+//   rc_formats::shrub::wind_sway): ShrubProc shears the instance columns in game space, x += sx * z and
+//   y += sy * z (Z up, about the origin); in Bevy axes (x, z, -y) that is x += sx * y, z -= sy * y.
+// * texture: MODULATE, GS mip rule level = round(log2(z / 32) + K) clamped to 0..MXL (z = per-pixel camera
+//   depth in integer units; K = the ad-gif's TEX1 K, per vertex in info bits 20..31), as tfrag.wgsl / tie.wgsl.
+// * VU1 56467 writes the same F for every vertex from the instance origin depth (qw 4 = the translation
+//   column): here the tfrag slope / offset on the origin depth, clamped max(far_int) then min(near_int).
+// `params.misc.x` selects the ShrubProc list: 0 = always, 1 = opaque list (alpha = 0x80; TEST_1 0x5320b,
+// AREF 0x20), 2 = fading list (alpha < 0x80; TEST_1 0x530cb, AREF 0x0c). The GS_ATEST_* defs select the
+// half of that list's alpha-test split this draw is (gs_state.rs).
+
+#import bevy_pbr::{
+    mesh_functions,
+    view_transformations::{position_world_to_clip, position_world_to_view},
+}
+
+struct ShrubFog {
+    color: vec4<f32>,
+    params: vec4<f32>,
+}
+
+struct ShrubParams {
+    // x = variant (see above), y = MXL, z = near (32).
+    misc: vec4<f32>,
+}
+
+struct ShrubInst {
+    model: mat4x4<f32>,
+    // xyz = bounding-sphere centre (Bevy world), w = run-time draw distance D (world units).
+    centre: vec4<f32>,
+    // xyz = instance origin (Bevy world), w = billboard fade distance F, or -1.
+    origin: vec4<f32>,
+    palette: array<u32, 24>,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var tex_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: ShrubFog;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> params: ShrubParams;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> insts: array<ShrubInst>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var<storage, read> sway: array<vec2<f32>>;
+
+struct ShrubVertex {
+    @builtin(instance_index) instance_index: u32,
+    @location(0) position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    // palette entry VU1 reads the colour from (the vertex normal index, or the 6-vertex quirk's entry)
+    // | TEX1 K (s12, 1/16 units) << 20
+    @location(2) info: u32,
+}
+
+struct ShrubVertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(linear) color: vec4<f32>,
+    @location(2) @interpolate(flat) fog: f32,
+    // Camera depth in integer units, perspective-correct (= n / Q per pixel).
+    @location(3) depth: f32,
+    @location(4) @interpolate(flat) k: f32,
+}
+
+fn culled() -> ShrubVertexOutput {
+    var out: ShrubVertexOutput;
+    out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    return out;
+}
+
+@vertex
+fn vertex(v: ShrubVertex) -> ShrubVertexOutput {
+    let tag = mesh_functions::get_tag(v.instance_index);
+    let inst = &insts[tag];
+    let z = -position_world_to_view((*inst).centre.xyz).z;
+    let d = (*inst).centre.w;
+    if (d - z < 0.0) { return culled(); }
+    let f = (*inst).origin.w;
+    var alpha: f32;
+    if (f < 0.0) {
+        alpha = floor(min(trunc((d - z) * 4096.0), 32768.0) / 256.0);
+    } else {
+        let iz = trunc(max(z, 0.0) * 4096.0) - f * 4096.0;
+        if (f == 0.0 || iz >= 32768.0) { return culled(); }
+        alpha = select(floor((32768.0 - iz) / 256.0), 128.0, iz < 0.0);
+    }
+    let variant = params.misc.x;
+    if ((variant == 1.0 && alpha < 128.0) || (variant == 2.0 && alpha >= 128.0)) { return culled(); }
+
+    var out: ShrubVertexOutput;
+    let sw = sway[tag];
+    var off = ((*inst).model * vec4<f32>(v.position, 0.0)).xyz;
+    off = vec3<f32>(off.x + sw.x * off.y, off.y, off.z - sw.y * off.y);
+    let world = off + (*inst).model[3].xyz;
+    out.position = position_world_to_clip(world);
+    out.uv = v.uv;
+    out.depth = -position_world_to_view(world).z * 1024.0;
+    out.k = f32(bitcast<i32>(v.info) >> 20u) / 16.0;
+    let c = unpack4x8unorm((*inst).palette[(v.info & 0xfffu) % 24u]) * (255.0 / 128.0);
+    out.color = vec4<f32>(c.rgb, alpha / 128.0);
+    let origin_depth = -position_world_to_view((*inst).origin.xyz).z;
+    let fv = min(max(origin_depth * 1024.0 * fog.params.x + fog.params.y, fog.params.z), fog.params.w);
+    out.fog = trunc(fv) / 255.0;
+    return out;
+}
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
+@fragment
+fn fragment(in: ShrubVertexOutput) -> @location(0) vec4<f32> {
+    let level = clamp(floor(log2(in.depth / params.misc.z) + in.k + 0.5), 0.0, params.misc.y);
+    let t = textureSampleLevel(tex, tex_sampler, in.uv, level);
+    var rgb = min(t.rgb * in.color.rgb, vec3<f32>(1.0));
+    if (fog.color.w > 0.5) {
+        rgb = mix(fog.color.rgb, rgb, in.fog);
+    }
+    let a_s = min(floor(round(t.a * 255.0) * round(in.color.a * 128.0) / 128.0), 255.0);
+    // GS TEST_1 alpha test (ATST GEQUAL AREF, AFAIL RGB_ONLY): which half of the split this draw is (gs_state.rs).
+#ifdef GS_ATEST_PASS
+    if (a_s < f32(#{GS_AREF})) { discard; }
+#endif
+#ifdef GS_ATEST_FAIL
+    if (a_s >= f32(#{GS_AREF})) { discard; }
+#endif
+    return vec4<f32>(srgb_to_linear(rgb), a_s / 128.0);
+}

@@ -1,0 +1,895 @@
+//! Ratchet's idle behaviour (docs/plan/player_controller.md §13 "Idle behaviour"): the fidget chance
+//! `0x241e00` and its caller in the idle transitions, the head look `0x22b928`, the idle secondaries
+//! `0x22bdd0`, Ratchet's blink (`0x227590` → `0x2274e8`), Clank's glow and blink `0x2278c0`, the joint
+//! springs of the records those write (`0x2273d0` → `0x227050`), and the back items (the pack and Clank)
+//! as far as the idle code drives them: the sequence table the hero's animation calls draw from
+//! (`0x2476d0`, called from `SetAnim`'s `0x247550` and the advance's `0x247800`), Clank's fidget
+//! `0x2473e0`, and their creation / advance in `HeroItemsUpdate` (`0x22f3c0` / `0x22fec0`).
+//!
+//! Every routine here draws from the game's one `rand` stream in the game's order within the hero update
+//! `0x228870`:
+//! 1. advance `0x247d48` → `0x247800`: one `rand_range(0, n − 1)` per tick while Ratchet's sequence has `n > 0`
+//!    rows in the back table (sequence 0 has 3 on Novalis: one draw per idle tick);
+//! 2. the idle transitions: `SetAnim` → `0x247550` (one draw when the new sequence has rows, e.g. every blend
+//!    back to sequence 0), the fidget chance (one `randf` per tick in sequence 0 once the 120-tick cooldown is
+//!    over and a record is available), Clank's fidget (`rand_range(110, 270)` + one table draw);
+//! 3. the head look: in sequence 1/2 one `rand_range(40, 70)` per tick, in sequence 0 four draws per expiry;
+//! 4. the secondaries (sequence 0 only): 2, 2, 2, 3 draws per expiry of their four timers;
+//! 5. Ratchet's blink: two `randi(period)` per blink; Clank's blink: one `rand_range(50, 200)` per blink.
+//!
+//! Standard floats (`f32`) except where an existing PS2-float helper of the hero code is reused (the joint
+//! springs `turn_spring`, `fast_sin`); the random helpers are [`crate::rng`]'s.
+//!
+//! Not ported (no idle effect on Novalis): the edge look-down branch of `0x22b928` (0x13f5b0 is never set by
+//! the port), `HeroScanTargets` 0x22c080 (look target 0x1415c4: no target in range at the Novalis spawn, 0 in
+//! both savestates), the walk lean `HeroLean` 0x235638 (state 2) and the other writers of the joint records,
+//! the options 0x15edb1 / 0x15edb3 / 0x15edb5, Clank hidden (0x141628, 0 on Novalis), the hit flash 0x13f53e
+//! in the glow, the manipulators themselves (`AttachManipulator` and the quaternions of `0x26ee30`: the joint
+//! angles are computed, not applied to the pose), and the sound triggers of the advances (`PlayClassSound`
+//! pitch draws, the sound layer).
+#![allow(clippy::neg_cmp_op_on_partial_ord)] // compare semantics spelled out as in the game.
+
+use super::physics::{fast_sin, ticks, turn_spring};
+use super::states::Ctx;
+use super::Hero;
+use crate::ps2v::Pf;
+use crate::rng::Rng;
+use rc_formats::moby_anim::{self, AnimState, MobyAnimClass, MobyFrame};
+use std::sync::Arc;
+
+/// A fidget record (0x179d10 + k·0x70, the fields from +0x44; level01 data, the same on every level).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FidgetDef {
+    /// +0x44: the fidget is a state (`SetState(0x40)`) rather than a sequence.
+    pub state: bool,
+    /// +0x48: Ratchet's sequence.
+    pub seq: u8,
+    /// +0x50: required hand item (`0x22ddd8(0)`), −1 = any.
+    pub item: i32,
+    /// +0x58: mean interval in seconds (chance `1 / (int)(s·60)` per tick; 0 = never).
+    pub mean_s: f32,
+    /// +0x5c: the record's own cooldown in seconds (`(int)(s·60)` ticks into +0x60).
+    pub cooldown_s: f32,
+}
+
+/// The five fidget records. 0/1: sequences 1 and 2, the Novalis idle fidgets. 2: a state fidget with chance 0
+/// (never picked). 3: sequence 0x53, only on level 0xc with nothing 8 units above the body point. 4: sequence
+/// 0x5a, only within 50 ticks of a walk at health ≤ 1 (and the health-1 path of `0x241e00`).
+pub const FIDGETS: [FidgetDef; 5] = [
+    FidgetDef { state: false, seq: 1, item: -1, mean_s: 10.0, cooldown_s: 5.5 },
+    FidgetDef { state: false, seq: 2, item: -1, mean_s: 10.0, cooldown_s: 5.5 },
+    FidgetDef { state: true, seq: 0x63, item: -1, mean_s: 0.0, cooldown_s: 8.0 },
+    FidgetDef { state: false, seq: 0x53, item: -1, mean_s: 8.0, cooldown_s: 5.0 },
+    FidgetDef { state: false, seq: 0x5a, item: -1, mean_s: 4.0, cooldown_s: 2.5 },
+];
+
+/// The back-item sequence tables `(Ratchet's seq, pack seq, Clank seq)`, chosen by the back item id
+/// (`0x22ddd8(3)`): 2 → 0x17c070 (the Clank pack, Novalis), 3 → 0x17c050, 4 → gp−0x7548 (0x15f6b8).
+pub const BACK_TABLE_2: [(i16, u8, u8); 5] = [(0, 4, 11), (0, 3, 10), (0, 7, 14), (21, 5, 12), (18, 8, 15)];
+pub const BACK_TABLE_3: [(i16, u8, u8); 6] = [(0, 3, 3), (0, 4, 4), (0, 8, 5), (0, 5, 6), (0, 6, 7), (42, 7, 8)];
+pub const BACK_TABLE_4: [(i16, u8, u8); 2] = [(101, 3, 16), (101, 4, 17)];
+
+/// Blend lengths of the eased curves (gp−0x7520) as `SetAnim` passes them to the back items: −1 = 11 ticks,
+/// −2 = 16; the third word is the float 48.0's bits read as an integer (the game's value, not a tick count).
+pub const CURVE_TICKS: [i32; 3] = [11, 16, 0x4240_0000];
+
+/// Ratchet's blink values per frame (0x17c610) and Clank's (0x17c720): the eyelid manipulators' +0xc.
+pub const BLINK: [f32; 12] = [0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 0.8, 0.6, 0.4, 0.2, 0.0];
+pub const CLANK_BLINK: [f32; 22] =
+    [0.0, 0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.0];
+
+const fn f(bits: u32) -> f32 { f32::from_bits(bits) }
+
+/// `FastDecTimer` (0x220e78 int / 0x220ea8 s16): 1 when the timer was already 0, 2 when it reaches 0 now,
+/// else 0 (a timer at 0 counts as expired on every call).
+pub fn dec_timer(t: &mut i32) -> i32 {
+    if *t == 0 { return 1; }
+    *t = (*t).max(1) - 1;
+    if 0 < *t { 0 } else { 2 }
+}
+pub fn dec_timer_s16(t: &mut i16) -> i32 {
+    if *t == 0 { return 1; }
+    *t = (*t).max(1) - 1;
+    if 0 < *t { 0 } else { 2 }
+}
+
+/// One joint-manipulator record of the block at 0x17ab00 (stride 0xb0), the rotation part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JointRec {
+    /// Record index (address 0x17ab00 + 0xb0·rec).
+    pub rec: u8,
+    /// +0xa0: Ratchet's joint.
+    pub joint: i16,
+    /// +0x01: manipulator attached.
+    pub attached: bool,
+    /// +0x40 / +0x50 / +0x60: Euler angles, their spring velocities, this tick's targets (cleared after the
+    /// spring).
+    pub cur: [f32; 3],
+    pub vel: [f32; 3],
+    pub target: [f32; 3],
+    /// +0xa4 / +0xa8: spring stiffness and damping.
+    pub k: f32,
+    pub d: f32,
+    /// +0xac: scale (reset to 1 after the spring).
+    pub scale: f32,
+}
+
+impl JointRec {
+    const fn new(rec: u8, joint: i16, k: u32, d: u32) -> JointRec {
+        JointRec { rec, joint, attached: false, cur: [0.0; 3], vel: [0.0; 3], target: [0.0; 3], k: f(k), d: f(d), scale: 1.0 }
+    }
+
+    /// `0x227050` for a kind-0 record in mode 0 (Ratchet): when anything is set or still moving
+    /// (targets ≠ 0, scale ≠ 1, |angle| ≥ 0.005), the angular spring `0x270b58(target, k, d, 0, &angle, &vel,
+    /// 2)` on x, y, z and the manipulator is attached; otherwise it is detached (the angles stay). Then the
+    /// targets are cleared and the scale reset. (The translation part is idle: no idle writer.)
+    fn update(&mut self) {
+        let small = |v: f32| v.abs() < f(0x3ba3_d70a);
+        let active = self.target.iter().any(|&t| t != 0.0) || self.scale != 1.0 || !self.cur.iter().all(|&c| small(c));
+        if active {
+            for i in 0..3 {
+                let (mut a, mut v) = (Pf::f(self.cur[i]), Pf::f(self.vel[i]));
+                turn_spring(Pf::f(self.target[i]), Pf::f(self.k), Pf::f(self.d), Pf::ZERO, &mut a, &mut v, 2);
+                self.cur[i] = a.to_f32();
+                self.vel[i] = v.to_f32();
+            }
+            self.attached = true;
+        } else {
+            self.attached = false;
+        }
+        self.target = [0.0; 3];
+        self.scale = 1.0;
+    }
+}
+
+/// Indices into [`Idle::joints`].
+pub mod joint {
+    /// Record 1 (joint 10): follows the head look (×0.55 / ×0.52).
+    pub const NECK: usize = 0;
+    /// Record 3 (joint 4): the head look (0x17ad54 / 0x17ad58 = its y / z angles).
+    pub const HEAD: usize = 1;
+    /// Record 12 (joint 21): follows the head look (/2.8, ×0.25).
+    pub const REC12: usize = 2;
+    /// Records 13..16 (joints 25..28): the idle secondaries.
+    pub const SECONDARY: usize = 3;
+    /// Record 17 (joint 24): scale from 0x15ee14.
+    pub const REC17: usize = 7;
+}
+
+/// The idle fields of the hero block and the globals the idle routines keep.
+#[derive(Clone, Debug)]
+pub struct Idle {
+    /// 0x15f5cc as the hero update sees it (the tick counter before its increment). The hero keeps a mirror
+    /// that [`super::hero_update`] increments; the tick driver should overwrite it with the game's counter.
+    pub counter: i32,
+    /// 0x15ed84: the current level (−1 = unknown; fidget record 3 and the ground probe's water footstep read it).
+    pub level: i32,
+    /// 0x13f538 (s16): the fidget cooldown (ticks(120) at every fidget start; `HeroTickStateTimer` decrements it).
+    pub cooldown: i16,
+    /// 0x1415c0: the last fidget record picked.
+    pub fidget: i32,
+    /// +0x60 of the fidget records (0x179d70 + k·0x70): per-record cooldowns, decremented by `HeroTickStateTimer`.
+    pub fidget_cool: [i32; 5],
+    /// 0x140354 / 0x140358: head-look pitch (y) / yaw (z) targets; 0x140364 / 0x140368: their spring k / d.
+    /// (The timer 0x140360 is [`Hero::fidget_timer`].)
+    pub look_pitch: f32,
+    pub look_yaw: f32,
+    pub look_k: f32,
+    pub look_d: f32,
+    /// 0x1415c4: look target (HeroScanTargets, not ported: always 0).
+    pub look_target: i32,
+    /// 0x1403b0..0x1403bc: the secondaries' timers; 0x140374 + 0x10·k / 0x140378 + 0x10·k: their y / z targets.
+    pub sec_timer: [i32; 4],
+    pub sec: [[f32; 2]; 4],
+    /// 0x140340: Ratchet's blink frame (0 = not blinking, 2..11 while blinking); 0x140344: tick of the next
+    /// blink; 0x140348: blink period (0x68 = 104 after SetState of 0, 2, 4, 6; 0 otherwise).
+    pub blink: i32,
+    pub blink_next: i32,
+    pub blink_period: i32,
+    /// 0x14034c (s16): Clank's blink timer; 0x14034e (s16): Clank's blink frame (1..21).
+    pub clank_blink_timer: i16,
+    pub clank_blink: i16,
+    /// 0x141614: Clank's fidget timer.
+    pub clank_fidget_timer: i32,
+    /// 0x15ee14: record 17's scale source (approaches 0.92 by ≤ 0.05 per tick).
+    pub rec17_scale: f32,
+    /// Records 1, 3, 12..17 of the joint block 0x17ab00.
+    pub joints: [JointRec; 8],
+}
+
+impl Default for Idle {
+    fn default() -> Self { Idle::new() }
+}
+
+impl Idle {
+    /// Zeroed, with `HeroInit`'s 0x140364 / 0x140368 and the records' spring constants (level01 data).
+    pub fn new() -> Idle {
+        Idle {
+            counter: 0,
+            level: -1,
+            cooldown: 0,
+            fidget: 0,
+            fidget_cool: [0; 5],
+            look_pitch: 0.0,
+            look_yaw: 0.0,
+            look_k: f(0x3be5_6042),
+            look_d: f(0x3e99_999a),
+            look_target: 0,
+            sec_timer: [0; 4],
+            sec: [[0.0; 2]; 4],
+            blink: 0,
+            blink_next: 0,
+            blink_period: 0,
+            clank_blink_timer: 0,
+            clank_blink: 0,
+            clank_fidget_timer: 0,
+            rec17_scale: f(0x3f6b_851f),
+            joints: [
+                JointRec::new(1, 10, 0x3c03_126f, 0x3e99_999a),
+                JointRec::new(3, 4, 0x3be5_6042, 0x3e99_999a),
+                JointRec::new(12, 21, 0x3df5_c28f, 0x3e99_999a),
+                JointRec::new(13, 25, 0x3c75_c28f, 0x3e99_999a),
+                JointRec::new(14, 26, 0x3c75_c28f, 0x3e99_999a),
+                JointRec::new(15, 27, 0x3c54_fdf4, 0x3e80_0000),
+                JointRec::new(16, 28, 0x3c8b_4396, 0x3e57_0a3d),
+                JointRec::new(17, 24, 0x3cf5_c28f, 0x3e4c_cccd),
+            ],
+        }
+    }
+
+    /// `0x22b8e8` (SetState 0, the hand swap): clears the look angles and the secondaries' targets.
+    pub fn clear_look(&mut self) {
+        self.look_pitch = 0.0;
+        self.look_yaw = 0.0;
+        self.sec = [[0.0; 2]; 4];
+    }
+
+    /// Record 3's current (y, z) angles: 0x17ad54 / 0x17ad58.
+    pub fn head(&self) -> (f32, f32) {
+        let h = &self.joints[joint::HEAD];
+        (h.cur[1], h.cur[2])
+    }
+
+    /// Ratchet's eyelid value this tick (`BLINK[frame]`, 0 when not blinking).
+    pub fn blink_value(&self) -> f32 { if self.blink == 0 { 0.0 } else { BLINK[self.blink as usize % 12] } }
+}
+
+// ------------------------------------------------------------------------------------------------
+// The back items.
+
+/// The anim classes of the back items: the pack of back item 2 (class 607 on Novalis) and Clank (601).
+#[derive(Clone, Debug)]
+pub struct BackClasses {
+    pub pack: MobyAnimClass,
+    pub clank: MobyAnimClass,
+}
+
+/// A back moby's animation (moby+0x50..0x70) and its snapshot frame.
+#[derive(Clone, Debug)]
+pub struct BackMoby {
+    pub anim: AnimState,
+    pub snapshot: Option<MobyFrame>,
+}
+
+/// Item slot 3 (0x1404d0): the pack moby (+0x00), Clank (+0x04), state (+0x24 = 0x1404f4), item id (+0x28).
+#[derive(Clone, Debug)]
+pub struct Back {
+    pub state: i32,
+    pub id: i32,
+    pub pack: BackMoby,
+    pub clank: BackMoby,
+    /// Clank's moby+0x90 colour word (the pulsing glow of `0x2278c0`).
+    pub clank_color: u32,
+    pub classes: Arc<BackClasses>,
+}
+
+impl Back {
+    /// The table of `0x2476d0` / `0x247488` (`0x22ddd8(3)`: the id while the slot state is 2).
+    pub fn table(&self) -> &'static [(i16, u8, u8)] {
+        if self.state != 2 { return &[]; }
+        match self.id {
+            2 => &BACK_TABLE_2,
+            3 => &BACK_TABLE_3,
+            4 => &BACK_TABLE_4,
+            _ => &[],
+        }
+    }
+
+    /// `0x2476d0(seq)`: the rows of Ratchet's sequence `seq`; with n > 0 of them, `rand_range(0, n − 1)` picks
+    /// one: `(pack seq, Clank seq)`. None (no draw) without rows.
+    pub fn pick(&self, seq: u8, rng: &mut Rng) -> Option<(u8, u8)> {
+        let t = self.table();
+        let rows: Vec<usize> = (0..t.len()).filter(|&i| t[i].0 == seq as i16).collect();
+        if rows.is_empty() { return None; }
+        let r = rng.rand_range(0, rows.len() as i32 - 1);
+        let e = t[rows[r as usize]];
+        Some((e.1, e.2))
+    }
+
+    /// `0x247488(pack_seq)`: Ratchet's sequence of the first row whose pack sequence is `pack_seq`.
+    pub fn owner(&self, pack_seq: u8) -> Option<i16> { self.table().iter().find(|e| e.1 == pack_seq).map(|e| e.0) }
+
+    /// `MobyAnimBlend(pack, seq, frame, ticks)` (0x26c660).
+    pub fn blend_pack(&mut self, seq: u8, frame: i32, ticks: i32) {
+        let c = &self.classes.pack;
+        moby_anim::set_sequence(&mut self.pack.anim, c, seq, frame, ticks, &mut self.pack.snapshot);
+    }
+    pub fn blend_clank(&mut self, seq: u8, frame: i32, ticks: i32) {
+        let c = &self.classes.clank;
+        moby_anim::set_sequence(&mut self.clank.anim, c, seq, frame, ticks, &mut self.clank.snapshot);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+
+/// `0x2705a8(a, b, t)`: `a + (b − a)·t`.
+fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+
+impl Hero {
+    /// `0x22ddd8(0)`: the hand item while the hand slot is ready (state 2), else −1.
+    pub fn held_item(&self) -> i32 { if self.items.slot.state == 2 { self.items.slot.id } else { -1 } }
+
+    /// Give the hero the back items' classes (the pack of back item 2 and Clank): they are created on the next
+    /// hero update, as `HeroItemsCreate` does on the first one. Without them the back is not modelled (no back
+    /// table draws, no Clank fidget or blink).
+    pub fn set_back_classes(&mut self, pack: MobyAnimClass, clank: MobyAnimClass) {
+        self.back_classes = Some(Arc::new(BackClasses { pack, clank }));
+    }
+
+    /// `0x247800` (the end of Ratchet's advance): in mode 0 with the back ready, a table row for Ratchet's
+    /// sequence copies his playback speed 0x13fde0 into both back mobys' speed (+0x58).
+    pub(super) fn back_follow_speed(&mut self, seq_b: u8, rng: &mut Rng) {
+        if self.mode != 0 { return; }
+        let speed = self.anim_speed.to_f32();
+        let Some(b) = self.back.as_mut() else { return };
+        if b.state != 2 { return; }
+        if b.pick(seq_b, rng).is_some() {
+            b.pack.anim.speed = speed;
+            b.clank.anim.speed = speed;
+        }
+    }
+
+    /// `0x247550(blend, seq, frame)` (from `SetAnim` in mode 0): with the back ready, a table row for the new
+    /// sequence (≠ 0) blends pack and Clank to that row's sequences unless the pack already plays it; otherwise
+    /// both return to sequence 1 over 7 ticks (19 after state 8 with pack 2), except in group 0 while the pack
+    /// plays one of sequence 0's rows (a Clank fidget runs on).
+    pub(super) fn back_follow_anim(&mut self, blend: i32, seq: u8, frame: i32, rng: &mut Rng) {
+        let (group, prev_state) = (self.group, self.prev_state);
+        let Some(b) = self.back.as_mut() else { return };
+        if b.state != 2 { return; }
+        let pick = b.pick(seq, rng);
+        if let (Some((p, q)), true) = (pick, seq != 0) {
+            if b.pack.anim.seq_b != p {
+                b.blend_pack(p, frame, blend);
+                b.blend_clank(q, frame, blend);
+            }
+            return;
+        }
+        if group == 0 && b.owner(b.pack.anim.seq_b) == Some(0) { return; }
+        let t = if prev_state == 8 && b.id == 2 { ticks(19) } else { ticks(7) };
+        if b.pack.anim.seq_b != 1 { b.blend_pack(1, 0, t); }
+        if b.clank.anim.seq_b != 1 { b.blend_clank(1, 0, t); }
+    }
+
+    /// `HeroItemsCreate` 0x22f3c0 / `HeroItemsAttach` 0x22fec0 for slot 3 (after the write-back): the pack
+    /// and Clank are created once (state 2, back item 2: 0x141430 = 0x14166c = 0 and 0x15ed94 = 0 on a new
+    /// game), then advanced every tick (`MobyAnimAdvance`, sound triggers not modelled).
+    pub(super) fn back_items_update(&mut self) {
+        if self.back.is_none() {
+            let Some(c) = self.back_classes.clone() else { return };
+            let pack = BackMoby { anim: AnimState::spawn(&c.pack), snapshot: None };
+            let clank = BackMoby { anim: AnimState::spawn(&c.clank), snapshot: None };
+            self.back = Some(Back { state: 2, id: 2, pack, clank, clank_color: 0, classes: c });
+        }
+        if let Some(b) = self.back.as_mut() {
+            let c = b.classes.clone();
+            moby_anim::advance(&mut b.pack.anim, &c.pack);
+            moby_anim::advance(&mut b.clank.anim, &c.clank);
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // The idle transitions (0x242930 state 0, the part before StickTarget).
+
+    /// State 0 of `0x242930` after the strafe check and the loop clear: the item-0x1b rule, the back items'
+    /// return to sequence 1, the fidget or the return to the idle sequence, Clank's fidget.
+    pub(super) fn idle_anim(&mut self, c: &mut Ctx) {
+        let idle = self.idle_seq();
+        let mut can_fidget = true;
+        if self.held_item() == 0x1b {
+            if c.anim.view().seq_b != idle { self.set_anim(c.anim, c.rng, Pf::b(0xc000_0000), idle, 0); }
+            can_fidget = false;
+        }
+        let (head_y, head_z) = self.idle.head();
+        if let Some(b) = self.back.as_mut() {
+            if b.state == 2 {
+                if b.pack.anim.flags & 2 != 0 && b.pack.anim.seq_b != 1 { b.blend_pack(1, 0, ticks(7)); }
+                if b.clank.anim.flags & 2 != 0 && b.clank.anim.seq_b != 1 { b.blend_clank(1, 0, ticks(7)); }
+            }
+            if f(0x3f1c_61aa) < head_z || f(0x3edf_66f3) < head_y {
+                if b.pack.anim.seq_b != 1 { b.blend_pack(1, 0, ticks(12)); }
+                if b.clank.anim.seq_b != 1 { b.blend_clank(1, 0, ticks(12)); }
+            }
+        }
+        let v = c.anim.view();
+        if v.seq_b == idle && can_fidget {
+            if let Some(k) = self.fidget_chance(c, v.flags) {
+                self.idle.fidget = k as i32;
+                self.idle.cooldown = ticks(120) as i16;
+                let d = FIDGETS[k];
+                self.idle.fidget_cool[k] = (d.cooldown_s * 60.0) as i32;
+                if d.state {
+                    self.set_state(c, 0x40, true);
+                } else {
+                    self.set_anim(c.anim, c.rng, Pf::from_i32(ticks(12)), d.seq, 0);
+                }
+            }
+        } else if v.flags & 2 != 0 {
+            // Weapon-in-hand idle (0x1413f8 / 0x1413fa with 0x1415e4, 0x140058): never set on foot here.
+            let keep = self.f13f8 != 0 && self.f13fa != 0;
+            if !keep {
+                self.f13f8 = 0;
+                if idle == 0x54 {
+                    self.set_anim(c.anim, c.rng, Pf::from_i32(ticks(18)), 0x54, 0);
+                } else {
+                    self.set_anim(c.anim, c.rng, Pf::b(0xc000_0000), idle, 0);
+                }
+            }
+        }
+        // Clank's fidget: after 10 ticks in idle, Clank on sequence 1, the head not turned far.
+        let (head_y, head_z) = self.idle.head();
+        let clank_ready = self.back.as_ref().is_some_and(|b| b.clank.anim.seq_b == 1);
+        if ticks(10) < self.timer
+            && clank_ready
+            && dec_timer(&mut self.idle.clank_fidget_timer) != 0
+            && head_z < f(0x3f0e_fa35)
+            && head_y < f(0x3eb2_b8c2)
+            && self.back.as_ref().is_some_and(|b| b.state == 2)
+        {
+            self.idle.clank_fidget_timer = c.rng.rand_range(ticks(110), ticks(270));
+            self.clank_fidget(c.rng);
+        }
+    }
+
+    /// `0x241e00`: the fidget chance. Returns the record picked, or None. Draws one `randf(0, 1)` whenever a
+    /// record is available (or on a wrap in the health-1 path).
+    fn fidget_chance(&mut self, c: &mut Ctx, anim_flags: u8) -> Option<usize> {
+        if self.idle.cooldown != 0 { return None; }
+        if self.health == 1 {
+            if self.idle.fidget_cool[4] != 0 || anim_flags & 2 == 0 { return None; }
+            return (c.rng.randf(0.0, 1.0) < f(0x3ea8_f5c3)).then_some(4);
+        }
+        let mut cands = [0usize; 5];
+        let mut n = 0;
+        for (k, d) in FIDGETS.iter().enumerate() {
+            if self.idle.fidget_cool[k] != 0 || d.mean_s == 0.0 { continue; }
+            let item = self.held_item();
+            if d.item != -1 && d.item != item { continue; }
+            if d.state && self.ground_moby.is_some() { continue; }
+            if k == 3 {
+                if self.idle.level != 0xc || self.held_item() == 0x17 { continue; }
+                let a = self.body_point;
+                let mut b = a;
+                b[2] = a[2] + Pf::b(0x4100_0000);
+                if c.env.line(a, b, 2).is_some() { continue; }
+            }
+            if k == 4 && (self.prev_group != 1 || ticks(50) < self.timer || 1 < self.health) { continue; }
+            cands[n] = k;
+            n += 1;
+        }
+        if n == 0 { return None; }
+        let chance = |k: usize| 1.0 / ((FIDGETS[k].mean_s * 60.0) as i32) as f32;
+        let mut sum = 0.0f32;
+        for &k in &cands[..n] { sum += chance(k); }
+        let r = c.rng.randf(0.0, 1.0);
+        if !(r < sum) { return None; }
+        let mut pick = cands[0];
+        for &k in &cands[..n] {
+            pick = k;
+            sum -= chance(k);
+            if sum < r { break; }
+        }
+        Some(pick)
+    }
+
+    /// `0x2473e0`: with the pack on sequence 1, a random row of sequence 0 for pack and Clank (7-tick blends).
+    fn clank_fidget(&mut self, rng: &mut Rng) {
+        let Some(b) = self.back.as_mut() else { return };
+        if b.pack.anim.seq_b != 1 { return; }
+        if let Some((p, q)) = b.pick(0, rng) {
+            b.blend_pack(p, 0, ticks(7));
+            b.blend_clank(q, 0, ticks(7));
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // The sub-updates after the transitions (mode 0).
+
+    /// `0x22b928`, `0x22bdd0`, `0x227590`, `0x2278c0` and the joint springs `0x2273d0`, in the hero update's
+    /// order (`seq_b` = Ratchet's sequence B after the transitions; `counter` = 0x15f5cc).
+    pub(super) fn idle_updates(&mut self, seq_b: u8, counter: i32, rng: &mut Rng) {
+        self.head_look(seq_b, rng);
+        self.idle_secondaries(seq_b, rng);
+        self.blink_update(seq_b, counter, rng);
+        self.clank_glow_blink(counter, rng);
+        for j in &mut self.idle.joints { j.update(); }
+    }
+
+    /// `0x22b928`: record 17's scale; in state 0 on sequence 0..2 or 0x3a with no look target, the head-look
+    /// timer 0x140360 (re-armed to 40..70 every tick of the fidgets 1/2, so it only expires in sequence 0: then
+    /// a new pitch `−randf(−0.157, 0.436)`, yaw `randf_sym(0.349, 0.995)`, spring constants from `k = randf(0, 1)`
+    /// and the timer `rand_range(90, 200) + (int)(80·k)`); the fidgets clamp the look to ±20° / 0..15°. Record 3
+    /// gets the look, record 1 55 % / 52 % of it.
+    fn head_look(&mut self, seq_b: u8, rng: &mut Rng) {
+        let rec17 = &mut self.idle.joints[joint::REC17];
+        rec17.scale = self.idle.rec17_scale;
+        // Approach(0.92, 0.05, &0x15ee14) (1.57 with option 0x15edb1).
+        let t = f(0x3f6b_851f);
+        let step = f(0x3d4c_cccd);
+        let mut d = t - self.idle.rec17_scale;
+        if step < d { d = step; } else if d < -step { d = -step; }
+        self.idle.rec17_scale += d;
+        if self.state != 0 || !(seq_b < 3 || seq_b == 0x3a) || self.idle.look_target != 0 { return; }
+        let fidget = seq_b.wrapping_sub(1) < 2;
+        if fidget { self.fidget_timer = rng.rand_range(ticks(40), ticks(70)); }
+        if dec_timer(&mut self.fidget_timer) != 0 {
+            let i = &mut self.idle;
+            i.look_pitch = -rng.randf(f(0xbe20_d97c), f(0x3edf_66f3));
+            i.look_yaw = rng.randf_sym(f(0x3eb2_b8c2), f(0x3f7e_adae));
+            let k = rng.randf(0.0, 1.0);
+            i.look_k = lerp(f(0x3c75_c28f), f(0x3be5_6042), k);
+            i.look_d = lerp(f(0x3e94_7ae1), f(0x3e99_999a), k);
+            self.fidget_timer = rng.rand_range(ticks(90), ticks(200));
+            self.fidget_timer += (ticks(80) as f32 * k) as i32;
+        }
+        let i = &mut self.idle;
+        if fidget {
+            let m = f(0x3eb2_b8c2);
+            if m < i.look_yaw { i.look_yaw = m; } else if i.look_yaw < -m { i.look_yaw = -m; }
+            if f(0x3e86_0a92) < i.look_pitch { i.look_pitch = f(0x3e86_0a92); }
+            if i.look_pitch < 0.0 { i.look_pitch = 0.0; }
+        }
+        let head = &mut i.joints[joint::HEAD];
+        head.k = i.look_k;
+        head.d = i.look_d;
+        head.target[1] = i.look_pitch;
+        head.target[2] = i.look_yaw;
+        let (hy, hz) = (head.target[1], head.target[2]);
+        let neck = &mut i.joints[joint::NECK];
+        neck.k = f(0x3c03_126f);
+        neck.d = f(0x3e99_999a);
+        neck.target[2] = hz * f(0x3f05_1eb8);
+        neck.target[1] = hy * f(0x3f0c_cccd);
+    }
+
+    /// `0x22bdd0` (state 0, sequence 0): four timers; on expiry new targets for records 13..16 (y of record 16
+    /// `randf(−0.087, 0.524)`, z `randf_sym` ranges per record, record 16's z alternating sign) and a new
+    /// timer; every tick the targets are written.
+    fn idle_secondaries(&mut self, seq_b: u8, rng: &mut Rng) {
+        if self.state != 0 || seq_b != 0 { return; }
+        let i = &mut self.idle;
+        for k in 0..4 {
+            if dec_timer(&mut i.sec_timer[k]) != 0 {
+                match k {
+                    0 => {
+                        i.sec[0][1] = rng.randf_sym(f(0x3e32_b8c2), f(0x3f06_0a92));
+                        i.sec_timer[0] = rng.rand_range(ticks(70), ticks(150));
+                    }
+                    1 => {
+                        i.sec[1][1] = rng.randf_sym(f(0x3e32_b8c2), f(0x3f06_0a92));
+                        i.sec_timer[1] = rng.rand_range(ticks(40), ticks(90));
+                    }
+                    2 => {
+                        i.sec[2][1] = rng.randf_sym(f(0x3e86_0a92), f(0x3f5f_66f3));
+                        i.sec_timer[2] = rng.rand_range(ticks(40), ticks(90));
+                    }
+                    _ => {
+                        i.sec[3][0] = rng.randf(f(0xbdb2_b8c2), f(0x3f06_0a92));
+                        let old = i.sec[3][1];
+                        let new = rng.randf_sym(f(0x3eb2_b8c2), f(0x3f75_be0b));
+                        i.sec[3][1] = new;
+                        let flip = (old <= 0.0 && new <= 0.0) || (0.0 <= old && 0.0 <= new);
+                        if flip { i.sec[3][1] = -new; }
+                        i.sec_timer[3] = rng.rand_range(ticks(35), ticks(70));
+                    }
+                }
+            }
+            let r = &mut i.joints[joint::SECONDARY + k];
+            r.target[1] = i.sec[k][0];
+            r.target[2] = i.sec[k][1];
+        }
+    }
+
+    /// `0x227590`: record 12 follows the head look (z ×0.25 within ±8.5°, y /2.8 within −10°..17°; ±2° / ±7° in
+    /// the fidgets 1/2), then Ratchet's blink (`0x2274e8`: with a period, a blink starts once the counter passes
+    /// 0x140344 and schedules the next at `counter + 20 + randi(p) + randi(p)`; without, the next is pushed to
+    /// `counter + 30`) and its frame 1 → 11.
+    fn blink_update(&mut self, seq_b: u8, counter: i32, rng: &mut Rng) {
+        let i = &mut self.idle;
+        let (hy, hz) = { let h = &i.joints[joint::HEAD]; (h.target[1], h.target[2]) };
+        let mut z = hz * 0.25;
+        let zm = f(0x3e17_e9d8);
+        if zm < z { z = zm; } else if z < -zm { z = -zm; }
+        let mut y = hy / f(0x4033_3333);
+        if f(0x3e97_e9d8) < y { y = f(0x3e97_e9d8); }
+        if y < f(0xbe32_b8c2) { y = f(0xbe32_b8c2); }
+        if seq_b.wrapping_sub(1) < 2 {
+            let m = f(0x3d0e_fa35);
+            if m < z { z = m; }
+            if z < -m { z = -m; }
+            let m = f(0x3dfa_35dd);
+            if m < y { y = m; }
+            if y < -m { y = -m; }
+        }
+        let r12 = &mut i.joints[joint::REC12];
+        r12.target[2] = z;
+        r12.target[1] = y;
+        // 0x2274e8.
+        if i.blink == 0 {
+            if i.blink_period == 0 {
+                i.blink_next = counter + ticks(30);
+            } else if i.blink_next < counter {
+                i.blink = 1;
+                let a = ticks(20);
+                let b = rng.randi(i.blink_period);
+                let c = rng.randi(i.blink_period);
+                i.blink_next = counter + a + b + c;
+            }
+        }
+        if i.blink != 0 {
+            i.blink += 1;
+            if 12 <= i.blink { i.blink = 0; }
+        }
+    }
+
+    /// `0x2278c0` in mode 0 on Clank: the glow colour (+0x90, a ticks(110) sine pulse) and Clank's blink (timer
+    /// 0x14034c re-armed to 50..200 when it has run out and Clank is on sequence 1; frames 1..21).
+    fn clank_glow_blink(&mut self, counter: i32, rng: &mut Rng) {
+        let base = if self.health == 1 { 0x88 } else { 0x38 };
+        let Some(b) = self.back.as_mut() else { return };
+        let p = ticks(110);
+        let ph = (counter % p) as f32 / p as f32;
+        let s = fast_sin(Pf::f((ph + ph) * std::f32::consts::PI + -std::f32::consts::PI)).to_f32();
+        let v = s * 24.0;
+        let r = base + (v as i32 + 0xc);
+        let g = (s * 48.0) as i32 + 0xa0;
+        let bl = v as i32 + 0x4c;
+        b.clank_color = (0x80u32 << 24) | ((bl as u32) << 16) | ((g as u32) << 8) | r as u32;
+        let i = &mut self.idle;
+        if dec_timer_s16(&mut i.clank_blink_timer) != 0 && b.clank.anim.seq_b == 1 {
+            i.clank_blink = 1;
+            i.clank_blink_timer = rng.rand_range(ticks(50), ticks(200)) as i16;
+        }
+        if i.clank_blink != 0 {
+            i.clank_blink += 1;
+            if 0x16 <= i.clank_blink { i.clank_blink = 0; }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::testkit::{cam_x, floor};
+    use super::super::{hero_update, AnimCtl, AnimView, Env, Hero, RecordingAnim};
+    use super::*;
+    use crate::moby_runtime::Moby;
+    use crate::pad::{PadInput, PadState};
+    use rc_formats::collision::Collision;
+
+    /// Draws between two stream states.
+    fn draws(from: Rng, to: Rng) -> usize {
+        let mut r = from;
+        for n in 0..100_000 {
+            if r.state == to.state { return n; }
+            r.rand();
+        }
+        panic!("streams do not meet");
+    }
+
+    /// [`RecordingAnim`] whose non-idle sequences wrap (flag 2) `len` ticks after their `set_anim`.
+    struct WrapAnim {
+        rec: RecordingAnim,
+        len: u32,
+        t: u32,
+    }
+
+    impl AnimCtl for WrapAnim {
+        fn set_anim(&mut self, blend: Pf, seq: u8, frame: i32) {
+            self.rec.set_anim(blend, seq, frame);
+            self.t = 0;
+        }
+        fn advance(&mut self, speed: Pf) {
+            self.rec.advance(speed);
+            self.t += 1;
+            if self.rec.v.seq_b != 0 && self.t == self.len { self.rec.v.flags |= 2; }
+        }
+        fn view(&self) -> AnimView { self.rec.view() }
+        fn frame_count(&self, s: u8) -> u8 { self.rec.frame_count(s) }
+        fn set_loop(&mut self, a: i32, b: i32) { self.rec.set_loop(a, b); }
+        fn clear_loop(&mut self) { self.rec.clear_loop(); }
+    }
+
+    struct Idler {
+        hero: Hero,
+        moby: Moby,
+        pad: PadState,
+        anim: WrapAnim,
+        rng: Rng,
+        coll: Collision,
+    }
+
+    impl Idler {
+        fn new(seed: u32, fidget_len: u32) -> Idler {
+            let coll = floor(100.0, 100, 106, 100, 106);
+            let hero = Hero::spawn([410.0, 410.0, 100.0], 0.0);
+            let mut moby = Moby::zeroed();
+            moby.position = hero.pos.map(Pf::to_f32);
+            let mut rng = Rng::new();
+            rng.srand(seed);
+            let anim = WrapAnim { rec: RecordingAnim::default(), len: fidget_len, t: 0 };
+            let mut pad = PadState::default();
+            pad.update(Some(&PadInput::neutral().bytes()), false);
+            Idler { hero, moby, pad, anim, rng, coll }
+        }
+
+        /// One idle tick; returns the draws it made.
+        fn tick(&mut self) -> usize {
+            self.pad.update(Some(&PadInput::neutral().bytes()), false);
+            let (cam_rows, cam_yaw) = cam_x();
+            let env = Env { coll: &self.coll, pad: &self.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+            let before = self.rng;
+            hero_update(&mut self.hero, &mut self.moby, &env, &mut self.anim, &mut self.rng);
+            draws(before, self.rng)
+        }
+    }
+
+    /// The fidget chance on its own: with the look, secondaries and blink out of the way, an idle tick draws
+    /// one `randf(0, 1)`, and a fidget starts on the first tick whose value is below 1/600 + 1/600 (record 0
+    /// above 1/600, else record 1), with the 120-tick global and 330-tick record cooldowns.
+    #[test]
+    fn fidget_chance_and_cooldowns() {
+        for seed in [1234u32, 7, 99, 2024] {
+            let mut t = Idler::new(seed, 150);
+            t.hero.fidget_timer = 100_000;
+            t.hero.idle.sec_timer = [100_000; 4];
+            let mut started = None;
+            for n in 0..20_000 {
+                let mut probe = t.rng;
+                let r = probe.randf(0.0, 1.0);
+                let d = t.tick();
+                if t.anim.rec.v.seq_b != 0 {
+                    // The start tick: the chance, then the look timer's re-arm in the new sequence.
+                    assert_eq!(d, 2, "seed {seed} tick {n}: fidget start");
+                    let sum = 1.0f32 / 600.0 + 1.0 / 600.0;
+                    assert!(r < sum, "fidget without a winning draw ({r})");
+                    let want = if 1.0f32 / 600.0 < r { 1 } else { 2 };
+                    assert_eq!(t.anim.rec.v.seq_b, want, "record by draw {r}");
+                    started = Some(n);
+                    break;
+                }
+                assert_eq!(d, 1, "seed {seed} tick {n}: one randf per idle tick");
+                assert!(!(r < 2.0 / 600.0), "a winning draw {r} started no fidget");
+            }
+            let n0 = started.expect("no fidget in 20000 ticks");
+            let k = t.hero.idle.fidget as usize;
+            assert_eq!(t.anim.rec.calls.last().copied(), Some((Pf::from_i32(12), FIDGETS[k].seq, 0)));
+            assert_eq!(t.hero.idle.cooldown, 120);
+            assert_eq!(t.hero.idle.fidget_cool[k], 330);
+            // The fidget (150 ticks here): the look timer is re-armed every tick (one draw), no chance draw.
+            for i in 1..150 {
+                assert_eq!(t.tick(), 1, "fidget tick {i}");
+                assert!((39..=69).contains(&t.hero.fidget_timer), "look timer {}", t.hero.fidget_timer);
+            }
+            // The wrap: back to the idle sequence (eased curve −2); the global cooldown is over (150 > 120), the
+            // other record is free: one chance draw per tick again, with the other record's chance only.
+            t.tick();
+            assert_eq!(t.anim.rec.calls.last().copied(), Some((Pf::b(0xc000_0000), 0, 0)));
+            assert_eq!(t.hero.idle.cooldown, 0);
+            assert_eq!(t.hero.idle.fidget_cool[k], 330 - 150);
+            let mut probe = t.rng;
+            let r = probe.randf(0.0, 1.0);
+            assert_eq!(t.tick(), 1);
+            if r < 1.0 / 600.0 { assert_eq!(t.anim.rec.v.seq_b, FIDGETS[1 - k].seq); }
+            eprintln!("seed {seed}: fidget record {k} after {n0} ticks");
+        }
+    }
+
+    /// Short fidgets: no chance draw until the 120-tick cooldown has run out.
+    #[test]
+    fn cooldown_blocks_the_chance_draw() {
+        let mut t = Idler::new(4321, 40);
+        t.hero.fidget_timer = 100_000;
+        t.hero.idle.sec_timer = [100_000; 4];
+        let mut n = 0;
+        while t.anim.rec.v.seq_b == 0 {
+            t.tick();
+            n += 1;
+            assert!(n < 50_000);
+        }
+        // 39 fidget ticks (1 look draw each), the wrap on the 40th (the blend back to the idle sequence happens in
+        // the transitions, so the look sees sequence 0: no draw), then idle with the cooldown running: no draws
+        // until it reaches 0.
+        let mut counts = Vec::new();
+        for _ in 0..130 { counts.push(t.tick()); }
+        assert!(counts[..39].iter().all(|&d| d == 1), "{counts:?}");
+        assert_eq!(counts[39], 0, "wrap tick");
+        // The cooldown was set to 120 on the start tick; post-move counts it down before the transitions. The only
+        // other draws: the look timer (re-armed to 40..70 by the fidget) running out once (4 draws).
+        assert!(counts[40..119].iter().all(|&d| d == 0 || d == 4), "{counts:?}");
+        assert_eq!(counts[40..119].iter().filter(|&&d| d == 4).count(), 1, "{counts:?}");
+        assert!(counts[119..].iter().all(|&d| d == 1), "{counts:?}");
+    }
+
+    /// Draws per idle tick with every consumer live: the first tick expires the look timer (4 draws) and the four
+    /// secondaries (2 + 2 + 2 + 3) besides the chance (1); then one per tick until a timer runs out; a blink
+    /// (period 0x68 after SetState(0)) draws two.
+    #[test]
+    fn draw_count_per_idle_tick() {
+        let mut t = Idler::new(1234, 150);
+        t.hero.fidget_timer = 0;
+        assert_eq!(t.tick(), 1 + 4 + 9);
+        let look = t.hero.fidget_timer;
+        assert!((89..=280).contains(&look), "look timer {look}");
+        let next_sec = *t.hero.idle.sec_timer.iter().min().unwrap();
+        assert!(next_sec >= 34);
+        for i in 1..next_sec.min(look) {
+            let d = t.tick();
+            if t.anim.rec.v.seq_b != 0 { break; }
+            assert_eq!(d, 1, "tick {i}");
+        }
+        // Ratchet's blink: period 0x68, the next blink due now.
+        let mut t = Idler::new(99, 150);
+        t.hero.fidget_timer = 100_000;
+        t.hero.idle.sec_timer = [100_000; 4];
+        t.hero.idle.cooldown = 1000;
+        t.hero.idle.blink_period = 0x68;
+        t.hero.idle.blink_next = -1;
+        t.hero.idle.counter = 500;
+        let mut probe = t.rng;
+        let (b1, b2) = (probe.randi(0x68), probe.randi(0x68));
+        assert_eq!(t.tick(), 2);
+        assert_eq!(t.hero.idle.blink, 2);
+        assert_eq!(t.hero.idle.blink_next, 500 + 20 + b1 + b2);
+        for f in 3..12 {
+            assert_eq!(t.tick(), 0);
+            assert_eq!(t.hero.idle.blink, f);
+        }
+        assert_eq!(t.tick(), 0);
+        assert_eq!(t.hero.idle.blink, 0);
+    }
+
+    /// SetState(0) sets the blink period and clears the look; state 3 clears the period.
+    #[test]
+    fn set_state_blink_period() {
+        let mut t = Idler::new(1, 150);
+        let (cam_rows, cam_yaw) = cam_x();
+        let env = Env { coll: &t.coll, pad: &t.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+        let mut c = super::super::states::Ctx { env: &env, anim: &mut t.anim, rng: &mut t.rng };
+        t.hero.idle.look_yaw = 0.5;
+        t.hero.set_state(&mut c, 0, true);
+        assert_eq!(t.hero.idle.blink_period, 0x68);
+        assert_eq!(t.hero.idle.look_yaw, 0.0);
+        t.hero.set_state(&mut c, 7, true);
+        assert_eq!(t.hero.idle.blink_period, 0);
+    }
+
+    #[test]
+    fn back_table_pick() {
+        let classes = Arc::new(BackClasses { pack: MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] }, clank: MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] } });
+        let m = || BackMoby { anim: AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false }, snapshot: None };
+        let b = Back { state: 2, id: 2, pack: m(), clank: m(), clank_color: 0, classes };
+        let mut r = Rng::new();
+        r.srand(1234);
+        let mut p = r;
+        let k = p.rand_range(0, 2);
+        assert_eq!(b.pick(0, &mut r), Some([(4, 11), (3, 10), (7, 14)][k as usize]));
+        assert_eq!(draws(p, r), 0);
+        let s = r;
+        assert_eq!(b.pick(1, &mut r), None);
+        assert_eq!(draws(s, r), 0, "no rows, no draw");
+        assert_eq!(b.pick(21, &mut r), Some((5, 12)));
+        assert_eq!(draws(s, r), 1, "one row still draws rand_range(0, 0)");
+        assert_eq!(b.owner(3), Some(0));
+        assert_eq!(b.owner(1), None);
+    }
+}

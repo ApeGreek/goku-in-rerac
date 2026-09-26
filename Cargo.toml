@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/rc-formats", "crates/rc-engine", "crates/rc-trace", "crates/rc-game"]
+
+[workspace.package]
+edition = "2021"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+bytemuck = { version = "1", features = ["derive", "min_const_generics", "extern_crate_alloc"] }
+
+# Fast iteration: optimise dependencies (Bevy) fully, our crates lightly.
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,0 +1,9 @@
+# Dev loop: `cargo dev` = run the engine with Bevy dynamically linked (fast relink).
+# Release/profiling builds use plain `cargo run --release -p rc-engine`.
+[alias]
+dev = "run -p rc-engine --features dev"
+dev-build = "build -p rc-engine --features dev"
+
+[build]
+# Cap parallelism a little below core count so the machine stays responsive during big builds.
+jobs = 8

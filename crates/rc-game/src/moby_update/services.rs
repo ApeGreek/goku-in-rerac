@@ -1,0 +1,1432 @@
+//! The engine services the ported class updates call (`docs/plan/moby_update_catalogue.md` §7), level01
+//! addresses. Everything a class update reads besides its own moby lives in [`World`] (the game's globals
+//! as the moby loop sees them); everything that persists between ticks and is owned by the moby system
+//! lives in [`Services`].
+//!
+//! * **Vector / quaternion library** (VU0 macro code at 0x2211xx..0x222xxx and 0x26ee30, 0x2721f0,
+//!   0x272090): lane-by-lane on the PS2 float model ([`Pf`]), ACC order as in the instructions. The helpers
+//!   that already exist in [`crate::hero::physics`] (vadd, set_len3, mul_rows3/4, euler_rows, …) are reused.
+//! * **Hit messages** (0x178580 records, `MobyGetHitMessage` 0x26f320): [`HitLog`], [`World::get_hit`],
+//!   [`World::deliver_hit`].
+//! * **Sounds** (`fun_0022da68` = level01 0x2a1618 `PlayClassSound(idx, flags, moby)`): recorded into
+//!   [`Services::sounds`] for the audio port to drain.
+//! * **Glints** (0x16eec0, 16 × 0x20: `FUN_002208a0` create, `FUN_00220928` update): [`Glints`].
+//! * **Save / game-state writes** of the bolt pickup: [`SaveBits`], [`GameCounters`].
+//! * **Timers**: `ticks(n)` 0x220e30, `multiply_global_scale` 0x220e20, `FastDecTimer` 0x220ea8 / 0x220ed8.
+#![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern, clippy::needless_range_loop, clippy::too_many_arguments)] // FPU compare semantics, op order and lane loops are spelled out on purpose.
+
+use std::collections::HashMap;
+
+use crate::hero::physics::{self as ph, V4};
+use crate::hero::Hero;
+use crate::moby_runtime::{ClassInfo, Moby, MobyId, MobyTable};
+use crate::moby_update::scheduler::Groups;
+use crate::collision_query::{coll_line_m, coll_sphere_m, coll_sphere_mobys, CollOutput, MobyGrid, MobyScene, PoseCache, QueryFlags, TableMobys};
+use crate::particles::{BSphereView, Particles};
+use crate::ps2v::Pf;
+use crate::rng::Rng;
+use rc_formats::collision::Collision;
+use rc_formats::moby_anim::{MobyAnimClass, MobyFrame};
+use rc_formats::moby_collision::MobyCollision;
+use std::sync::{Arc, Mutex};
+
+// ---------------------------------------------------------------------------------------------------
+// Constants and small conversions
+
+/// `0x15ed6c` dt (NTSC 1/60) and `0x15ed70` dt².
+pub use crate::hero::physics::{DT, DT2};
+/// π/180 as the updates load it (`0x3c8efa35`).
+pub const DEG: Pf = Pf::b(0x3c8e_fa35);
+/// π/4 (`0x3f490fdb`).
+pub const QUARTER_PI: Pf = Pf::b(0x3f49_0fdb);
+
+/// A moby field as a PS2 float vector, keeping the bits (the moby fields hold what the PS2 stored).
+#[inline]
+pub fn pv(a: [f32; 4]) -> V4 { a.map(|x| Pf(x.to_bits())) }
+#[inline]
+pub fn pf(x: f32) -> Pf { Pf(x.to_bits()) }
+#[inline]
+pub fn fl(x: Pf) -> f32 { f32::from_bits(x.0) }
+/// Back to the moby's storage (bits kept).
+#[inline]
+pub fn fv(a: V4) -> [f32; 4] { a.map(fl) }
+
+/// Little-endian pvar accessors (the per-class block at moby+0x78, raw bytes).
+pub mod pvar {
+    use crate::ps2v::Pf;
+    #[inline]
+    pub fn u8(p: &[u8], o: usize) -> u8 { p[o] }
+    #[inline]
+    pub fn set_u8(p: &mut [u8], o: usize, x: u8) { p[o] = x; }
+    #[inline]
+    pub fn i16(p: &[u8], o: usize) -> i16 { i16::from_le_bytes([p[o], p[o + 1]]) }
+    #[inline]
+    pub fn set_i16(p: &mut [u8], o: usize, x: i16) { p[o..o + 2].copy_from_slice(&x.to_le_bytes()); }
+    #[inline]
+    pub fn u16(p: &[u8], o: usize) -> u16 { u16::from_le_bytes([p[o], p[o + 1]]) }
+    #[inline]
+    pub fn i32(p: &[u8], o: usize) -> i32 { i32::from_le_bytes(p[o..o + 4].try_into().unwrap()) }
+    #[inline]
+    pub fn set_i32(p: &mut [u8], o: usize, x: i32) { p[o..o + 4].copy_from_slice(&x.to_le_bytes()); }
+    #[inline]
+    pub fn u32(p: &[u8], o: usize) -> u32 { i32(p, o) as u32 }
+    #[inline]
+    pub fn set_u32(p: &mut [u8], o: usize, x: u32) { set_i32(p, o, x as i32); }
+    #[inline]
+    pub fn f(p: &[u8], o: usize) -> Pf { Pf(u32(p, o)) }
+    #[inline]
+    pub fn set_f(p: &mut [u8], o: usize, x: Pf) { set_u32(p, o, x.0); }
+    #[inline]
+    pub fn v4(p: &[u8], o: usize) -> [Pf; 4] { [f(p, o), f(p, o + 4), f(p, o + 8), f(p, o + 12)] }
+    #[inline]
+    pub fn set_v4(p: &mut [u8], o: usize, x: [Pf; 4]) { for (k, c) in x.iter().enumerate() { set_f(p, o + 4 * k, *c); } }
+    /// Native `f32` views (the classes written on standard floats).
+    #[inline]
+    pub fn ff(p: &[u8], o: usize) -> f32 { f32::from_bits(u32(p, o)) }
+    #[inline]
+    pub fn set_ff(p: &mut [u8], o: usize, x: f32) { set_u32(p, o, x.to_bits()); }
+    #[inline]
+    pub fn v4f(p: &[u8], o: usize) -> [f32; 4] { [ff(p, o), ff(p, o + 4), ff(p, o + 8), ff(p, o + 12)] }
+    #[inline]
+    pub fn set_v4f(p: &mut [u8], o: usize, x: [f32; 4]) { for (k, c) in x.iter().enumerate() { set_ff(p, o + 4 * k, *c); } }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Timers (level01 0x220e20..0x220ed8)
+
+/// The time base: `0x15ed68` timer scale (1.0 NTSC, 0.8333 PAL).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Timing {
+    pub timer_scale: Pf,
+}
+
+impl Timing {
+    pub const NTSC: Timing = Timing { timer_scale: Pf::ONE };
+
+    /// `ticks(n)` 0x220e30: `cvt.w.s((0.25 + 0.25) + (f32)n · scale)` (`adda.s`, `madd.s`).
+    pub fn ticks(&self, n: i32) -> i32 {
+        let acc = Pf::b(0x3e80_0000) + Pf::b(0x3e80_0000);
+        (acc + Pf::from_i32(n) * self.timer_scale).to_i32()
+    }
+
+    /// `multiply_global_scale` 0x220e20: `scale · x` (`mul.s f0, f0(scale), f12`).
+    pub fn scale(&self, x: Pf) -> Pf { self.timer_scale * x }
+}
+
+/// `FastDecTimer__FRs` 0x220ea8 on an s16: 1 if it is 0 (untouched), else `t = max(t, 1) − 1` and 2 when
+/// that is ≤ 0, 0 otherwise.
+pub fn fast_dec_timer_s16(t: &mut i16) -> i32 {
+    if *t == 0 { return 1; }
+    let n = (*t as i32).max(1) - 1;
+    *t = n as i16;
+    if n < 1 { 2 } else { 0 }
+}
+
+/// `FUN_00220ed8` on a u8 (the byte variant): 1 if it is 0, else `t = max(t, 1) − 1`, 2 when that is ≤ 0.
+pub fn fast_dec_timer_u8(t: &mut u8) -> i32 {
+    if *t == 0 { return 1; }
+    let n = (*t as i32).max(1) - 1;
+    *t = n as u8;
+    if n < 1 { 2 } else { 0 }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// VU0 vector / quaternion library (level01 addresses; boot copies in brackets)
+
+/// `FastVecCross(out, a, b)` 0x2212d0: `vopmula.xyz ACC, b, a; vopmsub.xyz out, a, b` = **b × a**.
+pub fn cross_ba(a: V4, b: V4) -> V4 {
+    let c = crate::ps2v::cross([b[0].0, b[1].0, b[2].0], [a[0].0, a[1].0, a[2].0]);
+    [Pf(c[0]), Pf(c[1]), Pf(c[2]), a[3]]
+}
+
+/// `fun_001f9a68` [boot 0x1f9a68]: `out.xyz = a.xyz · s` (w of `out` is the source's w; the store writes
+/// the whole quadword from `vf1`, whose w is `a.w`).
+pub fn scale3(a: V4, s: Pf) -> V4 { [a[0] * s, a[1] * s, a[2] * s, a[3]] }
+
+/// `fun_001f9a40` 0x2211e8: `a + (b − a) · t` (`vsub`, `vmulx`, `vadd`).
+pub fn lerp3(a: V4, b: V4, t: Pf) -> V4 {
+    let d = ph::vsub(b, a);
+    let d = [d[0] * t, d[1] * t, d[2] * t, d[3]];
+    ph::vadd(a, d)
+}
+
+/// `FUN_002745f0(max, v)`: `if max < FastVecLength(v) { v = FastVecNormalize(max, v) }`.
+pub fn clamp_len(v: &mut V4, max: Pf) {
+    let l = ph::len3(*v);
+    if max < l { *v = ph::set_len3(*v, max); }
+}
+
+/// `FUN_00221570(out, v, n)`: reflect `v` off the plane with normal direction `n` when `v` moves into it.
+/// `a = 0 − v`; `n̂ = n · rsqrt(n·n)` (`vrsqrt Q, vf0w`); `d = a·n̂` ((x+y)+1·z); `m = n̂ · d`; when the sign
+/// bit of `d` is set `out = v`, else `out = a + ((m − a) + (m − a))`.
+pub fn reflect(vel: V4, n: V4) -> V4 {
+    let a = [Pf::ZERO - vel[0], Pf::ZERO - vel[1], Pf::ZERO - vel[2], vel[3]];
+    let nn = (n[0] * n[0] + n[1] * n[1]) + Pf::ONE * (n[2] * n[2]);
+    let q = Pf::ONE / nn.sqrt();
+    let nh = [n[0] * q, n[1] * q, n[2] * q];
+    let d = (a[0] * nh[0] + a[1] * nh[1]) + Pf::ONE * (a[2] * nh[2]);
+    if d.sign() { return vel; }
+    let m = [nh[0] * d, nh[1] * d, nh[2] * d];
+    let e = [m[0] - a[0], m[1] - a[1], m[2] - a[2]];
+    let e = [e[0] + e[0], e[1] + e[1], e[2] + e[2]];
+    [a[0] + e[0], a[1] + e[1], a[2] + e[2], a[3]]
+}
+
+/// `fun_001fa480` 0x221ef8: quaternion (x, y, z, w) → rotation rows (3 rows, w lanes 0).
+pub fn quat_rows(q: V4) -> [V4; 3] {
+    let z = Pf::ZERO;
+    let one = Pf::ONE;
+    let q2 = [q[0] + q[0], q[1] + q[1], q[2] + q[2], q[3] + q[3]]; // vadd vf9 = q + q
+    let w = [q2[0] * q[3], q2[1] * q[3], q2[2] * q[3]]; // vf10 = 2q · w
+    let x = [q2[0] * q[0], q2[1] * q[0], q2[2] * q[0]]; // vf11 = 2q · x
+    let y = [q2[1] * q[1], q2[2] * q[1]]; // vf12.yz = 2q.yz · y
+    let zz = q2[2] * q[2]; // vf13.z
+    let mut r0 = [one, z, z, z];
+    let mut r1 = [z, one, z, z];
+    let mut r2 = [z, z, one, z];
+    r1[0] = z + w[2]; // vaddz.x vf15, vf0, vf10
+    r2[0] = z - w[1]; // vsuby.x vf16, vf0, vf10
+    r2[1] = z + w[0]; // vaddx.y vf16, vf0, vf10
+    r0[0] = r0[0] - y[0]; // vsuby.x vf14, vf14, vf12
+    r1[1] = r1[1] - x[0]; // vsubx.y vf15, vf15, vf11
+    r2[2] = r2[2] - x[0]; // vsubx.z vf16, vf16, vf11
+    r0[1] = x[1] - w[2]; // vsubz.y vf14, vf11, vf10
+    r0[2] = x[2] + w[1]; // vaddy.z vf14, vf11, vf10
+    r1[2] = y[1] - w[0]; // vsubx.z vf15, vf12, vf10
+    r1[0] = r1[0] + x[1]; // vaddy.x vf15, vf15, vf11
+    r2[0] = r2[0] + x[2]; // vaddz.x vf16, vf16, vf11
+    r2[1] = r2[1] + y[1]; // vaddz.y vf16, vf16, vf12
+    r0[0] = r0[0] - zz; // vsubz.x vf14, vf14, vf13
+    r1[1] = r1[1] - zz; // vsubz.y vf15, vf15, vf13
+    r2[2] = r2[2] - y[0]; // vsuby.z vf16, vf16, vf12
+    [r0, r1, r2]
+}
+
+/// `fun_001fa328` 0x221c98 `(out, a, b)`: `out_i = ((a0·b_i.x + a1·b_i.y) + a2·b_i.z)` over xyzw
+/// (`vmulax`, `vmadday`, `vmaddz`), for i = 0..2.
+pub fn mat3_mul(a: &[V4; 3], b: &[V4; 3]) -> [V4; 3] {
+    b.map(|bi| std::array::from_fn(|k| (a[0][k] * bi[0] + a[1][k] * bi[1]) + a[2][k] * bi[2]))
+}
+
+/// 0x221ce8 `(out, a, b)`: 4-row version, `out_i = (((a0·b_i.x + a1·b_i.y) + a2·b_i.z) + a3·b_i.w)`.
+pub fn mat4_mul(a: &[V4; 4], b: &[V4; 4]) -> [V4; 4] {
+    b.map(|bi| std::array::from_fn(|k| ((a[0][k] * bi[0] + a[1][k] * bi[1]) + a[2][k] * bi[2]) + a[3][k] * bi[3]))
+}
+
+/// `fun_001fa2d8` [boot 0x1fa2d8]: the transpose of the 3×3 (`vaddx.x vf4, vf0, vf1` …, each lane `0 + v`),
+/// w lanes `1 − 1 = 0`, row 3 = (0, 0, 0, 1).
+#[allow(clippy::eq_op)] // `vsubw.w vf4, vf0, vf0` is 1 − 1 on the VU.
+pub fn transpose(m: &[V4; 3]) -> [V4; 4] {
+    let z = Pf::ZERO;
+    let t = |k: usize| [z + m[0][k], z + m[1][k], z + m[2][k], Pf::ONE - Pf::ONE];
+    [t(0), t(1), t(2), [z, z, z, Pf::ONE]]
+}
+
+/// `fun_001fa3c0` 0x221d78: the quaternion product `a·b` (Hamilton): xyz = `(b·a.w + a·b.w) + a × b`,
+/// w = `a.w·b.w − ((a.x·b.x + a.y·b.y) + 1·a.z·b.z)`.
+pub fn quat_mul(a: V4, b: V4) -> V4 {
+    let w3 = b[3] * a[3]; // vmul.w vf3, vf2, vf1
+    let p = [b[0] * a[0], b[1] * a[1], b[2] * a[2]]; // vmul.xyz vf4, vf2, vf1
+    let s5 = [b[0] * a[3], b[1] * a[3], b[2] * a[3]]; // vmulw.xyz vf5, vf2, vf1
+    let s6 = [a[0] * b[3], a[1] * b[3], a[2] * b[3]]; // vmulw.xyz vf6, vf1, vf2
+    let c = crate::ps2v::cross([a[0].0, a[1].0, a[2].0], [b[0].0, b[1].0, b[2].0]); // vopmula ACC, vf1, vf2; vopmsub vf7, vf2, vf1
+    let dot = (p[0] + p[1]) + Pf::ONE * p[2];
+    let s8 = [s5[0] + s6[0], s5[1] + s6[1], s5[2] + s6[2]];
+    [s8[0] + Pf(c[0]), s8[1] + Pf(c[1]), s8[2] + Pf(c[2]), w3 - dot]
+}
+
+/// `fun_001fa400` 0x221db8 `(t, out, a, b)`: nlerp. `a' = a·(1 − t)`, `b' = b·t` (xyzw); the sign test is on
+/// `d = (((a'·b').y + (a'·b').x) + 1·z) + 1·w` (lane y, read by `qmfc2` + `bgez`); `q = d < 0 ? a' − b' : a' + b'`;
+/// `out = q · rsqrt((((q.x² + q.y²) + 1·q.z²) + 1·q.w²))`.
+pub fn quat_nlerp(t: Pf, a: V4, b: V4) -> V4 {
+    let u = Pf::ONE - t; // vsubx.w vf3, vf0, vf3
+    let a1 = a.map(|x| x * u);
+    let b1 = b.map(|x| x * t);
+    let mut q: V4 = std::array::from_fn(|k| a1[k] + b1[k]);
+    let p: V4 = std::array::from_fn(|k| a1[k] * b1[k]);
+    let d = ((p[1] + p[0]) + Pf::ONE * p[2]) + Pf::ONE * p[3];
+    if d.sign() { q = std::array::from_fn(|k| a1[k] - b1[k]); }
+    let s = q.map(|x| x * x);
+    let l = ((s[0] + s[1]) + Pf::ONE * s[2]) + Pf::ONE * s[3];
+    let r = Pf::ONE / l.sqrt(); // vrsqrt Q, vf0w, vf5x
+    q.map(|x| x * r)
+}
+
+/// `FUN_00221e38(a, out, axis)`: the half-angle quaternion about axis 0/1/2 as the game builds it (note the
+/// negated sine): `c2 = 2·cos a`, `s = −sin a`, `k = sqrt(|c2| + 2)`; `c2 ≥ 0`: `w = 0.5·k`, `v = s / k`;
+/// `c2 < 0` (sign bit): `v = 0.5·k`, `w = s / k`; `v` goes to lane `axis`.
+pub fn axis_quat(a: Pf, axis: usize) -> V4 {
+    let s = -ph::fast_sin(a); // neg.s f0
+    let c = ph::fast_cos(a);
+    let c2 = c + c; // add.s f0, f0, f0
+    let k = (c2.abs() + Pf::b(0x4000_0000)).sqrt(); // vabs, vadd.x vf1, vf3(2.0), vsqrt
+    let half = Pf::b(0x3f00_0000);
+    let z = Pf::ZERO;
+    let (vv, w) = if c2.sign() {
+        let x = half * (z + k); // vaddq.x vf6, vf0, Q; vmulq.x vf4, vf5(0.5), Q
+        (x, z + s / (z + k)) // vdiv Q, vf2x, vf6x; vaddq.w vf4, vf4(0), Q
+    } else {
+        let w = half * (z + k);
+        (z + s / (z + k), w)
+    };
+    let mut q = [z, z, z, w];
+    match axis {
+        0 => q[0] = vv,
+        1 => q[1] = z + vv, // vaddx.y vf4, vf4, vf4; vadd.x vf4, vf0, vf0
+        _ => q[2] = z + vv,
+    }
+    if axis != 0 { q[0] = z + z; }
+    q
+}
+
+/// `FUN_0026ee30(out, e)`: Euler → quaternion `(qx(e.x) · qy(e.y)) · qz(e.z)` ([`axis_quat`], [`quat_mul`]).
+pub fn euler_quat(e: V4) -> V4 {
+    let qx = axis_quat(e[0], 0);
+    let qy = axis_quat(e[1], 1);
+    let qz = axis_quat(e[2], 2);
+    quat_mul(quat_mul(qx, qy), qz)
+}
+
+/// `FUN_00272090(angle, out, axis)` (build_quaternion_from_axis_angle): `out.xyz = axis · fast_sin(angle·0.5)`,
+/// `out.w = fast_cos(angle·0.5)`.
+pub fn axis_angle_quat(angle: Pf, axis: V4) -> V4 {
+    let h = angle * Pf::b(0x3f00_0000);
+    let mut q = scale3(axis, ph::fast_sin(h));
+    q[3] = ph::fast_cos(h); // the second `angle · 0.5` gives the same bits
+    q
+}
+
+/// The FPU sine polynomial of `fun_001fa070` 0x2219a0: fold `x` into [−π/2, π/2] (`x ≥ π/2 → π − x`; the
+/// second test reads the unfolded `x`: `x < −π/2 → −π − x`), then `(((x + 0) + x³·c1) + x⁵·c2) + x⁷·c3) + x⁹·c4`
+/// (`adda.s`, `madda.s` ×3, `madd.s`).
+pub fn fpu_sin(x0: Pf) -> Pf {
+    let (hp, nhp) = (Pf::b(0x3fc9_0fdb), -Pf::b(0x3fc9_0fdb));
+    let (p, np) = (Pf::b(0x4049_0fdb), -Pf::b(0x4049_0fdb));
+    let mut x = x0;
+    let below = x0 < nhp;
+    if !(x0 < hp) { x = p - x0; }
+    if below { x = np - x; }
+    let (c1, c2, c3, c4) = (Pf::b(0xbe2a_aaa4), Pf::b(0x3c08_873e), Pf::b(0xb94f_b21f), Pf::b(0x362e_9c14));
+    let x2 = x * x;
+    let x3 = x * x2;
+    let x5 = x3 * x2;
+    let x7 = x5 * x2;
+    let x9 = x7 * x2;
+    let acc = x + Pf::ZERO;
+    let acc = acc + x3 * c1;
+    let acc = acc + x5 * c2;
+    let acc = acc + x7 * c3;
+    acc + x9 * c4
+}
+
+/// `fun_001fa070` 0x2219a0 `(out, e)`: rows of the inverse-order Euler rotation built on the FPU polynomial:
+/// from the identity, z (if `e.z` bits ≠ 0: rows 0/1 = (c, s, 0, 0) / (−s, c, 0, 0), written into the
+/// identity), then y (`rows_i = ((Y0·r.x + Y1·r.y) + Y2·r.z)`, Y = (c,0,−s,0), (0,1,0,0), (s,0,c,0)), then x
+/// (X = (1,0,0,0), (0,c,s,0), (0,−s,c,0)); row 3 = (0,0,0,1). `s = fpu_sin(a)`, `c = fpu_sin(a + π/2)`.
+pub fn euler_rows_fpu(e: V4) -> [V4; 4] {
+    let (z, one) = (Pf::ZERO, Pf::ONE);
+    let hp = Pf::b(0x3fc9_0fdb);
+    let mut r: [V4; 3] = [[z + one, z, z, z], [z, z + one, z, z], [z, z, one, z]];
+    let sc = |a: Pf| (fpu_sin(a), fpu_sin(a + hp));
+    let apply = |m: [V4; 3], r: [V4; 3]| r.map(|ri| std::array::from_fn(|k| (m[0][k] * ri[0] + m[1][k] * ri[1]) + m[2][k] * ri[2]));
+    if e[2].0 != 0 {
+        let (s, c) = sc(e[2]);
+        r[0][0] = z + c;
+        r[0][1] = z + s;
+        r[1][1] = z + c;
+        r[1][0] = z - s;
+    }
+    if e[1].0 != 0 {
+        let (s, c) = sc(e[1]);
+        let m = [[z + c, z, z - s, z], [z, z + one, z, z], [z + s, z, z + c, z]];
+        r = apply(m, r);
+    }
+    if e[0].0 != 0 {
+        let (s, c) = sc(e[0]);
+        let m = [[z + one, z, z, z], [z, z + c, z + s, z], [z, z - s, z + c, z]];
+        r = apply(m, r);
+    }
+    [r[0], r[1], r[2], [z, z, z, one]]
+}
+
+/// Rows from Euler angles through VU0 program 0x1a3 (`fun_001fa030` 0x221960 stores 3 rows, `fun_001fa050`
+/// 0x221980 also row 3 = (0,0,0,1)).
+pub fn euler_rows(e: V4) -> [V4; 4] { ph::euler_rows(e) }
+
+/// `FUN_002721f0(m, out)`: rotation rows (4) → Euler angles (x, y, z). `z = atan(r0.x, r0.y)`;
+/// `m' = Rz(−z)·m` (0x221980 then 0x221ce8 with m's row 3 replaced by (0,0,0,1)); `y = atan(m'.r0.x, −m'.r0.z)`;
+/// `m'' = Ry(−y)·m'` ([`euler_rows_fpu`] with (0, −y, 0)); `x = −atan(m''.r1.y, m''.r1.z)`.
+pub fn rows_euler(m: &[V4; 4]) -> V4 {
+    use crate::pad::fast_arctan as atan;
+    let z = Pf::ZERO;
+    let mut mm = [m[0], m[1], m[2], [z, z, z, Pf::ONE]];
+    let a_z = atan(mm[0][0], mm[0][1]);
+    let rz = euler_rows([z, z, -a_z, z]);
+    mm = mat4_mul(&rz, &mm);
+    let a_y = atan(mm[0][0], -mm[0][2]);
+    let ry = euler_rows_fpu([z, -a_y, z, z]);
+    mm = mat4_mul(&ry, &mm);
+    let a_x = atan(mm[1][1], mm[1][2]);
+    [-a_x, a_y, a_z, z]
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Class data
+
+/// What the scheduler needs to know about the level's classes (the class headers `0x197780[slot]`).
+pub trait ClassData {
+    /// `InitMobyInstance`'s view of the class, for `CreateMoby(o_class)` (None: class not loaded).
+    fn info(&self, o_class: i16) -> Option<ClassInfo>;
+    /// Animation data (sequences) for `MobyAnimAdvance` and the sequence helpers.
+    fn anim(&self, o_class: i16) -> Option<&MobyAnimClass>;
+}
+
+/// A [`ClassData`] built from per-class records.
+#[derive(Default)]
+pub struct ClassTable {
+    pub classes: HashMap<i16, (ClassInfo, Option<MobyAnimClass>)>,
+}
+
+impl ClassData for ClassTable {
+    fn info(&self, o_class: i16) -> Option<ClassInfo> { self.classes.get(&o_class).map(|c| c.0) }
+    fn anim(&self, o_class: i16) -> Option<&MobyAnimClass> { self.classes.get(&o_class).and_then(|c| c.1.as_ref()) }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Hit messages (0x178580)
+
+/// One hit record (0x40 bytes at `0x178580 + slot·0x40`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HitRecord {
+    /// +0x00: zero (`deliver_hit`) or vf0 = (0,0,0,1) (the sphere kernel).
+    pub pos: V4,
+    /// +0x10: direction / push vector (template +0x00).
+    pub dir: V4,
+    /// +0x20: attacker moby (template +0x10; None = 0).
+    pub attacker: Option<MobyId>,
+    /// +0x24: damage flags (template +0x14). Receivers test masks: bolts/crates 0x1830000, 577 0x330000, 459
+    /// 0x210000; 0x20000 = heavy (breaks reinforced crates), 0x1000000 exactly = "touched" (TNT crate fuse).
+    pub flags: u32,
+    /// +0x28 / +0x29 / +0x2a: attack type bytes and class (template +0x18..+0x1b).
+    pub b28: u8,
+    pub b29: u8,
+    pub h2a: u16,
+    /// +0x2c: damage (template +0x1c).
+    pub damage: Pf,
+    /// +0x30: template +0x20.
+    pub w30: u32,
+    /// +0x34: target moby.
+    pub target: MobyId,
+    /// +0x38: `CollLine_Fix`'s hit: the primitive index hit, −1 for a triangle; 0 from the sphere kernel
+    /// and `deliver_hit`.
+    pub prim: i32,
+}
+
+/// The attack a sender fills in (the 0x24-byte template the hit functions copy into a record).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct HitTemplate {
+    /// +0x00: direction / push vector.
+    pub dir: V4,
+    /// +0x10: attacker.
+    pub attacker: Option<MobyId>,
+    /// +0x14: flags.
+    pub flags: u32,
+    /// +0x18..+0x1b (the TNT crate leaves them as stale stack; 0 here).
+    pub b18: u8,
+    pub b19: u8,
+    pub h1a: u16,
+    /// +0x1c: damage.
+    pub damage: Pf,
+    /// +0x20.
+    pub w20: u32,
+}
+
+/// The hit-message records and the next-slot counter `0x1742d4` (CollOutput+0x14). A target's `moby+0xa4`
+/// holds its record slot (0xff = none).
+#[derive(Clone, Debug)]
+pub struct HitLog {
+    pub records: Vec<HitRecord>,
+    pub next: u8,
+}
+
+impl Default for HitLog {
+    fn default() -> Self { HitLog { records: vec![HitRecord::default(); HIT_SLOTS], next: 0 } }
+}
+
+/// Number of records at 0x178580 (0x40 each; `slot = (slot + 1) & 0x3f`).
+pub const HIT_SLOTS: usize = 0x40;
+
+impl HitLog {
+    fn write(&mut self, table: &mut MobyTable, target: MobyId, t: &HitTemplate, pos: V4) { self.write_prim(table, target, t, pos, 0) }
+
+    fn write_prim(&mut self, table: &mut MobyTable, target: MobyId, t: &HitTemplate, pos: V4, prim: i32) {
+        let slot = self.next;
+        self.records[slot as usize] = HitRecord {
+            pos,
+            dir: t.dir,
+            attacker: t.attacker,
+            flags: t.flags,
+            b28: t.b18,
+            b29: t.b19,
+            h2a: t.h1a,
+            damage: t.damage,
+            w30: t.w20,
+            target,
+            prim,
+        };
+        table.mobys[target].hit_slot = slot;
+        self.next = (slot + 1) & 0x3f;
+    }
+
+    /// The record currently addressed by `target+0xa4`, if it is for `target`.
+    fn current(&self, table: &MobyTable, target: MobyId) -> Option<&HitRecord> {
+        let s = table.mobys[target].hit_slot;
+        if s == 0xff { return None; }
+        self.records.get(s as usize).filter(|r| r.target == target)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Sounds, glints, save bits, counters, inventory
+
+/// A `PlayClassSound(idx, flags, moby)` (level01 0x2a1618) call: class sound `index` of `o_class`
+/// (`sound_class` is the class whose sound table is used: 0x2a16c0 passes another class).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoundEvent {
+    pub index: i32,
+    pub flags: u32,
+    pub moby: MobyId,
+    pub o_class: i16,
+    pub sound_class: i16,
+    pub pos: [f32; 3],
+    pub tick: u64,
+}
+
+/// The sound system as the updates see it (`PlayClassSound` → `SoundSlotAlloc` 0x2a13a0). The audio port
+/// implements it with `audio::voices::SoundSlots::play` on the same RNG: the slot allocator draws
+/// `randi(pb_hi − pb_lo)` for a class sound with a pitch-bend range (on Novalis: crate 502's sound 0) when a
+/// slot is free, so the draw must happen during the moby update. Without a sink the call is only recorded
+/// in [`Services::sounds`] and draws nothing.
+pub trait SoundSink {
+    /// Returns the voice slot, or −1 when refused.
+    fn play_class_sound(&mut self, ev: &SoundEvent, rng: &mut Rng) -> i32;
+}
+
+/// One glint (0x16eec0 + i·0x20): the sparkle drawn on idle bolts.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Glint {
+    /// +0x00: position.
+    pub pos: V4,
+    /// +0x10: remaining ticks (0x18 at creation; the entry is free when ≤ 0).
+    pub timer: i16,
+    /// +0x12: brightness ramp (+5 per tick while timer ≥ 13, then −5; not reset at creation).
+    pub alpha: i16,
+    /// +0x14: owner moby index.
+    pub moby: i16,
+    /// +0x18: spin angle.
+    pub angle: Pf,
+    /// +0x1c: size.
+    pub size: Pf,
+}
+
+/// The glint table.
+#[derive(Clone, Debug, Default)]
+pub struct Glints {
+    pub entries: [Glint; 16],
+}
+
+impl Glints {
+    /// `FUN_002208a0(size, pos, moby)`: the first entry with timer < 1 gets `pos`, size, timer 0x18, owner and
+    /// `rand_angle()`; returns its index, −1 when all 16 are busy (no RNG draw then).
+    pub fn create(&mut self, size: Pf, pos: V4, moby: i16, rng: &mut Rng) -> i16 {
+        for (i, e) in self.entries.iter_mut().enumerate() {
+            if e.timer < 1 {
+                e.pos = pos;
+                e.size = size;
+                e.timer = 0x18;
+                e.moby = moby;
+                e.angle = Pf(rng.rand_angle_bits());
+                return i as i16;
+            }
+        }
+        -1
+    }
+
+    /// `FUN_00220928`, run right after `UpdateParts` every tick: live entries spin by `−dt·5.2359877`
+    /// (wrapped), brightness ±5, timer − 1, and are zeroed (`FastMemSet(e, 0, 0x20)`) when it reaches ≤ 0.
+    pub fn update(&mut self) {
+        for e in self.entries.iter_mut() {
+            if e.timer > 0 {
+                e.angle = ph::fast_subtract_rotations(e.angle, DT * Pf::b(0x40a7_8d36));
+                e.alpha = e.alpha.wrapping_add(if e.timer < 0xd { -5 } else { 5 });
+                e.timer = e.timer.wrapping_sub(1);
+                if e.timer < 1 { *e = Glint::default(); }
+            }
+        }
+    }
+}
+
+/// The per-spawn-id save state the bolt pickup and `SetDeathBits` 0x26c250 write (indexed by moby+0xb2).
+#[derive(Clone, Debug, Default)]
+pub struct SaveBits {
+    /// `0x14c190 + level·0x100 + (id >> 5)·4`, bit `id & 31`: the persistent death bits, as (level, id).
+    pub death: std::collections::HashSet<(u32, i16)>,
+    /// `0x1ba950 + (id >> 5)·4`, bit `id & 31`: this visit's death bits.
+    pub death_level: std::collections::HashSet<i16>,
+    /// `0x1baea4[id] = mission + 2` (the level's "killed" bytes).
+    pub killed: HashMap<i16, u8>,
+    /// `0x1bbb04[id] = mission + 2` (persistent: a collected placed bolt does not respawn).
+    pub collected: HashMap<i16, u8>,
+}
+
+/// Game-state words the ported classes read or add to (owned here until the game-state port takes them).
+#[derive(Clone, Debug, Default)]
+pub struct GameCounters {
+    /// `0x15ed98`: the bolt count.
+    pub bolts: i32,
+    /// `0x13df38[level]`: bolts collected per planet.
+    pub level_bolts: [i32; 20],
+    /// `0x15ee2c`: bolts of the current challenge (the pickup adds when the bolt's pvar+0x40 is set, or when
+    /// `0x15f598` and a placed bolt). BoltBurst's farm limiter reads it.
+    pub challenge_bolts: i32,
+    /// `0x15f598`: "the dropped bolts count for the challenge" (set by `BoltBurst` from the mission table
+    /// for non-crate droppers).
+    pub challenge_on: i32,
+    /// `0x15ee28`: the challenge's time limit (BoltBurst limiter; 0 = off).
+    pub challenge_limit: i32,
+    /// `0x15eea0` (game beaten): BoltBurst doubles N when it or [`times_completed`](Self::times_completed) is set.
+    pub double_a: i32,
+    /// `0x15ee20` (gp−0x7de0): times completed / challenge-mode count (`GameState::global.completes`). BoltBurst
+    /// doubles N when it is set; the challenge-mode content reads it: `TeleporterPadUpdate` 0x308bd8 hides a pad
+    /// with pvar+0x3c ≠ 0 and `ItemOfferUpdate` 0x2e1ac0 deletes the even gold-weapon offers while it is 0.
+    pub times_completed: i32,
+    /// `0x13e520` u8[40]: gold weapon owned, by item id (`GameState::global.gold_weapons`; empty = none).
+    pub gold_weapons: Vec<u8>,
+    /// `0x14d592 + level·0x100 + spawner(+0xb1)·4` (s16), keyed by (level, spawner byte).
+    pub spawner_bolts: HashMap<(u32, u8), i16>,
+    /// HUD bolt-counter refreshes requested (`queue_animation_update(2, 0x754e, …)`).
+    pub hud_bolt_refresh: u32,
+}
+
+/// The mission tables the death-bit and pickup writes consult: `0x15fc88[mission]` and
+/// `0x14c050[level·16 + mission]`, and the per-mission deaths `0x14ee90`. The level's state is
+/// [`LevelMissions`]; the trait's defaults ([`NoMissions`]: every byte 0xff, no ammo-crate gate) are for
+/// worlds without one.
+pub trait MissionState {
+    fn mission_slot(&self, _mission: u8) -> u8 { 0xff }
+    fn mission_done(&self, _level: u32, _mission: u8) -> u8 { 0xff }
+    /// `0x14ee90[mission]` (s32): an ammo crate (501) whose pvar+0xf8 exceeds it is deleted at init.
+    fn ammo_crate_gate(&self, _mission: u8) -> i32 { i32::MAX }
+}
+/// [`MissionState`] with nothing started.
+pub struct NoMissions;
+impl MissionState for NoMissions {}
+
+/// The mission state of the loaded level (L = 0x15ed84) the moby code reads:
+/// * `0x15fc88[16]`: the mission bytes as `LoadLevelCoreData` 0x258128 copied them from the save at load;
+/// * `0x14c050 + L·16`: the live save bytes (`SetMissionDone` writes them; the port has no writer yet);
+/// * `0x14ee90` s32[16]: hero deaths per mission since the fresh entry. `LoadLevelCoreData` clears it right
+///   before `MobyLoadTimeUpdatePass`, but only on a fresh load (`param_2 == 0`; `entry` passes 1 for the death
+///   reload, 0x141401 set); the hero death routine `FUN_002319b0` does `deaths[killer+0xb0]++` (killer =
+///   0x1415d0, when its +0xb0 ≠ 0xff). Not in any save descriptor. The class-501 ammo crates read it
+///   (`FUN_002eac18`: a crate with mission m and pvar+0xf8 = N exists only once the player died N times to
+///   mission m's enemies since entering the level).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LevelMissions {
+    pub level: u32,
+    pub slot: [u8; 16],
+    pub done: [u8; 16],
+    pub deaths: [i32; 16],
+}
+
+impl LevelMissions {
+    /// A fresh load of level `level` whose save mission bytes are `save` (`0x14c050 + L·16`): the copy, the
+    /// live bytes, deaths cleared.
+    pub fn fresh_load(level: u32, save: [u8; 16]) -> LevelMissions { LevelMissions { level, slot: save, done: save, deaths: [0; 16] } }
+
+    /// The death reload (`LoadLevelCoreData` with `param_2 = 1`): the copy is taken again, the deaths are kept.
+    pub fn death_reload(&self, save: [u8; 16]) -> LevelMissions { LevelMissions { level: self.level, slot: save, done: save, deaths: self.deaths } }
+
+    /// `FUN_002319b0`'s count: `deaths[killer+0xb0]++` when the killer (0x1415d0) has a mission byte.
+    pub fn hero_death(&mut self, killer_mission: Option<u8>) {
+        if let Some(m) = killer_mission.filter(|&m| m != 0xff) {
+            if let Some(d) = self.deaths.get_mut(m as usize) { *d = d.wrapping_add(1); }
+        }
+    }
+}
+
+impl MissionState for LevelMissions {
+    fn mission_slot(&self, mission: u8) -> u8 { self.slot.get(mission as usize).copied().unwrap_or(0) }
+    fn mission_done(&self, level: u32, mission: u8) -> u8 {
+        if level == self.level { self.done.get(mission as usize).copied().unwrap_or(0) } else { 0 }
+    }
+    fn ammo_crate_gate(&self, mission: u8) -> i32 { self.deaths.get(mission as usize).copied().unwrap_or(0) }
+}
+
+/// The inventory the ammo crates read (`0x26bff8`, `0x2daf10`, crate state 6 on planet 0x12).
+pub trait Inventory {
+    /// `0x13d4c0[i]`: item `i` owned.
+    fn owned(&self, _item: usize) -> bool { false }
+    /// `0x13d428[i]`: ammo of item `i`.
+    fn ammo(&self, _item: usize) -> i32 { 0 }
+    /// `0x1c4530 + i·0x18 + 0xe` / `+0xc`: max ammo / pickup amount.
+    fn max_ammo(&self, _item: usize) -> u16 { 0 }
+    fn pickup_amount(&self, _item: usize) -> u16 { 0 }
+    /// `0x15edd0[0..12]`: the ammo item list (0xff ends it).
+    fn ammo_list(&self) -> [u8; 12] { [0xff; 12] }
+    /// `0x179f40 + type·0x4c + 0x3a` (s16): the pickup class of item `ty` (level01 .data).
+    fn pickup_class(&self, ty: i32) -> i16 {
+        match ty {
+            10 => 226,
+            11 => 204,
+            13 => 222,
+            15 => 1006,
+            16 => 214,
+            17 => 225,
+            19 => 213,
+            20 => 223,
+            23 => 1438,
+            24 => 1447,
+            25 => 1449,
+            _ => 0,
+        }
+    }
+}
+/// An empty inventory.
+pub struct NoInventory;
+impl Inventory for NoInventory {}
+
+/// Spawns the ported code asked for that have no port of their own, counted (particle types without a
+/// spawn port, the debris-moby updates …).
+#[derive(Clone, Debug, Default)]
+pub struct FxStats {
+    pub part_spawns: HashMap<u8, u64>,
+    pub part_failed: u64,
+    pub debris: u64,
+    pub flashes: u64,
+    pub pickups: u64,
+    /// `BoltBurst` with flags 4 on a dropper with a mode-0x20 pvar header (base velocity not ported).
+    pub unported_base: u64,
+    /// Class states / branches the ported updates reached but do not port (combat, teleports, dialogs …), by
+    /// name ([`Services::unported`]).
+    pub unported: std::collections::BTreeMap<&'static str, u64>,
+}
+
+/// State the moby system keeps between ticks (the game's globals it owns).
+#[derive(Clone, Debug)]
+pub struct Services {
+    pub timing: Timing,
+    /// `0x15ed84`: the level (planet) number.
+    pub level: u32,
+    /// `0x15f5c4`: game mode (2 = cutscene; bolts hide).
+    pub game_mode: i32,
+    /// `0x13d4e2`: bolt grabber owned (the hero tick then sets the pickup radii to 12 / 4.5).
+    pub bolt_grabber: bool,
+    /// `0x141402` (u8): the hero flag that makes dropped bolts fly straight to the hero.
+    pub hero_magnet: u8,
+    /// `0x15f5d0` / `0x15f5d4`: the frame-load ratios (RCNT1 based) that throttle sparks and flashes. The port
+    /// cannot reproduce them; 0 = never throttled.
+    pub frame_load: [Pf; 2],
+    pub hits: HitLog,
+    pub sounds: Vec<SoundEvent>,
+    pub glints: Glints,
+    pub save: SaveBits,
+    pub counters: GameCounters,
+    pub fx: FxStats,
+    /// `gp−0x5854` (0x1613ac): tick of the last bolt pickup sound (.lit, 0 at boot).
+    pub last_bolt_sound: i32,
+    /// `gp−0x5858` (0x1613a8): the bolt spin rate, 720.0 degrees per second (.lit, never written).
+    pub bolt_spin: Pf,
+    /// `0x16196c` / `0x161970`: ticks of the last crate break sound / break effect (rate limits).
+    pub break_sound_tick: i32,
+    pub break_fx_tick: i32,
+    /// `0x1b0930[i]`: the level's splines (first point's w is used as a counter by the ammo-crate init), as
+    /// raw words.
+    pub splines: Vec<Vec<[u32; 4]>>,
+    /// Snapshot frames of the mobys' blends (`0x1aabc0` slots), by moby index.
+    pub snapshots: Vec<Option<MobyFrame>>,
+    /// `0x1abcc0`: the moby groups (the active-list builder and the crates' group iteration read them).
+    pub groups: Groups,
+    /// `0x19bc60`: the moby grid the collision kernels walk (kept by `MobyBuildMatrix` / `DeleteMoby`:
+    /// [`World::build_matrix`], the scheduler, [`World::delete_moby`]). Built at load with
+    /// [`MobyGrid::build`]. Shared (`Arc`) so the hero's per-tick scene can hold it without a copy.
+    pub grid: Arc<MobyGrid>,
+    /// The level's moby class collision blobs (class header +0x10) by `o_class` ([`Services::set_moby_collision`]).
+    /// Empty: no moby collision (every moby pass finds nothing).
+    pub coll_classes: Arc<HashMap<i16, MobyCollision>>,
+    /// `CollOutput +4/+8/+0xc`: the collision kernels' joint-pose cache.
+    pub pose_cache: Arc<Mutex<PoseCache>>,
+    /// Per class: the first byte list of each joint list (class header `joints`, `rc_formats::gadget::joint_list`),
+    /// for `FUN_002645a8(moby, list, out)` ([`World::joint_point`]). Filled for the classes whose update needs
+    /// it ([`crate::moby_update::classes::needs_joint_lists`]).
+    pub joint_lists: HashMap<i16, Vec<Vec<u8>>>,
+    /// The level's volume sections (cuboids 0x1600ec, spheres, cylinders, pills, paths, grind paths) for the
+    /// trigger tests ([`crate::moby_update::triggers`], [`Services::set_volumes`]).
+    pub volumes: Arc<rc_formats::volumes::Volumes>,
+}
+
+impl Default for Services {
+    fn default() -> Self { Services::new() }
+}
+
+impl Services {
+    pub fn new() -> Services {
+        Services {
+            timing: Timing::NTSC,
+            level: 1,
+            game_mode: 0,
+            bolt_grabber: false,
+            hero_magnet: 0,
+            frame_load: [Pf::ZERO; 2],
+            hits: HitLog::default(),
+            sounds: Vec::new(),
+            glints: Glints::default(),
+            save: SaveBits::default(),
+            counters: GameCounters::default(),
+            fx: FxStats::default(),
+            last_bolt_sound: 0,
+            bolt_spin: Pf::b(0x4434_0000),
+            break_sound_tick: 0,
+            break_fx_tick: 0,
+            splines: Vec::new(),
+            snapshots: Vec::new(),
+            groups: Groups::default(),
+            grid: Arc::new(MobyGrid::new()),
+            coll_classes: Arc::new(HashMap::new()),
+            pose_cache: Arc::new(Mutex::new(PoseCache::default())),
+            joint_lists: HashMap::new(),
+            volumes: Arc::new(rc_formats::volumes::Volumes::default()),
+        }
+    }
+
+    /// Counts a reached-but-unported state or branch of a ported class (the stats line / trace report).
+    pub fn unported(&mut self, what: &'static str) { *self.fx.unported.entry(what).or_default() += 1; }
+
+    /// The class collision blobs of the level (`rc_formats::moby_collision::parse_level`).
+    pub fn set_moby_collision(&mut self, blobs: Vec<(i32, MobyCollision)>) {
+        self.coll_classes = Arc::new(blobs.into_iter().map(|(oc, c)| (oc as i16, c)).collect());
+    }
+
+    /// The level loader's grid registrations over the loaded table ([`MobyGrid::build`]).
+    pub fn build_grid(&mut self, table: &mut MobyTable) { self.grid = Arc::new(MobyGrid::build(table)); }
+
+    /// `MobyBuildMatrix` 0x265bd8 on moby `id` of `table`: matrix and bounding sphere
+    /// ([`crate::moby_update::scheduler::rebuild_matrix`]), then the grid re-registration.
+    pub fn build_matrix_in(&mut self, table: &mut MobyTable, classes: &dyn ClassData, id: MobyId) {
+        let m = &mut table.mobys[id];
+        crate::moby_update::scheduler::rebuild_matrix(m, classes.anim(m.o_class));
+        Arc::make_mut(&mut self.grid).register(m);
+    }
+
+    /// The moby pass's view of `table` (with `classes` for the joint poses).
+    pub fn scene_parts<'s>(&'s self, table: &'s MobyTable, classes: &'s dyn ClassData) -> TableMobys<'s> {
+        TableMobys { table, classes, snapshots: &self.snapshots }
+    }
+
+    /// A [`MobyScene`] over `mobys` with this level's grid, blobs and pose cache.
+    pub fn scene<'s>(&'s self, mobys: &'s TableMobys<'s>) -> MobyScene<'s> {
+        MobyScene { mobys, grid: &self.grid, classes: &self.coll_classes, cache: &self.pose_cache }
+    }
+
+    pub fn ticks(&self, n: i32) -> i32 { self.timing.ticks(n) }
+
+    /// The splines from `rc_formats::gameplay::parse_splines`, as raw words.
+    pub fn set_splines(&mut self, s: &[Vec<[f32; 4]>]) {
+        self.splines = s.iter().map(|v| v.iter().map(|p| p.map(f32::to_bits)).collect()).collect();
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The world a class update sees
+
+/// What a class update reads and writes besides its own moby: the game's globals at the time the moby loop
+/// runs (after the pad, before the hero: the hero fields are last tick's).
+pub struct World<'a> {
+    pub table: &'a mut MobyTable,
+    /// The hero block (0x13f350..0x141660).
+    pub hero: &'a Hero,
+    /// `0x1413d0`: Ratchet's moby.
+    pub hero_moby: Option<MobyId>,
+    /// `0x167240`: camera position (written by the previous tick's camera update).
+    pub camera: V4,
+    /// `0x16d140..`: the view the crate respawn's `FastBSphereCheck` uses (None: never out of view).
+    pub view: Option<&'a BSphereView>,
+    /// The game's one `rand` stream (shared with the particles and the hero).
+    pub rng: &'a mut Rng,
+    /// The level collision (world mesh). None: the world pass finds nothing (the moby pass still runs, on
+    /// [`Services::grid`] / [`Services::coll_classes`]).
+    pub coll: Option<&'a Collision>,
+    /// `0x15f5cc`: the tick counter.
+    pub counter: u64,
+    pub classes: &'a dyn ClassData,
+    /// The particle system (None: spawns are only counted in [`FxStats`], without their RNG draws).
+    pub particles: Option<&'a mut Particles>,
+    pub sound: Option<&'a mut dyn SoundSink>,
+    pub missions: &'a dyn MissionState,
+    pub inventory: &'a dyn Inventory,
+    /// Class updates ported outside `moby_update` (water 751, emitters 27, …), run in the moby order.
+    pub external: Option<&'a mut dyn ExternalUpdates>,
+    pub svc: &'a mut Services,
+}
+
+/// Updates of classes whose ports live outside `moby_update` (the water manager 751 in `water.rs`, the
+/// class-27 emitters of `particles::type06`, …). The scheduler calls them at the moby's place in the run
+/// order (load pass: array order; ticks: class-slot order) with the one shared RNG, so their draws land where
+/// the game makes them.
+pub trait ExternalUpdates {
+    /// The level-table address this handles for `o_class` (`Some`: the class gets an update function, so
+    /// `InitMobyInstance` does not set mode 2).
+    fn update_fn(&self, o_class: i16) -> Option<u32>;
+    /// `(*moby+0x74)(moby)` for an address [`update_fn`](Self::update_fn) returned. `particles` is the
+    /// world's particle system (the class-27 emitters spawn into it).
+    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: V4, counter: u64, particles: Option<&mut Particles>);
+}
+
+/// A `CollLine_Fix` result with its moby (`CollOutput+0x18`).
+#[derive(Clone, Copy, Debug)]
+pub struct LineHit {
+    pub moby: Option<MobyId>,
+    /// +0x20 hit point (w from the kernel: 0 here).
+    pub point: V4,
+    /// +0x40 raw normal (a moby primitive: hit − primitive centre).
+    pub normal: V4,
+}
+
+impl LineHit {
+    fn of(h: &CollOutput) -> LineHit {
+        LineHit { moby: h.moby, point: [pf(h.point[0]), pf(h.point[1]), pf(h.point[2]), Pf::ZERO], normal: [pf(h.normal[0]), pf(h.normal[1]), pf(h.normal[2]), Pf::ZERO] }
+    }
+}
+
+/// The empty mesh for a world without collision.
+fn no_mesh() -> &'static Collision {
+    static EMPTY: std::sync::OnceLock<Collision> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(Collision::default)
+}
+
+impl<'a> World<'a> {
+    /// A world with no collision, particles, sound sink, view or external updates, no missions and an
+    /// empty inventory; the camera at the hero.
+    pub fn new(table: &'a mut MobyTable, hero: &'a Hero, rng: &'a mut Rng, classes: &'a dyn ClassData, svc: &'a mut Services, counter: u64) -> World<'a> {
+        let hero_moby = table.hero();
+        World {
+            table,
+            hero,
+            hero_moby,
+            camera: hero.pos,
+            view: None,
+            rng,
+            coll: None,
+            counter,
+            classes,
+            particles: None,
+            sound: None,
+            missions: &NoMissions,
+            inventory: &NoInventory,
+            external: None,
+            svc,
+        }
+    }
+
+    pub fn m(&self, id: MobyId) -> &Moby { &self.table.mobys[id] }
+    pub fn mm(&mut self, id: MobyId) -> &mut Moby { &mut self.table.mobys[id] }
+    pub fn ticks(&self, n: i32) -> i32 { self.svc.ticks(n) }
+
+    /// The bolt pickup radii `(0x1415d8 xy, 0x1415dc z)`: hero init 0x226b70 writes 2.125 / 1.25; every hero
+    /// tick (`HeroTickStateTimer` 0x23c710) rewrites them as 3.0 / 1.75, or 12 / 4.5 with the bolt grabber
+    /// (0x13d4e2). The mobys run before the hero, so tick 0 sees the init values.
+    pub fn bolt_radii(&self) -> (Pf, Pf) {
+        if self.counter == 0 { return (Pf::b(0x4008_0000), Pf::b(0x3fa0_0000)); }
+        if self.svc.bolt_grabber { (Pf::b(0x4140_0000), Pf::b(0x4090_0000)) } else { (Pf::b(0x4040_0000), Pf::b(0x3fe0_0000)) }
+    }
+
+    /// `0x13f390`: the transpose of the hero rows 0x13f350 (`HeroMotionUpdate` 0x231d18: identity, then
+    /// `fun_001fa2d8(0x13f390, 0x13f350)`).
+    pub fn hero_inverse(&self) -> [V4; 4] {
+        let r = self.hero.rows;
+        transpose(&[r[0], r[1], r[2]])
+    }
+
+    /// `CollLine_Fix(p0, p1, flags, ignore, 0)`: the world mesh, then the mobys ([`coll_line_m`]).
+    pub fn line(&self, p0: V4, p1: V4, flags: u32, ignore: Option<MobyId>) -> Option<LineHit> {
+        self.coll_line(p0, p1, flags, ignore).map(|h| LineHit::of(&h))
+    }
+
+    /// `CollLine_Fix(p0, p1, flags, ignore, 0)` with the whole `CollOutput`.
+    pub fn coll_line(&self, p0: V4, p1: V4, flags: u32, ignore: Option<MobyId>) -> Option<CollOutput> {
+        let src = self.svc.scene_parts(self.table, self.classes);
+        let sc = self.svc.scene(&src);
+        coll_line_m(self.coll.unwrap_or(no_mesh()), Some(&sc), ph::to_f32x3(p0), ph::to_f32x3(p1), QueryFlags(flags), ignore)
+    }
+
+    /// The sphere kernel 0x212960 `(r, &centre, flags, ignore)`: the world mesh, then the mobys.
+    pub fn coll_sphere(&self, centre: V4, r: Pf, flags: u32, ignore: Option<MobyId>) -> Option<CollOutput> {
+        let src = self.svc.scene_parts(self.table, self.classes);
+        let sc = self.svc.scene(&src);
+        coll_sphere_m(self.coll.unwrap_or(no_mesh()), Some(&sc), ph::to_f32x3(centre), fl(r), QueryFlags(flags), ignore)
+    }
+
+    /// `GroundHeight(up, pos, fl)` 0x26e618: `CollLine_Fix((x, y, z + up), (x, y, 0.01), fl | 2)`; the hit z,
+    /// else 0.
+    pub fn ground_height(&self, up: Pf, pos: V4, fl: u32) -> Pf {
+        let a = [pos[0], pos[1], pos[2] + up, pos[3]];
+        let b = [pos[0], pos[1], Pf::b(0x3c23_d70a), pos[3]];
+        self.line(a, b, fl | 2, None).map(|h| h.point[2]).unwrap_or(Pf::ZERO)
+    }
+
+    /// `PlayClassSound(idx, flags, moby)` 0x2a1618 (`sound_class` = the moby's class) or 0x2a16c0 (another
+    /// class's table): through the [`SoundSink`] (its RNG draw included), and recorded.
+    pub fn play_sound_as(&mut self, index: i32, flags: u32, id: MobyId, sound_class: i16) -> i32 {
+        let m = &self.table.mobys[id];
+        let ev = SoundEvent { index, flags, moby: id, o_class: m.o_class, sound_class, pos: [m.position[0], m.position[1], m.position[2]], tick: self.counter };
+        self.svc.sounds.push(ev);
+        match self.sound.as_deref_mut() {
+            Some(s) => s.play_class_sound(&ev, self.rng),
+            None => -1,
+        }
+    }
+
+    pub fn play_sound(&mut self, index: i32, flags: u32, id: MobyId) -> i32 {
+        let c = self.table.mobys[id].o_class;
+        self.play_sound_as(index, flags, id, c)
+    }
+
+    /// `CreateMoby(o_class)` 0x263390 with the class as loaded (the game's init defaults, a zeroed 0x80-byte
+    /// pvar block); decrements the free-slot count (`MobyTable::free_slots`, in [`MobyTable::create`]). The
+    /// snapshot slot of the new moby is cleared.
+    pub fn create_moby(&mut self, o_class: i16) -> Option<MobyId> {
+        let info = self.classes.info(o_class);
+        let id = self.table.create(o_class, info.as_ref(), self.counter)?;
+        if self.svc.snapshots.len() <= id { self.svc.snapshots.resize(id + 1, None); }
+        self.svc.snapshots[id] = None;
+        Some(id)
+    }
+
+    /// `DeleteMoby` 0x2636c0: state 0xfd / 0xfe, the reuse tick, and the grid removal
+    /// (`UpdateMobyGrids(moby, 0x80807f7f)`).
+    pub fn delete_moby(&mut self, id: MobyId) {
+        self.table.delete(id, self.counter);
+        Arc::make_mut(&mut self.svc.grid).remove(&mut self.table.mobys[id]);
+    }
+
+    /// `MobyGetHitMessage(m, mask, keep)` 0x26f320: the record in slot `moby+0xa4` when it targets this moby
+    /// and `flags & mask ≠ 0`. A record for this moby whose flags miss the mask is dropped (`+0xa4 = 0xff`)
+    /// unless `keep`.
+    pub fn get_hit(&mut self, id: MobyId, mask: u32, keep: bool) -> Option<HitRecord> {
+        let slot = self.table.mobys[id].hit_slot;
+        if slot == 0xff { return None; }
+        let r = *self.svc.hits.records.get(slot as usize)?;
+        if r.target != id { return None; }
+        if r.flags & mask == 0 {
+            if !keep { self.table.mobys[r.target].hit_slot = 0xff; }
+            return None;
+        }
+        Some(r)
+    }
+
+    /// `FUN_0026e968(target, tmpl)`: the canonical hit delivery. Skipped when `target+0xa4` already holds a
+    /// record for it with a larger damage (`tmpl.damage < old`, `c.lt.s`); else the next slot (`0x1742d4`) gets
+    /// the record (+0x00 zero) and `target+0xa4` points at it. For the wrench / weapons (not ported yet).
+    pub fn deliver_hit(&mut self, target: MobyId, t: &HitTemplate) { deliver_hit_in(self.table, &mut self.svc.hits, target, t); }
+
+    /// `coll_sphere_mobys(r, centre, flags, ignore, tmpl)` 0x214468 ([`sphere_mobys_in`]). Returns the number
+    /// of mobys listed.
+    pub fn sphere_mobys(&mut self, r: Pf, centre: V4, flags: u32, ignore: Option<MobyId>, tmpl: Option<&HitTemplate>) -> usize {
+        sphere_mobys_in(self.table, self.svc, self.classes, r, centre, flags, ignore, tmpl).len()
+    }
+
+    pub fn class_scale(&self, o_class: i16) -> Pf {
+        self.classes.info(o_class).map(|c| pf(c.scale)).unwrap_or(Pf::ZERO)
+    }
+
+    pub fn anim_class(&self, o_class: i16) -> Option<&MobyAnimClass> { self.classes.anim(o_class) }
+
+    /// `fun_00212f90` (0x26c660) `MobyAnimBlend(m, seq, frame, ticks)` on the moby's animation state and
+    /// snapshot slot. False when the class has no such sequence (nothing changes).
+    pub fn anim_blend(&mut self, id: MobyId, seq: u8, frame: i32, ticks: i32) -> bool {
+        let o = self.table.mobys[id].o_class;
+        let Some(class) = self.classes.anim(o) else { return false };
+        if self.svc.snapshots.len() <= id { self.svc.snapshots.resize(id + 1, None); }
+        let snap = &mut self.svc.snapshots[id];
+        rc_formats::moby_anim::set_sequence(&mut self.table.mobys[id].anim, class, seq, frame, ticks, snap)
+    }
+
+    /// `MobyBuildMatrix` 0x265bd8 on one moby.
+    pub fn build_matrix(&mut self, id: MobyId) { self.svc.build_matrix_in(self.table, self.classes, id); }
+
+    /// `FUN_002645a8(moby, list, out)` 0x2645a8: the world point of the last joint of the class's joint list
+    /// `list` in the moby's current pose. The partial pose `fun_00210850` (`rc_formats::moby_anim::evaluate_chain`)
+    /// gives the joint's translation `P.r3`; then `q = P.r3.xyz · (scale / 1024)` (w kept), `r = rows(+0xc0) · q`
+    /// with `(0, 0, 0, 1)` as row 3 (0x2215e0), `out.xyz = r.xyz + position` (w = r.w). The rows are the ones the
+    /// last `MobyBuildMatrix` left (an update that turns the moby this tick still sees last tick's). Without the
+    /// class's joint list or animation data the joint is the moby origin. Native `f32`.
+    pub fn joint_point(&self, id: MobyId, list: usize) -> [f32; 4] {
+        let m = &self.table.mobys[id];
+        let chain = self.svc.joint_lists.get(&m.o_class).and_then(|l| l.get(list)).filter(|c| !c.is_empty());
+        let t = match (self.classes.anim(m.o_class), chain) {
+            (Some(class), Some(chain)) => {
+                let snap = self.svc.snapshots.get(id).and_then(|s| s.as_ref());
+                rc_formats::moby_anim::evaluate_chain(class, &m.anim, snap, chain)[3]
+            }
+            _ => [0.0, 0.0, 0.0, 1.0],
+        };
+        let k = m.scale * (1.0 / 1024.0);
+        let q = [t[0] * k, t[1] * k, t[2] * k, t[3]];
+        let r = &m.rows;
+        let v: [f32; 4] = std::array::from_fn(|l| r[0][l] * q[0] + r[1][l] * q[1] + r[2][l] * q[2] + if l == 3 { q[3] } else { 0.0 });
+        [v[0] + m.position[0], v[1] + m.position[1], v[2] + m.position[2], v[3]]
+    }
+
+    // -----------------------------------------------------------------------------------------------
+    // Particle spawners (the record writes and RNG draws of the game's spawn functions; the per-type
+    // updates are the particle port's: an unported type kills itself on its first update and is counted)
+
+    fn part(&mut self, ty: u8) -> Option<usize> {
+        let p = self.particles.as_deref_mut()?;
+        let r = p.create_part(ty);
+        if r.is_none() { self.svc.fx.part_failed += 1; }
+        *self.svc.fx.part_spawns.entry(ty).or_default() += 1;
+        r
+    }
+
+    /// `PartType13Spawn(J, lo, hi, g, size, pos, s, rgba)` 0x280698 (crate break dust): 5 draws when a record
+    /// is free (3 × `randf_sym(0, J)` jitter, `randi(2)` spin sign, `randf(lo, hi)`), none otherwise.
+    #[allow(clippy::too_many_arguments)]
+    pub fn part13(&mut self, j: Pf, lo: Pf, hi: Pf, g: Pf, size: Pf, pos: V4, s: i32, rgba: u32) {
+        let Some(i) = self.part(13) else { return };
+        let def = self.particles.as_ref().map(|p| p.def_first(13)).unwrap_or(0);
+        let t10 = self.ticks(10);
+        let jit: [Pf; 3] = std::array::from_fn(|_| pf(self.rng.randf_sym(0.0, fl(j))));
+        let sign = if self.rng.randi(2) != 0 { s } else { -s };
+        let w = Pf(self.rng.randf_bits(lo.0, hi.0));
+        let r = &mut self.particles.as_deref_mut().unwrap().pool.recs[i];
+        use crate::particles::rec;
+        for k in 0..4 { rec::set_f(r, 0x10 + 4 * k, pos[k].0); }
+        rec::set_u32(r, 4, rgba);
+        r[9] = 0x44;
+        r[3] = 0x48;
+        rec::set_f(r, 0xc, size.0);
+        r[1] = 0;
+        r[8] = 0;
+        r[2] = def;
+        for k in 0..3 { let v = Pf(rec::f(r, 0x10 + 4 * k)) + jit[k]; rec::set_f(r, 0x10 + 4 * k, v.0); }
+        rec::set_i16(r, 0xa, t10 as i16);
+        rec::set_u32(r, 0x24, 0);
+        rec::set_u32(r, 0x28, sign as u32);
+        rec::set_u32(r, 0x34, rgba & 0xff_ffff);
+        rec::set_f(r, 0x2c, w.0);
+        rec::set_f(r, 0x30, g.0);
+    }
+
+    /// `PartType11Spawn(size, speed, pos, base, c1, c2, life, t1, t2, t3)` 0x27f8f8 (TNT sparks). The frame-load
+    /// throttle draws `randi(3)` / `randi(2)` / `randi(1)` only when [`Services::frame_load`] exceeds 0.85 / 0.9
+    /// / 1.0. With a record: `randi(100)`, a raw `rand()`, 3 × `randf(−1, 1)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn part11(&mut self, size: Pf, speed: Pf, pos: V4, base: V4, c1: u32, c2: u32, life: i32, t1: i32, t2: u8, t3: u8) {
+        use crate::particles::type11;
+        // The throttle reads the one frame-load global 0x15f5d0 / 0x15f5d4 (kept here and in the particles).
+        let load = self.svc.frame_load.map(|x| x.0);
+        let Some(p) = self.particles.as_deref_mut() else {
+            // No particle system (tests): the throttle's draws only, as with a full pool.
+            if life != 0 { type11::throttle(load, self.rng); }
+            return;
+        };
+        p.frame_load = load;
+        let (created, failed) = (p.stats.created, p.stats.create_failed);
+        type11::spawn(p, self.rng, size.0, speed.0, pos.map(|x| x.0), base.map(|x| x.0), c1, c2, life, t1 as u8, t2, t3);
+        // The spawn counters of `part` (a record was asked for when the throttle let it through).
+        if (p.stats.created, p.stats.create_failed) != (created, failed) {
+            if p.stats.create_failed != failed { self.svc.fx.part_failed += 1; }
+            *self.svc.fx.part_spawns.entry(11).or_default() += 1;
+        }
+    }
+
+    /// `PartType53Spawn(f12, f13, f14, pos, life, rgba, a3, t0, vel)` 0x287328 (bolt pickup sparkle): no draw
+    /// for `a3` 0 / 1 (`randi(255)` otherwise).
+    #[allow(clippy::too_many_arguments)]
+    pub fn part53(&mut self, s12: Pf, s13: Pf, s14: Pf, pos: V4, life: i32, rgba: u32, a3: i32, t0: i8, vel: V4) {
+        let Some(i) = self.part(0x35) else { return };
+        let def = self.particles.as_ref().map(|p| p.def_first(0x35)).unwrap_or(0);
+        let b8 = match a3 { 0 => 0, 1 => 0x20, _ => self.rng.randi(0xff) as u8 };
+        let k = Pf::b(0x484d_1400);
+        let r = &mut self.particles.as_deref_mut().unwrap().pool.recs[i];
+        use crate::particles::rec;
+        for c in 0..4 { rec::set_f(r, 0x10 + 4 * c, pos[c].0); }
+        rec::set_u32(r, 4, rgba);
+        r[3] = 0x48;
+        rec::set_f(r, 0x18, (pos[2] + Pf::b(0x3d4c_cccd)).0);
+        r[1] = 0;
+        r[9] = 0x20;
+        r[2] = def;
+        rec::set_i16(r, 0xa, life as i16);
+        let sz = s12 * k;
+        rec::set_f(r, 0xc, sz.0);
+        r[8] = b8;
+        rec::set_i16(r, 0x28, life as i16);
+        rec::set_f(r, 0x20, sz.0);
+        r[0x2a] = t0 as u8;
+        rec::set_f(r, 0x24, (s13 * k).0);
+        r[0x2b] = (rgba >> 24) as u8;
+        rec::set_f(r, 0x38, s14.0);
+        for c in 0..3 { rec::set_f(r, 0x2c + 4 * c, vel[c].0); }
+    }
+
+    // (The effect mobys' spawners, `DebrisSpawn` 0x2c5080 and `FlashSpawn` 0x2c20e0, live with their updates in
+    // `classes::debris`.)
+
+    // -----------------------------------------------------------------------------------------------
+    // Paths (0x1b0930 splines)
+
+    /// `ClampToPath(idx, a, b, out)` 0x276820: where the segment a → b (flattened) first crosses spline `idx`
+    /// (as a 2-D polyline in the segment's frame), `lerp(a, b, t)` with the smallest crossing `t` in (0, 1),
+    /// else `b`.
+    pub fn clamp_to_path(&self, idx: i32, a: V4, b: V4) -> V4 {
+        let Some(pts) = usize::try_from(idx).ok().and_then(|i| self.svc.splines.get(i)) else { return b };
+        let mut d = ph::vsub(b, a);
+        d[2] = Pf::ZERO;
+        let l = ph::len3(d);
+        d = ph::set_len3(d, Pf::ONE / l);
+        let z = Pf::ZERO;
+        let m = [d, [d[1], -d[0], z, z], [z, z, Pf::ONE, z]];
+        let xf = |p: [u32; 4]| ph::mul_rows3(&m, ph::vsub(p.map(Pf), a));
+        let mut best = Pf::ONE;
+        let Some(&first) = pts.first() else { return b };
+        let mut p0 = xf(first);
+        for &pt in pts.iter().skip(1) {
+            let p1 = xf(pt);
+            if !(p0[3].is_zero() && p1[3].is_zero()) && (p1[1] * p0[1]) < Pf::ZERO {
+                let t = ((p0[0] - p1[0]) / (p0[1] - p1[1])) * (-p1[1]) + p1[0];
+                if Pf::ZERO < t && t < best { best = t; }
+            }
+            p0 = p1;
+        }
+        lerp3(a, b, best)
+    }
+
+    /// The landing correction of `BoltBurst` 0x275988 / `CrateDropBolts` 0x2eb498 for a dropper with a path
+    /// (`idx ≥ 0`): pick the fall time `t` from the quadratic (gravity `10.8·dt²`), clamp the landing point
+    /// to the path, and aim the xy velocity at it (0.25 short).
+    pub fn land_correct(&self, idx: i32, vel: &mut V4, base: V4, spawn: V4, z0: Pf) {
+        let Some(s) = usize::try_from(idx).ok().and_then(|i| self.svc.splines.get(i)) else { return };
+        let a = (DT2 * Pf::b(0x412c_cccd)) * Pf::b(0xbf00_0000);
+        let first_z = s.first().map(|p| Pf(p[2])).unwrap_or(Pf::ZERO);
+        let (n, r0) = quad(a, vel[2] - a, z0 - first_z);
+        let mut t = Pf::b(0x42f0_0000);
+        if Pf::ONE <= Pf::from_i32(n) && Pf::ZERO < r0 && r0 < t { t = r0; }
+        let target = ph::vadd(scale3(*vel, t), base);
+        let o = self.clamp_to_path(idx, base, target);
+        let mut d = ph::vsub(o, spawn);
+        d[2] = Pf::ZERO;
+        let nrm = ph::set_len3(d, Pf::b(0x3e80_0000));
+        let d = ph::vsub(d, nrm);
+        let d = scale3(d, Pf::ONE / t);
+        vel[0] = d[0];
+        vel[1] = d[1];
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Hit delivery outside the moby loop (the hero's attacks)
+
+/// `FUN_0026e968(target, tmpl)`: the canonical hit delivery. Skipped when `target+0xa4` already holds a
+/// record for it with a larger damage (`tmpl.damage < old`, `c.lt.s`); else the next slot (`0x1742d4`) gets
+/// the record (+0x00 zero) and `target+0xa4` points at it. The wrench's line sweep and [`World::deliver_hit`].
+pub fn deliver_hit_in(table: &mut MobyTable, hits: &mut HitLog, target: MobyId, t: &HitTemplate) {
+    if let Some(r) = hits.current(table, target) {
+        if t.damage < r.damage { return; }
+    }
+    hits.write(table, target, t, [Pf::ZERO; 4]);
+}
+
+/// `coll_sphere_mobys(r, centre, flags, ignore, tmpl)` 0x214468 ([`coll_sphere_mobys`]): the mobys the sphere
+/// touches, in grid order; with a template, every listed moby with `mode & 0x4000` gets a record
+/// (+0x00 = (0,0,0,1), +0x38 = 0) — unless its current record (`+0xa4`, for this moby) has a larger damage
+/// (the kernel compares the float bits as integers: `old − new > 0` skips).
+#[allow(clippy::too_many_arguments)]
+pub fn sphere_mobys_in(table: &mut MobyTable, svc: &mut Services, classes: &dyn ClassData, r: Pf, centre: V4, flags: u32, ignore: Option<MobyId>, tmpl: Option<&HitTemplate>) -> Vec<MobyId> {
+    let hits = {
+        let src = svc.scene_parts(table, classes);
+        let sc = svc.scene(&src);
+        coll_sphere_mobys(&sc, ph::to_f32x3(centre), fl(r), QueryFlags(flags), ignore)
+    };
+    if let Some(t) = tmpl {
+        for &id in &hits {
+            if table.mobys[id].mode & 0x4000 == 0 { continue; }
+            if let Some(old) = svc.hits.current(table, id) {
+                if (old.damage.0 as i32).wrapping_sub(t.damage.0 as i32) > 0 { continue; }
+            }
+            svc.hits.write(table, id, t, [Pf::ZERO, Pf::ZERO, Pf::ZERO, Pf::ONE]);
+        }
+    }
+    hits
+}
+
+/// `CollLine_Fix(a, b, flags, ignore, tmpl)` with a hit template (0x212888..0x212904): on a moby hit, a moby
+/// with `mode & 0x4000` gets a record (+0x00 = the hit point, +0x38 = the primitive index or −1 for a
+/// triangle) unless its current record has a larger damage (bits compared as integers, as the sphere list).
+#[allow(clippy::too_many_arguments)]
+pub fn line_hit_in(table: &mut MobyTable, svc: &mut Services, classes: &dyn ClassData, coll: Option<&Collision>, a: V4, b: V4, flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<CollOutput> {
+    let h = {
+        let src = svc.scene_parts(table, classes);
+        let sc = svc.scene(&src);
+        coll_line_m(coll.unwrap_or(no_mesh()), Some(&sc), ph::to_f32x3(a), ph::to_f32x3(b), QueryFlags(flags), ignore)?
+    };
+    if let Some(id) = h.moby {
+        if table.mobys[id].mode & 0x4000 != 0 {
+            let skip = svc.hits.current(table, id).is_some_and(|old| (old.damage.0 as i32).wrapping_sub(tmpl.damage.0 as i32) > 0);
+            if !skip {
+                let p = [pf(h.point[0]), pf(h.point[1]), pf(h.point[2]), Pf::ZERO];
+                svc.hits.write_prim(table, id, tmpl, p, h.primitive.map_or(-1, |i| i as i32));
+            }
+        }
+    }
+    Some(h)
+}
+
+/// The hero's [`crate::hero::items::HitSink`] on the moby system: spheres through [`sphere_mobys_in`], lines
+/// through [`line_hit_in`] (the kernels write the hit records themselves).
+pub struct ServiceHits<'a> {
+    pub svc: &'a mut Services,
+    pub classes: &'a dyn ClassData,
+    pub coll: Option<&'a Collision>,
+}
+
+impl crate::hero::items::HitSink for ServiceHits<'_> {
+    fn sphere(&mut self, table: &mut MobyTable, r: Pf, centre: V4, flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<MobyId> {
+        sphere_mobys_in(table, self.svc, self.classes, r, centre, flags, ignore, Some(tmpl)).first().copied()
+    }
+
+    fn line(&mut self, table: &mut MobyTable, a: V4, b: V4, flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<Option<MobyId>> {
+        line_hit_in(table, self.svc, self.classes, self.coll, a, b, flags, ignore, tmpl).map(|h| h.moby)
+    }
+}
+
+/// A copy of what the hero's and the camera's collision queries read of the moby system (the table's collision
+/// fields, the grid, the blobs, the pose cache; [`crate::tick::MobySystem::scene`]): the hero runs after the
+/// moby loop with its own moby borrowed mutably, so it cannot see the live table.
+pub struct HeroMobys {
+    pub mobys: Vec<crate::collision_query::CollMoby>,
+    pub anim: Vec<rc_formats::moby_anim::AnimState>,
+    pub o_class: Vec<i16>,
+    pub snapshots: Vec<Option<MobyFrame>>,
+    pub classes: Arc<dyn ClassData + Send + Sync>,
+}
+
+impl crate::collision_query::MobySource for HeroMobys {
+    fn moby(&self, id: usize) -> Option<crate::collision_query::CollMoby> { self.mobys.get(id).copied() }
+    fn joints(&self, id: usize, count: usize) -> Vec<[u32; 4]> {
+        let (Some(a), Some(&oc)) = (self.anim.get(id), self.o_class.get(id)) else { return vec![[0; 4]; count] };
+        let snap = self.snapshots.get(id).and_then(Option::as_ref);
+        crate::collision_query::pose_joints(self.classes.anim(oc), a, snap, count)
+    }
+}
+
+impl Services {
+    /// The scene over `table` now (see [`HeroMobys`]); `hero` is only stored as the scene's `ignore`.
+    pub fn hero_scene(&self, table: &MobyTable, classes: Arc<dyn ClassData + Send + Sync>, hero: Option<MobyId>) -> crate::collision_query::OwnedScene {
+        let n = table.mobys.len();
+        let mobys = HeroMobys {
+            mobys: table.mobys.iter().map(crate::collision_query::CollMoby::of).collect(),
+            anim: table.mobys.iter().map(|m| m.anim).collect(),
+            o_class: table.mobys.iter().map(|m| m.o_class).collect(),
+            snapshots: if self.coll_classes.values().any(|c| c.joint_counts != [0, 0]) { self.snapshots.iter().take(n).cloned().collect() } else { Vec::new() },
+            classes,
+        };
+        crate::collision_query::OwnedScene { mobys: Box::new(mobys), grid: self.grid.clone(), classes: self.coll_classes.clone(), cache: self.pose_cache.clone(), ignore: hero }
+    }
+}
+
+/// [`crate::tick::MobySystem`] over the moby loop's services, shared with the moby hook (and the hero's hit
+/// sink) through a `RefCell`, with the class data for the poses and the bounding spheres.
+pub struct SharedServices<'a, 'b> {
+    pub svc: &'a std::cell::RefCell<&'b mut Services>,
+    pub classes: Arc<dyn ClassData + Send + Sync>,
+}
+
+impl crate::tick::MobySystem for SharedServices<'_, '_> {
+    fn scene(&mut self, table: &MobyTable) -> Option<crate::collision_query::OwnedScene> {
+        Some(self.svc.borrow().hero_scene(table, self.classes.clone(), None))
+    }
+    fn build_matrix(&mut self, table: &mut MobyTable, id: MobyId) { self.svc.borrow_mut().build_matrix_in(table, &*self.classes, id); }
+    fn deliver_hit(&mut self, table: &mut MobyTable, target: MobyId, tmpl: &HitTemplate) {
+        let mut s = self.svc.borrow_mut();
+        deliver_hit_in(table, &mut s.hits, target, tmpl);
+    }
+}
+
+/// `Quad(a, b, c, &r0, &r1)` 0x26e520: roots of `a·t² + b·t + c`: `(count, larger root)`.
+pub fn quad(a: Pf, b: Pf, c: Pf) -> (i32, Pf) {
+    let disc = b * b - (a * Pf::b(0x4080_0000)) * c;
+    let two_a = a + a;
+    if disc == Pf::ZERO { return (1, (-b) / two_a); }
+    let s = Pf::ZERO + disc.abs().sqrt();
+    let r0 = ((-b) + s) / two_a;
+    let r1 = ((-b) - s) / two_a;
+    let r = if r0 < r1 { r1 } else { r0 };
+    (if Pf::ZERO < disc { 2 } else { 0 }, r)
+}
+
+/// `FastNormalizeAngle` 0x222088: wrap into [−π, π) by repeated ±2π (`(x − π) − π`).
+pub fn normalize_angle(a: Pf) -> Pf {
+    let p = Pf::b(0x4049_0fdb);
+    let mut x = a;
+    if !(x < p) { loop { x = (x - p) - p; if x < p { break; } } }
+    if x < -p { loop { x = (x + p) + p; if !(x < -p) { break; } } }
+    x
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::particles::type11;
+
+    /// `World::part11` is `type11::spawn` (plus the spawn counters): same draws, same record, for each frame load,
+    /// with and without a free record, and throttle-only without a particle system.
+    #[test]
+    fn part11_is_type11_spawn_draw_for_draw() {
+        let hero = Hero::new();
+        let classes = ClassTable::default();
+        let (size, speed) = (Pf::b(0x48c3_5000), Pf::b(0x3e4c_cccd));
+        let pos: V4 = [Pf::f(150.0), Pf::f(152.5), Pf::f(40.25), Pf::ZERO];
+        let base: V4 = [Pf::f(0.01), Pf::f(-0.02), Pf::f(0.05), Pf::ZERO];
+        for load in [0.0f32, 0.86, 0.95, 1.5] {
+            let load = [Pf::f(load), Pf::ZERO];
+            let mut seed = Rng::new();
+            seed.srand(crate::rng::LEVEL_SEED);
+            let (mut ra, mut rb) = (seed, seed);
+            let mut pa = Particles::new(None, Vec::new());
+            let mut pb = Particles::new(None, Vec::new());
+            // Fill the pool but one record for the last spawns (pool full → no record, no further draws).
+            for _ in 0..0x7f8 { pa.create_part(1); pb.create_part(1); }
+            pb.frame_load = load.map(|x| x.0);
+            let mut table = MobyTable::new(Vec::new(), 1);
+            let mut svc = Services::new();
+            svc.frame_load = load;
+            {
+                let mut w = World::new(&mut table, &hero, &mut ra, &classes, &mut svc, 0);
+                w.particles = Some(&mut pa);
+                for k in 0..12 { w.part11(size, speed, pos, base, 0x80ff_8040, 0x0010_2030, 20 + k, 6, 0, 0); }
+                w.part11(size, speed, pos, base, 0, 0, 0, 0, 0, 0);
+            }
+            for k in 0..12 {
+                type11::spawn(&mut pb, &mut rb, size.0, speed.0, pos.map(|x| x.0), base.map(|x| x.0), 0x80ff_8040, 0x0010_2030, 20 + k, 6, 0, 0);
+            }
+            type11::spawn(&mut pb, &mut rb, size.0, speed.0, pos.map(|x| x.0), base.map(|x| x.0), 0, 0, 0, 0, 0, 0);
+            assert_eq!(ra.state, rb.state, "rng after the spawns, load {load:?}");
+            assert_ne!(ra.state, seed.state);
+            assert!(pa.pool.recs.iter().zip(pb.pool.recs.iter()).all(|(a, b)| a == b), "records, load {load:?}");
+            assert_eq!(pa.pool.count, pb.pool.count);
+            let spawns = svc.fx.part_spawns.get(&11).copied().unwrap_or(0);
+            assert_eq!(spawns, pa.stats.created + pa.stats.create_failed - 0x7f8);
+            assert_eq!(svc.fx.part_failed, pa.stats.create_failed);
+            // No particle system: the throttle's draws only.
+            let (mut rc, mut rd) = (seed, seed);
+            {
+                let mut w = World::new(&mut table, &hero, &mut rc, &classes, &mut svc, 0);
+                for _ in 0..3 { w.part11(size, speed, pos, base, 1, 2, 20, 6, 0, 0); }
+            }
+            for _ in 0..3 { type11::throttle(load.map(|x| x.0), &mut rd); }
+            assert_eq!(rc.state, rd.state, "throttle-only draws, load {load:?}");
+        }
+    }
+}

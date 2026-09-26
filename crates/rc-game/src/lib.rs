@@ -1,0 +1,42 @@
+//! Gameplay logic of Ratchet & Clank (PS2, SCUS_971.99), ported from the game's own code.
+//!
+//! Modules mirror game subsystems and cite the level01/boot addresses they reproduce:
+//! * [`collision_query`]: line / sphere / capsule queries against the level collision mesh
+//!   (`docs/plan/collision_queries.md`).
+//! * [`ps2v`]: VU0 macro-mode vector arithmetic on PS2 float bit patterns used by the kernels.
+//! * [`rng`]: the newlib `rand` stream and the game's random helpers (`docs/plan/particles.md` §5).
+//! * [`pad`]: the controller record (`UpdatePad`/`ProcessPadInput`) and its input-history queries.
+//! * [`moby_runtime`]: the runtime moby record and the moby table with `CreateMoby`/`DeleteMoby`.
+//! * [`moby_update`]: the moby scheduler (load pass, active list, per-moby loop), the services the class
+//!   updates call, and the ported classes: bolts, crates, grass (`docs/plan/moby_update_catalogue.md`).
+//! * [`hero`]: Ratchet on foot — the hero block, per-state physics, move + collide, SetState and the
+//!   transitions, the animation interface (`docs/plan/player_controller.md` §1–§6).
+//! * [`follow_camera`]: the type-0 gameplay camera and the `Camera` record (§7).
+//! * [`tick`]: one gameplay tick in the game's order (pad → mobys → hero → particles → camera).
+//! * [`particles`]: the particle pool, allocator, `UpdateParts` scheduler and type 6 (`docs/plan/particles.md`).
+//! * [`sky_stars`]: the sky's star sprites, generated on the first frame and updated per frame (`docs/plan/sky_render_notes.md`).
+//! * [`audio`]: sound slots, 989snd grain VM, music and a software SPU2 mixer (`docs/plan/audio.md`).
+//! * [`water`]: strip-water scroll / wobble / bob and the ripple-patch simulation (`docs/plan/world_animation.md` §1–§3).
+//! * [`menus`]: the mode system, the quick-select ring and the mode-3 page menus (`docs/plan/menus.md`).
+//! * [`fog_zones`]: fog zones, the underwater test and `UpdateFog`'s fog selection (`docs/plan/world_animation.md` §5, §6).
+//! * [`scene_player`]: the in-engine scene (cutscene) player, game mode 2 (`docs/plan/cutscenes_transitions.md` §3).
+//! * [`game_state`]: the saved game state, new game, level-start rules, transitions, saves and options (`docs/plan/game_state.md`).
+
+pub mod collision_query;
+pub mod ps2v;
+pub mod rng;
+pub mod particles;
+pub mod pad;
+pub mod moby_runtime;
+pub mod moby_update;
+pub mod hero;
+pub mod follow_camera;
+pub mod tick;
+pub mod fog_zones;
+pub mod sky_stars;
+pub mod water;
+pub mod hud;
+pub mod audio;
+pub mod game_state;
+pub mod menus;
+pub mod scene_player;

@@ -1,0 +1,385 @@
+//! The moby update scheduler (level01 addresses): the class dispatch of the level's update table, the
+//! load pass `FUN_002792d0`, the active-list builder `fun_0020d868` (0x265548) and the per-frame loop
+//! `FUN_002793d8` (called by `UpdateMobysPartB` 0x279470 outside the profiler mode), each moby running
+//! `MobyAnimAdvance` 0x265260 (unless mode & 0x40) → its update → the matrix rebuild `fun_0020def8` 0x265bd8
+//! (unless mode & 4). Spec: `docs/plan/moby_update_catalogue.md` §1 and "In the port: the scheduler".
+//!
+//! **Active rule** (`fun_0020d868`, read from the disassembly). Walk the moby array from index 0 until the
+//! first state byte 0xff; skip state ≥ 0x80 (deleted) and mode & 2. A moby is active when
+//! `+0x31 != 0` (drawn last frame), or update distance `+0x30 == 0xff`, or
+//! `((d·d − dx²) − dy²) − dz²` has its sign bit clear, with `d = (f32)+0x30` and `dx.. = pos − camera`
+//! (0x167240) on VU0 (`vmula.x`, three `vmsuba`/`vmsub` with 1.0). An active moby with group `+0x21 ≥ 0` is
+//! **not** added itself: it flags its group, and after the walk every member of every flagged group is
+//! added (groups 0..0x70 in order, members in list order, only `state < 0x80` checked, not mode 2 or the
+//! distance). Additions go to per-class-slot lists (224 slots, `0x70000000 + slot·8` = head/tail), which are
+//! then chained in slot order: **run order = class slot, then direct actives in index order, then
+//! group-added members in group order**. Every added moby with mode & 0x1000 goes to the target list
+//! 0x1abe80 (NULL-terminated), in addition order.
+//!
+//! **Loop.** The list is built before any update runs: a moby created during the loop waits a tick, a moby
+//! deleted during the loop (state ≥ 0x80) is skipped when reached. The update function is only called when
+//! the moby has one (`+0x74 != 0`); group-added mobys without one still get the advance and the matrix.
+//!
+//! **Load pass** (`FUN_002792d0`, once from `LoadLevelCoreData`): every moby up to the first 0xff with
+//! state < 0x80 and no mode 2, in **array order** (no distance gate, no class order), target list cleared.
+//!
+//! **Dispatch.** The game calls `moby+0x74`, the level table's function for the class. The port keeps the
+//! address in [`Moby::update_fn`](crate::moby_runtime::Moby::update_fn) and maps it to a Rust port with
+//! [`ported`]; [`port_update_fn`] gives the address to put in `ClassInfo::update_fn` for a class. A class
+//! without a port gets `None` there, so `InitMobyInstance` sets mode 2 exactly as for a class with no table
+//! entry (such mobys are still advanced/rebuilt when their sequence 0 has ≥ 2 frames, which clears mode 2,
+//! or when a group adds them — as in the game).
+
+use crate::hero::physics::V4;
+use crate::moby_runtime::{mode, state, Moby, MobyId, MobyTable};
+use crate::moby_update::classes::{self, ClassUpdate};
+use crate::moby_update::services::{pv, World};
+#[allow(unused_imports)]
+use crate::moby_update::services::ClassData;
+use crate::ps2v::Pf;
+use rc_formats::moby_anim::{self, MobyAnimClass};
+
+/// Class-slot lists of the builder (`0x70000000..0x70000700`, 8 bytes each).
+pub const CLASS_SLOTS: usize = 0xe0;
+/// Group flags of the builder (`0x70000c80..0x70000cf0`).
+pub const GROUPS: usize = 0x70;
+
+/// The level-table address the port uses for `o_class` (`Some` only for classes with a Rust port).
+pub fn port_update_fn(o_class: i16) -> Option<u32> { classes::for_class(o_class).map(ClassUpdate::address) }
+
+/// [`port_update_fn`], then the external ports.
+pub fn update_fn_for(o_class: i16, external: Option<&dyn crate::moby_update::services::ExternalUpdates>) -> Option<u32> {
+    port_update_fn(o_class).or_else(|| external.and_then(|e| e.update_fn(o_class)))
+}
+
+/// The Rust port behind a level-table address.
+pub fn ported(addr: u32) -> Option<ClassUpdate> { ClassUpdate::from_address(addr) }
+
+/// Moby groups `0x1abcc0[g]` (gameplay header +0x48): member lists of runtime moby indices, the last one
+/// flagged with bit 15 in the game; here plain lists.
+#[derive(Clone, Debug, Default)]
+pub struct Groups {
+    pub lists: Vec<Option<Vec<u16>>>,
+}
+
+impl Groups {
+    /// The loader's copy (`InitLevelRenderGlobals` 0x255958): section `s32 count, s32 data_size, pad[2],
+    /// s32 offset[count]`, then the data; each list is u16 instance indices ending at bit 15, mapped through
+    /// the instance → moby table (`instance_to_moby`; −1 drops an entry), and a list left empty is absent.
+    pub fn parse(gameplay: &[u8], instance_to_moby: &dyn Fn(usize) -> Option<usize>) -> Groups {
+        let rd = |o: usize| -> Option<i32> { Some(i32::from_le_bytes(gameplay.get(o..o + 4)?.try_into().ok()?)) };
+        let Some(base) = rd(0x48).filter(|&b| b > 0).map(|b| b as usize) else { return Groups::default() };
+        let (Some(count), Some(_size)) = (rd(base), rd(base + 4)) else { return Groups::default() };
+        let offs = base + 0x10;
+        let data = offs + 4 * count.max(0) as usize;
+        let mut lists = Vec::new();
+        for g in 0..count.max(0) as usize {
+            let Some(o) = rd(offs + 4 * g) else { break };
+            if o < 0 { lists.push(None); continue; }
+            let mut p = data + o as usize;
+            let mut out = Vec::new();
+            while let Some(b) = gameplay.get(p..p + 2) {
+                let e = u16::from_le_bytes([b[0], b[1]]);
+                if let Some(m) = instance_to_moby((e & 0x7fff) as usize) { out.push(m as u16); }
+                if e & 0x8000 != 0 { break; }
+                p += 2;
+            }
+            lists.push(if out.is_empty() { None } else { Some(out) });
+        }
+        Groups { lists }
+    }
+}
+
+/// Scheduler state kept between ticks (the groups live in [`Services::groups`](crate::moby_update::Services)).
+#[derive(Clone, Debug, Default)]
+pub struct Scheduler {
+    /// `0x1abe80`: the targetable (mode 0x1000) mobys of the last list, in addition order.
+    pub targets: Vec<MobyId>,
+    /// The run list of the last tick (for stats and tests).
+    pub last_list: Vec<MobyId>,
+}
+
+/// `fun_0020d868` 0x265548: `(run list, target list)` for the camera at `cam` (0x167240).
+pub fn build_active_list(table: &MobyTable, cam: V4, groups: &Groups) -> (Vec<MobyId>, Vec<MobyId>) {
+    let mut slots: Vec<Vec<MobyId>> = vec![Vec::new(); CLASS_SLOTS];
+    let mut group_flag = [false; GROUPS];
+    let mut targets = Vec::new();
+    let add = |slots: &mut Vec<Vec<MobyId>>, targets: &mut Vec<MobyId>, id: MobyId, m: &Moby| {
+        if m.mode & mode::TARGETABLE != 0 { targets.push(id); }
+        slots[m.class_slot as usize % CLASS_SLOTS].push(id);
+    };
+    for (id, m) in table.mobys.iter().enumerate() {
+        if m.state == state::END { break; }
+        if m.state >= 0x80 || m.mode & mode::NO_UPDATE != 0 { continue; }
+        if !is_active(m, cam) { continue; }
+        if m.group >= 0 {
+            group_flag[m.group as usize % GROUPS] = true;
+            continue;
+        }
+        add(&mut slots, &mut targets, id, m);
+    }
+    for (g, &on) in group_flag.iter().enumerate() {
+        if !on { continue; }
+        let Some(Some(list)) = groups.lists.get(g) else { continue };
+        for &e in list {
+            let id = (e & 0x7fff) as usize;
+            let Some(m) = table.mobys.get(id) else { continue };
+            if m.state >= 0x80 { continue; }
+            add(&mut slots, &mut targets, id, m);
+        }
+    }
+    (slots.into_iter().flatten().collect(), targets)
+}
+
+/// The per-moby activity test of `fun_0020d868` (without the group step).
+pub fn is_active(m: &Moby, cam: V4) -> bool {
+    if m.visible != 0 || m.update_dist == 0xff { return true; }
+    let p = pv(m.position);
+    let d = [p[0] - cam[0], p[1] - cam[1], p[2] - cam[2]];
+    let sq = d.map(|x| x * x);
+    let r = Pf::from_i32(m.update_dist as i32); // vitof0.x
+    let acc = r * r; // vmula.x ACC, vf3, vf3
+    let acc = acc - Pf::ONE * sq[0]; // vmsubax.x ACC, vf4, vf2
+    let acc = acc - Pf::ONE * sq[1]; // vmsubay.x
+    let v = acc - Pf::ONE * sq[2]; // vmsubz.x vf2, vf4, vf2
+    !v.sign() // qmfc2, dsll32, bltz
+}
+
+/// `fun_0020def8` 0x265bd8: rows from the Euler angles (unless mode 0x100, which keeps the stored rows),
+/// row 1 negated with mode 0x8000 (also on kept rows, as in the code), the sequence bounding sphere
+/// (`+0xf0` cache of the key-A sequence's sphere when A = B, else `((B·t) + A) − A·t`) scaled, rotated and
+/// placed at `pos · 1024` into +0x00, and the +0xa8 change counter + 1. The moby-grid re-insert (0x265900,
+/// for mobys with collision) is `collision_query::MobyGrid::register`, which the callers with the grid run
+/// right after ([`run_moby`], `World::build_matrix`; the loader's through `MobyGrid::build`). A snapshot key
+/// A (seq 0xff) uses sequence B's sphere (the snapshot sphere table 0x197180 is not ported).
+pub fn rebuild_matrix(m: &mut Moby, class: Option<&MobyAnimClass>) {
+    if m.state >= 0x80 { return; }
+    let mut rows: [V4; 3] = if m.mode & mode::KEEP_ROWS != 0 {
+        [pv(m.rows[0]), pv(m.rows[1]), pv(m.rows[2])]
+    } else {
+        rc_formats::moby_light::rotation_rows([m.rotation[0], m.rotation[1], m.rotation[2]]).map(|r| r.map(Pf))
+    };
+    let sphere_of = |seq: u8| -> Option<V4> {
+        let q = class?.sequence(seq)?;
+        Some(q.header.sphere.map(|x| Pf(x.to_bits())))
+    };
+    let (a, b) = (m.anim.seq_a, m.anim.seq_b);
+    let sphere: Option<V4> = if a == b {
+        if a != m.b71 {
+            m.b71 = a;
+            if let Some(s) = sphere_of(a) { m.rows[3] = s.map(|x| f32::from_bits(x.0)); }
+        }
+        Some(pv(m.rows[3]))
+    } else {
+        let sb = sphere_of(b);
+        let sa = if a == moby_anim::SNAPSHOT_SEQ { sb } else { sphere_of(a) };
+        match (sa, sb) {
+            (Some(sa), Some(sb)) => {
+                let t = Pf(m.anim.t.to_bits());
+                Some(std::array::from_fn(|k| ((sb[k] * t) + sa[k] * Pf::ONE) - sa[k] * t))
+            }
+            _ => None,
+        }
+    };
+    if m.mode & mode::MIRROR != 0 {
+        for x in &mut rows[1][..3] { *x = Pf::ZERO - *x; }
+    }
+    for (k, r) in rows.iter().enumerate() { m.rows[k] = r.map(|x| f32::from_bits(x.0)); }
+    if let Some(s) = sphere {
+        let sc = Pf(m.scale.to_bits());
+        let s5 = s.map(|x| x * sc);
+        let p = pv(m.position);
+        let k1024 = Pf::b(0x4480_0000);
+        let p7 = [p[0] * k1024, p[1] * k1024, p[2] * k1024];
+        let c: [Pf; 3] = std::array::from_fn(|k| ((rows[0][k] * s5[0] + rows[1][k] * s5[1]) + rows[2][k] * s5[2]) + p7[k] * Pf::ONE);
+        m.bsphere = [c[0], c[1], c[2], s5[3]].map(|x| f32::from_bits(x.0));
+    }
+    let lo = (m.uid_hi as u16).wrapping_add(1);
+    m.uid_hi = (m.uid_hi & 0xffff_0000) | lo as u32;
+}
+
+/// One moby's step of the loop: advance (unless mode 0x40), update (if it has a function), matrix (unless
+/// mode 4). Skipped when the state byte is ≥ 0x80 (deleted earlier in the loop).
+pub fn run_moby(w: &mut World, id: MobyId) {
+    if w.m(id).state >= 0x80 { return; }
+    let o_class = w.m(id).o_class;
+    if w.m(id).mode & mode::NO_ANIM == 0 {
+        if let Some(class) = w.classes.anim(o_class) {
+            moby_anim::advance(&mut w.table.mobys[id].anim, class);
+        }
+    }
+    if let Some(addr) = w.m(id).update_fn {
+        if let Some(u) = ported(addr) {
+            classes::dispatch(u, w, id);
+        } else if let Some(ext) = w.external.as_deref_mut() {
+            ext.update(addr, id, w.table, w.rng, w.camera, w.counter, w.particles.as_deref_mut());
+        }
+    }
+    if w.m(id).mode & mode::KEEP_MATRIX == 0 {
+        let class = w.classes.anim(o_class);
+        rebuild_matrix(&mut w.table.mobys[id], class);
+        // MobyBuildMatrix's tail: the moby-grid re-insert (UpdateMobyGrids 0x265900).
+        std::sync::Arc::make_mut(&mut w.svc.grid).register(&mut w.table.mobys[id]);
+    }
+}
+
+impl Scheduler {
+    pub fn new() -> Scheduler { Scheduler::default() }
+
+    /// `FUN_002792d0`: the load pass. Returns the number of mobys run.
+    pub fn load_pass(&mut self, w: &mut World) -> usize {
+        self.targets.clear();
+        // `0x15ffbc` as the loader leaves it (the count of 0x263300 over the fresh dynamic slots).
+        w.table.free_slot_pass(w.counter);
+        let mut list = Vec::new();
+        for (id, m) in w.table.mobys.iter().enumerate() {
+            if m.state == state::END { break; }
+            if m.state & 0x80 == 0 && m.mode & mode::NO_UPDATE == 0 { list.push(id); }
+        }
+        if w.svc.snapshots.len() < w.table.mobys.len() { w.svc.snapshots.resize(w.table.mobys.len(), None); }
+        for &id in &list { run_moby(w, id); }
+        let n = list.len();
+        self.last_list = list;
+        n
+    }
+
+    /// `FUN_002793d8`: one frame of moby updates (build the list with the camera of `w`, run it). Returns the
+    /// number of mobys in the list. The free-slot pass 0x263300 (`MobyTable::free_slot_pass`) is the tick's
+    /// first call and belongs to the caller (`rc_game::tick::Game::tick`).
+    pub fn tick(&mut self, w: &mut World) -> usize {
+        let (list, targets) = build_active_list(w.table, w.camera, &w.svc.groups);
+        self.targets = targets;
+        if w.svc.snapshots.len() < w.table.mobys.len() { w.svc.snapshots.resize(w.table.mobys.len(), None); }
+        for &id in &list { run_moby(w, id); }
+        let n = list.len();
+        self.last_list = list;
+        n
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Level load: the loader's instance loop, for building the table
+
+/// `InitMobyInstance`'s view of a class blob (header fields by offset) with its slot and update address.
+/// (`has_collision` = class +0x10 ≠ 0: `moby+0x94`, the grid registration and the collision kernels' test.)
+pub fn class_info(class: &rc_formats::moby::MobyClass, slot: u8, update_fn: Option<u32>) -> crate::moby_runtime::ClassInfo {
+    let h = &class.header;
+    crate::moby_runtime::ClassInfo {
+        slot,
+        no_header: false,
+        update_fn,
+        b06: h.metal_count,
+        b0c: h.sequence_count,
+        b0e: h.lod_trans,
+        b0f: h.shadow,
+        has_collision: h.collision != 0,
+        scale: h.scale,
+        glow: (h.glow_rgba != 0).then_some(h.glow_rgba as u32),
+        mode_bits: h.mode_bits as u16,
+        seq0: None,
+    }
+}
+
+/// The loader's instance loop over every record as if every spawn test passed (runtime index = instance
+/// index): for tools and tests that want the whole instance list. The level loader is [`load_level_mobys`].
+pub fn load_static_mobys(
+    instances: &[rc_formats::gameplay::MobyInstance],
+    classes: &mut crate::moby_update::ClassTable,
+    pvars: &[Option<Vec<u8>>],
+) -> Vec<Moby> {
+    let all = rc_formats::moby_spawn::SpawnTest { spawn: true, b1: 0, b4: 0, b6: 0 };
+    let tests: Vec<_> = instances.iter().map(|i| rc_formats::moby_spawn::SpawnTest {
+        b1: if i.spawn_flags == 0 { 0xfe } else { 0xff },
+        b4: i.unknown_10 as i16,
+        b6: i.unknown_10 as i16,
+        ..all
+    }).collect();
+    load_level_mobys(instances, classes, pvars, &tests).mobys
+}
+
+/// The static mobys the loader created, and its instance ↔ moby maps.
+#[derive(Clone, Debug, Default)]
+pub struct LevelStatics {
+    /// The created mobys in runtime order (moby index = position here).
+    pub mobys: Vec<Moby>,
+    /// `0x1acc00`: gameplay instance → runtime moby index (None: not created on this load).
+    pub instance_to_moby: Vec<Option<MobyId>>,
+    /// Runtime moby index → gameplay instance.
+    pub moby_to_instance: Vec<usize>,
+    /// Instances the spawn test rejected, in instance order. The game has no in-level path that creates them
+    /// (only the loader reads the instance records): they appear on a later load of the level whose save state
+    /// passes the test (`rc_formats::moby_spawn::spawn_test`, e.g. the flag-2 records once their mission is done).
+    pub pending: Vec<usize>,
+}
+
+impl LevelStatics {
+    /// The loader's groups (gameplay +0x48) through this load's instance → moby map.
+    pub fn groups(&self, gameplay: &[u8]) -> Groups {
+        Groups::parse(gameplay, &|i| self.instance_to_moby.get(i).copied().flatten())
+    }
+}
+
+/// The loader's instance loop (`InitLevelRenderGlobals` 0x255958, after `InitMobyInstance`): the records whose
+/// spawn test passed (`tests`, `rc_formats::moby_spawn::loader_spawns`) become consecutive mobys; the others
+/// get `0x1acc00[i] = −1` and no slot. Per created moby: +0xb2 spawn id, +0xb1 / +0xb4 / +0xb6 from the test,
+/// +0xb0 = record +0x04, scale = class scale · instance scale, draw / update distance, position, Euler, group,
+/// occlusion word, pvars (`pvars` indexed by pvar index, moby links already remapped:
+/// `rc_formats::gameplay::parse_pvars_spawned`), mode bits (OR'd into the class's +0x44 as well, so later
+/// instances and `CreateMoby` see them: `classes` is updated), `MobyBuildMatrix`, ambient and light word. The
+/// is-rooted ground snap (none on Novalis) is not applied.
+pub fn load_level_mobys(
+    instances: &[rc_formats::gameplay::MobyInstance],
+    classes: &mut crate::moby_update::ClassTable,
+    pvars: &[Option<Vec<u8>>],
+    tests: &[rc_formats::moby_spawn::SpawnTest],
+) -> LevelStatics {
+    let mut out = LevelStatics { mobys: Vec::with_capacity(instances.len()), ..Default::default() };
+    for (i, inst) in instances.iter().enumerate() {
+        let t = tests.get(i).copied().unwrap_or(rc_formats::moby_spawn::SpawnTest { spawn: true, b1: 0xff, b4: 0, b6: 0 });
+        if !t.spawn {
+            out.instance_to_moby.push(None);
+            out.pending.push(i);
+            continue;
+        }
+        let id = out.mobys.len();
+        out.instance_to_moby.push(Some(id));
+        out.moby_to_instance.push(i);
+        let oc = inst.o_class as i16;
+        let info = classes.classes.get(&oc).map(|c| c.0);
+        let mut m = Moby::init_instance(id as u32, oc, info.as_ref());
+        m.spawn_id = inst.spawn_id as i16;
+        m.spawn_flag = t.b1;
+        m.b4 = t.b4;
+        m.mission = inst.unknown_4 as u8;
+        m.b6 = t.b6;
+        if let Some(c) = info.filter(|c| !c.no_header) { m.scale = f32::from_bits((Pf(c.scale.to_bits()) * Pf(inst.scale.to_bits())).0); }
+        m.draw_dist = inst.draw_distance as i16;
+        m.update_dist = inst.update_distance as u8;
+        m.position = [inst.position[0], inst.position[1], inst.position[2], 0.0];
+        m.rotation = [inst.rotation[0], inst.rotation[1], inst.rotation[2], 0.0];
+        m.group = inst.group as i8;
+        m.occlusion = if inst.occlusion == 0 { 0 } else { 0x7f80 };
+        m.pvars = inst.pvar(pvars).map(|p| p.to_vec()).unwrap_or_default();
+        if let Some(c) = classes.classes.get_mut(&oc) { c.0.mode_bits |= inst.mode(); }
+        m.mode |= inst.mode();
+        if m.has_class {
+            let anim = classes.classes.get(&oc).and_then(|c| c.1.as_ref());
+            rebuild_matrix(&mut m, anim);
+        }
+        let rgb = inst.ambient_rgb();
+        m.ambient = [rgb[0], rgb[1], rgb[2], 0];
+        m.light = inst.light_word();
+        out.mobys.push(m);
+    }
+    out
+}
+
+/// The spawn test's save inputs for level slot `level` of a game state (`LoadLevelCoreData`'s copy of the
+/// mission bytes 0x14c050 → 0x15fc88, the killed bits 0x14c190, the spawner slots 0x14d590). This visit's
+/// death bits 0x1ba950 and the per-id flags 0x1bbb04 are left empty (no save chunk of the port holds them;
+/// empty on a first visit, as in the Novalis savestate).
+pub fn spawn_save(level: &crate::game_state::LevelState) -> rc_formats::moby_spawn::SpawnSave {
+    let mut s = rc_formats::moby_spawn::SpawnSave { missions: level.missions, killed: level.killed, ..Default::default() };
+    for (slot, d) in s.spawner.iter_mut().zip(&level.bolt_drops) { *slot = d.first; }
+    s
+}

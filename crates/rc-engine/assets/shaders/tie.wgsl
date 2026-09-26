@@ -1,0 +1,188 @@
+// Tie pass: instanced class meshes, colour = the instance's LightTies slot table, GS TFX = MODULATE,
+// GS fog (one F per instance), GS mip rule. Rust side: tie_render.rs; lighting: rc_formats::tie_light.
+//
+// Instance data (`insts[mesh tag]`): the class -> Bevy-world matrix (the game's column-major instance
+// matrix with game_to_bevy applied after it; it may scale, shear and mirror, so the entity transform is
+// not used for positions), the bounding-sphere centre (Bevy world) with the draw distance in w, the radius,
+// and 64 packed RGBA8 colours (0x80 = 1.0).
+//
+// Per-frame TieProc decision (`lods[mesh tag]`, tie_lod.rs): x = LOD (3 = culled) | F << 8, y = k,
+// z = VU qw4.w = 256k, w = qw4.z = 256 - 256k (f32 bits). Vertices of the other LODs are dropped;
+// VU1 program 13507 writes the same F for every vertex of an instance (qw 5.w).
+// Fat vertices (13507 L25..L39): position + k * delta (`mulx.xyz vf05, vf05, vf27`, `add.xyzw vf05, vf05,
+// vf28`); colour per lane = low byte of avg * w + c0 * z with avg = (c1 + c2) * 0.5, all in VU floats
+// (`mulay/maddy vf29, vf30, vf27`, `mulaw ACC, vf29, vf27`, `maddz vf11, vf11, vf27`), palette lanes
+// 0x4b000000 + byte. Dinky vertices: the slot colour as is (`lq vf11, 838(vi09)`).
+// Texture: same GS rules as tfrag.wgsl (MODULATE, raw display-encoded bytes, As = At * Af >> 7, mip level
+// round(log2(z / 32) + K) clamped to 0..MXL).
+
+#import bevy_pbr::{
+    mesh_functions,
+    view_transformations::{position_world_to_clip, position_world_to_view},
+}
+
+struct TieFog {
+    color: vec4<f32>,
+    params: vec4<f32>,
+}
+
+struct TieParams {
+    // x = near (32), y = MXL, z = 1: tint by LOD.
+    misc: vec4<f32>,
+}
+
+struct TieInst {
+    model: mat4x4<f32>,
+    // xyz = bounding-sphere centre (Bevy world), w = draw distance (world units).
+    centre: vec4<f32>,
+    // x = bounding radius (world units).
+    misc: vec4<f32>,
+    colors: array<u32, 64>,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(1) var tex_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: TieFog;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> params: TieParams;
+@group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> insts: array<TieInst>;
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(5) var<storage, read> lods: array<vec4<u32>>;
+
+struct TieVertex {
+    @builtin(instance_index) instance_index: u32,
+    @location(0) position: vec3<f32>,
+    @location(1) uv: vec2<f32>,
+    // light slot | TEX1 K (s12, 1/16) << 20
+    @location(2) info: u32,
+    // morph slot 1 | slot 2 << 6 | fat << 12 | LOD << 13
+    @location(3) morph: u32,
+    @location(4) delta: vec3<f32>,
+}
+
+struct TieVertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(linear) color: vec4<f32>,
+    @location(2) @interpolate(flat) fog: f32,
+    // Camera depth in raw units, perspective-correct (= n / Q per pixel).
+    @location(3) depth: f32,
+    @location(4) @interpolate(flat) k: f32,
+    // Debug tint: 0 none, 1 LOD 1, 2 LOD 2.
+    @location(5) @interpolate(flat) tint: u32,
+}
+
+// VU FMAC product of two non-negative floats, truncated (rc_formats ps2::mul; tie_lod::vu_mul).
+fn vu_mul(a: u32, b: u32) -> u32 {
+    let ea = i32((a >> 23u) & 0xffu);
+    let eb = i32((b >> 23u) & 0xffu);
+    if (ea == 0 || eb == 0) { return 0u; }
+    let ma = (a & 0x7fffffu) | 0x800000u;
+    let mb = (b & 0x7fffffu) | 0x800000u;
+    let ah = ma >> 12u;
+    let al = ma & 0xfffu;
+    let bh = mb >> 12u;
+    let bl = mb & 0xfffu;
+    let mid = ah * bl + al * bh;
+    let low = ((mid & 0xfffu) << 12u) + al * bl;
+    let top = ah * bh + (mid >> 12u) + (low >> 24u);
+    var m = top;
+    var e = ea + eb - 126;
+    if (top < 0x800000u) {
+        m = (top << 1u) | ((low >> 23u) & 1u);
+        e = ea + eb - 127;
+    }
+    if (e < 1) { return 0u; }
+    if (e > 255) { return 0x7fffffffu; }
+    return (u32(e) << 23u) | (m & 0x7fffffu);
+}
+
+// VU FMAC sum of two non-negative floats, truncated (ps2::add; tie_lod::vu_add).
+fn vu_add(a: u32, b: u32) -> u32 {
+    let ea = i32(a >> 23u);
+    let eb = i32(b >> 23u);
+    if (ea == 0) { return b; }
+    if (eb == 0) { return a; }
+    var hi = a;
+    var lo = b;
+    var eh = ea;
+    var el = eb;
+    if (eb > ea) {
+        hi = b;
+        lo = a;
+        eh = eb;
+        el = ea;
+    }
+    let d = u32(eh - el);
+    if (d >= 25u) { return hi; }
+    let s = ((hi & 0x7fffffu) | 0x800000u) + (((lo & 0x7fffffu) | 0x800000u) >> d);
+    if (s >= 0x1000000u) { return (u32(eh + 1) << 23u) | ((s >> 1u) & 0x7fffffu); }
+    return (u32(eh) << 23u) | (s & 0x7fffffu);
+}
+
+// One colour lane of a fat vertex (tie_lod::vu_fat_color): bytes c0, c1, c2, weights w, z (f32 bits).
+fn vu_fat_lane(c0: u32, c1: u32, c2: u32, w: u32, z: u32) -> u32 {
+    let avg = vu_add(vu_mul(0x4b000000u | c1, 0x3f000000u), vu_mul(0x4b000000u | c2, 0x3f000000u));
+    return vu_add(vu_mul(avg, w), vu_mul(0x4b000000u | c0, z)) & 0xffu;
+}
+
+@vertex
+fn vertex(v: TieVertex) -> TieVertexOutput {
+    var out: TieVertexOutput;
+    let tag = mesh_functions::get_tag(v.instance_index);
+    let inst = &insts[tag];
+    let lod = lods[tag];
+    let vlod = (v.morph >> 13u) & 3u;
+    if ((lod.x & 3u) != vlod) {
+        // Culled this frame (3), or a vertex of another LOD: the triangle is clipped away.
+        out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+        return out;
+    }
+    let k = bitcast<f32>(lod.y);
+    let world = ((*inst).model * vec4<f32>(v.position + k * v.delta, 1.0)).xyz;
+    out.position = position_world_to_clip(world);
+    out.uv = v.uv;
+    let c0 = (*inst).colors[v.info & 63u];
+    var rgba = c0;
+    if (((v.morph >> 12u) & 1u) != 0u) {
+        let c1 = (*inst).colors[v.morph & 63u];
+        let c2 = (*inst).colors[(v.morph >> 6u) & 63u];
+        rgba = 0u;
+        for (var i = 0u; i < 32u; i += 8u) {
+            let lane = vu_fat_lane((c0 >> i) & 0xffu, (c1 >> i) & 0xffu, (c2 >> i) & 0xffu, lod.z, lod.w);
+            rgba |= lane << i;
+        }
+    }
+    out.color = unpack4x8unorm(rgba) * (255.0 / 128.0);
+    out.depth = -position_world_to_view(world).z * 1024.0;
+    out.fog = f32(lod.x >> 8u) / 255.0;
+    out.k = f32(bitcast<i32>(v.info) >> 20u) / 16.0;
+    out.tint = select(0u, vlod, params.misc.z > 0.5);
+    return out;
+}
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
+@fragment
+fn fragment(in: TieVertexOutput) -> @location(0) vec4<f32> {
+    let level = clamp(floor(log2(in.depth / params.misc.x) + in.k + 0.5), 0.0, params.misc.y);
+    let t = textureSampleLevel(tex, tex_sampler, in.uv, level);
+    var rgb = min(t.rgb * in.color.rgb, vec3<f32>(1.0));
+    if (fog.color.w > 0.5) {
+        rgb = mix(fog.color.rgb, rgb, in.fog);
+    }
+    if (in.tint == 1u) { rgb = mix(rgb, vec3<f32>(1.0, 0.0, 0.0), 0.5); }
+    if (in.tint == 2u) { rgb = mix(rgb, vec3<f32>(0.0, 0.2, 1.0), 0.5); }
+    let a_s = min(floor(round(t.a * 255.0) * round(in.color.a * 128.0) / 128.0), 255.0);
+    // GS TEST_1 alpha test (ATST GEQUAL AREF, AFAIL RGB_ONLY): which half of the split this draw is (gs_state.rs).
+#ifdef GS_ATEST_PASS
+    if (a_s < f32(#{GS_AREF})) { discard; }
+#endif
+#ifdef GS_ATEST_FAIL
+    if (a_s >= f32(#{GS_AREF})) { discard; }
+#endif
+    return vec4<f32>(srgb_to_linear(rgb), a_s / 128.0);
+}

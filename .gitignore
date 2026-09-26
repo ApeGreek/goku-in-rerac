@@ -1,0 +1,22 @@
+# Game data: never committed. Everything derived from the user's own disc lives here.
+/iso/
+/assets/
+/build/
+# Per-target CMake build dirs (build-tie/, build-sky/, build-shrub/, build-coll/, build-occl/, ...)
+/build-*/
+/out/
+/extracted/
+# Reverse-engineering artifacts (contain game code)
+/ghidra/
+/decomp/export/
+# Local config
+/config.local.json
+.env
+# Editors / OS
+.DS_Store
+.cache/
+.vscode/
+.idea/
+compile_commands.json
+# Rust
+/target/

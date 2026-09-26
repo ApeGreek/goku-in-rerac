@@ -1,0 +1,148 @@
+//! Reads one level's disc-derived lumps from `extracted/` and parses what the renderer needs.
+//!
+//! Inputs (written by `rc_extract`, never shipped with the repo):
+//! `levels/NN/core_index.bin`, `levels/NN/core_data.bin` (WAD-compressed), `levels/NN/gs_ram.bin`.
+//! The call chain is the one `crates/rc-formats/tests/golden.rs` verifies byte-for-byte.
+
+use anyhow::{Context, Result};
+use rc_formats::{level, texture, tfrag, wad};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+/// Novalis. Level 01 on the NTSC-U disc (docs/plan/roadmap.md "Novalis (level01)",
+/// docs/formats/tfrag_rac1.md 9b: 1004 tfrags, 61,919 LOD-0 triangles).
+pub const DEFAULT_LEVEL: u32 = 1;
+
+pub struct LoadedLevel {
+    pub tfrags: Vec<tfrag::Tfrag>,
+    pub textures: Vec<texture::LevelTexture>,
+    /// Level-settings fog (gameplay file, NTSC variant), docs/plan/game_camera_fog.md.
+    pub fog: crate::game_camera::LevelFog,
+    /// Level-settings background colour = the GS frame clear colour (`game_camera::level_background`).
+    pub background: [u8; 3],
+    /// Moby classes, instances and their lit vertex colours (crate::moby_render).
+    pub mobys: crate::moby_render::LevelMobys,
+    /// Tie classes, instances and their LightTies colour tables (crate::tie_render).
+    pub ties: crate::tie_render::LevelTies,
+    /// Shrub classes, instances and their LightShrubs palettes (crate::shrub_render).
+    pub shrubs: crate::shrub_render::LevelShrubs,
+    /// The sky block and its textures (crate::sky_render).
+    pub sky: Option<crate::sky_render::LevelSky>,
+    /// Occlusion grid and per-object occlusion words (crate::occlusion).
+    pub occlusion: crate::occlusion::LevelOcclusionData,
+    /// Tfrag LOD distances and mip chains (crate::tfrag_lod).
+    pub tfrag_lod: crate::tfrag_lod::TfragLodData,
+    /// Particle textures and the class-27 emitters (crate::particle_render).
+    pub particles: crate::particle_render::LevelParticles,
+    /// HUD graphics, glyph tables and level text (crate::hud_render); None if they do not load.
+    pub hud: Option<crate::hud_render::LevelHud>,
+    /// Level-code water tables (crate::water_render; empty when `RC_WATER=0` or the level has none).
+    pub water: crate::water_render::LevelWater,
+    /// The level collision mesh (the hero and the follow camera query it, crate::gameplay); None when it
+    /// does not parse (warned; the game tick is then off).
+    pub collision: Option<rc_formats::collision::Collision>,
+    /// Level settings +0x28: the death height the game copies to `0x15f638` (player_controller.md §10).
+    pub death_z: f32,
+    /// Sound bank, defs, sound instances and music (crate::audio_out); None with `RC_AUDIO=0`.
+    pub audio: Option<rc_game::audio::LevelAudio>,
+    /// The decompressed gameplay file (NTSC), for the moby scheduler's loader (pvars, groups, splines, the
+    /// spawnable count; crate::gameplay).
+    pub gameplay: Vec<u8>,
+    /// The level core's moby class list in order (o_class per entry): the class slot of `MobyClassesRelocate`
+    /// (0x2549d0) is the index here (crate::gameplay).
+    pub moby_class_order: Vec<i32>,
+    pub timings: LoadTimings,
+}
+
+#[derive(Debug, Default)]
+pub struct LoadTimings {
+    pub read: Duration,
+    pub decompress: Duration,
+    pub parse_core: Duration,
+    pub parse_tfrags: Duration,
+    pub parse_textures: Duration,
+}
+
+impl LoadTimings {
+    pub fn total(&self) -> Duration { self.read + self.decompress + self.parse_core + self.parse_tfrags + self.parse_textures }
+}
+
+/// `RC_EXTRACTED`, else `<workspace>/extracted` (resolved from this crate's manifest dir at compile time,
+/// so `cargo dev` works from any cwd).
+pub fn extracted_root() -> PathBuf {
+    std::env::var_os("RC_EXTRACTED")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted"))
+}
+
+/// `RC_LEVEL` (decimal level index), else Novalis.
+pub fn level_index() -> u32 {
+    match std::env::var("RC_LEVEL") {
+        Ok(s) => s.trim().parse().unwrap_or_else(|_| panic!("RC_LEVEL must be a level index, got {s:?}")),
+        Err(_) => DEFAULT_LEVEL,
+    }
+}
+
+pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
+    // The user's disc image when present, else extracted/ (crate::disc_source; same bytes either way).
+    let read = |name: &str| crate::disc_source::level_file(root, index, name);
+    let mut t = LoadTimings::default();
+
+    let t0 = Instant::now();
+    let core_index = read("core_index.bin")?;
+    let core_data_wad = read("core_data.bin")?;
+    let gs_ram = read("gs_ram.bin")?;
+    let gameplay_wad = read("gameplay_ntsc.bin")?;
+    t.read = t0.elapsed();
+
+    let t0 = Instant::now();
+    let core_data = wad::decompress(&core_data_wad).context("decompressing core_data")?;
+    t.decompress = t0.elapsed();
+
+    let t0 = Instant::now();
+    let core = level::parse_level_core(&core_index, core_data.len()).context("parsing core index")?;
+    t.parse_core = t0.elapsed();
+
+    let t0 = Instant::now();
+    let mut tfrags = tfrag::parse_level_tfrags(&core, &core_data).context("parsing tfrags")?;
+    // Game's LightTfrags pass overwrites the stored RGBA (docs/plan/tfrag_lighting.md); RC_NO_LIGHT=1 skips it.
+    crate::tfrag_light::light_level_tfrags(root, index, &mut tfrags).context("lighting tfrags")?;
+    t.parse_tfrags = t0.elapsed();
+
+    let t0 = Instant::now();
+    let textures = texture::parse_textures(&core, &core_data, &gs_ram).context("decoding textures")?;
+    t.parse_textures = t0.elapsed();
+    let tfrag_lod = crate::tfrag_lod::load(&core, &core_data, &gs_ram)?;
+
+    let gameplay = wad::decompress(&gameplay_wad).context("decompressing gameplay_ntsc")?;
+    let fog = crate::game_camera::LevelFog::parse(&gameplay).context("parsing level settings")?;
+    let background = crate::game_camera::level_background(&gameplay).context("parsing level settings")?;
+    let mobys = crate::moby_render::load_mobys(root, &core, &core_data, &gameplay).context("loading mobys")?;
+    let ties = crate::tie_render::load_ties(&core, &core_data, &gs_ram, &gameplay, &textures).context("loading ties")?;
+    let shrubs = crate::shrub_render::load_shrubs(&core, &core_data, &gameplay, &textures).context("loading shrubs")?;
+
+    let sky = crate::sky_render::load(&core, &core_data, index).context("loading sky")?;
+    let occlusion = crate::occlusion::load(&core, &core_data, &gameplay, &tfrags, &ties.instances, &mobys.instances).context("loading occlusion")?;
+
+    let particles = crate::particle_render::load(&core, &core_index, &core_data, &gameplay, index).context("loading particles")?;
+    let hud = crate::hud_render::load(root, index, &core, &core_index, &core_data, &gameplay).map_err(|e| eprintln!("hud: {e:#}")).ok();
+    let water = crate::water_render::load(root, index, &gameplay).context("loading water")?;
+    let collision = rc_formats::collision::parse_collision(&core, &core_data)
+        .map_err(|e| eprintln!("level {index:02}: collision not parsed ({e}); no game tick"))
+        .ok();
+    let death_z = level_settings_f32(&gameplay, 0x28).context("reading the death height")?;
+    let audio = crate::audio_out::load(root, index, &core_index, &core, &core_data, &gameplay, collision.clone());
+    let moby_class_order = core.moby_classes.iter().map(|e| e.o_class).collect();
+    Ok(LoadedLevel {
+        tfrags, textures, fog, background, mobys, ties, shrubs, sky, occlusion, tfrag_lod, particles, hud, water, collision, death_z, audio,
+        gameplay, moby_class_order, timings: t,
+    })
+}
+
+/// The f32 at byte `off` of the level-settings section (gameplay file pointer 0).
+fn level_settings_f32(gameplay: &[u8], off: usize) -> Result<f32> {
+    let word = |o: usize| gameplay.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).context("gameplay file too short for level settings");
+    let base = word(0)? as usize;
+    anyhow::ensure!(base != 0, "gameplay file has no level-settings section");
+    Ok(f32::from_bits(word(base + off)?))
+}
