@@ -15,7 +15,7 @@
 //! Banks are WAD-compressed on disc; every function here takes them decompressed.
 
 use crate::buf::{invalid, Buf, Result};
-use crate::texture::{clut_index, decode_indexed8, Texture};
+use crate::texture::{clut_index, decode_indexed8, IndexedImage, Texture};
 use bytemuck::{Pod, Zeroable};
 
 /// Number of HUD banks (`hud_banks[5]` in the level data header).
@@ -175,6 +175,12 @@ impl Hud {
         let f = self.frames.get(i)?;
         let t = self.textures.get(usize::try_from(f.texture).ok()?)?;
         Some((t.width(), t.height()))
+    }
+
+    /// The stored indices and CLUT of frame `i` (the parts [`Hud::decode_frame`] decodes).
+    pub fn frame_image(&self, i: usize) -> Result<IndexedImage<'_>> {
+        let (indices, clut, width, height) = self.frame_parts(i)?;
+        Ok(IndexedImage { width, height, indices, clut })
     }
 
     fn frame_parts(&self, i: usize) -> Result<(&[u8], &[u8], u32, u32)> {

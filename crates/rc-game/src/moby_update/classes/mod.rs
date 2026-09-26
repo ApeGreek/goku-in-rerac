@@ -14,10 +14,18 @@
 //! | 805 (checkpoint triggers) | 0x300220 `CheckpointTriggerUpdate` | [`checkpoint`] |
 //! | 679 (flow chutes; levels 1, 5, 8, 15) | 0x2f6328 `FlowUpdate` | [`flow`] |
 //! | 758, 803 (Swingshot pull / swing targets; not on level01) | level03 0x2d0bd8 | [`swing_target`] |
+//! | 577 (critters; level 1) | 0x2efc60 `GroundCritterUpdate` | [`critter`] |
+//! | 572, 865, 866 (amoeboids; levels 1, 5, 11) | 0x2edca0 `AmoeboidUpdate` | [`amoeboid`] |
+//! | 1736–1738, 1747–1749, 1761–1763, 1770, 1814, 1815, 1817 (body pieces; level 1) | 0x30cd18 `FxGroupUpdate` | [`crate::moby_update::creature::fx`] |
+//! | 639 (explosion light; every level) | 0x2f3748 | [`crate::moby_update::creature::fx`] |
+//! | 121 (Bomb Glove bomb), 122 (its fireballs) | 0x2c3300, 0x2c4d88 | [`bomb`] |
 
+pub mod amoeboid;
 pub mod bolt;
+pub mod bomb;
 pub mod checkpoint;
 pub mod crate_;
+pub mod critter;
 pub mod debris;
 pub mod flow;
 pub mod flyer;
@@ -45,10 +53,16 @@ pub enum ClassUpdate {
     Checkpoint,
     Flow,
     SwingTarget,
+    Critter,
+    FxPiece,
+    ExplosionLight,
+    Amoeboid,
+    Bomb,
+    Fireball,
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 12] = [
+    pub const ALL: [ClassUpdate; 18] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -61,11 +75,19 @@ impl ClassUpdate {
         ClassUpdate::Checkpoint,
         ClassUpdate::Flow,
         ClassUpdate::SwingTarget,
+        ClassUpdate::Critter,
+        ClassUpdate::FxPiece,
+        ClassUpdate::ExplosionLight,
+        ClassUpdate::Amoeboid,
+        ClassUpdate::Bomb,
+        ClassUpdate::Fireball,
     ];
 
     /// The level01 class-table address of this update.
     pub const fn address(self) -> u32 {
         match self {
+            ClassUpdate::Bomb => bomb::UPDATE_FN,
+            ClassUpdate::Fireball => bomb::FIREBALL_UPDATE_FN,
             ClassUpdate::Bolt => bolt::UPDATE_FN,
             ClassUpdate::Crate => crate_::UPDATE_FN,
             ClassUpdate::Grass => grass::UPDATE_FN,
@@ -78,6 +100,10 @@ impl ClassUpdate {
             ClassUpdate::Checkpoint => checkpoint::UPDATE_FN,
             ClassUpdate::Flow => flow::UPDATE_FN,
             ClassUpdate::SwingTarget => swing_target::UPDATE_FN,
+            ClassUpdate::Critter => critter::UPDATE_FN,
+            ClassUpdate::FxPiece => crate::moby_update::creature::fx::PIECE_UPDATE_FN,
+            ClassUpdate::ExplosionLight => crate::moby_update::creature::fx::LIGHT_UPDATE_FN,
+            ClassUpdate::Amoeboid => amoeboid::UPDATE_FN,
         }
     }
 
@@ -86,6 +112,8 @@ impl ClassUpdate {
     /// The classes the level01 table maps to this function.
     pub fn classes(self) -> &'static [i16] {
         match self {
+            ClassUpdate::Bomb => &bomb::CLASSES,
+            ClassUpdate::Fireball => &bomb::FIREBALL_CLASSES,
             ClassUpdate::Bolt => &bolt::CLASSES,
             ClassUpdate::Crate => &crate_::CLASSES,
             ClassUpdate::Grass => &grass::CLASSES,
@@ -98,6 +126,10 @@ impl ClassUpdate {
             ClassUpdate::Checkpoint => &checkpoint::CLASSES,
             ClassUpdate::Flow => &flow::CLASSES,
             ClassUpdate::SwingTarget => &swing_target::CLASSES,
+            ClassUpdate::Critter => &critter::CLASSES,
+            ClassUpdate::FxPiece => &crate::moby_update::creature::fx::PIECE_CLASSES,
+            ClassUpdate::ExplosionLight => &[crate::moby_update::creature::fx::LIGHT_CLASS],
+            ClassUpdate::Amoeboid => &amoeboid::CLASSES,
         }
     }
 }
@@ -108,6 +140,8 @@ pub fn for_class(o_class: i16) -> Option<ClassUpdate> { ClassUpdate::ALL.into_it
 /// `(*moby+0x74)(moby)`.
 pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
     match u {
+        ClassUpdate::Bomb => bomb::update(w, id),
+        ClassUpdate::Fireball => bomb::fireball_update(w, id),
         ClassUpdate::Bolt => bolt::update(w, id),
         ClassUpdate::Crate => crate_::update(w, id),
         ClassUpdate::Grass => grass::update(w, id),
@@ -120,6 +154,10 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::Checkpoint => checkpoint::update(w, id),
         ClassUpdate::Flow => flow::update(w, id),
         ClassUpdate::SwingTarget => swing_target::update(w, id),
+        ClassUpdate::Critter => critter::update(w, id),
+        ClassUpdate::FxPiece => crate::moby_update::creature::fx::piece_update(w, id),
+        ClassUpdate::ExplosionLight => crate::moby_update::creature::fx::light_update(w, id),
+        ClassUpdate::Amoeboid => amoeboid::update(w, id),
     }
 }
 

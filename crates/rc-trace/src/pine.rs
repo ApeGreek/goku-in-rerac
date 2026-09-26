@@ -74,6 +74,23 @@ impl Pine {
     /// Asks PCSX2 to save a state to `slot` (asynchronous on the emulator's CPU thread).
     pub fn save_state(&mut self, slot: u8) -> Result<()> { self.call(&[MSG_SAVE_STATE, slot]).map(|_| ()) }
 
+    /// One message of `MsgRead64` at each of `addrs` (8-byte aligned, at most 50000): the 8 bytes at each, in
+    /// order. PCSX2 serves a message's commands back to back, so a batch is as close to one snapshot as PINE
+    /// gets (the EE keeps running meanwhile: callers bracket a batch with a counter read to detect a tick
+    /// boundary inside it).
+    pub fn read_many(&mut self, addrs: &[u32]) -> Result<Vec<[u8; 8]>> {
+        ensure!(addrs.len() <= READS_PER_MSG, "too many reads in one PINE message");
+        let mut cmds = Vec::with_capacity(addrs.len() * 5);
+        for &a in addrs {
+            ensure!(a.is_multiple_of(8), "PINE reads must be 8-byte aligned ({a:#x})");
+            cmds.push(MSG_READ64);
+            cmds.extend_from_slice(&a.to_le_bytes());
+        }
+        let r = self.call(&cmds)?;
+        ensure!(r.len() == addrs.len() * 8, "PINE returned {} bytes for {} reads", r.len(), addrs.len());
+        Ok(r.chunks_exact(8).map(|c| c.try_into().unwrap()).collect())
+    }
+
     /// Reads `len` bytes of EE memory at `addr` (both multiples of 8) through batched `MsgRead64`.
     pub fn read(&mut self, addr: u32, len: usize) -> Result<Vec<u8>> {
         ensure!(addr.is_multiple_of(8) && len.is_multiple_of(8), "PINE reads must be 8-byte aligned");
@@ -140,6 +157,35 @@ mod tests {
         for (i, w) in r.chunks(8).enumerate() {
             assert_eq!(u64::from_le_bytes(w.try_into().unwrap()), 0x10_0000 + 8 * i as u64);
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `read_many`: one message, the replies in request order.
+    #[test]
+    fn read_many_framing() {
+        let dir = std::env::temp_dir().join(format!("rc-trace-pine-many-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("pcsx2.sock");
+        let _ = std::fs::remove_file(&path);
+        let l = UnixListener::bind(&path).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut h = [0u8; 4];
+            s.read_exact(&mut h).unwrap();
+            let mut b = vec![0u8; u32::from_le_bytes(h) as usize - 4];
+            s.read_exact(&mut b).unwrap();
+            let mut reply = vec![0u8; 5];
+            for c in b.chunks(5) { reply.extend_from_slice(&(!(u32::from_le_bytes(c[1..5].try_into().unwrap()) as u64)).to_le_bytes()); }
+            let n = reply.len() as u32;
+            reply[..4].copy_from_slice(&n.to_le_bytes());
+            s.write_all(&reply).unwrap();
+        });
+        let mut c = Pine { s: UnixStream::connect(&path).unwrap() };
+        let addrs = [0x15f5c8u32, 0x13f3d0, 0x100];
+        let r = c.read_many(&addrs).unwrap();
+        server.join().unwrap();
+        for (a, w) in addrs.iter().zip(&r) { assert_eq!(u64::from_le_bytes(*w), !(*a as u64)); }
+        assert!(c.read_many(&[3]).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

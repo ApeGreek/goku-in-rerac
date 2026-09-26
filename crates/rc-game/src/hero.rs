@@ -48,9 +48,11 @@ pub mod platform;
 pub mod stance;
 pub mod surface;
 pub mod swingshot;
+pub mod comet;
+pub mod weapons;
 
 use crate::ps2v::Pf;
-pub use ledge::LedgeBlock;
+pub use ledge::{ledge_yaw_input, LedgeBlock};
 use physics::V4;
 
 /// Hero state ids (`0x1413d4`) the port implements.
@@ -409,6 +411,14 @@ pub struct Hero {
     pub swing: swingshot::Swing,
     /// The hero's requests of other systems (camera shakes, …) queued for the tick ([`fx`]).
     pub fx: fx::HeroFx,
+    /// 0x1413f5: the first-person camera is up (the camera type 4 `0x316330` sets it every tick once its blend-in
+    /// is over, `crate::follow_camera`; every SetState clears it): the look stances turn Ratchet to the camera
+    /// and `HeroSyncMoby` 0x229f20 hides him and his items ([`Hero::write_back`]).
+    pub f13f5: u8,
+    /// The weapons: the ammo mirror, the weapon-out arm (0x1413f8), the bomb glove's pvars ([`weapons`]).
+    pub weapons: weapons::Weapons,
+    /// The Comet-Strike's catch request ([`comet`]).
+    pub comet: comet::Comet,
 }
 
 /// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
@@ -474,6 +484,7 @@ impl Hero {
             carry: platform::Carry::default(), surf: surface::Surf::default(),
             owned: Owned::default(), back_slot: idle::BackSlot::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
+            f13f5: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(),
         }
     }
 
@@ -602,6 +613,8 @@ impl Hero {
         for (k, r) in self.rows.iter().take(3).enumerate() { moby.rows[k] = r.map(Pf::to_f32); }
         self.moby_rows = self.rows;
         self.moby_rot = self.rot;
+        // 0x1413f5 (first person): `0x2486c0` hides Ratchet (and his items: the engine), else `0x2487a8` shows him.
+        if self.f13f5 != 0 { moby.mode |= crate::moby_runtime::mode::HIDDEN; } else { moby.mode &= !crate::moby_runtime::mode::HIDDEN; }
     }
 }
 
@@ -667,6 +680,8 @@ pub fn hero_update_with_sounds(
         }
         return HeroTick::Unimplemented(hero.state);
     }
+    // The Comet-Strike's catch (the wrench's update asked for Ratchet's loop exit after last tick's advance).
+    comet::before_advance(hero, anim);
     let before = anim.view();
     anim.advance(hero.anim_speed);
     sounds.anim_advanced(moby, &before, &anim.view(), rng);

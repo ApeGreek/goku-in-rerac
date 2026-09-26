@@ -258,11 +258,11 @@ impl Game {
         // HeroItemsUpdate 0x231268 (hand slot): create, attach, the swap, the item's update (the wrench's hit).
         if hero_tick == HeroTick::Ran {
             if let Some(data) = self.item_data.as_ref() {
-                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby };
+                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])) };
                 items_update(&mut self.hero, &mut self.item_globals, &mut self.mobys, &*anim, &mut self.rng, &ienv, hits);
                 // The slot loop's item update that needs the hero's context (the Swingshot's hook: SetState, the
                 // collision lines), at the same point of the frame (hero::gadgets).
-                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive {
+                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() {
                     let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
                     let mobys = scene.as_ref().map(OwnedScene::scene);
                     let view = self.camera.out;
@@ -283,7 +283,7 @@ impl Game {
                 }
                 // The hand item's class sounds (the wrench's hit, the Swingshot's fire / hit / pull), right after its
                 // update.
-                crate::hero::gadgets::flush_item_sounds(&mut self.hero, hero_sounds, &mut self.rng);
+                crate::hero::gadgets::flush_item_sounds(&mut self.hero, &self.mobys.mobys[self.hero_moby], hero_sounds, &mut self.rng);
             }
         }
         (hooks.particles)(&self.hero, &self.camera.out, &mut self.rng, self.counter);
@@ -300,6 +300,8 @@ impl Game {
             self.camera.update(&CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: mobys.as_ref(), hero_moby })
         };
         drop(scene);
+        // The first-person camera's store of 0x1413f5 (`0x316330`; every SetState clears it).
+        if self.camera.first_person_flag() { self.hero.f13f5 = 1; }
         // A crate blocking the camera line (0x312ef8): FUN_0026e808(20.0, tmpl, Ratchet, 0x800000, dir), +0x18 /
         // +0x19 = 3, +0x1a = Ratchet's class, then FUN_0026e968.
         if let (Some((id, dir)), Some(w)) = (self.camera.hit, hooks.world.as_deref_mut()) {

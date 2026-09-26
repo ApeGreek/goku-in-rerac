@@ -74,6 +74,13 @@ pub trait AnimCtl {
     fn set_loop(&mut self, start: i32, end: i32);
     /// `0x247d00()`: clear the loop range (also done by every `set_anim`).
     fn clear_loop(&mut self);
+    /// `0x247d18(n)` followed by the caller's `0x13fe04 = to` (the comet strike's catch, `0x2be1c0` / `0x242930`):
+    /// the next key step of the advance leaves the loop and continues at frame `to`, and the advance after it
+    /// steps onto that key at once (see [`RatchetAnim`]'s `jump`). No-op without animation data.
+    fn exit_loop(&mut self, _to: i32) {}
+    /// `(0x13fe00 ≠ −1, 0x13fe04)`: a loop range is set, and the loop end (which outlives the range: a
+    /// `clear_loop` only clears the start).
+    fn loop_state(&self) -> (bool, i32) { (false, 0) }
     /// One step of the eased blend curve right away (`moby+0x54 = curve[0x13fdf4++]`, what the hurt entries
     /// 0x16 / 0x75 / 0x76 do after their `SetAnim(−3, …)`); nothing outside a curve blend.
     fn curve_step(&mut self) {}
@@ -160,12 +167,20 @@ pub struct RatchetAnim {
     pub loop_range: Option<(i32, i32)>,
     /// Option 0x15edb5: swap sequences 0x31 ↔ 0x32.
     pub mirror: bool,
+    /// `0x13fe04`: the loop end as last written (kept after the range is cleared; `0x247d18`'s exit target).
+    pub loop_end: i32,
+    /// `0x13fe08 ≠ 0`: leave the loop at the next key step (`0x247d18`).
+    pub exit: bool,
+    /// The loop exit's rate `0x15f708` (= `0x7f800000`, which the PS2 FPU treats as the largest finite value, not
+    /// as infinity): the next advance completes the key step at once and continues with `t = speed · rate` of the
+    /// new key. Reproduced as that result (docs/plan/hardware_fidelity_layers.md), not as an infinite rate.
+    pub jump: bool,
 }
 
 impl RatchetAnim {
     /// Spawned on sequence 0 frame 0 (what `InitMobyInstance` leaves).
     pub fn new(class: &MobyAnimClass) -> RatchetAnim {
-        RatchetAnim { state: AnimState::spawn(class), snapshot: None, rate: Pf::ONE, flags: 0, curve: -1, curve_pos: 0, frame: Pf::ZERO, frame_step: Pf::ZERO, loop_range: None, mirror: false }
+        RatchetAnim { state: AnimState::spawn(class), snapshot: None, rate: Pf::ONE, flags: 0, curve: -1, curve_pos: 0, frame: Pf::ZERO, frame_step: Pf::ZERO, loop_range: None, mirror: false, loop_end: 0, exit: false, jump: false }
     }
 
     /// Bind to Ratchet's class for one tick of hero code.
@@ -221,7 +236,9 @@ impl AnimCtl for RatchetAnimCtl<'_> {
             a.curve_pos = 0;
             a.state.t = 0.0;
         }
+        // 0x247d00: the loop range and a pending exit (0x13fe00 = −1, 0x13fe08 = 0).
         a.loop_range = None;
+        a.exit = false;
     }
 
     fn advance(&mut self, speed: Pf) {
@@ -229,7 +246,11 @@ impl AnimCtl for RatchetAnimCtl<'_> {
         let a = &mut *self.a;
         a.flags &= !3;
         let t0 = Pf::f(a.state.t);
-        let mut t = if a.state.seq_a == a.state.seq_b {
+        // The advance after a loop exit: the huge rate takes t past 1 at once (see `RatchetAnim::jump`).
+        let mut jump = std::mem::take(&mut a.jump);
+        let mut t = if jump {
+            Pf::ONE
+        } else if a.state.seq_a == a.state.seq_b {
             t0 + speed * a.rate
         } else if a.curve >= 0 {
             let c = CURVES.get(a.curve as usize).copied().unwrap_or(&[0x3f80_0000]);
@@ -254,6 +275,15 @@ impl AnimCtl for RatchetAnimCtl<'_> {
             a.flags |= 1;
             s.frame_a = s.frame_b;
             s.frame_b = s.frame_b.wrapping_add(1);
+            if a.exit {
+                // 0x13fe08 ≠ 0: the loop exit (rate 0x15f708, t = 0, frame B = 0x13fe04, `0x247d00`).
+                a.exit = false;
+                a.jump = true;
+                t = Pf::ZERO;
+                s.frame_b = a.loop_end as u8;
+                a.loop_range = None;
+                continue;
+            }
             if let Some((start, end)) = a.loop_range {
                 if end < s.frame_b as i32 {
                     a.rate = Pf::b(0x3eaa_aaab);
@@ -267,8 +297,14 @@ impl AnimCtl for RatchetAnimCtl<'_> {
                 s.frame_b = 0;
                 a.flags |= 2;
             }
-            t = t - Pf::ONE;
-            t = t / a.rate;
+            if jump {
+                // (speed · 2¹²⁸ − 1) / 2¹²⁸ on the PS2 FPU: the playback speed.
+                jump = false;
+                t = speed;
+            } else {
+                t = t - Pf::ONE;
+                t = t / a.rate;
+            }
             a.rate = class.frame(s.seq_a, s.frame_a).map(|f| Pf::f(f.header.rate)).unwrap_or(Pf::ONE);
             t = t * a.rate;
         }
@@ -304,10 +340,23 @@ impl AnimCtl for RatchetAnimCtl<'_> {
 
     fn set_loop(&mut self, start: i32, end: i32) {
         let fc = self.frame_count(self.a.state.seq_b) as i32;
-        if start >= 0 && end < fc { self.a.loop_range = Some((start, end)); }
+        if start >= 0 && end < fc {
+            self.a.loop_range = Some((start, end));
+            self.a.loop_end = end;
+        }
     }
 
-    fn clear_loop(&mut self) { self.a.loop_range = None; }
+    fn clear_loop(&mut self) {
+        self.a.loop_range = None;
+        self.a.exit = false;
+    }
+
+    fn exit_loop(&mut self, to: i32) {
+        self.a.exit = true;
+        self.a.loop_end = to;
+    }
+
+    fn loop_state(&self) -> (bool, i32) { (self.a.loop_range.is_some(), self.a.loop_end) }
     fn curve_step(&mut self) {
         let a = &mut *self.a;
         if a.curve < 0 || a.state.seq_a == a.state.seq_b { return; }
@@ -322,5 +371,59 @@ impl AnimCtl for RatchetAnimCtl<'_> {
 
     fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> {
         snapshot(self.class, &self.a.state, self.a.snapshot.as_ref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rc_formats::moby_anim::{MobyFrameHeader, MobySequence, MobySequenceHeader};
+
+    /// One joint, 30 keys at rate 0.5 (2 ticks per key), key time 16·k.
+    fn class() -> MobyAnimClass {
+        let key = |k: i16| {
+            let payload = vec![0u8, 0, 0, 0, 0, 0, 0xff, 0x7f, 0, 0, 0, 0, 0, 0, 0, 0];
+            MobyFrame {
+                header: MobyFrameHeader { rate: 0.5, time: 16 * k, qwc: 1, quat_bytes: 8, scale_count: 0, trans_offset: 8, trans_count: 0 },
+                quats: vec![[0, 0, 0, 0x7fff]],
+                scales: vec![],
+                trans: vec![],
+                payload,
+            }
+        };
+        let seq = MobySequence { header: MobySequenceHeader { frame_count: 30, loop_sound: 0xff, ..Default::default() }, frames: (0..30).map(key).collect(), triggers: vec![] };
+        MobyAnimClass { joint_count: 1, skeleton: vec![], rest: vec![[0.0; 3]], parent_word: vec![0], sequences: vec![Some(seq)] }
+    }
+
+    /// The loop 6..21 holds key B inside the range; `exit_loop(26)` (`0x247d18` + `0x13fe04 = 0x1a`) leaves it at the
+    /// next key step onto frame 26, and the advance after that steps onto key 26 at once with t = speed · its rate
+    /// (the PS2 result of the rate 0x7f800000).
+    #[test]
+    fn loop_exit_jumps_to_the_key() {
+        let c = class();
+        let mut a = RatchetAnim::new(&c);
+        let mut ctl = a.ctl(&c);
+        ctl.set_anim(Pf::ONE, 0, 0);
+        ctl.set_loop(6, 21);
+        for _ in 0..120 {
+            ctl.advance(Pf::ONE);
+            assert!(ctl.view().frame_b as i32 <= 21, "left the loop: {:?}", ctl.view());
+        }
+        assert_eq!(ctl.loop_state(), (true, 21));
+        ctl.exit_loop(26);
+        let mut steps = 0;
+        while ctl.view().frame_b != 26 && steps < 10 {
+            ctl.advance(Pf::ONE);
+            steps += 1;
+        }
+        assert_eq!(ctl.view().frame_b, 26, "never left");
+        assert!(steps <= 3, "the exit waits for a key step: {steps}");
+        assert_eq!(ctl.loop_state(), (false, 26));
+        ctl.advance(Pf::ONE);
+        let v = ctl.view();
+        assert_eq!((v.frame_a, v.frame_b), (26, 27), "one advance onto key 26");
+        assert!((v.t - 0.5).abs() < 1e-6, "t = speed · rate: {}", v.t);
+        ctl.advance(Pf::ONE);
+        assert_eq!(ctl.view().frame_a, 27);
     }
 }

@@ -77,6 +77,14 @@ and falls back to in-memory decompression when the folder cannot be written. The
 `extracted/` tree therefore gets `extracted/cache/v1/` on the first `cargo dev`. The folder can be
 deleted at any time. `RC_CACHE=0` skips it; `RC_PERF_LOG=1` prints where each lump came from.
 
+**Exports (Tier 2, optional).** `randcrw-extract export --out <data folder> [--to <dir>] [--what
+textures,audio,models,levels,collision,text|all] [--level NN]` writes usable formats from the archive (no disc):
+indexed PNG textures with JSON sidecars (original CLUT and GS format), WAV audio with loop points, glTF 2.0
+levels, collision and skinned, animated moby models, and JSON tables and text. Default folder `<data
+folder>/exports/`; the full disc is about 60,000 files and 3.5 GiB in about 10 s. The game never reads them; the
+launcher's "Export assets…" runs the same command. Layout and what is lossy: `docs/plan/launcher_extractor.md`
+§5.5; how mods will use them: `docs/plan/mods.md` §2.1a.
+
 Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
 `rc_formats::test_data::root()`), because they also use the C++-derived files it holds (`.dec`,
 dumps, `core/` and `gameplay/` splits, `overlay.elf`); they skip when it is absent.

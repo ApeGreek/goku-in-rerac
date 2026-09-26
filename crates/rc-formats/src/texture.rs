@@ -99,17 +99,41 @@ impl LevelTexture {
     }
 }
 
-fn decode_entry(tex: Buf, gs: Buf, e: &TextureEntry) -> Result<Texture> {
-    let px = tex.sub(e.data_offset as usize, e.width as usize * e.height as usize, "texture pixels")?;
-    let clut = gs.sub(e.palette as usize * 0x100, 1024, "texture palette")?;
-    decode_indexed8(px.bytes(), e.width as u32, e.height as u32, clut.bytes())
+/// One stored 8-bit indexed image: the `width × height` indices and the 256-entry RGBA32 CLUT (1024 bytes) exactly
+/// as the disc holds them (CLUT in CSM1 order, alpha 0x80 = 1.0). [`IndexedImage::decode`] is the decode every
+/// loader here applies; exporters use the raw parts to keep the indices and the CLUT.
+#[derive(Clone, Copy, Debug)]
+pub struct IndexedImage<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub indices: &'a [u8],
+    pub clut: &'a [u8],
 }
 
-fn decode_billboard(gs: Buf, b: &ShrubBillboardInfo) -> Result<Texture> {
+impl IndexedImage<'_> {
+    /// [`decode_indexed8`] of the image.
+    pub fn decode(&self) -> Result<Texture> { decode_indexed8(self.indices, self.width, self.height, self.clut) }
+}
+
+fn entry_image_in<'a>(tex: Buf<'a>, gs: Buf<'a>, e: &TextureEntry) -> Result<IndexedImage<'a>> {
+    let px = tex.sub(e.data_offset as usize, e.width as usize * e.height as usize, "texture pixels")?;
+    let clut = gs.sub(e.palette as usize * 0x100, 1024, "texture palette")?;
+    Ok(IndexedImage { width: e.width as u32, height: e.height as u32, indices: px.bytes(), clut: clut.bytes() })
+}
+
+/// The stored image of a tfrag/moby/tie/shrub table entry (level 0 only), as [`parse_textures`] decodes it.
+pub fn entry_image<'a>(core: &LevelCore, core_data: &'a [u8], gs_ram: &'a [u8], e: &TextureEntry) -> Result<IndexedImage<'a>> {
+    let Some(blk) = core.blocks.iter().find(|b| b.name == "textures") else { return invalid("level core has no textures block"); };
+    entry_image_in(Buf(core_data).sub(blk.offset, blk.size, "textures block")?, Buf(gs_ram), e)
+}
+
+/// The stored image of a shrub billboard (level 0 only), as [`parse_textures`] decodes it.
+pub fn billboard_image<'a>(gs_ram: &'a [u8], b: &ShrubBillboardInfo) -> Result<IndexedImage<'a>> {
+    let gs = Buf(gs_ram);
     if b.texture_offset < 0 || b.palette_offset < 0 { return invalid("negative billboard gs_ram offset"); }
     let px = gs.sub(b.texture_offset as usize * 0x100, b.width as usize * b.height as usize, "billboard pixels")?;
     let clut = gs.sub(b.palette_offset as usize * 0x100, 1024, "billboard palette")?;
-    decode_indexed8(px.bytes(), b.width as u32, b.height as u32, clut.bytes())
+    Ok(IndexedImage { width: b.width as u32, height: b.height as u32, indices: px.bytes(), clut: clut.bytes() })
 }
 
 /// Decodes every texture the C++ `textures` command exports, in the same order:
@@ -133,14 +157,14 @@ pub fn parse_textures(core: &LevelCore, core_data: &[u8], gs_ram: &[u8]) -> Resu
     for (table, entries) in tables {
         for (index, e) in entries.iter().enumerate() {
             if e.width <= 0 || e.height <= 0 || e.data_offset < 0 || e.palette < 0 { continue; }
-            let texture = decode_entry(tex, gs, e)?;
+            let texture = entry_image_in(tex, gs, e)?.decode()?;
             out.push(LevelTexture { table, index, source: TextureSource::Entry(*e), texture });
         }
     }
     for (index, c) in core.shrub_classes.iter().enumerate() {
         let b = &c.billboard;
         if b.width <= 0 || b.height <= 0 { continue; }
-        let texture = decode_billboard(gs, b)?;
+        let texture = billboard_image(gs_ram, b)?.decode()?;
         out.push(LevelTexture { table: TextureTable::Billboard, index, source: TextureSource::Billboard { o_class: c.base.o_class, info: *b }, texture });
     }
     Ok(out)
@@ -160,6 +184,11 @@ pub fn parse_textures(core: &LevelCore, core_data: &[u8], gs_ram: &[u8]) -> Resu
 /// Only verified for the tfrag table (`TextureEntry::ty` is the level count there); other tables are not known
 /// to follow the same layout.
 pub fn decode_tfrag_mip_levels(core: &LevelCore, core_data: &[u8], gs_ram: &[u8], e: &TextureEntry) -> Result<Vec<Texture>> {
+    tfrag_mip_images(core, core_data, gs_ram, e)?.iter().map(IndexedImage::decode).collect()
+}
+
+/// The stored images of a tfrag texture's mip chain (level 0 first), the parts [`decode_tfrag_mip_levels`] decodes.
+pub fn tfrag_mip_images<'a>(core: &LevelCore, core_data: &'a [u8], gs_ram: &'a [u8], e: &TextureEntry) -> Result<Vec<IndexedImage<'a>>> {
     let Some(blk) = core.blocks.iter().find(|b| b.name == "textures") else { return invalid("level core has no textures block"); };
     let tex = Buf(core_data).sub(blk.offset, blk.size, "textures block")?;
     let gs = Buf(gs_ram);
@@ -178,7 +207,7 @@ pub fn decode_tfrag_mip_levels(core: &LevelCore, core_data: &[u8], gs_ram: &[u8]
             3 if e.pad >= 0 => gs.sub(e.pad as usize * 0x100, lw * lh, "mip 3 pixels")?,
             _ => return invalid("mip level without a gs_ram block"),
         };
-        out.push(decode_indexed8(px.bytes(), lw as u32, lh as u32, clut.bytes())?);
+        out.push(IndexedImage { width: lw as u32, height: lh as u32, indices: px.bytes(), clut: clut.bytes() });
     }
     Ok(out)
 }
@@ -188,6 +217,11 @@ pub fn decode_tfrag_mip_levels(core: &LevelCore, core_data: &[u8], gs_ram: &[u8]
 /// `mip1..mip3` (gs_ram blocks of 0x100 bytes, all resident), so level k is `gs_ram[block_k · 0x100]`,
 /// `w >> k × h >> k` 8-bit indices (the same linear layout as level 0, which `parse_textures` decodes).
 pub fn decode_billboard_mip_levels(gs_ram: &[u8], b: &ShrubBillboardInfo) -> Result<Vec<Texture>> {
+    billboard_mip_images(gs_ram, b)?.iter().map(IndexedImage::decode).collect()
+}
+
+/// The stored images of a billboard's mip chain (level 0 first), the parts [`decode_billboard_mip_levels`] decodes.
+pub fn billboard_mip_images<'a>(gs_ram: &'a [u8], b: &ShrubBillboardInfo) -> Result<Vec<IndexedImage<'a>>> {
     let gs = Buf(gs_ram);
     if b.width <= 0 || b.height <= 0 || b.palette_offset < 0 { return invalid("billboard has no texture"); }
     if !(1..=4).contains(&b.max_mip) { return invalid("billboard level count outside 1..=4"); }
@@ -199,7 +233,7 @@ pub fn decode_billboard_mip_levels(gs_ram: &[u8], b: &ShrubBillboardInfo) -> Res
         if lw == 0 || lh == 0 { return invalid("mip level smaller than one texel"); }
         if blk < 0 { return invalid("billboard mip level without a gs_ram block"); }
         let px = gs.sub(blk as usize * 0x100, lw * lh, "billboard mip pixels")?;
-        out.push(decode_indexed8(px.bytes(), lw as u32, lh as u32, clut.bytes())?);
+        out.push(IndexedImage { width: lw as u32, height: lh as u32, indices: px.bytes(), clut: clut.bytes() });
     }
     Ok(out)
 }

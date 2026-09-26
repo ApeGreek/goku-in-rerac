@@ -17,7 +17,7 @@
 
 use crate::buf::{invalid, Buf, Result};
 use crate::level::LevelCore;
-use crate::texture::{decode_indexed8, Texture};
+use crate::texture::{IndexedImage, Texture};
 use bytemuck::{Pod, Zeroable};
 
 /// Number of particle types (entries of the update table 0x1b2300 and of `part_defs`).
@@ -152,12 +152,21 @@ fn bank<'a>(core: &LevelCore, core_data: &'a [u8], name: &str) -> Result<Buf<'a>
 
 /// Decodes one 8-bit image with its CLUT from `bank`.
 pub fn decode_bank_texture(bank: &[u8], palette: i32, texture: i32, width: i32, height: i32) -> Result<Texture> {
+    bank_texture_image(bank, palette, texture, width, height)?.decode()
+}
+
+/// The stored indices and CLUT of one bank image, the parts [`decode_bank_texture`] decodes.
+pub fn bank_texture_image(bank: &[u8], palette: i32, texture: i32, width: i32, height: i32) -> Result<IndexedImage<'_>> {
     if palette < 0 || texture < 0 || width <= 0 || height <= 0 { return invalid("bank texture with negative offset or size"); }
     let b = Buf(bank);
     let px = b.sub(texture as usize, width as usize * height as usize, "bank texture pixels")?;
     let clut = b.sub(palette as usize, 1024, "bank texture palette")?;
-    decode_indexed8(px.bytes(), width as u32, height as u32, clut.bytes())
+    Ok(IndexedImage { width: width as u32, height: height as u32, indices: px.bytes(), clut: clut.bytes() })
 }
+
+/// The part bank (`"part_bank"`) or FX bank (`"fx_bank"`) of a level's core data, as [`parse_particle_textures`]
+/// bounds it; entries' `palette`/`texture` offsets are relative to it.
+pub fn core_bank<'a>(core: &LevelCore, core_data: &'a [u8], name: &str) -> Result<&'a [u8]> { bank(core, core_data, name).map(|b| b.bytes()) }
 
 /// Parses and decodes the particle tables of a level. `index` is the raw core index (the tables are
 /// index-relative), `core_data` the whole decompressed core data (the banks are data-relative).

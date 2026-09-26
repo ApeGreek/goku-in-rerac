@@ -2,6 +2,10 @@
 //! compare it with what our reimplementation computes. Doc: docs/plan/trace_harness.md.
 
 pub mod ee;
+pub mod hero_analysis;
+pub mod hero_record;
+pub mod hero_replay;
+pub mod hero_trace;
 pub mod novalis_spawn;
 pub mod pine;
 pub mod port_sim;

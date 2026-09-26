@@ -367,6 +367,11 @@ fn novalis_hero_digest() {
             text = text.replace(&format!(", walk_to: {:?}", rc_game::hero::stance::WalkTo::default()), "");
             // The camera's shake records (hero polish) while idle.
             text = text.replace(&format!(", shake: {:?}", [rc_game::follow_camera::Shake::default(); 2]), "");
+            // The first-person camera and the switch blend (weapons + first person) while idle.
+            text = text.replace(&format!(", first_person: {:?}", rc_game::follow_camera::FirstPerson::default()), "");
+            text = text.replace(&format!(", blend: {:?}", rc_game::follow_camera::CamBlend::default()), "");
+            // The hand slot's hand point 0x1403c0 (the thrown wrench's target; no hand item in these runs).
+            text = text.replace(", hand_point: [0.0, 0.0, 0.0]", "");
             text.hash(&mut h);
             let _ = writeln!(out, "{name} {t} state {:#x} timer {} pos {:?} {:016x}", g.hero.state, g.hero.timer, g.hero.position(), h.finish());
         }

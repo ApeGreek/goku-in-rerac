@@ -35,6 +35,7 @@ Native reproductions of PS2 effects that are noticeable in play. One row each.
 | Effect (as the player notices it) | PS2 cause | Native reproduction (file) | Evidence |
 |---|---|---|---|
 | *(e.g. water ripple advances every 9 ticks)* | *(e.g. f32 truncation in the ripple phase accumulator)* | *(e.g. integer tick counter, `rc-game/src/water.rs`)* | *(e.g. PCSX2 trace, doc §)* |
+| The Comet-Strike's catch: when the wrench is nearly back, Ratchet's anim jumps from the throw loop to the catch frames in one tick | `0x247d18` sets the loop exit 0x13fe08; the next key step of Ratchet's advance sets the rate 0x13fde4 to `0x15f708` = `0x7f800000`, which the PS2 FPU treats as the largest finite value (2¹²⁸, no infinity): the advance after it steps onto the key at once, and `(speed·2¹²⁸ − 1)/2¹²⁸` leaves t = speed. IEEE would give ∞ and NaN | the exit's next advance completes one key step and continues with `t = speed · rate` of the new key; no infinite rate is stored (`rc-game/src/hero/anim.rs` `RatchetAnim::jump`, test `anim::tests::loop_exit_jumps_to_the_key`) | disassembly of 0x247d48 (0x247ed0 `lwc1 f23, 0x15f708`) and the ELF data word; not trace-checked |
 | Blarg flyers' (660) per-segment path length, which sets their first-guess step along each spline segment (5 % too fast or too slow otherwise until the arc-length correction) | `FUN_0028bb90` samples the Hermite segment with `t += 0.05` while `t ≤ 1.0`: the PS2's truncating adds reach t = 0.99999946 on the 20th sample and take it; IEEE round-to-nearest reaches 1.0000001 after 19 and drops the last chord | 20 samples at `t = 0.05·k`, k = 1..=20 (`rc-game/src/moby_update/classes/flyer.rs` `arc_lengths`) | `compare-novalis-spawn` §f2: all 10 flyer splines (count, z, per-point arc lengths) within 2.7e-4 of RAM (2026-09-27, `SCUS-97199 (CE4933D0).01.p2s`) |
 
 ### Tolerances
@@ -317,6 +318,11 @@ alpha doubled), not a GS packet. No PS2 effect was noticeable enough to reproduc
    verification first (decisions.md "Native-first fidelity policy (2026-09-27)", Phase 2).
 9. **D3, D1.** Widescreen and high-refresh rendering only after everything above, since culling and gameplay
    tuning depend on them.
+
+The weapons and first person (`rc-game/src/hero/{comet,weapons}.rs`, the first-person camera and the switch blend in
+`follow_camera.rs`, `moby_update/classes/bomb.rs`) are native `f32` with `std` trig (quaternion slerp for the blend,
+Rodrigues rotations for the first-person view); only the state code of 0x15 / 0x23 keeps the hero block's `Pf` at its
+boundary, as the other hero states do. The one reproduced PS2 effect is the loop exit's rate (the row above).
 
 The hero polish (`rc-game/src/hero/fx.rs`, the camera shake in `follow_camera.rs`, particle types 25 / 34 / 47 / 60
 in `rc-game/src/particles/`) is native: the new particle updates run in `f32` with `std` trig (the existing types 6 /

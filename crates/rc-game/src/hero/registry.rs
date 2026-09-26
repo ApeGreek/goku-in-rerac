@@ -47,7 +47,8 @@ pub enum Module {
     Damage,
     /// `stance.rs` (P2): look stance, fidget state, scripted walk-to-point.
     Stance,
-    /// Later (no file yet): weapon / gadget use states.
+    /// `weapons.rs`: the weapon states (the glove throw 0x23; the weapon stances 0x17 / 0x27 / 0x2e / 0x30 have no
+    /// SetState caller in any level; the gadget poses 0x38..0x3a are set by one moby callback).
     Weapons,
     /// Later: scripted / cutscene control states.
     Scripted,
@@ -98,7 +99,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("jump out of the water", 4, Jump, true),                    // 0x12
     s("wrench combo", 6, Melee, true),                            // 0x13
     s("wrench jump attack", 6, Melee, true),                      // 0x14
-    s("comet strike (crouch + □)", 6, Melee, false),              // 0x15
+    s("comet strike (crouch + □)", 6, Melee, true),               // 0x15
     s("hurt (knockback)", 7, Damage, true),                       // 0x16
     s("weapon fire stance", 8, Weapons, false),                   // 0x17
     s("ledge grab", 3, Ledge, true),                              // 0x18
@@ -112,7 +113,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("gadget lunge (hand item swing)", 6, Melee, false),         // 0x20
     s("wrench rebound", 10, Melee, false),                        // 0x21
     s("Thruster-Pack stomp (R1 in the air)", 0xb, Packs, true),   // 0x22
-    s("melee 0x23 (hand item)", 6, Melee, false),                 // 0x23
+    s("glove throw (hand item)", 6, Weapons, true),                // 0x23
     s("Swingshot fire", 0xd, Swingshot, true),                   // 0x24
     s("Swingshot pull", 0xd, Swingshot, true),                   // 0x25
     s("Swingshot arrive", 0xd, Swingshot, true),                 // 0x26
@@ -228,7 +229,7 @@ impl Hero {
             Walk => self.walk_entry(c, id, play),
             Air => self.fall_entry(c, play),
             Jump if implemented(id) => self.jump_group_entry(c, id, play, old_sub),
-            Melee if matches!(id, 0x13 | 0x14 | 0x15 | 0x20 | 0x23 | 0x51) => {
+            Melee | Weapons if matches!(id, 0x13 | 0x14 | 0x15 | 0x20 | 0x23 | 0x51) => {
                 self.melee_entry(c, id, play);
                 None
             }
@@ -265,8 +266,10 @@ impl Hero {
             Melee => match s {
                 0x13 => self.phys_combo(env, anim),
                 0x14 => self.phys_jump_attack(env, anim),
+                0x15 => return super::comet::physics(self, env, anim),
                 _ => return false,
             },
+            Weapons if s == 0x23 => return super::weapons::physics(self, env),
             Ledge => return super::ledge::physics(self, env, anim, rng),
             Packs => return super::packs::physics(self, env, anim, rng),
             Boots => return super::boots::physics(self, env, anim, rng),
@@ -292,8 +295,9 @@ impl Hero {
             Air => self.tr_fall(c),
             Jump if implemented(s) => self.tr_jump(c),
             Melee => {
-                if matches!(s, 0x13 | 0x14) { self.tr_melee(c) }
+                if matches!(s, 0x13..=0x15) { self.tr_melee(c) }
             }
+            Weapons if s == 0x23 => super::weapons::transitions(self, c),
             Swim => match s {
                 0x33 | 0x35 => self.tr_underwater(c),
                 0x34 => self.tr_underwater_idle(c),
@@ -334,6 +338,8 @@ mod tests {
         want.extend([0x28, 0x29, 0x2a, 0x2b, 0x3f, 0x42, 0x70, 0x71, 0x74]);
         // Package P6 (swingshot.rs).
         want.extend([0x24, 0x25, 0x26, 0x2c, 0x2d]);
+        // Weapons + first person (comet.rs, weapons.rs).
+        want.extend([0x15, 0x23]);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));
@@ -344,7 +350,7 @@ mod tests {
     fn stubs_own_no_ported_state() {
         for (id, s) in STATES.iter().enumerate() {
             if s.ported {
-                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot), "state {id:#x} ported in {:?}", s.module);
+                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons), "state {id:#x} ported in {:?}", s.module);
             }
         }
     }

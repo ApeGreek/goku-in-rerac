@@ -773,6 +773,8 @@ pub struct Services {
     /// The camera shake requests this tick's class updates made (their stores into 0x167260 / 0x167270), in order;
     /// taken by the tick and applied to the camera before the hero update ([`World::shake_camera`]).
     pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
+    /// The creature layer's globals ([`crate::moby_update::creature::Globals`]: rate limiters, class spheres).
+    pub creatures: crate::moby_update::creature::Globals,
 }
 
 impl Default for Services {
@@ -808,6 +810,7 @@ impl Services {
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
             hero_writes: None,
             camera_shakes: Vec::new(),
+            creatures: Default::default(),
         }
     }
 

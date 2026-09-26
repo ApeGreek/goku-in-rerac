@@ -3,7 +3,8 @@
 Status: **decided 2026-09-26** (user's picks in §9; they override the original recommendations where they differ).
 **Built:** Stage 1a, the Rust extractor `randcrw-extract` (`crates/rc-extract`, §4.1), and Stage 1b, the engine
 cut-over (§7: the engine reads only the data folder; `--data-dir`, `RC_DATA_DIR`, `--version-json`; settings under
-`randcrw`). **P1.5, the Tier 1 engine cache v1** (§5.4: `randcrw-extract prepare`, `crates/rc-data`), is built too.
+`randcrw`). **P1.5, the Tier 1 engine cache v1** (§5.4: `randcrw-extract prepare`, `crates/rc-data`), is built too,
+and so is **P1.7, the Tier 2 exports** (§5.5: `randcrw-extract export`, PNG / WAV / glTF / JSON).
 The launcher ↔ game interface is `docs/plan/launcher_contract.md`. Mods get a separate, shorter doc: `docs/plan/mods.md`.
 
 **Names.** The project is **randcrw**. Everything user-facing uses `randcrw` (binaries, data folders, window titles);
@@ -384,6 +385,91 @@ the raw layout `rc_extract unpack` writes to `extracted/`:
 - **For v2+ (E2 and later):** add a kind (`kind.<name> = <version>` in the stamp, files under `<kind>/`), keep
   Tier 0 paths as the key, and add its round-trip test. Tier 2 exports are a separate tree (not under `cache/`).
 
+### 5.5 Tier 2 as built (P1.7 / E2, 2026-09-26)
+- **Command.** `randcrw-extract export --out <data> [--to <dir>] [--what textures,audio,models,levels,collision,text|all]
+  [--level NN] [--json]` (contract clarification 18). Reads only the Tier 0 archive, through the same golden-tested
+  `rc-formats` loaders the engine uses; never the disc, never the Tier 1 cache. Default output `<data>/exports/`
+  (kept outside `cache/`). The launcher's "Export assets…" runs it with a folder the user picks.
+- **Code.** `crates/rc-extract/src/export/`: the encoders `png.rs` (CRC-32, Adler-32, zlib with one fixed-Huffman
+  deflate block and greedy LZ77), `wav.rs` (RIFF PCM16 + `smpl` loop chunk), `gltf.rs` (accessor/buffer writer and a
+  structural validator), `jsonv.rs` (nested JSON writer and reader); the exporters `textures.rs`, `audio.rs`,
+  `geometry.rs` (level and collision glTF), `models.rs` (moby glTF), `tables.rs`, `text.rs`. No new dependency: the
+  crate still depends on `rc-formats` and `rc-data` only. Jobs are (level, kind) pairs plus the global kinds, run on
+  the extractor's worker pool (`--threads`).
+- **Layout** (paths are the asset paths mod overrides will use, mods.md §2.1):
+  ```
+  <to>/export-info.json                        written last: format 1, kinds, levels, counts per folder, skipped
+  <to>/textures/levels/NN/{tfrag,moby,tie,shrub}/<index>_<w>x<h>_t<ty>.png   + .json; tfrag mips .mipK.png
+  <to>/textures/levels/NN/billboard/<o_class>_<w>x<h>.png                   + .json; mips .mipK.png
+  <to>/textures/levels/NN/{sky,particle,fx,hud}/…png                         + .json; particle/part_defs.json, hud/icons.json
+  <to>/textures/global/hud/…                                                 the global HUD set
+  <to>/audio/levels/NN/sound_bank/NNN.wav + .json, audio/levels/NN/sound_bank.json (the bank index)
+  <to>/audio/levels/NN/music/NNN.wav, speech/KK_<lang>.wav (+ .json), music.json (the level header's table)
+  <to>/audio/global/sound_bank/…, music.wav, {help,vendor,space,qwark_boss,post_credits}_audio/NNN.wav
+  <to>/levels/NN/level.gltf + level.bin         scenes: 0 level (LOD 0), 1 lod1, 2 lod2, 3 sky
+  <to>/levels/NN/collision.gltf + .bin
+  <to>/levels/NN/{mobys,ties,shrubs,volumes,paths,grind_paths,sound_instances,env_sample_points,fog_zones,level}.json
+  <to>/models/levels/NN/mobys/CCCC.gltf + .bin  one per moby class, skinned, every sequence as an animation
+  <to>/text/levels/NN/<lang>.json, text/global/all_text/<lang>.json
+  ```
+- **Textures → PNG.** 8-bit **indexed** PNGs: the pixel values are the stored PSMT8 indices; `PLTE`/`tRNS` hold the
+  CLUT in linear order (CSM1 swizzle undone) with alpha scaled 0x80 → 255 (`a < 0x80 ? 2a : 255`, the loaders'
+  `scale_alpha`), so any decoder shows exactly `decode_indexed8`. The export checks every texel against the loader's
+  decode. The sidecar holds the CLUT as stored (`clut_csm1`, 1024 bytes hex: raw alpha, CSM1 order), the table
+  entry (`data_offset`, `ty`, `palette`, `mipmap`, `pad`, or the billboard/sky/particle/HUD descriptor), the GS
+  TEX0 format (PSMT8, CPSMCT32, CSM1, TCC 1, TW/TH) and the mip files. Accessors added to `rc-formats` so the
+  indices come from the loaders' own slicing: `texture::{IndexedImage, entry_image, billboard_image,
+  tfrag_mip_images, billboard_mip_images}`, `sky::sky_texture_image`, `particle_tex::{bank_texture_image,
+  core_bank}`, `hud::Hud::frame_image` (the existing decoders now call them).
+- **Audio → WAV.** Mono PCM16 decoded by `rc_formats::vag::decode` (the port's decoder, PCSX2 rounding). Bank
+  samples: one WAV per distinct sample the tones play (`Bank::vags`), at 48 kHz for PS2-rate tones (negative centre
+  note) and 44.1 kHz for PS1-style ones; VAG files at their header rate (44,100 music, 44,056 speech). Loops (the
+  ADPCM loop-start + repeat flags, `SampleExtent::loop_points`) go into the WAV `smpl` chunk and the sidecar.
+  `sound_bank.json` is the bank index: header, every sound (volume, pan, flags, instance limit) with its grains
+  (type, delay, raw data, decoded tone parameters and the WAV the tone plays).
+- **Levels → glTF 2.0** (`.gltf` + `.bin`, validated by `export::gltf::validate`, and imported by Blender 5.2 in
+  the check below). Buffers keep game coordinates (Z up, world units); each scene's root node rotates Z up → Y up.
+  - tfrag: one mesh per strip list (LOD 0 in scene 0, LOD 1 / 2 in scenes 1 / 2), one primitive per (texture,
+    wrap, min filter) like the engine's batches; `COLOR_0` = the stored RGBA as display values (×2, clamped,
+    sRGB-decoded), the stored bytes in `_PS2_RGBA`; TEX1 K values and the LOD distances (6L, 4L, 2L) in extras.
+  - ties: one mesh per class and LOD, instanced by nodes with the instance matrix; NORMAL = the class normal of the
+    vertex's light slot; `_PS2_TIE_SLOTS` (light slot, morph slots, fat) and `_PS2_MORPH_DELTA`; per-instance
+    RGBA5551 ambient colours, uid, draw distance, occlusion index in node extras; ad-gif registers per primitive.
+  - shrubs: one mesh per class, instanced; instance colour and light sets in extras, billboard record and texture
+    in mesh extras. Mobys: an empty node per instance (position, R = Rz·Ry·Rx, scale) pointing at its model file.
+  - sky: scene 3, one mesh per shell, camera-relative raw units; gouraud shells carry vertex colours.
+  - materials: double-sided, `KHR_materials_unlit` (optional), base colour texture with the GS wrap/filter as the
+    sampler, `alphaMode` MASK at AREF/0x80 when the texture has alpha; extras hold the GS pass (TEST_1, AREF,
+    ALPHA_1 and the two-draw rule).
+  - collision: world-space triangles (`collision_triangles`), one primitive per surface byte with surface id,
+    sound class and high bit in extras.
+- **Mobys → glTF**, skinned: stored pose (bind pose) mesh, high LOD + metal in scene 0, low LOD in scene 1;
+  JOINTS_0 / WEIGHTS_0 from the resolved skin (weights /256). The glTF skin reproduces the game's result, not its
+  mechanism: one joint node per palette entry `F_j = P_j·S_j` (`moby_anim::evaluate`) with identity inverse binds,
+  so the rest pose is the stored pose, plus a `static` joint for lists the game draws with the identity. Every
+  sequence is an animation: one key per keyframe at the time the game reaches it (1/rate ticks at 60 Hz), F_j
+  decomposed into TRS (shear, if any, is dropped and reported: at most 1.2e-7 on Novalis), identity channels
+  omitted. Ratchet (class 0) gets the level's `ratchet_seq` sequences. The class skeleton (the game's inverse bind
+  matrices) and joint parents are in extras. Triangles are turned to face along their vertex normals (the game's
+  strips alternate winding and the GS draws both sides).
+- **JSON tables** from the gameplay file: moby instances (every field and the pvar block), tie and shrub instances,
+  volumes, paths, grind paths, sound instances, env sample points, fog zones, ship placement. **Text**: every
+  language block of each level and of `all_text`, each message as `strings::display` (lossless `\xNN` escapes)
+  and as stored bytes.
+- **What is lossy / not exported.** Load-time vertex lighting is not baked (tfrag uses the stored colours; tie and
+  shrub colours stay per instance in extras); tfrag/tie LOD morphing is not animated (LODs are separate scenes, the
+  morph deltas are attributes); PS2 colours above 0x80 clamp in `COLOR_0` (kept in `_PS2_RGBA`); a TRS shear in
+  animations; ADPCM is decoded (the ADPCM bytes stay in Tier 0). Not exported yet: menu and goodies images,
+  credits images and FMVs (no loader), the RAC1 gadget classes (compressed separately), moby collision, occlusion,
+  scenes (cutscenes), sky shell rotations, `bindata`.
+- **Check.** `cargo test -p rc-extract --lib export_level_01 -- --ignored --nocapture` exports level 01, decodes
+  every PNG/WAV/JSON with the test readers, validates every glTF (indices, bounds, min/max, skins, animations,
+  image URIs), compares every texture with `parse_textures` and every bank WAV with `vag::decode_extent`
+  (`RC_EXPORT_TEST_ALL=1`: every level and the global data). Level 01: 3,304 files, 168.6 MiB (audio 97.6,
+  models 32.9, levels 27.8, textures 8.5, text 1.8) in 0.7 s; glTF: 515 meshes, 571,072 triangles, 81 skins, 543
+  animations. Full disc: 60,015 files, 3.5 GiB in 10 s, nothing skipped. Blender 5.2 imports `level.gltf` and the
+  moby models headless (textures, skin and animations render as expected).
+
 ## 6. Launcher options
 
 | | A. Tauri app (OpenGOAL's choice) | B. Launcher screen inside the Bevy game binary | C. Separate Rust native GUI: egui/eframe (or iced/Slint) |
@@ -532,7 +618,7 @@ workspace **path** crates are fine. Each package reports load times, file counts
 | P1.4 | **Done (Stage 1b; §7)** except the 19-level smoke run and the deterministic before/after capture. Original scope: **Engine cut-over.** `disc_source.rs` becomes data-dir-only via `rc-data`; `extracted_root()` → `rc_data`; drop `RC_ISO`/`RC_SOURCE`; clear no-data message and exit code; README env table | `rc-engine/src/disc_source.rs`, `level_load.rs` (`extracted_root` only), `rc-engine/Cargo.toml` (+1 path dep), `README.md` (data section) | No `disc`/`iso9660` use in rc-engine; engine runs with the ISO moved away; music, speech, scenes, ship and save template load from the data dir; `RC_DETERMINISTIC` capture on 01 byte-identical before and after; 19-level smoke run | P1.3 |
 | P1.5 | **Done (2026-09-26; §5.4)** with `stamp.toml`, lumps with an XXH64 trailer, and the lazy build in every build type; measured 01/05/16 and capture identity as in §5.4. Original scope: **Tier 1 v1 cache.** `rc-extract prepare` writes decompressed WADs + `stamp.toml`. `rc-data` serves `level_core_data(NN)`, `level_gameplay(NN)`, `hud_bank` as `Arc<[u8]>`, decompressed once per process and built lazily if the cache is missing or stale. Engine call sites switch from `wad::decompress(read(…))` to these helpers | `rc-extract/src/prepare.rs`, `rc-data` (cache module), engine: `level_load`, `fog_state`, `menu_render`, `gameplay`, `moby_attach`, `moby_spawn`, `tfrag_light`, `hud_render` (the decompress lines only; dispatch only when no other agent owns these files) | Load time before/after on 01, 05, 16; goldens unchanged; deterministic capture identical; stale stamp triggers a rebuild | P1.2, P1.4 |
 | P1.6 | **Done (Stage 1b)** with `rc_formats::test_data::root()` instead of `rc_data::test_root()`. Original scope: **Test and tool migration.** `rc-trace` roots and the `rc-game` test paths use `rc_data::test_root()` | `rc-trace/src/{lib.rs, novalis_spawn.rs, tfrag_light_cmp.rs, tie_shrub_cmp.rs, port_sim.rs}`, the listed `rc-game` test modules (path lines only) | `cargo test --workspace` green; tests still skip without data | P1.3 (parallel with P1.4/P1.5) |
-| P1.7 | **Tier 2 exports v1.** Textures and menu images → PNG (in-house stored-deflate PNG writer or the approved `png` crate); VAG → WAV via the existing decoder; text → JSON; tfrag/tie/shrub LOD0 → glTF (hand-written JSON + bin). `rc-extract export` | `rc-extract/src/export/**` | PNG count = texture count per level; WAV sample count = decoder output; glTF structure test | P1.2 (can move after Stage 2) |
+| P1.7 | **Built (§5.5).** **Tier 2 exports v1.** Textures and menu images → PNG (in-house stored-deflate PNG writer or the approved `png` crate); VAG → WAV via the existing decoder; text → JSON; tfrag/tie/shrub LOD0 → glTF (hand-written JSON + bin). `rc-extract export` | `rc-extract/src/export/**` | PNG count = texture count per level; WAV sample count = decoder output; glTF structure test | P1.2 (can move after Stage 2) |
 | P1.8 | **FMV demux** (lossless) into Tier 1; doc of the decoder options for U10 | `rc-extract/src/pss.rs`, `docs/plan/cutscenes_transitions.md` §5 append | Demuxed stream sizes add up to the PSS payload; SShd header fields as documented | P1.2 |
 
 Stage 1 is done when a fresh machine with only the ISO can run `rc-extract extract` then `cargo dev`, and after

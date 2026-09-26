@@ -1,6 +1,7 @@
 //! `randcrw-extract`: the command-line front end. Interface: docs/plan/launcher_contract.md.
 
 use rc_extract::build_db::{self, BUILDS};
+use rc_extract::export::{self as tier2, Kinds};
 use rc_extract::extract::{self, Options};
 use rc_extract::{done_json, error_json, identify, mib, prepare, verify, Code, Error, Event, DEFAULT_THREADS, EXTRACTOR_VERSION};
 use std::ffi::OsString;
@@ -14,16 +15,20 @@ usage:
   randcrw-extract extract  --iso <image> --out <data dir> [--ntsc-only] [--json]   (ends with prepare)
   randcrw-extract verify   --out <data dir> [--json]
   randcrw-extract prepare  --out <data dir> [--json]   (build the engine cache <data dir>/cache/v1 from the archive)
+  randcrw-extract export   --out <data dir> [--to <dir>] [--what <kinds>] [--level NN] [--json]
+                           (usable formats: PNG, WAV, glTF, JSON; default --to <data dir>/exports, --what all)
   randcrw-extract table    --iso <image> --output <file.tsv> [--json]   (developer: regenerate the size/SHA-1 table)
 options:
   --json          JSON lines on stdout (launcher mode; docs/plan/launcher_contract.md)
   --ntsc-only     skip the PAL copies (PAL FMVs, PAL scenes, gameplay_pal, PAL credits)
-  --threads <n>   copy/hash workers (default 4)
+  --threads <n>   copy/hash/export workers (default 4)
+  --what <kinds>  export: comma list of textures, audio, models, levels, collision, text, or all
+  --level NN      export: only this level (no global data)
   --iso may be omitted when RC_ISO is set. --flag=value also works.
   randcrw-extract --help | --version";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Cmd { Identify, Extract, Verify, Prepare, Table, Help, Version }
+enum Cmd { Identify, Extract, Verify, Prepare, Export, Table, Help, Version }
 
 #[derive(Debug, PartialEq, Eq)]
 struct Args {
@@ -31,6 +36,9 @@ struct Args {
     iso: Option<PathBuf>,
     out: Option<PathBuf>,
     output: Option<PathBuf>,
+    to: Option<PathBuf>,
+    what: Kinds,
+    level: Option<u32>,
     json: bool,
     ntsc_only: bool,
     threads: usize,
@@ -38,7 +46,7 @@ struct Args {
 
 /// Parses `argv[1..]`. `env_iso` is `RC_ISO`. Errors are the message after `usage: `.
 fn parse_args(argv: &[OsString], env_iso: Option<OsString>) -> Result<Args, String> {
-    let mut a = Args { cmd: Cmd::Help, iso: None, out: None, output: None, json: false, ntsc_only: false, threads: DEFAULT_THREADS };
+    let mut a = Args { cmd: Cmd::Help, iso: None, out: None, output: None, to: None, what: Kinds::ALL, level: None, json: false, ntsc_only: false, threads: DEFAULT_THREADS };
     let mut it = argv.iter();
     let Some(first) = it.next() else { return Err("no command".into()) };
     a.cmd = match first.to_str() {
@@ -46,6 +54,7 @@ fn parse_args(argv: &[OsString], env_iso: Option<OsString>) -> Result<Args, Stri
         Some("extract") => Cmd::Extract,
         Some("verify") => Cmd::Verify,
         Some("prepare") => Cmd::Prepare,
+        Some("export") => Cmd::Export,
         Some("table") => Cmd::Table,
         Some("--help" | "-h" | "help") => return Ok(a),
         Some("--version" | "-V") => { a.cmd = Cmd::Version; return Ok(a) }
@@ -64,6 +73,15 @@ fn parse_args(argv: &[OsString], env_iso: Option<OsString>) -> Result<Args, Stri
             "--iso" => a.iso = Some(value("--iso")?.into()),
             "--out" => a.out = Some(value("--out")?.into()),
             "--output" => a.output = Some(value("--output")?.into()),
+            "--to" => a.to = Some(value("--to")?.into()),
+            "--what" => {
+                let v = value("--what")?;
+                a.what = Kinds::parse(v.to_str().ok_or("--what needs text")?)?;
+            }
+            "--level" => {
+                let v = value("--level")?;
+                a.level = Some(v.to_str().and_then(|v| v.parse().ok()).filter(|n| *n < 100).ok_or("--level needs a level number (00..18)")?);
+            }
             "--threads" => {
                 let v = value("--threads")?;
                 a.threads = v.to_str().and_then(|v| v.parse().ok()).filter(|n| (1..=64).contains(n)).ok_or("--threads needs a number from 1 to 64")?;
@@ -79,11 +97,12 @@ fn parse_args(argv: &[OsString], env_iso: Option<OsString>) -> Result<Args, Stri
     match a.cmd {
         Cmd::Identify => need(a.iso.is_some(), "--iso (or RC_ISO)")?,
         Cmd::Extract => { need(a.iso.is_some(), "--iso (or RC_ISO)")?; need(a.out.is_some(), "--out")?; }
-        Cmd::Verify | Cmd::Prepare => need(a.out.is_some(), "--out")?,
+        Cmd::Verify | Cmd::Prepare | Cmd::Export => need(a.out.is_some(), "--out")?,
         Cmd::Table => { need(a.iso.is_some(), "--iso (or RC_ISO)")?; need(a.output.is_some(), "--output")?; }
         Cmd::Help | Cmd::Version => {}
     }
     if a.ntsc_only && a.cmd != Cmd::Extract { return Err("--ntsc-only applies to extract only".into()); }
+    if a.cmd != Cmd::Export && (a.to.is_some() || a.level.is_some() || a.what != Kinds::ALL) { return Err("--to, --what and --level apply to export only".into()); }
     Ok(a)
 }
 
@@ -194,6 +213,14 @@ fn run(a: &Args, emit: &mut dyn FnMut(Event)) -> Result<String, Error> {
             let p = prepare::prepare(a.out.as_ref().unwrap(), a.threads, None, emit)?;
             Ok(format!("prepared {} lumps ({} built, {} kept) in {:.1} s", p.lumps, p.built, p.up_to_date, t0.elapsed().as_secs_f64()))
         }
+        Cmd::Export => {
+            let out = a.out.as_ref().unwrap();
+            let to = a.to.clone().unwrap_or_else(|| out.join(tier2::DEFAULT_DIR));
+            let opts = tier2::Options { to: to.clone(), kinds: a.what, level: a.level, threads: a.threads, cancel: None };
+            let x = tier2::export(out, &opts, emit)?;
+            let skipped = if x.skipped > 0 { format!(" ({} items skipped, named above)", x.skipped) } else { String::new() };
+            Ok(format!("exported {} files, {:.1} MiB to {} in {:.1} s{skipped}", x.files, mib(x.bytes), to.display(), t0.elapsed().as_secs_f64()))
+        }
         Cmd::Table => {
             let (id, rows) = extract::table(a.iso.as_ref().unwrap(), BUILDS, a.threads, emit)?;
             let path = a.output.as_ref().unwrap();
@@ -219,6 +246,10 @@ mod tests {
         assert_eq!((a.cmd, a.out.as_deref(), a.ntsc_only, a.threads), (Cmd::Extract, Some(std::path::Path::new("/data")), true, DEFAULT_THREADS));
         let a = args(&["prepare", "--out", "/data", "--json"]).unwrap();
         assert_eq!((a.cmd, a.out.as_deref(), a.json), (Cmd::Prepare, Some(std::path::Path::new("/data")), true));
+        let a = args(&["export", "--out", "/data", "--to", "/x", "--what", "textures,audio", "--level", "01", "--json"]).unwrap();
+        assert_eq!((a.cmd, a.to.as_deref(), a.level, a.what.textures, a.what.models), (Cmd::Export, Some(std::path::Path::new("/x")), Some(1), true, false));
+        let a = args(&["export", "--out=/data"]).unwrap();
+        assert_eq!((a.to, a.level, a.what), (None, None, Kinds::ALL));
         let a = args(&["verify", "--out=/data", "--threads=8"]).unwrap();
         assert_eq!((a.cmd, a.out.as_deref(), a.json, a.threads), (Cmd::Verify, Some(std::path::Path::new("/data")), false, 8));
         assert_eq!(args(&["--version"]).unwrap().cmd, Cmd::Version);
@@ -234,7 +265,8 @@ mod tests {
         for bad in [
             &[][..], &["frobnicate"], &["identify"], &["extract", "--iso", "a"], &["verify"], &["prepare"], &["prepare", "--out", "o", "--ntsc-only"], &["identify", "--iso"],
             &["identify", "--iso", "a", "--bogus"], &["verify", "--out", "o", "--ntsc-only"], &["verify", "--out", "o", "--threads", "0"],
-            &["table", "--iso", "a"], &["identify", "--iso", "a", "--json=1"],
+            &["table", "--iso", "a"], &["identify", "--iso", "a", "--json=1"], &["export"], &["export", "--out", "o", "--what", "meshes"],
+            &["export", "--out", "o", "--level", "x"], &["verify", "--out", "o", "--to", "t"], &["prepare", "--out", "o", "--level", "1"],
         ] {
             assert!(args(bad).is_err(), "{bad:?}");
         }

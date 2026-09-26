@@ -32,7 +32,7 @@ impl Sim {
         let mut r = Runner::new([402.0, 410.0, 100.0], 0.0);
         r.hero.idle.level = 3;
         let anim = AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false };
-        r.hero.items.slot.item = Some(HandItem { o_class: SWINGSHOT_CLASS, mstate: 0, anim, snapshot: None, scale: 1.0, position: [402.3, 410.0, 101.0], rows: [[0; 4]; 3], hit_timer: 0 });
+        r.hero.items.slot.item = Some(HandItem { o_class: SWINGSHOT_CLASS, mstate: 0, anim, snapshot: None, scale: 1.0, position: [402.3, 410.0, 101.0], rows: [[0; 4]; 3], hit_timer: 0, flight: Default::default() });
         (r.hero.items.slot.state, r.hero.items.slot.id, r.hero.items.slot.fire_mask, r.hero.items.slot.ticks_ready) = (2, SWINGSHOT, button::CIRCLE, 60);
         let mut w = Carriers::default();
         w.targets = Targets { list: ts, camera: [390.0, 410.0, 104.0], cam_yaw: 0.0, cam_pitch: 0.0 };

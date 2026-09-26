@@ -3,6 +3,7 @@
 //! gold-weapon offers 304/1456–1465). Spec: `docs/plan/moby_update_catalogue.md` §1, §4, §7 and the "In the port"
 //! sections.
 pub mod classes;
+pub mod creature;
 pub mod scheduler;
 pub mod services;
 pub mod triggers;

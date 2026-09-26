@@ -4,8 +4,9 @@
 //! tests the swing against mobys and sends the hit (`coll_sphere_mobys` 0x214468 / `CollLine_Fix` with a hit
 //! template → 0x26e968). Spec: `docs/plan/player_controller.md` "Melee and item swap". Addresses level01.
 //!
-//! Not ported: the comet strike 0x15 (crouch + □; its entry is, its physics and the wrench's throw states
-//! 10/11 are not: the hero freezes like in any unported state), 0x20/0x23/0x51/0x70/0x2b, the rebound 0x21
+//! The comet strike 0x15 (crouch + □) has its entry here and its physics, the throw and the wrench's flight
+//! states 10 / 11 in [`super::comet`]; the glove throw 0x23 has the group-6 entry here and the rest in
+//! [`super::weapons`]. Not ported: 0x20/0x51, the rebound 0x21
 //! (needs the targets' records: the port has none), the aim-assist target search `0x22e238` (targets need a
 //! mode-0x20 record no ported class has: always none), the wall-hit spark line and the jump-attack
 //! ground sparks (cosmetic + sounds) and the trail counters of the wrench (pvar +0x70/+0x74/+0x7c). The stats
@@ -133,6 +134,9 @@ impl Hero {
     /// `FUN_002351d0(range, cone, cone2)`: unless already aimed, aim at the stick direction when the stick is
     /// past 0.5, else the facing; then the target search `0x22e238(range, aim, cone, cone2)` over the
     /// targetable list (none in the port, see the module doc).
+    /// [`Hero::melee_aim`] for the other weapon states (`super::comet`, `super::weapons`).
+    pub(super) fn melee_aim_pub(&mut self, env: &Env) { self.melee_aim(env) }
+
     fn melee_aim(&mut self, env: &Env) {
         let mut a = self.melee.aim_yaw;
         if self.melee.aimed == 0 {
@@ -180,7 +184,8 @@ impl Hero {
                     break 'pick Some(if self.f658 == 1 { 0x70 } else { 0x13 });
                 }
                 if strafe && ticks(20) < self.timer {
-                    // FUN_00236da0 (a strafe-stance wrench move): not ported.
+                    // FUN_00236da0: the look stance's (first-person) wrench throw, no state change (super::comet).
+                    super::comet::throw_wrench(self, c.env, true);
                     break 'pick None;
                 }
                 break 'pick Some(0x15);
@@ -268,6 +273,7 @@ impl Hero {
                 self.set_anim(c.anim, c.rng, Pf::from_i32(b), 0x2b, 4);
                 if self.hand_is_wrench() { self.items.pending_blend = Some((10, 4, b + 2)); }
             }
+            0x23 => super::weapons::throw_entry(self, c, play),
             0x15 => {
                 self.melee.combo = 3;
                 self.items.restore = 0;
@@ -409,25 +415,28 @@ impl Hero {
         let blending = v.blending();
         let row = *self.combo_row();
         let pad = c.env.pad;
-        if Pf::from_i32(row[C_JUMP_AFTER]) < frame {
-            if blending { return; }
-            if self.state != 0x15 || self.f658 == 0 {
-                let n = frame.to_i32().wrapping_sub(row[C_REF]).wrapping_mul(2);
-                if pad.pressed_within(button::CROSS, n).is_some() {
-                    if pad.held & button::CROUCH == 0 {
-                        if self.jump_lockout == 0 {
-                            self.set_state(c, 7, true);
-                            return;
-                        }
-                    } else if self.crouch_jump(c) {
+        let mut idle_test = true;
+        if Pf::from_i32(row[C_JUMP_AFTER]) < frame && blending {
+            idle_test = false;
+        } else if Pf::from_i32(row[C_JUMP_AFTER]) < frame && (self.state != 0x15 || self.f658 == 0) {
+            let n = frame.to_i32().wrapping_sub(row[C_REF]).wrapping_mul(2);
+            if pad.pressed_within(button::CROSS, n).is_some() {
+                if pad.held & button::CROUCH == 0 {
+                    if self.jump_lockout == 0 {
+                        self.set_state(c, 7, true);
                         return;
                     }
+                } else if self.crouch_jump(c) {
+                    return;
                 }
             }
         }
-        if !blending && Pf::from_i32(row[C_IDLE_AFTER]) < frame {
+        if idle_test && !blending && Pf::from_i32(row[C_IDLE_AFTER]) < frame {
             self.set_state(c, 0, false);
+            return;
         }
+        // 0x15: the catch's loop exit / idle with another hand item (super::comet).
+        if self.state == 0x15 { super::comet::transitions_tail(self, c); }
     }
 }
 
@@ -448,7 +457,7 @@ fn reach_by_facing(v: V4, yaw: Pf) -> V4 {
 
 /// World point of the last joint of `chain` of a moby: `FUN_002645a8(moby, list, out)` (partial evaluation,
 /// `P.r3 · scale/1024`, rows, + position), on `rc_formats::moby_anim::{joint_translations, bone_points}`.
-fn list_point(p: &moby_anim::Rows, rows: &[moby_anim::V4; 3], pos: [f32; 3], scale: f32) -> V4 {
+pub(super) fn list_point(p: &moby_anim::Rows, rows: &[moby_anim::V4; 3], pos: [f32; 3], scale: f32) -> V4 {
     let t = [p[3][0].to_bits(), p[3][1].to_bits(), p[3][2].to_bits(), p[3][3].to_bits()];
     let w = moby_anim::bone_points(&[t], rows, pos, scale)[0];
     w.map(Pf)
@@ -467,11 +476,16 @@ fn list_point(p: &moby_anim::Rows, rows: &[moby_anim::V4; 3], pos: [f32; 3], sca
 ///   damage 1 (2 for the jump attack), class 0x47}, a 5-step sweep of lines between last tick's and this
 ///   tick's hand → head (`FUN_0026ebe8`) and a sphere of radius 0.35 (0.47 in 0x14) at the head − 0.085
 ///   (`coll_sphere_mobys`); the first hit of the swing plays the wrench's hit sound (counted).
-pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink) {
+pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, _rng: &mut crate::rng::Rng) {
     hero.items.slot.swap = 0;
     if hero.items.slot.state == 3 { return; }
     let Some(class) = hero.items.slot.item.as_ref().and_then(|m| env.data.class(m.o_class)) else { return };
     let st = hero.state;
+    // Thrown (+0x20 = 10 / 11): the flight (super::comet); other non-zero states do nothing.
+    match hero.items.slot.item.as_ref().map_or(0, |m| m.mstate) {
+        super::comet::OUT | super::comet::BACK => return super::comet::thrown_update(hero, table, anim, env, hits),
+        _ => {}
+    }
     {
         let it = hero.items.slot.item.as_mut().unwrap();
         if it.mstate != 0 { return; }
@@ -648,7 +662,7 @@ mod tests {
 
     fn wrench() -> HandItem {
         let anim = AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false };
-        HandItem { o_class: WRENCH_CLASS, mstate: 0, anim, snapshot: None, scale: 1.0, position: [0.0; 3], rows: [[0; 4]; 3], hit_timer: 0 }
+        HandItem { o_class: WRENCH_CLASS, mstate: 0, anim, snapshot: None, scale: 1.0, position: [0.0; 3], rows: [[0; 4]; 3], hit_timer: 0, flight: Default::default() }
     }
 
     /// Ratchet on a flat floor with the wrench in hand (slot ready, fire mask □).
@@ -779,7 +793,7 @@ mod tests {
         let mut frame = 100;
         let mut hand = Vec::new();
         for _ in 0..8 {
-            let env = ItemEnv { data: &data, pad: &pad, frame, hero_moby: 0 };
+            let env = ItemEnv { data: &data, pad: &pad, frame, hero_moby: 0, coll: None, camera: None };
             items::items_update(&mut r.hero, &mut g, &mut table, &anim, &mut rng, &env, &mut items::NoHits);
             hand.push((r.hero.items.slot.id, r.hero.items.slot.state, r.hero.items.slot.item.as_ref().map(|m| m.o_class)));
             frame += 1;
@@ -796,7 +810,7 @@ mod tests {
         // □ with the glove in hand swaps back to the wrench.
         let mut p = crate::pad::PadState::default();
         p.update(Some(&PadInput::neutral().press(button::SQUARE).bytes()), false);
-        let env = ItemEnv { data: &data, pad: &p, frame, hero_moby: 0 };
+        let env = ItemEnv { data: &data, pad: &p, frame, hero_moby: 0, coll: None, camera: None };
         items::items_update(&mut r.hero, &mut g, &mut table, &anim, &mut rng, &env, &mut items::NoHits);
         assert_eq!((r.hero.items.target, r.hero.items.slot.state, g.wrench_flag), (8, 3, 1));
     }

@@ -71,6 +71,8 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
    - `verify`: `verify` (every file is re-read from disk and hashed).
    - `prepare`: `prepare`. Its `done`/`total` are bytes of the Tier 0 sources processed; `file` is the source's
      archive path (`levels/NN/core_data.bin`).
+   - `export`: `export` (clarification 18). `done`/`total` are Tier 0 bytes, weighted per job; `file` is the main
+     Tier 0 source of the job most recently started (`levels/NN/core_data.bin`, `global/sound_bank.bin`, …).
 6. **Info lines** are human-readable and not meant to be parsed, with one exception kept stable for bug reports: for an
    unknown R&C build (code 21) one info line starts with `new build DB row: ` followed by a ready-to-paste Rust row for
    `crates/rc-extract/src/build_db.rs`.
@@ -109,7 +111,8 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
     Extra files in the folder (logs, caches, mods) are ignored.
 12. **Extra commands and flags** (not used by the launcher): `table` (developer tool that regenerates the committed
     size/SHA-1 table from a disc), `--threads <n>` (copy/hash/prepare workers, default 4), `--help`, `--version`.
-    `prepare` (clarification 17) is optional for the launcher (its "Rebuild cache" action).
+    `prepare` (clarification 17) is optional for the launcher (its "Rebuild cache" action), and so is `export`
+    (clarification 18, its "Export assets…" action).
 
 ### Runtime and folders
 13. The extractor and the runtime never compute the per-OS data root; they only receive paths (`--out`,
@@ -155,3 +158,27 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
     - **The runtime** reads the cache through `rc-data` and never requires it: a missing, stale or damaged cache is
       rebuilt lazily (one log line per lump), and an unwritable folder falls back to in-memory decompression. The
       runtime exit codes (clarification 14) are unchanged.
+
+### Exports (Tier 2)
+18. **`randcrw-extract export --out <game_data_dir> [--to <dir>] [--what <kinds>] [--level NN] [--json]`** writes
+    the optional "usable formats" from the Tier 0 archive in `<game_data_dir>` (never the disc image, never the
+    Tier 1 cache). Output: `progress` lines with `"stage":"export"`, `info` lines, one `done` or `error` line, as
+    for every command. The game never reads the exports.
+    - **`--to`** defaults to `<game_data_dir>/exports/` (outside `cache/`; `verify` ignores it like any extra
+      folder). It is created if missing; files already there are overwritten, others are left alone.
+    - **`--what`**: a comma list of `textures`, `audio`, `models`, `levels`, `collision`, `text`, or `all`
+      (the default). `levels` and `models` also write the level textures their materials reference.
+    - **`--level NN`** exports that level only (and no global data); without it every level and the global data
+      (global sound bank, music and voice folders, `all_text`, the global HUD) are exported.
+    - **Layout, formats and sidecars:** `docs/plan/launcher_extractor.md` "Tier 2 as built". The folder's
+      `export-info.json` is removed when an export starts and written last (kinds, levels, file and byte counts
+      per folder, skipped items); files are written as `*.partial` and renamed, and a re-run removes leftover
+      `*.partial` files. So cancelling is killing the process, as for `extract`.
+    - **Items a loader rejects** (none on SCUS_971.99) are skipped with an `info` line starting `skipped: ` and
+      listed in `export-info.json`; the export still ends with `done`.
+    - **Codes:** 10 (no `toc.bin`, `--level` not in the archive, or a Tier 0 file cannot be read), 30/31 (writing
+      failed / disk full; the free-space check estimates the output from the source sizes plus 64 MiB), 40 (a
+      level's core or gameplay lump does not parse: the archive is damaged; run `verify`), 99 (bad arguments:
+      the message starts with `usage:`).
+    - **Size and time** (full disc, dev machine, 4 workers): about 60,000 files and 3.5 GiB (audio 2.2 GiB as
+      16-bit WAV) in about 10 s; `--level 01` about 3,300 files and 170 MiB in under a second.

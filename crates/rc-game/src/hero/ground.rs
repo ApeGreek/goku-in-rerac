@@ -74,6 +74,8 @@ impl Hero {
         super::surface::ground_drag(self);
         self.edge_brake(env, Pf::b(0x406c_cccd), Pf::ZERO);
         self.stick_target(env, Pf::ONE);
+        // The look stances under the first-person camera (0x1413f5): face the camera (super::stance).
+        if (self.state == 1 || self.state == 0x1e) && self.f13f5 != 0 { super::stance::first_person_turn(self, env); }
         // State 3: 0x242858 (weapon draw from a stop) needs a weapon in hand; never on foot here.
         if self.state == state::CROUCH {
             let seq = anim.view().seq_b;
@@ -203,7 +205,8 @@ impl Hero {
         } else if self.crouch_jump(c) {
             return;
         }
-        // □ with the wrench (item 8) → 0x15: no weapon.
+        // □ with the wrench (item 8) → the Comet-Strike 0x15 (super::comet; the fall test below still runs).
+        if pad.pressed_within(button::SQUARE, ticks(0xf)).is_some() && self.items.slot.id == super::items::item::WRENCH { self.set_state(c, 0x15, true); }
         if ticks(8) < self.air_ticks as i32 {
             if self.prev_state == 8 && self.timer < ticks(15) { return; }
             self.set_state(c, 6, true);

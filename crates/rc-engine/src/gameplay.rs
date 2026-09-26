@@ -235,15 +235,19 @@ pub struct Session(pub SessionState);
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq)]
 pub struct HeldWeapon(pub Option<(u16, i32, i32)>);
 
-/// Per item: has an ammo HUD (record +8 ≠ 0) and the max ammo (record +0xe), from the item records.
+/// Per item: has an ammo HUD (record +8 ≠ 0) and the max ammo (record +0xe), from the item records; and the item
+/// definitions' weapon fields (`0x22ee08`), by id.
 #[derive(Resource, Clone, Debug, Default)]
-struct AmmoTable(Vec<(bool, u16)>);
+struct AmmoTable(Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
+
+/// The hand-item data, the ammo table (uses ammo, max) and the weapon fields of the item definitions.
+type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
 
 /// The level's hand-item data (item definitions from the overlay, the gadget classes, Ratchet's joint lists)
 /// for `rc_game::hero::items`: the definitions at the overlay's item table (L01 0x179f40, found through
 /// `GiveItem`), the classes from the gadget table (decompressed as `select_world_object_resource_tables`
-/// would), their joint lists.
-fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<(ItemData, Vec<(bool, u16)>)> {
+/// would), their joint lists; with the ammo table (uses ammo, max) and the weapon fields of the definitions.
+fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOut> {
     use anyhow::Context;
     use rc_formats::gadget;
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
@@ -256,6 +260,8 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<(ItemData, V
     let raw = rc_formats::font::read_overlay(&sections, tables.item_defs_addr, n * sz).context("item definitions")?;
     let w = |i: usize, o: usize| i32::from_le_bytes(raw[i * sz + o..i * sz + o + 4].try_into().unwrap());
     let defs = (0..n).map(|i| ItemDef { slot: w(i, 8), attach: w(i, 0xc), o_class: w(i, 0x10), b18: raw[i * sz + 0x18] }).collect();
+    // The weapon draw's fields (+0x18 word, the three sequences +0x24..+0x2c, +0x30): `0x22ee08`.
+    let weapon_defs = (0..n).map(|i| rc_game::hero::items::WeaponDef { w18: w(i, 0x18), anims: [w(i, 0x24), w(i, 0x28), w(i, 0x2c)], w30: w(i, 0x30) }).collect();
     let (ratchet_blob, gadgets) = crate::moby_attach::load_blobs()?;
     let rc = lv.mobys.classes.iter().find(|c| c.o_class == gadget::RATCHET_O_CLASS).context("no class 0")?;
     let hero_chains = HERO_LISTS.iter().map(|&l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(a, _)| a).unwrap_or_default()).collect();
@@ -267,7 +273,7 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<(ItemData, V
         classes.push(ItemClass { o_class: g.moby.o_class as i16, anim: rc_formats::moby_anim::MobyAnimClass::new(c, seqs), scale: c.header.scale, chains });
     }
     let ammo = tables.records.iter().map(|r| (r.has_ammo(), u16::from_le_bytes([r.0[0xe], r.0[0xf]]))).collect();
-    Ok((ItemData { defs, hero_chains, classes }, ammo))
+    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs))
 }
 
 /// The level water tables the hero's ground probe reads (`0x26ed38`): the class-751 ripple patches of
@@ -317,6 +323,14 @@ impl HitSink for CellHits<'_, '_> {
     fn deliver(&mut self, table: &mut MobyTable, target: MobyId, tmpl: &HitTemplate) {
         let mut s = self.svc.borrow_mut();
         rc_game::moby_update::services::deliver_hit_in(table, &mut s.hits, target, tmpl);
+    }
+    fn create_moby(&mut self, table: &mut MobyTable, o_class: i16, counter: u64) -> Option<MobyId> {
+        let mut s = self.svc.borrow_mut();
+        rc_game::moby_update::classes::bomb::create_from_hero(table, &mut s, self.classes, o_class, counter)
+    }
+    fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) {
+        let mut s = self.svc.borrow_mut();
+        rc_game::moby_update::classes::bomb::delete_from_hero(table, &mut s, id, counter);
     }
 }
 
@@ -430,6 +444,8 @@ pub struct Play {
     trace: bool,
     respawn: bool,
     frozen_hint: bool,
+    /// Ratchet's entities hidden (his moby's mode bit 1: the first-person view hides him, `HeroSyncMoby`).
+    ratchet_hidden: bool,
 }
 
 /// The external updates' level-table address for `o_class` (`ExternalUpdates::update_fn`, also used to build
@@ -694,12 +710,12 @@ fn setup(
     if let Some(s) = &session { game.hero.health = s.0.hp; }
     // The hand items (wrench, bomb glove, …): created by the hero update from the first tick on.
     let item_data = match item_data(lv) {
-        Ok((d, ammo)) => {
+        Ok((d, ammo, weapon_defs)) => {
             println!(
                 "gameplay: hand items: {} item definitions, {} gadget classes (wrench 71: {}, bomb glove def {:?})",
                 d.defs.len(), d.classes.len(), d.class(71).is_some(), d.defs.get(10)
             );
-            commands.insert_resource(AmmoTable(ammo));
+            commands.insert_resource(AmmoTable(ammo, weapon_defs));
             Some(d)
         }
         Err(e) => {
@@ -861,6 +877,7 @@ fn setup(
         level: level_index,
         dynamic,
         sounds: HashMap::new(),
+        ratchet_hidden: false,
         debug_hits: std::env::var("RC_DEBUG_HIT").ok().map(|v| {
             v.split(',').filter_map(|h| {
                 let (a, b) = h.trim().split_once('@')?;
@@ -1108,7 +1125,13 @@ fn tick(
     p.game.item_globals = item_globals(state.as_deref().map(|s| &s.0), session.as_deref().map(|s| &s.0));
     // The item table 0x13d4c0 (the hero's owned mirror) and the back slot's globals: the saved back item 0x14166c
     // (equipped[3]), 0x15ed94, the request 0x141414 (the session's temp back item) and Clank hidden 0x141628.
+    // The ammo table 0x13d428 and the items' "uses ammo" (records +8) and weapon fields (definitions) for the weapons.
+    if let Some(a) = ammo.as_deref() {
+        for (i, &(has, _)) in a.0.iter().enumerate().take(p.game.hero.weapons.uses_ammo.len()) { p.game.hero.weapons.uses_ammo[i] = has; }
+        if p.game.hero.weapons.defs.is_empty() { p.game.hero.weapons.defs = a.1.clone(); }
+    }
     if let Some(gs) = state.as_deref() {
+        p.game.hero.weapons.ammo = gs.0.global.ammo;
         p.game.hero.owned.0 = gs.0.global.owned;
         p.game.hero.back_slot.slot.saved = gs.0.global.equipped[3];
         p.game.hero.back_slot.thruster_last = gs.0.global.thruster_last;
@@ -1161,6 +1184,14 @@ fn tick(
         if gl.thruster_last != last { gl.thruster_last = last; }
     }
 
+    // The ammo the weapons used (0x249450: the ammo and the ammo-used stat 0x13dea0).
+    if let Some(gs) = state.as_mut() {
+        let w = &mut p.game.hero.weapons;
+        if gs.0.global.ammo != w.ammo { gs.0.global.ammo = w.ammo; }
+        if w.used.iter().any(|&u| u != 0) {
+            for (t, u) in gs.0.global.ammo_used.iter_mut().zip(w.used.iter_mut()) { *t += std::mem::take(u); }
+        }
+    }
     // The melee entries' stats records (SetState 0x23cf98: 0x1416c0 = levels[8] 3007, misc 0/1, gadget 17).
     if p.game.hero.melee.entered != [0; 3] {
         if let (Some(gs), Some(s)) = (state.as_mut(), session.as_ref()) {
@@ -1287,6 +1318,13 @@ fn upload(
     let t = Transform::from_matrix(model);
     for &e in &p.entities {
         if let Ok(mut tr) = transforms.get_mut(e) { *tr = t; }
+    }
+    // Hidden in first person (mode bit 1, `HeroSyncMoby` 0x229f20 → 0x2486c0).
+    let hidden = hm.mode & rc_game::moby_runtime::mode::HIDDEN != 0;
+    if hidden != p.ratchet_hidden {
+        p.ratchet_hidden = hidden;
+        let v = if hidden { Visibility::Hidden } else { Visibility::Inherited };
+        for &e in &p.entities { commands.entity(e).insert(v); }
     }
     if let Some(mut buf) = buffers.get_mut(&p.extra.palette) { buf.data = Some(palette); }
     if let Some(mut buf) = buffers.get_mut(&p.extra.instances) { buf.data = Some(record); }

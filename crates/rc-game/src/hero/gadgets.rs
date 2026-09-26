@@ -17,8 +17,9 @@
 //! A new gadget or weapon adds one row to [`HAND_ITEMS`] (its fire case and / or its item update); nothing else in
 //! the hero or the tick changes.
 //!
-//! Ported rows: the wrench (item 8, fire in [`super::melee`] ahead of the table, update `melee::wrench_update`) and
-//! the Swingshot (item 12, [`super::swingshot`]). The game's other cases, not ported yet (their rows hold `None`):
+//! Ported rows: the wrench (item 8, fire in [`super::melee`] ahead of the table, update `melee::wrench_update`, its
+//! thrown flight [`super::comet`]), the Swingshot (item 12, [`super::swingshot`]) and the Bomb Glove (item 10, the
+//! throw gloves' fire case and the glove's update: [`super::weapons`]). The game's other cases, not ported yet (their rows hold `None`):
 //! the throw weapons 10 / 0x11 / 0x14 / 0x18 / 0x19 (→ 0x23 / `0x22ee08`), 0xf, 0x12 (→ 0x20), 0x15, the Hologuise
 //! 0x1f (the 18-tick timer 0x14162e), the PDA 0x20 (`OpenVendorMenu`); the holster check 0x2405f8.
 
@@ -33,7 +34,7 @@ pub enum ItemUpdate {
     /// Not ported (the item only follows the hand).
     None,
     /// Inside the slot loop (no hero context needed).
-    Slot(fn(&mut Hero, &mut MobyTable, &dyn super::anim::AnimCtl, &ItemEnv, &mut dyn HitSink)),
+    Slot(fn(&mut Hero, &mut MobyTable, &dyn super::anim::AnimCtl, &ItemEnv, &mut dyn HitSink, &mut crate::rng::Rng)),
     /// Right after the slot loop, with the hero's context.
     Hero(fn(&mut Hero, &mut Ctx, &ItemData)),
 }
@@ -50,9 +51,11 @@ pub struct HandItemKind {
 }
 
 /// The hand items the port knows (see the module doc).
-pub static HAND_ITEMS: [HandItemKind; 2] = [
+pub static HAND_ITEMS: [HandItemKind; 3] = [
     HandItemKind { id: super::items::item::WRENCH, name: "wrench", fire: None, update: ItemUpdate::Slot(super::melee::wrench_update) },
     HandItemKind { id: super::swingshot::SWINGSHOT, name: "Swingshot", fire: Some(super::swingshot::fire), update: ItemUpdate::Hero(super::swingshot::item_update) },
+    // The throw gloves' case of the weapon check (0x23 / the arm) and the Bomb Glove's update 0x2d8330 (super::weapons).
+    HandItemKind { id: super::items::item::BOMB_GLOVE, name: "Bomb Glove", fire: Some(super::weapons::fire), update: ItemUpdate::Slot(super::weapons::glove_update) },
 ];
 
 /// The row of item `id`.
@@ -75,15 +78,15 @@ pub(super) fn pda_item(h: &mut Hero, c: &mut Ctx, t0: i32) -> bool {
 
 /// The holster check 0x2405f8 (after the water checks). True when it changed the state. Not ported: it acts on a
 /// weapon drawn in the weapon stances (0x1413f8), which no ported item sets.
-pub(super) fn holster_check(_h: &mut Hero, _c: &mut Ctx) -> bool { false }
+pub(super) fn holster_check(h: &mut Hero, c: &mut Ctx) -> bool { super::weapons::holster_check(h, c) }
 
 /// The item moby's update in the slot loop 0x231088 (`(*moby+0x74)(moby)`), for the hand item of the slot.
-pub(super) fn slot_item_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn super::anim::AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink) {
+pub(super) fn slot_item_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn super::anim::AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut crate::rng::Rng) {
     let id = hero.items.slot.id;
     match hand_item(id).map(|k| k.update) {
         Some(ItemUpdate::Slot(f)) => {
             // The wrench's update belongs to its class (0x47), as before the table.
-            if id != super::items::item::WRENCH || hero.items.slot.item.as_ref().is_some_and(|it| it.o_class == 0x47) { f(hero, table, anim, env, hits); }
+            if id != super::items::item::WRENCH || hero.items.slot.item.as_ref().is_some_and(|it| it.o_class == 0x47) { f(hero, table, anim, env, hits, rng); }
         }
         Some(ItemUpdate::Hero(_)) => hero.gadgets.pending = Some(id),
         _ => {}
@@ -95,16 +98,29 @@ pub(super) fn slot_item_update(hero: &mut Hero, table: &mut MobyTable, anim: &dy
 pub fn after_items(hero: &mut Hero, c: &mut Ctx, data: &ItemData) {
     let pending = hero.gadgets.pending.take();
     if let Some(ItemUpdate::Hero(f)) = pending.and_then(hand_item).map(|k| k.update) { f(hero, c, data); }
+    // The SetState an item update made inside the slot loop (the Bomb Glove's 1 → 0x1e).
+    super::weapons::after_items(hero, c);
     if hero.items.slot.item.is_none() || hero.items.slot.id != super::swingshot::SWINGSHOT { super::swingshot::item_gone(hero); }
 }
 
 /// The hand item's class sounds of this tick (`PlayClassSound(index, 0, item)` inside its update: the wrench's hit,
 /// the Swingshot's fire / hit / pull), played through the hero's sound layer right after the item's update (the
 /// tick calls it after [`after_items`]), in the order the update made them. No hand moby: dropped.
-pub fn flush_item_sounds(h: &mut Hero, sounds: &mut dyn super::HeroSounds, rng: &mut crate::rng::Rng) {
+///
+/// Then Ratchet's own sounds of the item update (`fx.item_voices`, `moby` = Ratchet: the catch's voice, the thrown
+/// wrench's whoosh loop and its release, the bomb glove's throw voice), in order.
+pub fn flush_item_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sounds: &mut dyn super::HeroSounds, rng: &mut crate::rng::Rng) {
     let mut list = std::mem::take(&mut h.fx.item_sounds);
     list.append(&mut h.swing.item.sounds);
-    let Some(item) = h.items.slot.item.as_ref() else { return };
-    let (o_class, pos) = (item.o_class, item.position);
-    for index in list { sounds.item_sound(o_class, pos, index, 0, rng); }
+    if let Some(item) = h.items.slot.item.as_ref() {
+        let (o_class, pos) = (item.o_class, item.position);
+        for index in list { sounds.item_sound(o_class, pos, index, 0, rng); }
+    }
+    for cmd in std::mem::take(&mut h.fx.item_voices) {
+        match cmd {
+            super::packs::SoundCmd::Loop { n, sound } => h.packs.loops[n] = sounds.voice(moby, sound, 4, rng),
+            super::packs::SoundCmd::Voice { index, flags } => { sounds.voice(moby, index, flags, rng); }
+            super::packs::SoundCmd::Release { slot } => sounds.release(moby, slot),
+        }
+    }
 }

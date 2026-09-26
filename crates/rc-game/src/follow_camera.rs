@@ -245,6 +245,10 @@ pub struct Camera {
     pub hit: Option<(usize, V4)>,
     /// The shake records 0x167260 (along up) and 0x167270 (along forward), [`ShakeAxis`] order.
     pub shake: [Shake; 2],
+    /// The first-person camera (type 4, [`FirstPerson`]).
+    pub first_person: FirstPerson,
+    /// The camera switch blend 0x167370.. ([`CamBlend`]).
+    pub blend: CamBlend,
 }
 
 /// Which shake record a request writes: 0x167260 moves the camera along its up row, 0x167270 along its forward row.
@@ -685,10 +689,22 @@ impl Camera {
         self.g.since_switch += 1;
         self.pre_flags(inp);
         self.pre_motion(inp);
-        self.update_type0(inp);
-        self.cam.prev_pos = self.cam.pos;
-        self.out.pos = self.cam.pos;
-        self.out.rows = self.cam.rows;
+        // UpdateAllCameras 0x20d620: the active camera's own check (the first-person camera's release 0x316c08), the
+        // other camera's activation (the first-person check 0x316880; the follow camera takes over from a released
+        // one), the switch `0x20d110` with the new type's init, then the active type's update.
+        let prev = self.switch_cameras(inp);
+        if self.first_person.active {
+            self.first_person_update(inp);
+        } else {
+            self.update_type0(inp);
+            self.cam.prev_pos = self.cam.pos;
+        }
+        let (rows, pos) = self.active_view();
+        // CameraUpdate: the blend's capture of the previous camera (`fun_001ec8a0`, 0x167370 = 1 / 2) and the blend
+        // (`fun_001ed2b0`, 0x167370 = 3); else the active camera as it is.
+        let (rows, pos) = self.blend.step(prev, rows, pos, crate::hero::physics::to_f32x3(inp.hero.plat_applied));
+        self.out.pos = pos;
+        self.out.rows = rows;
         let f = self.out.rows[0];
         // 0x2721f0: yaw = atan2(fwd.y, fwd.x); pitch / roll from the rows (see the module doc).
         let yaw = fast_arctan(f[0], f[1]);
@@ -1495,6 +1511,402 @@ fn seg_dist(q: V4, a: V4, b: V4) -> (Pf, V4) {
     (len(vsub(q, c)), c)
 }
 
+// ------------------------------------------------------------------------------------------------
+// The first-person camera (type 4) and the camera switch blend
+
+/// **The first-person camera, type 4** (level01: activation `0x316880`, init `0x316b98` → `0x3162e8` / `0x3161c8`,
+/// update `0x316330` with the eye `0x3160b8`, release `0x316c08`; the camera table 0x20c480, entry 2). It is the
+/// look stances' camera: the hero's camera mode 0x1415d4 = 4 (state 1, L1 / L2 held) or 0x51 (0x1e). While the
+/// follow camera is up and the stance holds, it turns the follow camera toward Ratchet's facing (4° per tick,
+/// `0x313af0`) for 7 ticks, then takes over, blending in over 20 ticks (rate 0.05). Its eye is 1.6 above the feet
+/// (0.9 for Clank, 9.5 for Giant Clank) plus the platform displacement; the sticks (left first, then right, then
+/// the d-pad) turn the view: yaw up to 1.5° per tick about Ratchet's up, pitch the same about the view's left
+/// (stick up looks down with the default option 0x15eddc = 1), eased within 20° of the 84° limit; looking down
+/// past 64° pushes the eye 0.5 forward (springed, pulled back when a 0.3 sphere there hits). Once its blend-in is
+/// over it sets 0x1413f5 every tick (the hero then faces the view and is hidden: `crate::hero`). When the stance
+/// ends it hands back to the follow camera, which snaps behind Ratchet and is blended in over ~56 ticks (0.018),
+/// or cut when the views are 80° or more apart during the blend-in.
+///
+/// Native `f32` (the follow camera is the PS2-exact one). Not modelled: the camera collision grid's "no first
+/// person" cells (`0x20fdb0` bit 1: the port has no camera grid), the camera moby's entry sound (class 0x3ef is not
+/// created by the port), the 30-tick turn behind Ratchet after an aborted entry uses the same scripted yaw as the
+/// entry turn (8° per tick).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FirstPerson {
+    /// The first-person camera is the active one (0x167280).
+    pub active: bool,
+    /// UpdateCam +0x00 / +0x10 / +0x20 rows (forward, left, up) and +0x30 position.
+    pub rows: [[f32; 3]; 3],
+    pub pos: [f32; 3],
+    /// Its data (the D block's first words): yaw input and its spring velocity, pitch input and velocity, the
+    /// pitch so far (positive down), the eye push and its velocity.
+    pub d: [f32; 7],
+    /// The instance's +0x20 (ticks of the look stance before the switch), +0x22 (counting), +0x24 (the turn-back
+    /// timer).
+    pub count: i16,
+    pub counting: bool,
+    pub turn_back: i32,
+    /// This tick's update set 0x1413f5 (it was up with no blend running: 0x167370 = 0).
+    pub flag: bool,
+}
+
+/// The camera switch blend (`0x167370`: 0 none, 1 / 2 capture next, 3 blending; the record 0x167380: rotation t and
+/// rate, position t and rate, the start position and rotation). Native `f32`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CamBlend {
+    pub mode: u8,
+    pub t_rot: f32,
+    pub rot_rate: f32,
+    pub t_pos: f32,
+    pub pos_rate: f32,
+    pub start_pos: [f32; 3],
+    pub start_q: [f32; 4],
+    /// 0x167388 / 0x167394: the rates of the next blend.
+    pub next_rot_rate: f32,
+    pub next_pos_rate: f32,
+    /// 0x1673c0 / 0x1673d0: the captured previous camera.
+    pub cap_pos: [f32; 3],
+    pub cap_q: [f32; 4],
+}
+
+type R3 = [[f32; 3]; 3];
+
+fn fdot(a: [f32; 3], b: [f32; 3]) -> f32 { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
+fn fcross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
+fn fnorm(a: [f32; 3], l: f32) -> [f32; 3] {
+    let n = fdot(a, a).sqrt();
+    if n == 0.0 { a } else { [a[0] * l / n, a[1] * l / n, a[2] * l / n] }
+}
+fn fadd(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
+fn fsub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+fn fscale(a: [f32; 3], k: f32) -> [f32; 3] { [a[0] * k, a[1] * k, a[2] * k] }
+/// `rot(v, θ, axis)` 0x274ac8 (counter-clockwise), native.
+fn frot(v: [f32; 3], t: f32, axis: [f32; 3]) -> [f32; 3] {
+    if t.abs() < 1e-5 { return v; }
+    let a = fnorm(axis, 1.0);
+    let (s, c) = t.sin_cos();
+    let k = fcross(a, v);
+    let d = fdot(a, v) * (1.0 - c);
+    [v[0] * c + k[0] * s + a[0] * d, v[1] * c + k[1] * s + a[1] * d, v[2] * c + k[2] * s + a[2] * d]
+}
+/// `Cam_InterpValues` 0x20ce40, native.
+fn finterp(cur: f32, tgt: f32, k: f32, d: f32, max: f32, vel: &mut f32) -> f32 {
+    let e = tgt - cur;
+    *vel += k * e - d * *vel;
+    if max != 0.0 { *vel = vel.clamp(-max, max); }
+    let ae = e.abs();
+    *vel = vel.clamp(-ae, ae);
+    cur + *vel
+}
+fn fwrap(a: f32) -> f32 {
+    let t = std::f32::consts::TAU;
+    let mut x = a % t;
+    if x > std::f32::consts::PI { x -= t; }
+    if x < -std::f32::consts::PI { x += t; }
+    x
+}
+/// The angle between the horizontal parts (about `up`) of `a` and `b` (`90° − asin(dot / lengths)`).
+fn flat_angle(a: [f32; 3], b: [f32; 3], up: [f32; 3]) -> Option<f32> {
+    let fa = fsub(a, fscale(up, fdot(up, a)));
+    let fb = fsub(b, fscale(up, fdot(up, b)));
+    let (la, lb) = (fdot(fa, fa).sqrt(), fdot(fb, fb).sqrt());
+    if lb == 0.0 || la * lb == 0.0 { return None; }
+    Some(std::f32::consts::FRAC_PI_2 - (fdot(fb, fa) / (la * lb)).clamp(-1.0, 1.0).asin())
+}
+/// Rows (forward, left, up) → quaternion (x, y, z, w) of the matrix with those rows.
+fn rows_quat(r: R3) -> [f32; 4] {
+    let m = |i: usize, j: usize| r[i][j];
+    let tr = m(0, 0) + m(1, 1) + m(2, 2);
+    let q = if tr > 0.0 {
+        let s = (tr + 1.0).sqrt() * 2.0;
+        [(m(1, 2) - m(2, 1)) / s, (m(2, 0) - m(0, 2)) / s, (m(0, 1) - m(1, 0)) / s, 0.25 * s]
+    } else if m(0, 0) > m(1, 1) && m(0, 0) > m(2, 2) {
+        let s = (1.0 + m(0, 0) - m(1, 1) - m(2, 2)).sqrt() * 2.0;
+        [0.25 * s, (m(0, 1) + m(1, 0)) / s, (m(2, 0) + m(0, 2)) / s, (m(1, 2) - m(2, 1)) / s]
+    } else if m(1, 1) > m(2, 2) {
+        let s = (1.0 + m(1, 1) - m(0, 0) - m(2, 2)).sqrt() * 2.0;
+        [(m(0, 1) + m(1, 0)) / s, 0.25 * s, (m(1, 2) + m(2, 1)) / s, (m(2, 0) - m(0, 2)) / s]
+    } else {
+        let s = (1.0 + m(2, 2) - m(0, 0) - m(1, 1)).sqrt() * 2.0;
+        [(m(2, 0) + m(0, 2)) / s, (m(1, 2) + m(2, 1)) / s, 0.25 * s, (m(0, 1) - m(1, 0)) / s]
+    };
+    let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    q.map(|c| c / n)
+}
+fn quat_rows(q: [f32; 4]) -> R3 {
+    let [x, y, z, w] = q;
+    [
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + z * w), 2.0 * (x * z - y * w)],
+        [2.0 * (x * y - z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + x * w)],
+        [2.0 * (x * z + y * w), 2.0 * (y * z - x * w), 1.0 - 2.0 * (x * x + y * y)],
+    ]
+}
+/// Quaternion slerp (`fun_001fa400`).
+fn slerp(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+    let mut d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    let mut b = b;
+    if d < 0.0 {
+        d = -d;
+        b = b.map(|c| -c);
+    }
+    let (ka, kb) = if d > 0.9995 {
+        (1.0 - t, t)
+    } else {
+        let th = d.acos();
+        let s = th.sin();
+        (((1.0 - t) * th).sin() / s, (t * th).sin() / s)
+    };
+    let q = [a[0] * ka + b[0] * kb, a[1] * ka + b[1] * kb, a[2] * ka + b[2] * kb, a[3] * ka + b[3] * kb];
+    let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    q.map(|c| c / n)
+}
+/// `CosInterp(0, 1, t)` 0x26cc38, native.
+fn fcos_interp(t: f32) -> f32 {
+    if t == 0.0 { return 0.0; }
+    if t == 1.0 { return 1.0; }
+    (1.0 - (t * std::f32::consts::PI).cos()) * 0.5
+}
+fn rows_f(r: [V4; 3]) -> R3 { r.map(to_f32x3) }
+fn rows_pf(r: R3) -> [V4; 3] { r.map(crate::hero::physics::from_f32x3) }
+
+impl CamBlend {
+    /// The capture (`fun_001ec8a0`) and the blend step (`fun_001ed2b0` → `fun_001ecaf8`); `prev` = the camera the
+    /// last switch left (rows, position), `plat` = the platform displacement 0x13f490 (the start moves with it).
+    fn step(&mut self, prev: Option<([V4; 3], V4)>, rows: [V4; 3], pos: V4, plat: [f32; 3]) -> ([V4; 3], V4) {
+        if self.mode == 1 || self.mode == 2 {
+            if self.mode == 1 {
+                if let Some((r, p)) = prev {
+                    self.cap_pos = to_f32x3(p);
+                    self.cap_q = rows_quat(rows_f(r));
+                }
+            }
+            self.mode = 3;
+            self.t_pos = 0.0;
+            self.pos_rate = self.next_pos_rate;
+            self.start_pos = self.cap_pos;
+            self.t_rot = 0.0;
+            self.rot_rate = self.next_rot_rate;
+            self.start_q = self.cap_q;
+        }
+        if self.mode != 3 { return (rows, pos); }
+        if self.t_pos == 1.0 && self.t_rot == 1.0 {
+            self.mode = 0;
+            return (rows, pos);
+        }
+        let s = fcos_interp(self.t_pos);
+        self.start_pos = fadd(self.start_pos, plat);
+        let cp = to_f32x3(pos);
+        let p = fadd(self.start_pos, fscale(fsub(cp, self.start_pos), s));
+        let q = slerp(self.start_q, rows_quat(rows_f(rows)), fcos_interp(self.t_rot));
+        let r = quat_rows(q);
+        self.t_pos = (self.t_pos + self.pos_rate).min(1.0);
+        self.t_rot = (self.t_rot + self.rot_rate).min(1.0);
+        let mut pos_out = crate::hero::physics::from_f32x3(p);
+        pos_out[3] = pos[3];
+        (rows_pf(r), pos_out)
+    }
+}
+
+/// The release of the first-person camera (`0x316c08`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Release {
+    None,
+    Blend,
+    Cut,
+}
+
+impl Camera {
+    /// The active camera's rows and position (UpdateCam +0x00.. and +0x30).
+    fn active_view(&self) -> ([V4; 3], V4) {
+        if self.first_person.active {
+            let mut p = crate::hero::physics::from_f32x3(self.first_person.pos);
+            p[3] = Pf::ONE;
+            (rows_pf(self.first_person.rows), p)
+        } else {
+            (self.cam.rows, self.cam.pos)
+        }
+    }
+
+    /// The part of `UpdateAllCameras` before the active update: returns the camera switched away from (its rows and
+    /// position), if any.
+    fn switch_cameras(&mut self, inp: &CamInput) -> Option<([V4; 3], V4)> {
+        if self.first_person.active {
+            let r = self.first_person_release(inp);
+            if r == Release::None { return None; }
+            let prev = self.active_view();
+            // `0x20d110(follow)` after a release: the blend (0x167370 = 1 / 2) unless cut; the type-0 init
+            // (+0x7d = 0: target reset and the snap behind Ratchet) and `BackupCurrentCam`.
+            if r == Release::Blend { self.blend.mode = if self.blend.mode == 0 { 1 } else { 2 }; }
+            self.first_person.active = false;
+            self.init(inp);
+            self.d0 = self.cam;
+            self.g.since_switch = 0;
+            return Some(prev);
+        }
+        if !self.first_person_activation(inp) { return None; }
+        let prev = self.active_view();
+        self.first_person.active = true;
+        self.g.since_switch = 0;
+        self.first_person_init(inp, rows_f(prev.0)[0]);
+        Some(prev)
+    }
+
+    /// The first-person camera's activation check `0x316880` (with the follow camera up): true = switch.
+    fn first_person_activation(&mut self, inp: &CamInput) -> bool {
+        let h = inp.hero;
+        let fp = &mut self.first_person;
+        let facing = [h.rot[2].to_f32().cos(), h.rot[2].to_f32().sin(), 0.0];
+        if h.f15d4 == 4 || h.f15d4 == 0x51 {
+            // The follow camera is up (its mode 0): count 7 ticks, turning it toward Ratchet's facing.
+            fp.count += 1;
+            fp.counting = true;
+            fp.turn_back = 0;
+            if 7 <= fp.count {
+                fp.count = 0;
+                fp.counting = false;
+                return true;
+            }
+            self.scripted_turn(inp, f32::from_bits(0x3d8e_fa35), facing);
+            return false;
+        }
+        fp.count = 0;
+        if fp.counting {
+            fp.counting = false;
+            let up = to_f32x3(self.g.up2);
+            let hero_fwd = to_f32x3(h.moby_rows[0]);
+            if flat_angle(to_f32x3(self.cam.rows[0]), hero_fwd, up).is_some_and(|a| f32::from_bits(0x3fb2_b8c2) <= a) {
+                // CameraResetBehindHero 0x20ee80.
+                self.reset(inp);
+                self.resets += 1;
+                return false;
+            }
+            self.first_person.turn_back = 30;
+        }
+        if self.first_person.turn_back != 0 {
+            self.first_person.turn_back -= 1;
+            self.scripted_turn(inp, f32::from_bits(0x3e0e_fa35), facing);
+        }
+        false
+    }
+
+    /// `0x313af0(rate, 0, dir)` on the follow camera: the scripted yaw input toward `dir` at `rate` per tick (the
+    /// ledge's turn uses the same, `Hero::ledge_camera_yaw`).
+    fn scripted_turn(&mut self, _inp: &CamInput, rate: f32, dir: [f32; 3]) {
+        if rate == 0.0 { return; }
+        let yaw_in = crate::hero::ledge_yaw_input(dir, to_f32x3(self.cam.off), to_f32x3(self.g.up_s));
+        self.cam.yaw_rate = Pf::f(rate);
+        self.cam.script_yaw = Pf::f(yaw_in);
+    }
+
+    /// The init `0x316b98` (→ `0x3162e8`, `0x3161c8`): the blend in (0x167370 = 1, or 2 during a blend; rates 0.05),
+    /// the data cleared, the eye, the rows from the previous camera's forward about Ratchet's up.
+    fn first_person_init(&mut self, inp: &CamInput, prev_fwd: [f32; 3]) {
+        self.blend.mode = if self.blend.mode == 0 { 1 } else { 2 };
+        self.blend.next_rot_rate = f32::from_bits(0x3d4c_cccd);
+        self.blend.next_pos_rate = f32::from_bits(0x3d4c_cccd);
+        let h = inp.hero;
+        let up = fnorm(to_f32x3(h.moby_rows[2]), 1.0);
+        let fp = &mut self.first_person;
+        fp.d = [0.0; 7];
+        fp.pos = fadd(to_f32x3(h.pos), fscale(up, eye_height(h)));
+        let left = fnorm(fcross(up, prev_fwd), 1.0);
+        fp.rows = [fcross(left, up), left, up];
+    }
+
+    /// The release `0x316c08` (the active first-person camera's own check at the start of `UpdateAllCameras`).
+    fn first_person_release(&mut self, inp: &CamInput) -> Release {
+        let h = inp.hero;
+        if h.f15d4 == 0x51 || h.f15d4 == 4 { return Release::None; }
+        if self.blend.mode != 0 {
+            let up = to_f32x3(self.g.up2);
+            if flat_angle(self.first_person.rows[0], to_f32x3(h.moby_rows[0]), up).is_some_and(|a| f32::from_bits(0x3fb2_b8c2) <= a) {
+                self.blend.mode = 0;
+                return Release::Cut;
+            }
+        }
+        self.blend.next_rot_rate = f32::from_bits(0x3c93_74bc);
+        self.blend.next_pos_rate = f32::from_bits(0x3c93_74bc);
+        Release::Blend
+    }
+
+    /// The update `0x316330`.
+    fn first_person_update(&mut self, inp: &CamInput) {
+        let h = inp.hero;
+        let pad = inp.pad;
+        let up = fnorm(to_f32x3(h.moby_rows[2]), 1.0);
+        let blending = self.blend.mode != 0;
+        let fp = &mut self.first_person;
+        fp.flag = !blending;
+        // The eye (`0x3160b8`): the feet + up·height + the platform displacement 0x13f490.
+        fp.pos = fadd(fadd(to_f32x3(h.pos), fscale(up, eye_height(h))), to_f32x3(h.plat_applied));
+        let (k, dd) = (f32::from_bits(0x3cf5_c28f), f32::from_bits(0x3ecc_cccd));
+        let (lo, hi) = (0.0f32, f32::from_bits(0x3cd6_7750));
+        // Yaw: −left x, else −right x, else the d-pad (left +1, right −1).
+        let mut v = -pad.lx.to_f32();
+        if v == 0.0 { v = -pad.rx.to_f32(); }
+        if v == 0.0 { v = ((pad.held >> 15) & 1) as f32; }
+        if v == 0.0 { v = -(((pad.held >> 13) & 1) as f32); }
+        let rate = lo + (hi - lo) * fp.d[0].abs();
+        fp.d[0] = finterp(fp.d[0], v, k, dd, 0.0, &mut fp.d[1]);
+        let mut fwd = fp.rows[0];
+        if fp.d[0] != 0.0 { fwd = frot(fwd, rate * fp.d[0], up); }
+        let plat_yaw = h.plat_applied[3].to_f32();
+        if plat_yaw != 0.0 && h.f658 == 0 { fwd = frot(fwd, plat_yaw, up); }
+        // Pitch: −left y, else −right y, else the d-pad (up +1, down −1); none while blending in from a walk.
+        let mut v = -pad.ly.to_f32();
+        if v == 0.0 { v = -pad.ry.to_f32(); }
+        if v == 0.0 { v = ((pad.held >> 12) & 1) as f32; }
+        if v == 0.0 { v = -(((pad.held >> 14) & 1) as f32); }
+        if blending && h.prev_state == 2 { v = 0.0; }
+        if !self.opts.pitch_normal { v = -v; }
+        let rate = lo + (hi - lo) * fp.d[2].abs();
+        fp.d[2] = finterp(fp.d[2], v, k, dd, 0.0, &mut fp.d[3]);
+        if fp.d[2] != 0.0 {
+            let left = fcross(up, fwd);
+            let mut step = rate * fp.d[2];
+            let a = fwrap(fp.d[4] + step).abs();
+            if f32::from_bits(0x3f8e_fa35) < a && fp.d[4].abs() < a {
+                let over = fwrap(a - f32::from_bits(0x3f8e_fa35));
+                step += (0.0 - step) * (over / f32::from_bits(0x3eb2_b8c4));
+            }
+            let push_to = if f32::from_bits(0x3f8e_c104) <= a && 0.0 < fp.d[4] { 0.5 } else { 0.0 };
+            fp.d[5] = finterp(fp.d[5], push_to, f32::from_bits(0x3ba3_d70a), f32::from_bits(0x3e4c_cccd), 0.0, &mut fp.d[6]);
+            let hf = fnorm([fwd[0], fwd[1], 0.0], fp.d[5]);
+            fp.pos = fadd(fp.pos, hf);
+            let c = crate::hero::physics::from_f32x3(fp.pos);
+            if sphere(inp, Pf::b(0x3e99_999a), c, 0x12, inp.hero_moby).is_some() {
+                let fp = &mut self.first_person;
+                fp.d[5] = finterp(fp.d[5], 0.0, f32::from_bits(0x3ba3_d70a), f32::from_bits(0x3e4c_cccd), 0.0, &mut fp.d[6]);
+            }
+            let fp = &mut self.first_person;
+            let a2 = fwrap(fp.d[4] + step);
+            if f32::from_bits(0x3fbb_a866) < a2.abs() {
+                let lim = if a2 <= 0.0 { -f32::from_bits(0x3fbb_a866) } else { f32::from_bits(0x3fbb_a866) };
+                step = fwrap(lim - fp.d[4]);
+            }
+            fwd = frot(fwd, step, left);
+            fp.d[4] = fwrap(fp.d[4] + step);
+        }
+        let fp = &mut self.first_person;
+        let fwd = fnorm(fwd, 1.0);
+        let left = fnorm(fcross(up, fwd), 1.0);
+        fp.rows = [fwd, left, fcross(fwd, left)];
+    }
+
+    /// 0x1413f5: the first-person camera sets it while it is up and its blend-in is over (`0x316330`: when
+    /// 0x167370 = 0); the tick stores it into the hero (`Hero::f13f5`).
+    pub fn first_person_flag(&self) -> bool { self.first_person.active && self.first_person.flag }
+}
+
+/// `0x3160b8`'s eye height by the hero body 0x1413f4: 1.6 (Ratchet), 0.9 (Clank; 1.2 with 0x15edb3), 9.5 (Giant Clank).
+fn eye_height(h: &Hero) -> f32 {
+    match h.mode {
+        2 => f32::from_bits(0x4118_0000),
+        1 => f32::from_bits(0x3f66_6666),
+        _ => f32::from_bits(0x3fcc_cccd),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1510,6 +1922,72 @@ mod tests {
         assert!(r[0].to_f32().abs() < 1e-5 && (r[1].to_f32() - 1.0).abs() < 1e-5, "{r:?}");
         let c = cross(v, z); // z × x = y
         assert_eq!(c[1], Pf::ONE);
+    }
+
+    /// The look stance (camera mode 4): 7 ticks turning the follow camera, then the first-person camera takes over
+    /// with a 20-tick blend (rate 0.05); once it is over the flag 0x1413f5 is set; the eye 1.6 above the feet; the
+    /// left stick turns the view 1.5° per tick at full deflection (springed); back to the follow camera with the
+    /// 0.018 blend when the stance ends.
+    #[test]
+    fn first_person_enter_turn_exit() {
+        let (coll, mut hero, mut pad) = setup();
+        let neutral = crate::pad::PadInput::neutral();
+        let mut cam = Camera::new(&CamInput { hero: &hero, pad: &pad, coll: &coll, mobys: None, hero_moby: None }, CameraOptions::default());
+        let step = |cam: &mut Camera, hero: &crate::hero::Hero, pad: &mut PadState, inp: crate::pad::PadInput| {
+            pad.update(Some(&inp.bytes()), false);
+            cam.update(&CamInput { hero, pad, coll: &coll, mobys: None, hero_moby: None })
+        };
+        for _ in 0..5 { step(&mut cam, &hero, &mut pad, neutral); }
+        hero.f15d4 = 4;
+        let mut on = None;
+        for t in 1..=10 {
+            step(&mut cam, &hero, &mut pad, neutral);
+            if cam.first_person.active && on.is_none() { on = Some(t); }
+        }
+        assert_eq!(on, Some(7));
+        let mut flag_at = None;
+        for t in 11..=40 {
+            let v = step(&mut cam, &hero, &mut pad, neutral);
+            if flag_at.is_none() && cam.first_person_flag() {
+                flag_at = Some(t);
+                assert!((v.pos_f32()[2] - 101.6).abs() < 1e-3, "eye {:?}", v.pos_f32());
+            }
+        }
+        assert_eq!(flag_at, Some(7 + 21), "the flag the tick after the 20-tick blend");
+        let y0 = cam.out.yaw().to_f32();
+        for _ in 0..30 { step(&mut cam, &hero, &mut pad, neutral.stick(1.0, 0.0)); }
+        let y1 = cam.out.yaw().to_f32();
+        assert!(y1 < y0 - 0.3 && y1 > y0 - 0.8, "turned right {y0} → {y1}");
+        hero.f15d4 = 0;
+        step(&mut cam, &hero, &mut pad, neutral);
+        assert!(!cam.first_person.active && cam.blend.mode == 3);
+        let mut n = 1;
+        while cam.blend.mode != 0 && n < 200 {
+            step(&mut cam, &hero, &mut pad, neutral);
+            n += 1;
+        }
+        assert!((55..=58).contains(&n), "the 0.018 blend back took {n}");
+    }
+
+    /// Leaving within the blend-in with the views 80° apart cuts back without a blend.
+    #[test]
+    fn first_person_cut_when_far_off() {
+        let (coll, mut hero, mut pad) = setup();
+        let neutral = crate::pad::PadInput::neutral();
+        let mut cam = Camera::new(&CamInput { hero: &hero, pad: &pad, coll: &coll, mobys: None, hero_moby: None }, CameraOptions::default());
+        hero.f15d4 = 4;
+        for _ in 0..8 {
+            pad.update(Some(&neutral.bytes()), false);
+            cam.update(&CamInput { hero: &hero, pad: &pad, coll: &coll, mobys: None, hero_moby: None });
+        }
+        assert!(cam.first_person.active && cam.blend.mode == 3);
+        // Ratchet turned away 90°.
+        hero.moby_rows = crate::hero::physics::euler_rows([Pf::ZERO, Pf::ZERO, HALF_PI, Pf::ZERO]);
+        hero.f15d4 = 0;
+        pad.update(Some(&neutral.bytes()), false);
+        cam.update(&CamInput { hero: &hero, pad: &pad, coll: &coll, mobys: None, hero_moby: None });
+        assert!(!cam.first_person.active);
+        assert_eq!(cam.blend.mode, 0, "cut");
     }
 
     fn setup() -> (Collision, crate::hero::Hero, PadState) {

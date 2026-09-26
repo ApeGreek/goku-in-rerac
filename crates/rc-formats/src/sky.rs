@@ -19,7 +19,7 @@
 
 use crate::buf::{invalid, Buf, Result};
 use crate::level::LevelCore;
-use crate::texture::{decode_indexed8, Texture};
+use crate::texture::{IndexedImage, Texture};
 use bytemuck::{Pod, Zeroable};
 
 /// Sky block header (0x40 bytes) at byte 0 of the block. Offsets in it are relative to the block
@@ -278,14 +278,17 @@ impl SkyTexture {
 
 /// Decodes one texture definition: `width * height` PSMT8 indices with the 256-entry CLUT, CSM1 order
 /// and 0x80-alpha scaling exactly like level textures (the game's TEX0 is PSMT8 / CPSM CT32 / CSM1 / TCC 1).
-pub fn decode_sky_texture(block: &[u8], sky: &Sky, index: usize) -> Result<Texture> {
+pub fn decode_sky_texture(block: &[u8], sky: &Sky, index: usize) -> Result<Texture> { sky_texture_image(block, sky, index)?.decode() }
+
+/// The stored indices and CLUT of one texture definition, the parts [`decode_sky_texture`] decodes.
+pub fn sky_texture_image<'a>(block: &'a [u8], sky: &Sky, index: usize) -> Result<IndexedImage<'a>> {
     let Some(t) = sky.texture_defs.get(index) else { return invalid("sky texture index out of range") };
     if t.width <= 0 || t.height <= 0 { return invalid("sky texture with no pixels"); }
     let b = Buf(block);
     let base = off(sky.header.texture_data, "texture data")?;
     let px = b.sub(base + off(t.texture_offset, "texture")?, t.width as usize * t.height as usize, "sky texture pixels")?;
     let clut = b.sub(base + off(t.palette_offset, "palette")?, 1024, "sky palette")?;
-    decode_indexed8(px.bytes(), t.width as u32, t.height as u32, clut.bytes())
+    Ok(IndexedImage { width: t.width as u32, height: t.height as u32, indices: px.bytes(), clut: clut.bytes() })
 }
 
 /// Decodes every texture definition in table order (FX textures first), as `rc_extract sky` writes them.

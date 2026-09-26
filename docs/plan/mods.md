@@ -56,6 +56,25 @@ Takeaways:
   - a mesh import path (glTF → our moby/tie layout) for new models. This is the hard part, as with OpenGOAL's merc
     replacements: skins, LODs and GS state must be synthesised.
 
+### 2.1a From Tier 2 exports to overrides (the exports are built, 2026-09-26)
+`randcrw-extract export` (docs/plan/launcher_extractor.md §5.5) writes the formats and the paths an asset mod
+will ship. The rule: **a mod overrides an asset by shipping a file at the same relative path as its export**, and
+the importer uses the export's sidecar (or extras) to rebuild what the standard format cannot hold.
+
+| Export | Override | What the importer restores from the sidecar / extras |
+|---|---|---|
+| `textures/levels/NN/<table>/<key>.png` (indexed PNG) | same path, indexed or RGBA PNG | CLUT as stored (`clut_csm1`: CSM1 order, raw alpha 0..0x80), table entry (`ty` = mip count, gs_ram blocks), GS TEX0 format. An indexed PNG with an unchanged palette re-imports byte-exactly; an RGBA PNG goes through the renderer's RGBA path (quantising back to 256 colours is optional). Mips: `.mipK.png` if shipped, else generated. |
+| `audio/levels/NN/sound_bank/NNN.wav` | same path, WAV | Sample rate, loop (`smpl` chunk or sidecar); the bank index (`sound_bank.json`) keeps which sounds and tones play it. Mods add PCM samples as a second sample kind (not re-encoded to ADPCM). |
+| `audio/levels/NN/{music,speech}/*.wav` | same path | Rate and loop from the sidecar / `smpl`; the level's music table in `music.json`. |
+| `text/levels/NN/<lang>.json`, `text/global/all_text/<lang>.json` | keyed patch by message `id` | `text` uses the `\xNN` escapes of `strings::display` for control codes and accented letters; `help_audio` is kept. |
+| `models/levels/NN/mobys/CCCC.gltf` | same path (glTF/GLB) | Joint palette convention (identity inverse binds, one node per palette joint, extra `static` joint), class header, texture slots (`class_textures`), skeleton rows and parents, sequence extras (rate override, triggers). New skins/LODs/GS state are synthesised (the hard part, §2.1). |
+| `levels/NN/level.gltf` (tfrag, ties, shrubs) | later: per-class tie/shrub meshes, tfrag chunks | `_PS2_*` attributes (raw RGBA, tie light/morph slots, morph deltas), LOD scenes and distances, ad-gif registers, instance colours. |
+| `levels/NN/*.json` (mobys, ties, shrubs, volumes, paths, …) | keyed JSON patches (§2.2) | Every stored field is exported, so a patch names an instance by `index` (and `uid` for ties) and changes fields. |
+| `levels/NN/collision.gltf` | later | Surface byte per primitive; the 4-unit cell grid is rebuilt by the importer. |
+
+The exports are a starting point for mod authors: they are complete for the textures, audio, text and tables,
+and lossy only where §5.5 of the extractor plan says so (lighting not baked, LOD morphs not animated).
+
 ### 2.2 Data (gameplay content)
 - Level content as editable data exported to JSON (Tier 2) and merged back as patches: moby instances and pvars,
   paths, volumes, cameras, level settings, item/vendor tables, planet list, text.

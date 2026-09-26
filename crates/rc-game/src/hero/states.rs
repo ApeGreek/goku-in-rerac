@@ -47,6 +47,8 @@ impl Hero {
         // 0x1413f7 (the water states keep the wrench in hand: `update_hand_selected`) and 0x1413fc are cleared;
         // leaving 0x1413f7 set → the restore request 0x14145c (tail).
         let f7 = self.items.f13f7;
+        // 0x1413f5 (the first-person camera's flag: the camera sets it again while it is up) and 0x1413fc.
+        self.f13f5 = 0;
         self.items.f13fc = 0;
         if self.mode == 0 {
             self.frozen = 0;

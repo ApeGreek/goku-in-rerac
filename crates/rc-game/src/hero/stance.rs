@@ -21,8 +21,9 @@
 //!   idle anim; back to 0x65 when pushed off the point, to idle on the wrap or 0x1409a0). 0x66 (the stop) decays
 //!   to 0x65 on its wrap.
 //!
-//! Not modelled: 0x1413f5 (the vendor / dialog / ship "face the camera" flag: its writers are not ported; it is
-//! always 0, so the stance's camera-facing turn and play-time stat never run), the walk lean `HeroLean`
+//! **First person** (0x1413f5, `Hero::f13f5`): the first-person camera (camera type 4, `crate::follow_camera`) sets
+//! it once its blend-in is over; the ground physics then turns Ratchet to the camera ([`first_person_turn`]).
+//! Not modelled: the first-person play-time stat, the walk lean `HeroLean`
 //! (0x235638, not ported in the walk either), the weapon put-away `0x22efd8` (0x1413f8 is 0 on foot).
 
 use super::anim::AnimCtl;
@@ -108,6 +109,16 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, _old_sub: i3
         _ => {}
     }
     None
+}
+
+/// The look stances' turn under the first-person camera (the ground case of `0x2370b8` with state 1 / 0x1e and
+/// 0x1413f5): the stick direction 0x13f4c0 = the camera's forward, the target yaw = the camera's 0x167258, and
+/// `TurnTo(1, 0, 10000°/s)` (Ratchet faces the view at once). The 60-tick stats timer of the first-person view
+/// (`gp−0x7578`, record 0x1418d8) is not applied.
+pub(super) fn first_person_turn(h: &mut Hero, env: &Env) {
+    h.stick_world = env.cam_rows[0];
+    h.target_yaw = env.cam_yaw;
+    h.turn_to(SCALE64, SCALE64 * Pf::ZERO, DT * Pf::b(0x432e_886e));
 }
 
 /// Per-state physics; false = not ported (the hero freezes).

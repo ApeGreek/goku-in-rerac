@@ -104,9 +104,9 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0xf | Heli-Pack high jump | 4 | crouch + ✕ standing, Heli-Pack | jump case | curve jump: h 1.9, takeoff 9, table gp−0x7518, fall-over 4.5, air 130 | 0x15 | packs.rs (P4) | P |
 | 0x10 | Thruster-Pack long jump | 4 | crouch + ✕ moving / ✕+R1 combo in 6 / R1 tap in 7/9, Thruster | 6 after 60 ticks > 1.5, 0x7a, 0x22 | jump case: h 0.4..0.9, ramp 1, g 8.5·dt², acc 44 / dec 50·dt², 0x13f744 = 11.5·dt | 0x26 | packs.rs (P4) | P |
 | 0x11 | wall jump | 4 | ✕ within 7 while the wall window 0x13f504 is open (7, 9, 0x11 after 25) | jump case | jump case: h 3.3, takeoff 9, g 29·dt², 0x13f7c0 = the wall normal | 0x23 | ledge.rs (P3) | P |
-| 0x15 | comet strike | 6 | crouch + □ | 0 / wrench throw states | 0x15 case (speed 0, aim, `0x236da0`) | 0x1a | melee.rs (later) | E |
+| 0x15 | comet strike | 6 | crouch + □ (crouch transitions, with the wrench), □ late in 0x13 / 0x15 while crouched | 0 (row 3's idle frame; another hand item), 7 / crouch jumps (✕ after the row's jump frame); with the wrench after 100 ticks the loop exit `0x247d18(2)` + `0x13fe04 = 0x1a` | 0x15 case: speed 0, aim (or the turn to it, 15 rad/s), **the throw `0x236da0` at key time 33**, SpeedStep(37, 28), the combo's gravity; the wrench's flight `0x2be1c0` states 10 / 11 | 0x1a, loop 6..0x15 | comet.rs | P |
 | 0x16 | hurt (knockback) | 7 | hit intake on foot | 6 (airborne after frame 12.5 above 1), 0x3d, 0 / 0x81 after 27 | |vel| − 4·dt² (10·dt² grounded after 10), edge brake on 0x140637, vz −= 0.004 | 0x10 curve −3 fr 3 | damage.rs (P2) | P |
-| 0x17 | weapon fire stance | 8 | hand item fire | 0 when the fire button is released and 0x13f520 = 0 | ground case (`0x2324f8` turn) | idle blend 10 | (Weapons, later) | – |
+| 0x17 | weapon fire stance | 8 | only 0x2e's transitions (no SetState caller in any level) | 0 when the fire button is released and 0x13f520 = 0 | ground case (`0x2324f8` turn) | idle blend 10 | weapons.rs (unreachable) | – |
 | 0x18 | ledge grab | 3 | 6, 8, jumps with 0x13f838 | 0x19 after frame 13.5 | turn to ledge yaw + π (0.04, 0.2, 360°/s), pull to 0x13f820, ClampLen 4·dt | 0x20 | ledge.rs (P3) | P |
 | 0x19 | ledge hang | 3 | 0x18, shimmy end | 0x1c (✕), 6 (back + ✕ / R1, 0x13f500 = 10 / 40), 0x1a / 0x1b (probe `HeroWallLedgeCheckC` 0x22d838 (L00 0x20c758) at ±90° 0.3) | as 0x18 | 0x21 | ledge.rs (P3) | P |
 | 0x1a / 0x1b | shimmy left / right | 3 | 0x19 + stick | 0x19 (wrap / no probe), 0x1c, 6 | two probes `HeroWallLedgeCheckB`, speed from table 0x1c4130 by frame | 0x24 / 0x25 | ledge.rs (P3) | P |
@@ -116,20 +116,20 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x20 | gadget lunge | 6 | fire with a hand item (group < 3, 4, 5) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | melee.rs (later) | E |
 | 0x21 | wrench rebound | 0xa | wrench hit on a flag-2 target | 0 on wrap | speed → 0 by 24·dt², away from 0x13fdb8 | 0x27 + row | melee.rs (later) | – |
 | 0x22 | Thruster stomp | 0xb | R1/R2 in the air (7, 9, 0xd, 0xf, 0xe) with the Thruster | 0x10 (✕ early), 0 on wrap | up to 5.7 u/s (70·dt²) for 12 ticks, held until tick 33, then 100·dt² down; while coming down and airborne `coll_sphere_mobys` (0.8, feet − 0.5, flags 0x10, template 0x30000); camera shake 0x167260 on the ground (`hero::fx::shake`) | 0x2a | packs.rs (P4) | P |
-| 0x23 | melee 0x23 | 6 | hand item | 7 (✕ after frame 19), 0 | aim, SpeedStep(30, 35) | — | melee.rs (later) | E |
+| 0x23 | glove throw | 6 | the throw gloves' ○ (items 10, 0x11, 0x14, 0x18, 0x19) standing / crouched / walking slowly; the holster check `0x2405f8` | 7 / crouch jumps (✕ within 11 after key time 19), 0 from 21 | aim (`0x2351d0(11, 50°, −1)`) or turn to it, SpeedStep(30, 35), gravity 54 (25 in the air + the steep-wall stop); the glove's update throws at tick 16 | 0x2c from 7 | weapons.rs | P |
 | 0x24 | Swingshot fire | 0xd | ○ at a usable pull target 0x13fcb4 (weapon check case 0xc) | 0x25 / 0x26 (the hand item's update once the hook holds), 0 / 6 (blocked, released), 0 (hand item not the Swingshot) | turn to the target (0.02 / 0.15 / 360°/s), the ground case's braking at 12.6·dt², edge brake | 0x2f loop 10..14 | swingshot.rs (P6) | P |
 | 0x25 | Swingshot pull | 0xd | the hook holds (record +0x08 = 0) | 6 (○ released / braked < 4 u/s; gravity 29, 42·dt²), 0 below 0.3 | speed → 27 u/s at 80·dt², brakes at 42·dt² to stop 1.9 short (`0x26e520` roots), left hand aimed, pitch to the target, sink in the last 30 ticks | 0x30, 10 at the end | swingshot.rs (P6) | P |
 | 0x26 | Swingshot arrive | 0xd | the hook holds (record +0x08 ≠ 0: never on the disc) | 6 (○ released above 0.4), 0 | pendulum about the target, length 0x13fccc → record +0x04 at 10 u/s, damping 0.9, 15·dt² | 0x30 | swingshot.rs (P6) | P |
-| 0x27 / 0x30 | weapon stances | 8 | hand items | 0 (0x30: anim 0x36 wrap) | ground-like (0x30: drag, edge brake, gravity) | idle | (Weapons, later) | – |
+| 0x27 / 0x30 | weapon stances | 8 | no SetState caller in any level | 0 (0x30: anim 0x36 wrap) | ground-like (0x30: drag, edge brake, gravity) | idle | weapons.rs (unreachable) | – |
 | 0x28 | grind | 0xf | rail contact 0x13f8bc from 0 / 2 / 3 / 6 / jumps | 0x29 (✕), 0x2b (□), 0x42 / 0x16 (hit or blocked), 6 (5 ticks off the rail end) | `crate::spline` nearest / advance on the grind paths (section 0x74), speed 12 u/s ± slope, rail pull spring, sparks type 25 (recorded) | 0x31 / 0x32 by stance, leans 0x4a..0x4d | boots.rs (P5) | P |
 | 0x29 / 0x2a | grind jump / rail switch | 0xf | ✕ / ✕ + stick sideways in 0x29's first 10 ticks (a rail 2..4.5 aside) | 0x28 (landing, raw write 2 ticks later), 6, 0 | grind case + the jump system (h 2.4 (+4.7 booster 0x140638, +0.7 near one Kalebo booster) / 2.5; g 27 / 24·dt²); 0x2a blends old → new rail over 48 ticks | 0x50 / 0x1e, 0x1f | boots.rs (P5) | P |
 | 0x2b | grind wrench | 0xf | □ grinding | 0x29 (✕ after the jump frame), 0x2b, 0x28 (idle frame), 6 | grind case; hit sphere 1.0 at the hip (delivered with the pack hits) | 0x4e / 0x4f, wrench 0xc / 0xd | boots.rs (P5) | P |
 | 0x2c | Swingshot swing | 0xe | ○ at a usable swing target 0x13fce0 (better score than the pull target) | 0x2d (○ released after 10 ticks; gravity 27, 7·dt²) | rope 0x13fcf4 springs to record +0x04 (k / d / max +0x24..+0x2c or 0.025 / 0.33 / 11·dt), hooked (0x13fcec): gravity 40·dt², drag, stick pump, speed cap +0x0c, first-swing kick; body lean; anim re-timed to π·√(L / g) | 0x34 / 0x35 | swingshot.rs (P6) | P |
 | 0x2d | fall after a swing | 2 | 0x2c | the fall's transitions (0x1415d4 = 7) | roll / pitch back upright about the point 0.6 up (`0x22a8d8`), then the fall case | 0xb | swingshot.rs (P6) | P |
-| 0x2e | weapon draw walk | 1 | hand item | 0x17 / 0 after frame 28 | — | 0x2e | (Weapons, later) | – |
+| 0x2e | weapon draw walk | 1 | no SetState caller in any level | 0x17 / 0 after frame 28 | — | 0x2e | weapons.rs (unreachable) | – |
 | 0x2f | slippery-floor walk | 1 | walk on surface 7 (0x140632; L00) | 2 off the surface, 0 | own case (L00 0x217970) | 0x37 / 0x6d | surface.rs (P1) | P |
 | 0x31 | sinking floor | 0x10 | surface 4 (0x140633), grounded, not in groups 7/0x10/0x14 | 0 when off it and 0x13f530 = 0 (momentum = the carried part) | vz = min(disp.z − 50·dt², −40·dt²), turns with 0x13f440, particles 47, sound slot 0x141570, body roll springs | 100 | surface.rs (P1) | P |
-| 0x38..0x3a | gadget poses | 0x13 | hand items (L) | 0 | stop | 0x46 / 0x47 / 0x48 | (Weapons, later) | – |
+| 0x38..0x3a | gadget poses | 0x13 | one moby callback (`0x309cd0`, not a hand item) | 0 | stop | 0x46 / 0x47 / 0x48 | (Weapons, later) | – |
 | 0x3c | burn bounce | 4 | surface 1 (0x140635; L00), damage 1 | jump case | jump case: h 5.5, takeoff 5, g 15·dt², 150 ticks; → 0x7c on level 10 / twice | 0x43 | damage.rs (P2) | P |
 | 0x3d | death | 0x14 | health < 1 in 0/2, landing without health | fade 0x2319b0 on wrap | ground case | 0x45 | damage.rs (P2) | P |
 | 0x3f | Magneboots walk | 1 | walk / SetState(2) with 0x13f658 = 1 | 4, 0x71, 6, 2 (off the floor), 0 (no stick after 30) | own case: 2..3.5 u/s inside ±70°, TurnTo / SetPlanarVel / gravity in mode 1 | 0x5b | boots.rs (P5) | P |
@@ -383,8 +383,44 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
   `type47`, `type60`, `audio::tests::gadget_class_sounds_on_every_level`; `packs::tests` (stomp request), `boots::tests`
   (sparks queued, the grind wrench's hit). The `novalis_hero_digest` guard is byte-identical.
 
+### Weapons + first person
+**Done (2026-09-26).**
+- **The Comet-Strike** (`comet.rs`): 0x15's physics and transitions tail, the crouch's □ (ground.rs), the throw
+  `0x236da0` and the thrown wrench's update (`0x2be1c0` states 10 / 11: out at 23 u/s, the deceleration growing by
+  170·dt³ a tick, back to the hand point 0x1403c0 accelerating by 0.9·dt², 0.55 above the ground, the spin, the world
+  bounce, the 0.4 hit sphere through the hero's hit path, the whoosh loop in slot 0x14156c, the clank / hit sounds,
+  the catch voice and Ratchet's loop exit). The detached item keeps its own position and rotation
+  (`HeroItemsAttach`, items.rs). The anim loop exit `0x247d18` / `0x13fe08` is in `anim.rs` (`AnimCtl::exit_loop`;
+  its rate 0x7f800000 reproduced as its PS2 result: docs/plan/hardware_fidelity_layers.md).
+- **First person** (`follow_camera.rs`: camera type 4 `0x316330` and the switch blend 0x167370): the look stances'
+  camera. It takes over 7 ticks into the stance (the follow camera turning behind Ratchet meanwhile), blends in over
+  20 ticks, then sets 0x1413f5 every tick: Ratchet turns to the view at once (stance.rs `first_person_turn`) and is
+  hidden with his items (`HeroSyncMoby` `0x2486c0`: `Hero::write_back`, the engine's Ratchet and moby_attach), the
+  thrown wrench excepted. Eye 1.6 above the feet, the sticks / d-pad turn it (1.5° a tick, eased at the 84° pitch
+  limit, the eye pushed 0.5 forward when looking down). Out of the stance: the follow camera snaps behind Ratchet and
+  blends in over ~56 ticks (a cut when the views are 80° apart during the blend-in). **No view model**: the game hides
+  Ratchet and his hand item.
+- **Throwing in first person is the game's own**: `HeroPdaGadget` item 8 in states 1 / 0x1e after 20 ticks calls the
+  throw directly (camera-aimed, 7° up, or at the camera line's hit; voice 0x1b); the Bomb Glove's update throws on ○
+  in 0x1e (its update turns the look stance 1 into 0x1e) aimed along the camera. No Port Options entry was needed.
+- **Weapons** (`weapons.rs`): the throw gloves' fire case, 0x23, the weapon arm 0x1413f8 (its upper-body animation
+  layer is not ported), the holster check, ammo (`0x249530` / `0x249450`, the game state's table mirrored by the
+  engine; the HUD's count follows), the Bomb Glove's update `0x2d8330` as its `HAND_ITEMS` row. The bomb (class 121,
+  `moby_update/classes/bomb.rs`: flight, contact explosion, water, the growing 2.5 sphere hitting through the moby
+  hit path, fireballs 122, flashes 1192, type-11 rings, sound, camera shake) and its creation from the hero through
+  `HitSink::create_moby`. **Remaining**: 0x20 (the Walloper's lunge, item 0x12), 0x21 (the rebound: needs the targets'
+  records), the other throw gloves' item updates (Mine Glove 0x11, Glove of Doom 0x14, Drone 0x18, Decoy 0x19: their
+  fire case is generic, their rows and projectiles are not ported), the Blaster 0xf / Pyrocitor / other weapons'
+  cases, the auto-aim target list 0x1abe80. 0x17 / 0x27 / 0x2e / 0x30 have no SetState caller in any level; 0x38..0x3a
+  are set by one moby callback (not weapons).
+- Tests: `comet::tests` (3), `weapons::tests` (4), `anim::tests::loop_exit_jumps_to_the_key`,
+  `follow_camera::tests::first_person_*` (2), `classes::bomb::tests`, `tests/hero_weapons_novalis.rs` (the Comet-Strike
+  breaks a crate and the wrench returns, a bomb breaks a crate, first person in / aim / out, the first-person throw;
+  deterministic). The `novalis_hero_digest` guard is byte-identical up to the look stance at tick 980 of the moves
+  script, where the first-person camera now comes up (camera state only; the digest ignores the new idle fields).
+
 ### Later (not in this push)
-Weapons (0x15 comet, 0x17, 0x20, 0x21, 0x23, 0x27, 0x2e, 0x30, 0x38..0x3a, the bomb glove's throw), scripted
+Weapons (0x20, 0x21, the other gloves and guns: see "Weapons + first person"), scripted
 states (0x1d, 0x1f, 0x32, 0x3b, 0x63, 0x64, 0x72, 0x78; with the cutscene port), other bodies (Clank, Giant Clank,
 Hologuise), the Hoverboard. Each gets a module when started; the registry already names its rows.
 

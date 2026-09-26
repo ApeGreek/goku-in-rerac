@@ -67,6 +67,9 @@ pub struct HeroFx {
     /// The hand item's class sounds of this tick (`PlayClassSound(index, 0, item)` in its update: the wrench's hit),
     /// played by the tick right after the item's update (`super::gadgets::flush_item_sounds`).
     pub item_sounds: Vec<i32>,
+    /// Ratchet's own sounds the hand item's update makes (`0x236738` voices, the thrown wrench's whoosh loop in slot
+    /// 0x14156c and its release), played with the item sounds (`super::gadgets::flush_item_sounds`).
+    pub item_voices: Vec<super::packs::SoundCmd>,
     /// The length of `swim.events` when this tick's hero update started (the swim events after it are this tick's;
     /// the engine drains the list after the tick).
     pub swim_mark: usize,

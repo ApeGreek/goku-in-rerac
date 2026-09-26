@@ -43,6 +43,19 @@ Commands:
   pine-info [slot]                    print PCSX2 version / game / status over PINE
   pine-savestate <state-slot> [--slot N]   ask PCSX2 to save to a state slot (like pressing F1)
   synth [--level 01] [--unlit] --out FILE [--base HEX]   write a synthetic 'loaded level' EE image
+
+Hero feel pass (docs/plan/hero_feel_pass.md):
+  record [--pine [slot]] [--out FILE] [--seconds N] [--savestate N] [--poll-us N] [--quiet]
+      Live per-tick recorder of Ratchet over PINE (read-only). One batched PINE read per poll; each new tick
+      is written once (TSV with a documented header). Default file ~/PS2/ratchet1/traces/hero_<UTC>.tsv.
+      Stops on Enter or after --seconds. --savestate N first asks PCSX2 to save state slot N (off by default).
+  replay-hero --trace FILE [--extracted DIR] [--level N] [--start TICK] [--ticks N] [--tol X]
+              [--camera-at-hero] [--out-port FILE] [--report FILE] [--states N]
+      Runs the port's hero headless on the recorded level from the first standing sample, fed the recorded
+      pad bytes, and diffs per tick: first divergence, per-field max / mean error, per-jump table (PCSX2 vs
+      port), state sequences side by side. Writes <trace>.port.tsv and <trace>.report.txt (full curves).
+  hero-jumps --trace FILE        the per-jump table of one trace
+  hero-snap <source>             one hero sample from a savestate / EE dump / PINE (checks the addresses)
 ";
 
 struct Args(Vec<String>);
@@ -214,6 +227,30 @@ fn run() -> Result<i32> {
             println!("wrote {} ({})", out.display(), img.source);
             Ok(0)
         }
+        "record" => record(a),
+        "replay-hero" => replay_hero(a),
+        "hero-jumps" => {
+            let t = rc_trace::hero_trace::Trace::read(&PathBuf::from(a.opt("--trace")?.context("--trace required")?))?;
+            a.done()?;
+            let j = rc_trace::hero_analysis::segment(&t.samples);
+            print!("{}", rc_trace::hero_analysis::jumps_table(&rc_trace::hero_analysis::jump_stats(&t.samples, &j)));
+            Ok(0)
+        }
+        "hero-snap" => {
+            let src = a.source()?;
+            a.done()?;
+            let img = src.load()?;
+            let mem: &dyn rc_trace::hero_trace::Mem = &img;
+            let moby = img.u32(rc_trace::hero_trace::MOBY_PTR)?;
+            let level = img.u32(rc_trace::hero_trace::LEVEL)? as i32;
+            let hero = rc_trace::hero_trace::hero_pos(mem).context("hero position")?;
+            let cam = rc_trace::hero_trace::locate_camera(mem, level, hero);
+            let s = rc_trace::hero_trace::sample_from(mem, moby, cam)?;
+            println!("{}: level {level}, moby {moby:#x}, camera {}", img.source, cam.map_or("not found".into(), |c| format!("{c:#x}")));
+            let row = s.row();
+            for (f, v) in rc_trace::hero_trace::FIELDS.iter().zip(row.split('\t')) { println!("  {:<14} {:<24} {}", f.name, f.addr, v); }
+            Ok(0)
+        }
         _ => bail!("unknown command {cmd:?}\n\n{USAGE}"),
     }
 }
@@ -319,4 +356,68 @@ fn compare_novalis_spawn(mut a: Args) -> Result<i32> {
     std::fs::write(&report, &out.text)?;
     println!("report written to {}", report.display());
     Ok(if out.tallies.iter().all(|t| t.1 == t.2) { 0 } else { 2 })
+}
+
+fn record(mut a: Args) -> Result<i32> {
+    use rc_trace::hero_record as hr;
+    let slot = a.pine().unwrap_or(pine::DEFAULT_SLOT);
+    let out = a.opt("--out")?.map(PathBuf::from).unwrap_or_else(|| hr::default_dir().join(format!("hero_{}.tsv", hr::utc_stamp())));
+    let seconds: Option<f64> = a.opt("--seconds")?.map(|s| s.parse()).transpose().context("--seconds")?;
+    let savestate: Option<u8> = a.opt("--savestate")?.map(|s| s.parse()).transpose().context("--savestate")?;
+    let poll_us: u64 = a.opt("--poll-us")?.map(|s| s.parse()).transpose().context("--poll-us")?.unwrap_or(250);
+    let quiet = a.flag("--quiet");
+    a.done()?;
+    let sum = hr::record(&hr::RecordOptions { slot, out, seconds, savestate, poll_us, quiet })?;
+    Ok(if sum.rows == 0 { 2 } else { 0 })
+}
+
+fn replay_hero(mut a: Args) -> Result<i32> {
+    use rc_trace::hero_analysis as ha;
+    use rc_trace::hero_replay as hrp;
+    use rc_trace::hero_trace::Trace;
+    let path = PathBuf::from(a.opt("--trace")?.context("--trace required")?);
+    let extracted = a.extracted()?;
+    let level: Option<u32> = a.opt("--level")?.map(|s| s.parse()).transpose().context("--level")?;
+    let start_tick: Option<u32> = a.opt("--start")?.map(|s| s.parse()).transpose().context("--start")?;
+    let ticks: Option<u32> = a.opt("--ticks")?.map(|s| s.parse()).transpose().context("--ticks")?;
+    let tol: f64 = a.opt("--tol")?.map(|s| s.parse()).transpose().context("--tol")?.unwrap_or(1e-3);
+    let max_states: usize = a.opt("--states")?.map(|s| s.parse()).transpose().context("--states")?.unwrap_or(80);
+    let camera_at_hero = a.flag("--camera-at-hero");
+    let out_port = a.opt("--out-port")?.map(PathBuf::from).unwrap_or_else(|| path.with_extension("port.tsv"));
+    let report = a.opt("--report")?.map(PathBuf::from).unwrap_or_else(|| path.with_extension("report.txt"));
+    a.done()?;
+    let trace = Trace::read(&path)?;
+    if trace.samples.is_empty() { bail!("{} has no samples", path.display()); }
+    let start = match start_tick {
+        Some(t) => Some(trace.samples.iter().position(|s| s.tick >= t).context("--start beyond the trace")?),
+        None => None,
+    };
+    let lv_n = level.unwrap_or(trace.samples[start.unwrap_or(0)].level.max(0) as u32);
+    let lv = hrp::HeroLevel::load(&extracted, lv_n)?;
+    let t0 = std::time::Instant::now();
+    let r = hrp::replay(&lv, &trace, &hrp::ReplayOptions { start, ticks, camera_at_hero })?;
+    let rec = &trace.samples[r.start..];
+    let rec = &rec[..rec.len().min(r.samples.len())];
+    let mut port = Trace { meta: trace.meta.clone(), samples: r.samples.clone() };
+    port.set_meta("source", "rc-trace replay-hero (port)");
+    port.set_meta("replayed_from", path.display().to_string());
+    port.write(&out_port)?;
+    let names = ("pcsx2", "port");
+    let mut head = format!("replay of {} on level {lv_n}: {} ticks from tick {} (sample {}) in {:.2} s; {} missed ticks filled with the next pad\n",
+        path.display(), r.samples.len().saturating_sub(1), rec[0].tick, r.start, t0.elapsed().as_secs_f64(), r.filled);
+    for n in &r.notes { head += &format!("note: {n}\n"); }
+    // The start sample is the placement, not a result: the diff starts at the first replayed tick.
+    let d = ha::diff(&rec[1..], &r.samples[1..], tol);
+    let ja = ha::jump_stats(rec, &ha::segment(rec));
+    let jb = ha::jump_stats(&r.samples, &ha::segment(&r.samples));
+    let body = format!(
+        "\n== diff (tolerance {tol} on floats, integers exact)\n{}\n== jumps (k-th vs k-th)\n{}\n== states side by side\n",
+        ha::diff_text(&d, names), ha::jumps_compare(&ja, &jb, names)
+    );
+    print!("{head}{body}{}", ha::states_side_by_side(rec, &r.samples, names, max_states));
+    let full = format!("{head}{body}{}\n== curves\n{}", ha::states_side_by_side(rec, &r.samples, names, usize::MAX), ha::curves_compare(&ja, &jb, names));
+    if let Some(p) = report.parent() { std::fs::create_dir_all(p)?; }
+    std::fs::write(&report, full)?;
+    println!("\nport trace: {}\nreport (with the per-tick curves): {}", out_port.display(), report.display());
+    Ok(if d.first.is_none() { 0 } else { 2 })
 }

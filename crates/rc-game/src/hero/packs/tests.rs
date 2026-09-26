@@ -172,7 +172,7 @@ fn double_jump_into_glide(s: &mut Sim, coll: &Collision) -> Option<usize> {
 fn give_wrench(h: &mut Hero) {
     use rc_formats::moby_anim::AnimState;
     let anim = AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false };
-    h.items.slot.item = Some(super::super::items::HandItem { o_class: 0x47, mstate: 0, anim, snapshot: None, scale: 1.0, position: [0.0; 3], rows: [[0; 4]; 3], hit_timer: 0 });
+    h.items.slot.item = Some(super::super::items::HandItem { o_class: 0x47, mstate: 0, anim, snapshot: None, scale: 1.0, position: [0.0; 3], rows: [[0; 4]; 3], hit_timer: 0, flight: Default::default() });
     (h.items.slot.state, h.items.slot.id) = (2, 8);
 }
 

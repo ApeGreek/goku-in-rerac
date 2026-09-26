@@ -91,6 +91,9 @@ pub trait HeroWorld {
     /// The Swingshot targets of this tick's moby run list and the camera ([`super::swingshot::Targets`]; None:
     /// no targets).
     fn swing_targets(&self) -> Option<&super::swingshot::Targets> { None }
+    /// The camera as the previous tick's update left it: position 0x167240, yaw 0x167258 and pitch 0x167254
+    /// (positive looking down). None: no camera (tests).
+    fn camera(&self) -> Option<([f32; 3], f32, f32)> { None }
 }
 
 /// The carriers of a moby table as the moby loop left it (built once per tick, before the hero update).
@@ -132,6 +135,7 @@ impl HeroWorld for Carriers {
     fn moby_ledge_flag(&self, id: usize) -> bool { self.ledge_mobys.contains(&id) }
     fn grind_paths(&self) -> &[rc_formats::volumes::GrindPath] { &self.grind }
     fn swing_targets(&self) -> Option<&super::swingshot::Targets> { Some(&self.targets) }
+    fn camera(&self) -> Option<([f32; 3], f32, f32)> { Some((self.targets.camera, self.targets.cam_yaw, self.targets.cam_pitch)) }
 }
 
 /// The carry fields of the hero block.

@@ -50,6 +50,23 @@ pub struct ItemDef {
     pub b18: u8,
 }
 
+/// The weapon fields of an item definition (0x179f40 + 0x4c·id) the weapon draw `0x22ee08` reads
+/// (`super::weapons::draw_weapon`); the engine hands them to the hero (`super::weapons::Weapons::defs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeaponDef {
+    /// +0x18 (the word) ≠ 0: the arm's blend is 10 ticks, else 11.
+    pub w18: i32,
+    /// +0x24 / +0x28 / +0x2c: the weapon's sequences of Ratchet (standing (a full `SetAnim`), moving and crouched
+    /// (the arm layer)); −1 none.
+    pub anims: [i32; 3],
+    /// +0x30: copied to 0x1413fa (the arm stays up).
+    pub w30: i32,
+}
+
+impl Default for WeaponDef {
+    fn default() -> Self { WeaponDef { w18: 0, anims: [-1; 3], w30: 0 } }
+}
+
 /// Class data of one item moby class (a gadget class).
 #[derive(Clone, Debug)]
 pub struct ItemClass {
@@ -106,6 +123,8 @@ pub struct HandItem {
     pub rows: [moby_anim::V4; 3],
     /// Wrench pvars used by the ported part of its update: +0x6c hit timer.
     pub hit_timer: i32,
+    /// The thrown wrench's flight (its pvars +0x40..+0x7e and rotation while detached; [`super::comet`]).
+    pub flight: super::comet::Flight,
 }
 
 /// Slot 0 of the item slot records at 0x1403e0 (stride 0x50).
@@ -131,6 +150,9 @@ pub struct HandSlot {
     pub state: i32,
     /// +0x28: the item id held (0x140408).
     pub id: i32,
+    /// −0x20 (0x1403c0): the hand point `HeroItemsAttach` keeps for a detached item (`W.r3` of its attach list;
+    /// the thrown wrench flies back to it). Native `f32`.
+    pub hand_point: [f32; 3],
 }
 
 /// The hand-related hero-block fields besides the slot.
@@ -171,6 +193,11 @@ pub trait HitSink {
     fn line(&mut self, table: &mut MobyTable, a: V4, b: V4, flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<Option<MobyId>>;
     /// A hit record for `target` (`FUN_0026eaa8` / `0x26e968`: unless its current record has a larger damage).
     fn deliver(&mut self, _table: &mut MobyTable, _target: MobyId, _tmpl: &HitTemplate) {}
+    /// `CreateMoby(o_class)` 0x263390 from the hero's code (the bomb glove's bomb, class 121): a dynamic slot of the
+    /// table with the class's init (the moby system's class data). None: no moby system / no free slot.
+    fn create_moby(&mut self, _table: &mut MobyTable, _o_class: i16, _counter: u64) -> Option<MobyId> { None }
+    /// `DeleteMoby` 0x2636c0 from the hero's code (and its grid removal where the sink has a grid).
+    fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) { table.delete(id, counter); }
 }
 
 /// A sink that hits nothing (tests, no moby system).
@@ -189,6 +216,11 @@ pub struct ItemEnv<'a> {
     pub frame: i32,
     /// Ratchet's moby (`0x1413d0`).
     pub hero_moby: MobyId,
+    /// The level collision (world mesh) for the items' own lines (the thrown wrench's ground height and bounce;
+    /// None: they hit nothing).
+    pub coll: Option<&'a rc_formats::collision::Collision>,    /// The camera as the previous tick's update left it: position 0x167240 and forward 0x167450 (the Bomb Glove's
+    /// first-person aim). None: no camera.
+    pub camera: Option<([f32; 3], [f32; 3])>,
 }
 
 /// `FUN_0022de10(slot)` for the hand: gloves (10, 17, 20, 25) take Ratchet's hand pose instead of an
@@ -205,6 +237,8 @@ impl HeroItems {
 #[allow(clippy::too_many_arguments)]
 pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: &dyn AnimCtl, rng: &mut Rng, env: &ItemEnv, hits: &mut dyn HitSink) {
     super::melee::jump_attack_shockwave(hero, table, env, hits);
+    // 0x22f068 (the weapon arm's upkeep) runs in HeroItemsUpdate before the slots.
+    super::weapons::arm_upkeep(hero);
     apply_pending_blend(hero, env.data);
     create_hand(hero, g, env);
     attach_hand(hero, table, anim, env);
@@ -251,6 +285,7 @@ fn create_hand(hero: &mut Hero, g: &ItemGlobals, env: &ItemEnv) {
         position: [0.0; 3],
         rows: [[0; 4]; 3],
         hit_timer: 0,
+        flight: Default::default(),
     };
     it.slot.state = 2;
     if id == item::WRENCH {
@@ -321,6 +356,7 @@ pub fn glove_frame(hero: &MobyFrame, class: &MobyAnimClass, table: &[u8]) -> Mob
 /// A = B = that keyframe, t = 0: the port shows it as the snapshot key).
 fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &ItemEnv) {
     let id = hero.items.slot.id;
+    let detached = hero.items.slot.detached != 0;
     let Some(it) = hero.items.slot.item.as_mut() else { return };
     let def = env.data.def(id);
     let list = (def.attach.max(0) as usize).min(HERO_LISTS.len() - 1);
@@ -329,7 +365,15 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
     let r = &table.mobys[env.hero_moby];
     let host_rows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| r.rows[i].map(f32::to_bits));
     let w = moby_anim::attach_matrix(&p, &host_rows, [r.position[0], r.position[1], r.position[2]], r.scale);
-    it.position = [w[3][0], w[3][1], w[3][2]];
+    let hp = [w[3][0], w[3][1], w[3][2]];
+    if detached {
+        // A detached item (the thrown wrench): the hand point 0x1403c0 only, `MobyAnimAdvance`; the moby keeps its
+        // own position and rotation.
+        if let Some(c) = env.data.class(it.o_class) { moby_anim::advance(&mut it.anim, &c.anim); }
+        hero.items.slot.hand_point = hp;
+        return;
+    }
+    it.position = hp;
     let glove = is_glove(id);
     if !glove {
         if let Some(c) = env.data.class(it.o_class) { moby_anim::advance(&mut it.anim, &c.anim); }
@@ -346,6 +390,7 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
             it.anim.t = 0.0;
         }
     }
+    hero.items.slot.hand_point = hp;
 }
 
 /// The slot loop `0x231088` for slot 0.
@@ -373,7 +418,7 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
     }
     // The item moby's update `(*moby+0x74)(moby)`: the hand item's row of super::gadgets::HAND_ITEMS (the
     // wrench's here; one that needs the hero's context runs right after the slot loop, gadgets::after_items).
-    super::gadgets::slot_item_update(hero, table, anim, env, hits);
+    super::gadgets::slot_item_update(hero, table, anim, env, hits, rng);
 }
 
 /// `FUN_002305e8(0, frame)`: the slot is emptied (its update would run once more with state 3, which the

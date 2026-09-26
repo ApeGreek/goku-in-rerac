@@ -332,6 +332,8 @@ fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap:
 fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level: Res<crate::Level>, play: Option<Res<crate::gameplay::Play>>) {
     let (Some(mut a), Some(anim)) = (attach, anim) else { return };
     let hand = play.as_ref().map(|p| p.game.hero.items.slot.item.clone());
+    // First person (0x1413f5): `0x2486c0` hides Ratchet's items, the thrown wrench excepted.
+    let fp = play.as_ref().is_some_and(|p| p.game.hero.f13f5 != 0);
     // The Swingshot's hook (a moby of its own in the game: advanced every tick, placed by the item's update).
     let hook = play.as_ref().and_then(|p| p.game.hero.swing.item.hook.filter(|_| p.game.hero.swing.item.alive));
     // The back mobys' animation state and pose snapshot as the hero update left them (item slot 3: pack
@@ -348,7 +350,7 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
             } else {
                 None
             };
-            item.visible = m.is_some() && !hidden;
+            item.visible = m.is_some() && !hidden && !fp;
             if let Some(m) = m {
                 item.state = m.anim;
                 item.snapshot = m.snapshot.clone();
@@ -361,7 +363,7 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
             match h.as_ref().filter(|m| m.o_class == item.o_class) {
                 Some(m) => {
-                    item.visible = true;
+                    item.visible = !fp || m.mstate != 0;
                     item.state = m.anim;
                     item.snapshot = m.snapshot.clone();
                     item.rows = m.rows;
