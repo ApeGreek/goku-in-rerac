@@ -20,3 +20,6 @@
 compile_commands.json
 # Rust
 /target/
+
+# Release packages (tools/package/package.sh)
+/dist/

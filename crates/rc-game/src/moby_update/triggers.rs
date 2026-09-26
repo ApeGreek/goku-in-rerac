@@ -148,12 +148,12 @@ impl World<'_> {
     /// `PointInPathPolygon(p, 0x1b0930[index])` 0x26e6c0.
     pub fn in_path(&self, p: [f32; 3], index: i32) -> bool { point_in_path(&self.svc.volumes, p, index) }
 
-    /// `HeroOnMoby(m)` 0x277fb8: in movement group 3 (0x1413dc) or state 0x1c (0x1413d4) the hero's attach moby
-    /// `0x13f848` decides (not modelled by the hero port: never); otherwise he stands on `m`: air ticks
-    /// `0x13f65e` = 0 and ground moby `0x13f64c` = m.
+    /// `HeroOnMoby(m)` 0x277fb8: in movement group 3 (0x1413dc, the ledge states) or state 0x1c (0x1413d4, the
+    /// climb) he is on `m` when it is the ledge moby `0x13f848` (`Hero::ledge_blk.moby`, set by probe B for a ledge
+    /// on a moby top); otherwise he stands on `m`: air ticks `0x13f65e` = 0 and ground moby `0x13f64c` = m.
     pub fn hero_on_moby(&self, id: MobyId) -> bool {
         let h = self.hero;
-        if h.group == 3 || h.state == 0x1c { return false; }
+        if h.group == 3 || h.state == 0x1c { return h.ledge_blk.moby == Some(id); }
         h.air_ticks == 0 && h.ground_moby == Some(id)
     }
 }
@@ -167,6 +167,20 @@ pub fn platform_block(m: &Moby) -> Option<usize> {
     if m.mode & 0x20 == 0 || m.pvars.len() < 0x0c { return None; }
     let o = i32::from_le_bytes(m.pvars[8..12].try_into().unwrap());
     usize::try_from(o).ok().filter(|&o| o != 0 && o + 0x40 <= m.pvars.len())
+}
+
+/// `FUN_002711f8(m)`: the offset of a mode-`0x20` moby's pvar record (`**(m+0x78)`: pvar+0x00, a pointer the
+/// loader fixes up; the port keeps it block-relative). None: no mode 0x20, or the record lies outside the block.
+pub fn pvar_record(m: &Moby) -> Option<usize> {
+    if m.mode & 0x20 == 0 || m.pvars.len() < 4 { return None; }
+    let o = i32::from_le_bytes(m.pvars[0..4].try_into().unwrap());
+    usize::try_from(o).ok().filter(|&o| o + 0x20 <= m.pvars.len())
+}
+
+/// Bit 0 of the pvar record's u16 at +0x1e ([`pvar_record`]): a ledge on this moby's top can be grabbed
+/// (`HeroWallLedgeCheckB` 0x22d090, the moby branch).
+pub fn record_ledge_flag(m: &Moby) -> bool {
+    pvar_record(m).is_some_and(|o| u16::from_le_bytes([m.pvars[o + 0x1e], m.pvars[o + 0x1f]]) & 1 != 0)
 }
 
 /// The platform block as the hero code reads it.
@@ -332,7 +346,7 @@ mod tests {
     /// spawn; the native cuboid test agrees with the water port's PS2-float one on a grid of points.
     #[test]
     fn novalis_cuboids() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/gameplay_ntsc.dec");
+        let path = rc_formats::test_data::root().join("levels/01/gameplay_ntsc.dec");
         let Ok(g) = std::fs::read(path) else { eprintln!("skipped: no extracted/levels/01"); return };
         let v = rc_formats::volumes::parse_volumes(&g).unwrap();
         let spawn = [162.53032, 136.39348, 60.5];

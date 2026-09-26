@@ -13,6 +13,6 @@ use std::path::PathBuf;
 
 /// Default `extracted/` directory (the workspace's, git-ignored); override with `--extracted` or `RC_EXTRACTED`.
 pub fn default_extracted() -> PathBuf {
-    let p = std::env::var_os("RC_EXTRACTED").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted"));
+    let p = rc_formats::test_data::root();
     p.canonicalize().unwrap_or(p)
 }

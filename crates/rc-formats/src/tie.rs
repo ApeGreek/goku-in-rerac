@@ -790,7 +790,7 @@ mod tests {
             };
             dot(sub(p, q), sub(p, q)).sqrt()
         }
-        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+        let dir = crate::test_data::root().join("levels/01");
         let (Ok(idx), Ok(comp)) = (std::fs::read(dir.join("core_index.bin")), std::fs::read(dir.join("core_data.bin"))) else {
             eprintln!("skipped: no extracted/");
             return;
@@ -827,7 +827,7 @@ mod tests {
     /// data has 720 on all of them).
     #[test]
     fn novalis_draw_distances_are_integers_up_to_720() {
-        let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+        let dir = crate::test_data::root().join("levels/01");
         let Ok(gameplay) = std::fs::read(dir.join("gameplay_ntsc.dec")) else { eprintln!("skipped: no extracted/"); return; };
         let insts = parse_tie_instances(&gameplay).unwrap();
         assert!(!insts.is_empty());

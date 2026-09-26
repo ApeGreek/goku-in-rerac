@@ -7,7 +7,7 @@ use rc_formats::save_game::{crc16, ChunkTables, ItemTables, SaveFile, SaveGameLu
 use rc_game::game_state::{item, GameState, SessionState, FLAG_VELDIN_CLANK};
 use std::path::PathBuf;
 
-fn root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted") }
+fn root() -> PathBuf { rc_formats::test_data::root() }
 
 struct Data { elf: Vec<u8>, lump: SaveGameLump, overlay: [Vec<u8>; 2] }
 

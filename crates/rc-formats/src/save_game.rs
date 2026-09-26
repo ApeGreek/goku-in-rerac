@@ -467,7 +467,7 @@ mod tests {
     }
 
     fn extracted(rel: &str) -> Option<Vec<u8>> {
-        std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted").join(rel)).ok()
+        std::fs::read(crate::test_data::root().join(rel)).ok()
     }
 
     /// Descriptor tables, template sizes / CRCs / round trip, and "template = boot ELF initial data".

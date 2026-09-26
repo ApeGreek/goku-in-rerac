@@ -22,7 +22,7 @@
 use anyhow::{Context, Result};
 use rc_formats::moby_anim::{parse_sequence, parse_sequences, MobyAnimClass, MobySequence};
 use rc_formats::{collision, gameplay, level, wad};
-use rc_game::audio::class_sounds::{self, ClassSoundSink, TriggerAnim};
+use rc_game::audio::class_sounds::{self, ClassSoundSink, HeroClassSounds};
 use rc_game::audio::{AudioSystem, LevelAudio};
 use rc_game::follow_camera::CameraView;
 use rc_game::hero::anim::RatchetAnim;
@@ -425,8 +425,7 @@ impl<'l> PortSim<'l> {
         let classes_dyn: Arc<dyn rc_game::moby_update::ClassData + Send + Sync> = self.classes.clone();
         let mut world = rc_game::moby_update::services::SharedServices { svc: &svc, classes: classes_dyn };
         let mut hooks = TickHooks { mobys: &mut mobys, particles: &mut partsf, world: Some(&mut world) };
-        // The sound step (after the camera, before the counter increment) with Ratchet's trigger sounds.
-        let fired = RefCell::new(Vec::new());
+        // The sound step (after the camera, before the counter increment).
         let samples = &mut self.samples;
         samples.clear();
         let mut sound_n = 0;
@@ -434,15 +433,24 @@ impl<'l> PortSim<'l> {
             let mut a = audio.borrow_mut();
             let Some(a) = a.as_deref_mut() else { return };
             let r = rng.state;
-            class_sounds::sound_step(a, table, hero, hero_id, cam, rng, counter, &mut fired.borrow_mut(), samples);
+            class_sounds::sound_step(a, table, hero, cam, rng, counter, samples);
             sound_n = lcg_distance(r, rng.state);
         };
         let has_audio = audio.borrow().is_some();
         self.game.hero.idle.counter = self.game.counter as i32;
-        let mut ctl = self.anim.ctl(&lv.ratchet);
-        let mut anim = TriggerAnim { inner: &mut ctl, class: &lv.ratchet, fired: &fired };
+        let mut anim = self.anim.ctl(&lv.ratchet);
         let mut hits = rc_game::hero::items::NoHits;
-        self.game.tick_with_sound(Some(&pad.bytes()), &lv.mesh, &mut anim, &mut hooks, &mut hits, if has_audio { Some(&mut sound) } else { None });
+        // Ratchet's own sounds (his animation triggers, his voices) inside the hero update, with the listener the
+        // hero sees (the previous tick's camera).
+        let mut hero_sounds = HeroClassSounds {
+            audio: || std::cell::RefMut::filter_map(audio.borrow_mut(), |a| a.as_deref_mut()).ok(),
+            class: &lv.ratchet,
+            listener: class_sounds::listener_of(&cam),
+            hero: hero_id,
+            counter: self.game.counter,
+        };
+        let sound = if has_audio { Some(&mut sound as &mut rc_game::tick::SoundHook) } else { None };
+        self.game.tick_with_hero_sounds(Some(&pad.bytes()), &lv.mesh, &mut anim, &mut hooks, &mut hits, sound, &mut hero_sounds);
         self.sound_draws.push(sound_n);
         self.draws_per_tick.push(lcg_distance(r0, self.game.rng.state));
         // 751's per-tick colours (the engine's fog_state does the same after each tick).

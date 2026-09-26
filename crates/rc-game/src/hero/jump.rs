@@ -65,6 +65,8 @@ impl Hero {
         j.f7f6 = 0;
         j.ak = Pf::b(0x3f00_0000);
         j.g_down = Pf::ZERO;
+        // 0x141604: only the wall jump 0x11 sets it again (super::ledge).
+        self.ledge_blk.wall_chain = 0;
     }
 
     /// The jump-group entry (0x23e7e8) and the per-id jump block values.
@@ -138,6 +140,119 @@ impl Hero {
                 }
                 self.items.f13f7 = 1;
             }
+            0x1c => {
+                // The ledge climb (super::ledge): straight up 2.0 after a 10-tick windup; the forward push is
+                // the climb branch of the horizontal control (ledge::jump_horizontal).
+                j.h = Pf::f(2.0);
+                j.hmin = j.h;
+                j.hmax = Pf::f(2.05);
+                j.ramp = ticks(1) as i16;
+                j.takeoff = ticks(10);
+                (j.f_apex, j.f_hold, j.f_land) = (Pf::f(20.0), Pf::f(29.0), Pf::f(19.0));
+                j.bottom784 = Pf::b(0x3f59_999a);
+                j.g = DT2 * Pf::f(25.0);
+                j.flip_chain = 1;
+                j.ak = Pf::ONE;
+                j.speed7ac = Pf::ZERO;
+                self.items.f13f7 = 1;
+            }
+            0x11 => {
+                // The wall jump (super::ledge): h 3.3 after a 9-tick windup on the wall, then along the wall
+                // normal probe A accepted (0x13f7b0 → 0x13f7c0); 0x141604 marks the chain.
+                j.h = Pf::f(3.3);
+                j.hmin = j.h;
+                j.hmax = Pf::f(3.35);
+                j.ramp = ticks(12) as i16;
+                j.takeoff = ticks(9);
+                (j.f_apex, j.f_hold, j.f_land) = (Pf::f(12.0), Pf::f(20.0), Pf::f(10.0));
+                j.bottom784 = six;
+                j.fallover_after = ticks(80) as i16;
+                j.g = DT2 * Pf::f(29.0);
+                j.f7fc = 1;
+                let l = &mut self.ledge_blk;
+                (l.jump_normal, l.jump_yaw, l.wall_chain) = (l.wall_normal, l.wall_yaw, 1);
+                self.items.f13f7 = 1;
+            }
+            10 => {
+                // The Heli-Pack long jump (super::packs): h 1.9 after a 5-tick windup (pushed forward 53·dt²·T
+                // then), gravity 11·dt², no air control; 120 ticks before the forced fall.
+                j.h = Pf::f(1.9);
+                j.hmin = j.h;
+                j.hmax = Pf::f(1.95);
+                j.ramp = ticks(14) as i16;
+                j.takeoff = ticks(5);
+                (j.f_apex, j.f_hold, j.f_land) = (Pf::f(18.0), Pf::f(29.0), Pf::f(10.0));
+                j.bottom784 = six;
+                j.flip_chain = 1;
+                j.g = DT2 * Pf::f(11.0);
+                j.max_air = ticks(120) as i16;
+                j.fallover_after = ticks(90) as i16;
+                j.f7f6 = ticks(70) as i16;
+            }
+            0x10 => {
+                // The Thruster-Pack long jump: a 0.4..0.9 hop, gravity 8.5·dt², straight along the facing at
+                // 0x13f744 = 11.5 u/s (5.7 from above 1.4), windup acc 44 / dec 50·dt². (Its after-images, 3 ghost
+                // mobys, are not ported.)
+                j.h = Pf::f(0.4);
+                j.hmin = Pf::f(0.4);
+                j.hmax = Pf::f(0.9);
+                j.ramp = ticks(1) as i16;
+                j.takeoff = ticks(5);
+                (j.f_apex, j.f_hold, j.f_land) = (Pf::f(18.0), Pf::f(30.0), Pf::f(11.0));
+                j.bottom784 = Pf::b(0x3f4c_cccd);
+                j.f744 = DT * Pf::f(11.5);
+                j.flip_chain = 1;
+                if Pf::f(1.4) < self.height { j.f744 = DT * Pf::b(0x40b6_6666); }
+                j.g = DT2 * Pf::f(8.5);
+                j.acc = DT2 * Pf::f(44.0);
+                j.dec = DT2 * Pf::f(50.0);
+            }
+            0xd => {
+                // The Thruster-Pack high jump: a 0.1..0.2 hop after a 9-tick windup, then the curve
+                // packs::THRUSTER_HIGH_JUMP_CURVE over ticks 9..44 (the anim aims at frame 26).
+                j.h = Pf::f(0.1);
+                j.hmin = j.h;
+                j.hmax = Pf::f(0.2);
+                j.ramp = ticks(14) as i16;
+                j.takeoff = ticks(9);
+                (j.f_apex, j.f_hold, j.f_land) = (Pf::f(26.0), Pf::f(38.0), Pf::f(18.0));
+                j.bottom784 = six;
+                j.fallover_h = Pf::f(4.5);
+                j.max_air = ticks(120) as i16;
+                j.air_speed = DT * Pf::f(1.9);
+                j.curve_on = 1;
+                j.curve_from = ticks(9);
+                j.curve_to = ticks(35) + j.curve_from;
+                j.curve_frame = Pf::ZERO;
+                j.f72c = Pf::f(26.0);
+                j.curve_len = ticks(45);
+                j.flip_chain = 1;
+            }
+            0xf => {
+                // The Heli-Pack high jump: h 1.9 after a 9-tick windup, then the rotor's lift
+                // packs::HELI_HIGH_JUMP_CURVE over ticks 35..71 (the anim aims at frame 29, then 50); no glide
+                // before tick 85, no ledge regrab for 70 ticks.
+                j.h = Pf::f(1.9);
+                j.hmin = j.h;
+                j.hmax = Pf::f(1.95);
+                j.ramp = ticks(5) as i16;
+                j.takeoff = ticks(9);
+                (j.f_apex, j.f_hold, j.f_land) = (Pf::f(50.0), Pf::f(64.0), Pf::f(28.0));
+                j.bottom784 = six;
+                j.fallover_h = Pf::f(4.5);
+                j.max_air = ticks(130) as i16;
+                j.air_speed = DT * Pf::f(3.3);
+                j.f7f6 = ticks(85) as i16;
+                j.curve_on = 1;
+                // ticks(0x22) on PAL (0x15ed80), 0x23 on NTSC.
+                j.curve_from = ticks(0x23);
+                j.curve_to = ticks(0x24) + j.curve_from;
+                j.curve_frame = Pf::f(29.0);
+                j.f72c = Pf::f(50.0);
+                j.curve_len = ticks(0x56);
+                j.flip_chain = 1;
+                self.f500 = ticks(70) as i16;
+            }
             _ => {
                 // 0xb: the side / back flip.
                 j.h = Pf::b(0x404c_cccd);
@@ -176,6 +291,20 @@ impl Hero {
                 self.anim_speed = SCALE60 * Pf::b(0x3f4c_cccd);
             }
             0x12 => self.set_anim(c.anim, c.rng, Pf::b(0xbf80_0000), 0x72, 1),
+            0x1c => self.set_anim(c.anim, c.rng, blend(4), 0x22, 0),
+            0x11 => self.set_anim(c.anim, c.rng, blend(7), 0x23, 2),
+            10 => self.set_anim(c.anim, c.rng, blend(5), 0x12, 0),
+            0xd => self.set_anim(c.anim, c.rng, blend(5), 0x11, 0),
+            0xf => self.set_anim(c.anim, c.rng, blend(5), 0x15, 0),
+            0x10 => {
+                // From a jump (or the first 7 ticks of a crouch): a longer blend and 3 more windup ticks.
+                if self.prev_group == 4 || (self.prev_state == 4 && self.timer < ticks(7)) {
+                    self.set_anim(c.anim, c.rng, blend(8), 0x26, 0);
+                    self.jump.takeoff += ticks(3);
+                } else {
+                    self.set_anim(c.anim, c.rng, blend(5), 0x26, 0);
+                }
+            }
             _ => {
                 let mut d = self.jump.kind7a0;
                 if d == 2 { d = 0; self.jump.kind7a0 = 0; }
@@ -192,7 +321,11 @@ impl Hero {
     }
 
     /// Jumps 7, 9, 0xb, 0xe (0x23b4e4).
-    pub(super) fn phys_jump(&mut self, env: &Env) {
+    pub(super) fn phys_jump(&mut self, env: &Env) { self.phys_jump_anim(env, 0.0) }
+
+    /// The jump-group physics (0x23b4e4) with Ratchet's key time 0x13fdf8 (read by the ledge climb 0x1c's horizontal
+    /// control; the other ids ignore it).
+    pub(super) fn phys_jump_anim(&mut self, env: &Env, key: f32) {
         if self.jump.keep_speed != 0 && self.f0632 != 0 {
             self.target_speed = self.speed;
         } else {
@@ -200,7 +333,9 @@ impl Hero {
             self.stick_target(env, self.jump.air_speed);
         }
         if self.timer == self.jump.takeoff { self.jump.takeoff_pos = self.pos; }
-        let windup = self.jump.landed != 0 || (self.timer < self.jump.takeoff && self.state != state::LONG_JUMP);
+        // The horizontal control runs from tick 0 (no windup) for 0xb, 0xc, 0x10, 0x11, 0x1c, 0x4c.
+        let from_start = matches!(self.state, 0xb | 0xc | 0x10 | 0x11 | 0x1c | 0x4c);
+        let windup = self.jump.landed != 0 || (self.timer < self.jump.takeoff && !from_start);
         if windup {
             self.turn_to(SCALE64 * Pf::b(0x3c75_c28f), SCALE64 * Pf::b(0x3e4c_cccd), DT * Pf::b(0x4170_2845));
             let s = self.speed;
@@ -220,6 +355,12 @@ impl Hero {
                 self.vel[0] = self.vel[0] + fast_cos(self.moby_rot[2]) * a;
                 self.vel[1] = self.vel[1] + fast_sin(self.moby_rot[2]) * a;
             }
+            if self.state == 10 && self.timer < ticks(34) {
+                // The Heli long jump's push: 53·dt²·T along the moby's yaw.
+                let a = (DT2 * Pf::f(53.0)) * Pf::from_i32(self.timer);
+                self.vel[0] = self.vel[0] + fast_cos(self.moby_rot[2]) * a;
+                self.vel[1] = self.vel[1] + fast_sin(self.moby_rot[2]) * a;
+            }
             if self.timer < ticks(10) && Pf::b(0x3e4c_cccd) < self.stick_mag {
                 let mut a = self.pos;
                 a[2] = a[2] + Pf::b(0x3f00_0000);
@@ -228,7 +369,13 @@ impl Hero {
                 if env.line(a, b, 4).is_some() { self.jump.blocked = 1; }
             }
         } else {
-            self.air_control(env);
+            if matches!(self.state, 0x11 | 0x1c) {
+                super::ledge::jump_horizontal(self, env, key);
+            } else if matches!(self.state, 10 | 0x10) {
+                super::packs::jump_horizontal(self);
+            } else {
+                self.air_control(env);
+            }
             if self.state == super::swim::id::WATER_JUMP {
                 // The water jump caps the air speed at 3.7 u/s.
                 let l = len2(self.vel).to_f32();
@@ -250,6 +397,8 @@ impl Hero {
             self.jump.descending = 1;
             if self.jump.g_down != Pf::ZERO { self.jump.g = self.jump.g_down; }
         }
+        // The Thruster long jump smashes the crates ahead: super::packs.
+        super::packs::thruster_crates(self, env, key);
         self.jump_vertical(env);
         // The wall / ledge probe 0x22c9a0 (sets 0x13f504 / 0x13f838): super::ledge.
         super::ledge::wall_ledge_probe_a(self, env);
@@ -278,7 +427,12 @@ impl Hero {
             // the row's acceleration (·dt², kept for a −999999 row) plus its increment per further tick is added
             // to vz.
             if j.curve_on != 0 && j.curve_from <= self.timer && self.timer < j.curve_to {
-                let rows = &super::swim::WATER_JUMP_CURVE;
+                // The table 0x13f734 the entry set: the pack high jumps' or the deep-water jump's.
+                let rows: &[(f32, f32, i32)] = match self.state {
+                    0xd => &super::packs::THRUSTER_HIGH_JUMP_CURVE,
+                    0xf => &super::packs::HELI_HIGH_JUMP_CURVE,
+                    _ => &super::swim::WATER_JUMP_CURVE,
+                };
                 j.curve_tick += 1;
                 let dt2 = DT2.to_f32();
                 // (The table ends in a 100-tick row, past any window; the port stops there instead of reading on.)
@@ -293,13 +447,22 @@ impl Hero {
             }
         } else {
             let mut v = DT * Pf::b(0x40e0_0000);
-            // Clank heli module (0x22ddd8(3) == 3) is not available: the plain branch.
+            // The Heli-Pack owned with the Thruster-Pack on the back (0x13d4c2, `GetClankModule(3)` = 3, Clank
+            // shown) keeps more of the boost higher up; the Thruster-Pack adds a quarter.
+            let thruster = self.back_module() == 3 && self.back_slot.clank_hidden == 0;
             let above = vsub(self.pos, self.jump.takeoff_pos)[2];
-            if Pf::b(0x4006_6666) < above {
+            if thruster && self.owned.has(2) {
+                if Pf::b(0x402c_cccd) < above {
+                    v = v * Pf::b(0x3ef0_a3d7);
+                } else if Pf::b(0x4006_6666) < above {
+                    v = v * Pf::b(0x3f33_3333);
+                }
+            } else if Pf::b(0x4006_6666) < above {
                 v = v * Pf::b(0x3ee6_6666);
             } else if Pf::b(0x3fd9_999a) < above {
                 v = v * Pf::b(0x3f33_3333);
             }
+            if thruster { v = v * Pf::b(0x3fa0_0000); }
             if self.timer < ticks(8) {
                 let mut z = self.vel[2];
                 if z < v { approach(v, DT2 * Pf::b(0x4316_0000), &mut z); }
@@ -340,8 +503,10 @@ impl Hero {
                 }
             }
         }
-        // C: pack moves (Thruster ✕ combo → 0x10, an R1 tap → Heli 10 / Thruster 0x10): super::packs.
-        if super::packs::jump_pack_moves(self, c) { return; }
+        // C: pack moves (the Thruster ✕ combo → 0x10 ends the pass; an R1 tap → Heli 10 / Thruster 0x10 goes on in
+        // the new state): super::packs.
+        if super::packs::jump_thruster_combo(self, c) { return; }
+        super::packs::jump_pack_tap(self, c);
         // D: R1/R2 in the air: the Thruster's stomp 0x22 (super::packs); the pass ends either way.
         if self.jump.takeoff + ticks(8) < self.timer
             && (self.jump.descending == 0 || ticks(10) < self.jump.land_eta)
@@ -421,8 +586,13 @@ impl Hero {
         if super::packs::thruster_fallover(self, c) { return; }
         // N: wall jump (0x13f504 wall window from the ledge probes): super::ledge.
         if super::ledge::wall_jump(self, c) { return; }
+        // O: the long jumps' glide hold-off (super::packs); the glide's earliest tick (20; 8 in 0x10; 17 in 0xe
+        // above 4).
+        super::packs::long_jump_glide_holdoff(self);
+        let mut glide_after = if self.state == 0x10 { ticks(8) } else { ticks(20) };
         // P / Q: double jump.
         if self.state == state::DOUBLE_JUMP && Pf::b(0x4080_0000) < self.height {
+            glide_after = ticks(17);
             if self.jump.descending == 0 && self.anim_speed < Pf::b(0x3fa6_6666) {
                 approach(Pf::b(0x3fa6_6666), SCALE60 * Pf::b(0x3dcc_cccd), &mut self.anim_speed);
             }
@@ -442,7 +612,7 @@ impl Hero {
                 self.set_state(c, 0xe, true);
             } else if p || matches!(self.state, 0xd..=0xf) {
                 // No double jump: the Heli-Pack glide 8 (✕ held): super::packs.
-                super::packs::jump_to_glide(self, c);
+                super::packs::jump_to_glide(self, c, glide_after);
             }
         }
         // The ledge grab 0x18 (0x13f838) from any jump but the flip.
@@ -452,6 +622,12 @@ impl Hero {
     /// `LandingPicker()` 0x242198 (first runs the tick after touchdown).
     pub(super) fn landing_picker(&mut self, c: &mut Ctx) {
         self.f15d4 = 0;
+        // Level00's picker (0x2293a8) first: landing on a slippery floor (0x140632) faster than 0.5 u/s → the
+        // slide 0x2f.
+        if self.f0632 != 0 && DT * Pf::b(0x3f00_0000) < self.eff_len_xy {
+            self.set_state(c, 0x2f, true);
+            return;
+        }
         self.stick_target(c.env, Pf::ONE);
         if c.env.pad.held & button::CROUCH != 0 {
             self.set_state(c, 4, false);

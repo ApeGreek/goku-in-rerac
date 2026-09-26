@@ -45,7 +45,7 @@ callers, **L** inferred (identity guessed from behaviour, flagged). Addresses ar
 | 8 | wrench | — | melee (ported) |
 | 12 | Swingshot | 0x13d4cc | hand item → 0x24 / 0x2c |
 | 28 | Magneboots | 0x13d4dc | gravity mode 1 on surface 2; 0x3f / 0x70 / 0x71 |
-| 29 | Grind Boots | 0x13d4dd | grind 0x28.. (no ownership test found in the hero code; the rail contact decides) |
+| 29 | Grind Boots | 0x13d4dd | grind 0x28.. (the rail contact L00 0x20cf58 tests the flag first) |
 | 30 | Hoverboard | 0x13d4de | 0x6b..0x6f |
 | 31 | Hologuise | — | hand item → body mode 3 |
 
@@ -96,59 +96,59 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 
 | id | name | grp | reached by | leaves to | physics / helpers | anims | module (package) | st |
 |---|---|---|---|---|---|---|---|---|
-| 1 | look stance | 0 | L1/L2 in 0/2/3/4 | 0 release (anim `0x226f10(1)`), 4 | ground case + camera-facing turn (0x1413f5) | `0x226f10(1)`, 0xd | stance.rs (P2) | – |
-| 8 | pack glide / hover | 5 | ✕ held in 6 (> 0.6) / jumps (> 0.6, 1.0, 1.5), Heli-Pack owned, back ≠ Hydro | 6 after 30 ticks without ✕, 0x18, 0x11, landing 3/4/0/2 (0x13f524 = 12 − T) | target 3·dt (5·dt with 0x1404f8 = 3), TurnTo(0.025, 0.3, 720°/s), SpeedStep(15, 7)·dt², vz 0x248f68/0x248b68, sound slots, `HeroWallLedgeCheckA` | 0x13 curve −2 | packs.rs (P4) | – |
-| 0xa | Heli-Pack long jump | 4 | crouch + ✕ moving (stick > 0.7, fwd > 0.9·x) with the Heli-Pack; R1 tap in 7/9 | 3 on landing (anim 5, momentum ×0.8), 0x7a wall | jump case: h 1.9, g 11·dt², air 120 | 0x12 | packs.rs (P4) | – |
+| 1 | look stance | 0 | L1/L2 in 0/2/3/4 | 0 release (anim `0x226f10(1)`), 4 | ground case + camera-facing turn (0x1413f5) | `0x226f10(1)`, 0xd | stance.rs (P2) | P |
+| 8 | pack glide / hover | 5 | ✕ held in 6 (> 0.6) / jumps (> 0.6, 1.0, 1.5), Heli-Pack owned, back ≠ Hydro | 6 after 30 ticks without ✕, 0x18, 0x11, landing 3/4/0/2 (0x13f524 = 12 − T) | target 3·dt (5·dt with 0x1404f8 = 3), TurnTo(0.025, 0.3, 720°/s), SpeedStep(15, 7)·dt², vz 0x248f68/0x248b68, sound slots, `HeroWallLedgeCheckA` | 0x13 curve −2 | packs.rs (P4) | P |
+| 0xa | Heli-Pack long jump | 4 | crouch + ✕ moving (stick > 0.7, fwd > 0.9·x) with the Heli-Pack; R1 tap in 7/9 | 3 on landing (anim 5, momentum ×0.8), 0x7a wall | jump case: h 1.9, g 11·dt², air 120 | 0x12 | packs.rs (P4) | P |
 | 0xc | jump variant | 4 | unknown (no parameters in the jump entry) | jump case | jump case | — | jump.rs (none) | – |
-| 0xd | Thruster-Pack high jump | 4 | crouch + ✕ standing, Thruster | jump case | curve jump: h 0.1..0.2, takeoff 9, table 0x17c3a0, window 9..44 | 0x11 | packs.rs (P4) | – |
-| 0xf | Heli-Pack high jump | 4 | crouch + ✕ standing, Heli-Pack | jump case | curve jump: h 1.9, takeoff 9, table gp−0x7518, fall-over 4.5, air 130 | 0x15 | packs.rs (P4) | – |
-| 0x10 | Thruster-Pack long jump | 4 | crouch + ✕ moving / ✕+R1 combo in 6 / R1 tap in 7/9, Thruster | 6 after 60 ticks > 1.5, 0x7a, 0x22 | jump case: h 0.4..0.9, ramp 1, g 8.5·dt², acc 44 / dec 50·dt², 0x13f744 = 11.5·dt | 0x26 | packs.rs (P4) | – |
-| 0x11 | wall jump | 4 | ✕ within 7 while the wall window 0x13f504 is open (7, 9, 0x11 after 25) | jump case | jump case: h 3.3, takeoff 9, g 29·dt², 0x13f7c0 = the wall normal | 0x23 | ledge.rs (P3) | – |
+| 0xd | Thruster-Pack high jump | 4 | crouch + ✕ standing, Thruster | jump case | curve jump: h 0.1..0.2, takeoff 9, table 0x17c3a0, window 9..44 | 0x11 | packs.rs (P4) | P |
+| 0xf | Heli-Pack high jump | 4 | crouch + ✕ standing, Heli-Pack | jump case | curve jump: h 1.9, takeoff 9, table gp−0x7518, fall-over 4.5, air 130 | 0x15 | packs.rs (P4) | P |
+| 0x10 | Thruster-Pack long jump | 4 | crouch + ✕ moving / ✕+R1 combo in 6 / R1 tap in 7/9, Thruster | 6 after 60 ticks > 1.5, 0x7a, 0x22 | jump case: h 0.4..0.9, ramp 1, g 8.5·dt², acc 44 / dec 50·dt², 0x13f744 = 11.5·dt | 0x26 | packs.rs (P4) | P |
+| 0x11 | wall jump | 4 | ✕ within 7 while the wall window 0x13f504 is open (7, 9, 0x11 after 25) | jump case | jump case: h 3.3, takeoff 9, g 29·dt², 0x13f7c0 = the wall normal | 0x23 | ledge.rs (P3) | P |
 | 0x15 | comet strike | 6 | crouch + □ | 0 / wrench throw states | 0x15 case (speed 0, aim, `0x236da0`) | 0x1a | melee.rs (later) | E |
-| 0x16 | hurt (knockback) | 7 | hit intake on foot | 6 (airborne after frame 12.5 above 1), 0x3d, 0 / 0x81 after 27 | |vel| − 4·dt² (10·dt² grounded after 10), edge brake on 0x140637, vz −= 0.004 | 0x10 curve −3 fr 3 | damage.rs (P2) | – |
+| 0x16 | hurt (knockback) | 7 | hit intake on foot | 6 (airborne after frame 12.5 above 1), 0x3d, 0 / 0x81 after 27 | |vel| − 4·dt² (10·dt² grounded after 10), edge brake on 0x140637, vz −= 0.004 | 0x10 curve −3 fr 3 | damage.rs (P2) | P |
 | 0x17 | weapon fire stance | 8 | hand item fire | 0 when the fire button is released and 0x13f520 = 0 | ground case (`0x2324f8` turn) | idle blend 10 | (Weapons, later) | – |
-| 0x18 | ledge grab | 3 | 6, 8, jumps with 0x13f838 | 0x19 after frame 13.5 | turn to ledge yaw + π (0.04, 0.2, 360°/s), pull to 0x13f820, ClampLen 4·dt | 0x20 | ledge.rs (P3) | – |
-| 0x19 | ledge hang | 3 | 0x18, shimmy end | 0x1c (✕), 6 (back + ✕ / R1, 0x13f500 = 10 / 40), 0x1a / 0x1b (probe `HeroWallLedgeCheckC` 0x20c758 at ±90° 0.3) | as 0x18 | 0x21 | ledge.rs (P3) | – |
-| 0x1a / 0x1b | shimmy left / right | 3 | 0x19 + stick | 0x19 (wrap / no probe), 0x1c, 6 | two probes `HeroWallLedgeCheckB`, speed from table 0x1c4130 by frame | 0x24 / 0x25 | ledge.rs (P3) | – |
-| 0x1c | ledge climb / jump up | 4 | ✕ hanging | jump case | jump case: h 2.0, takeoff 10, g 25·dt²; carry follows 0x13f848 | 0x22 | ledge.rs (P3) | – |
+| 0x18 | ledge grab | 3 | 6, 8, jumps with 0x13f838 | 0x19 after frame 13.5 | turn to ledge yaw + π (0.04, 0.2, 360°/s), pull to 0x13f820, ClampLen 4·dt | 0x20 | ledge.rs (P3) | P |
+| 0x19 | ledge hang | 3 | 0x18, shimmy end | 0x1c (✕), 6 (back + ✕ / R1, 0x13f500 = 10 / 40), 0x1a / 0x1b (probe `HeroWallLedgeCheckC` 0x22d838 (L00 0x20c758) at ±90° 0.3) | as 0x18 | 0x21 | ledge.rs (P3) | P |
+| 0x1a / 0x1b | shimmy left / right | 3 | 0x19 + stick | 0x19 (wrap / no probe), 0x1c, 6 | two probes `HeroWallLedgeCheckB`, speed from table 0x1c4130 by frame | 0x24 / 0x25 | ledge.rs (P3) | P |
+| 0x1c | ledge climb / jump up | 4 | ✕ hanging | jump case | jump case: h 2.0, takeoff 10, g 25·dt²; carry follows 0x13f848 | 0x22 | ledge.rs (P3) | P |
 | 0x1d / 0x1f / 0x32 / 0x72 / 0x78 / 0x3b | scripted control (0x1413fc no control; 0x32 frozen; 0x78 vel = 0; 0x3b item use, hand seq 0xb) | 9 | cutscene / moby scripts | set by the scripts | none / ground case | idle / 0xb / 0x44 | (Scripted, later) | – |
-| 0x1e | look stance (mobys) | 0 | four moby classes | 0 | ground case | `0x226f10(1)` | stance.rs (P2) | – |
+| 0x1e | look stance (mobys) | 0 | four moby classes | 0 | ground case | `0x226f10(1)` | stance.rs (P2) | P |
 | 0x20 | gadget lunge | 6 | fire with a hand item (group < 3, 4, 5) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | melee.rs (later) | E |
 | 0x21 | wrench rebound | 0xa | wrench hit on a flag-2 target | 0 on wrap | speed → 0 by 24·dt², away from 0x13fdb8 | 0x27 + row | melee.rs (later) | – |
-| 0x22 | Thruster stomp | 0xb | R1/R2 in the air (7, 9, 0xd, 0xf, 0xe) with the Thruster | 0x10 (✕ early), 0 on wrap | up 5.7·dt for 12 ticks, then 100·dt² down after 33, landing shockwave `coll_sphere_mobys` (0.8, flags 0x30000), camera shake 0x167260 | 0x2a | packs.rs (P4) | – |
+| 0x22 | Thruster stomp | 0xb | R1/R2 in the air (7, 9, 0xd, 0xf, 0xe) with the Thruster | 0x10 (✕ early), 0 on wrap | up to 5.7 u/s (70·dt²) for 12 ticks, held until tick 33, then 100·dt² down; while coming down and airborne `coll_sphere_mobys` (0.8, feet − 0.5, flags 0x10, template 0x30000); camera shake 0x167260 on the ground (not applied) | 0x2a | packs.rs (P4) | P |
 | 0x23 | melee 0x23 | 6 | hand item | 7 (✕ after frame 19), 0 | aim, SpeedStep(30, 35) | — | melee.rs (later) | E |
-| 0x24 | Swingshot fire | 0xd | Swingshot at a pull target 0x13fcb4 | 0 | turn to the target, edge brake | 0x2f loop 10..14 | swingshot.rs (P6) | – |
-| 0x25 | Swingshot pull | 0xd | 0x24 | 0, 6 | fly to the target (`0x2595a0`, `0x25bc00`) | 0x30 | swingshot.rs (P6) | – |
-| 0x26 | Swingshot arrive | 0xd | 0x25 | 0, 6 | approach, distance 0x13fccc | 0x30 | swingshot.rs (P6) | – |
+| 0x24 | Swingshot fire | 0xd | ○ at a usable pull target 0x13fcb4 (weapon check case 0xc) | 0x25 / 0x26 (the hand item's update once the hook holds), 0 / 6 (blocked, released), 0 (hand item not the Swingshot) | turn to the target (0.02 / 0.15 / 360°/s), the ground case's braking at 12.6·dt², edge brake | 0x2f loop 10..14 | swingshot.rs (P6) | P |
+| 0x25 | Swingshot pull | 0xd | the hook holds (record +0x08 = 0) | 6 (○ released / braked < 4 u/s; gravity 29, 42·dt²), 0 below 0.3 | speed → 27 u/s at 80·dt², brakes at 42·dt² to stop 1.9 short (`0x26e520` roots), left hand aimed, pitch to the target, sink in the last 30 ticks | 0x30, 10 at the end | swingshot.rs (P6) | P |
+| 0x26 | Swingshot arrive | 0xd | the hook holds (record +0x08 ≠ 0: never on the disc) | 6 (○ released above 0.4), 0 | pendulum about the target, length 0x13fccc → record +0x04 at 10 u/s, damping 0.9, 15·dt² | 0x30 | swingshot.rs (P6) | P |
 | 0x27 / 0x30 | weapon stances | 8 | hand items | 0 (0x30: anim 0x36 wrap) | ground-like (0x30: drag, edge brake, gravity) | idle | (Weapons, later) | – |
-| 0x28 | grind | 0xf | rail contact 0x13f8bc from 2 / 6 | 0x29 (✕), 0x2a (rail switch), 0x2b (□), 0x42, 0x16, 6, 0 | `SplineProject` / `SplineSample` on the grind paths (section 0x74), sparks PartType25 | 0x31 / 0x32 by stance | boots.rs (P5) | – |
-| 0x29 / 0x2a | grind jump / rail switch | 0xf | ✕ / ✕ + side on a rail | the grind case | grind case (jump block h 2.4 (+4.7 booster 0x140638) / 2.5) | 0x50 / 0x1e, 0x1f | boots.rs (P5) | – |
-| 0x2b | grind wrench | 0xf | □ grinding | grind case | grind case | 0x4e / 0x4f, wrench 0xc / 0xd | boots.rs (P5) | – |
-| 0x2c | Swingshot swing | 0xe | Swingshot at a swing target 0x13fce0 | 0x2d (release) | rope (length 0x13fcf4, pvar +0x78 k/d/max), gravity 27·dt² | 0x34 / 0x35 | swingshot.rs (P6) | – |
-| 0x2d | fall after a swing | 2 | 0x2c | fall case of 6 | fall case (lean) | 0xb | swingshot.rs (P6) | – |
+| 0x28 | grind | 0xf | rail contact 0x13f8bc from 0 / 2 / 3 / 6 / jumps | 0x29 (✕), 0x2b (□), 0x42 / 0x16 (hit or blocked), 6 (5 ticks off the rail end) | `crate::spline` nearest / advance on the grind paths (section 0x74), speed 12 u/s ± slope, rail pull spring, sparks type 25 (recorded) | 0x31 / 0x32 by stance, leans 0x4a..0x4d | boots.rs (P5) | P |
+| 0x29 / 0x2a | grind jump / rail switch | 0xf | ✕ / ✕ + stick sideways in 0x29's first 10 ticks (a rail 2..4.5 aside) | 0x28 (landing, raw write 2 ticks later), 6, 0 | grind case + the jump system (h 2.4 (+4.7 booster 0x140638, +0.7 near one Kalebo booster) / 2.5; g 27 / 24·dt²); 0x2a blends old → new rail over 48 ticks | 0x50 / 0x1e, 0x1f | boots.rs (P5) | P |
+| 0x2b | grind wrench | 0xf | □ grinding | 0x29 (✕ after the jump frame), 0x2b, 0x28 (idle frame), 6 | grind case; hit sphere 1.0 at the hip (queued, not delivered) | 0x4e / 0x4f, wrench 0xc / 0xd | boots.rs (P5) | P |
+| 0x2c | Swingshot swing | 0xe | ○ at a usable swing target 0x13fce0 (better score than the pull target) | 0x2d (○ released after 10 ticks; gravity 27, 7·dt²) | rope 0x13fcf4 springs to record +0x04 (k / d / max +0x24..+0x2c or 0.025 / 0.33 / 11·dt), hooked (0x13fcec): gravity 40·dt², drag, stick pump, speed cap +0x0c, first-swing kick; body lean; anim re-timed to π·√(L / g) | 0x34 / 0x35 | swingshot.rs (P6) | P |
+| 0x2d | fall after a swing | 2 | 0x2c | the fall's transitions (0x1415d4 = 7) | roll / pitch back upright about the point 0.6 up (`0x22a8d8`), then the fall case | 0xb | swingshot.rs (P6) | P |
 | 0x2e | weapon draw walk | 1 | hand item | 0x17 / 0 after frame 28 | — | 0x2e | (Weapons, later) | – |
-| 0x2f | slippery-floor walk | 1 | walk on surface 7 (0x140632; L00) | 2 off the surface, 0 | own case (L00 0x217970) | 0x37 / 0x6d | surface.rs (P1) | – |
-| 0x31 | sinking floor | 0x10 | surface 4 (0x140633), grounded, not in groups 7/0x10/0x14 | 0 when off it and 0x13f530 = 0 (momentum = the carried part) | vz −40·dt² (≥ disp.z − 50·dt²), turns with 0x13f440, particles 47, sound slot 0x141570, body roll springs | 100 | surface.rs (P1) | – |
+| 0x2f | slippery-floor walk | 1 | walk on surface 7 (0x140632; L00) | 2 off the surface, 0 | own case (L00 0x217970) | 0x37 / 0x6d | surface.rs (P1) | P |
+| 0x31 | sinking floor | 0x10 | surface 4 (0x140633), grounded, not in groups 7/0x10/0x14 | 0 when off it and 0x13f530 = 0 (momentum = the carried part) | vz = min(disp.z − 50·dt², −40·dt²), turns with 0x13f440, particles 47, sound slot 0x141570, body roll springs | 100 | surface.rs (P1) | P |
 | 0x38..0x3a | gadget poses | 0x13 | hand items (L) | 0 | stop | 0x46 / 0x47 / 0x48 | (Weapons, later) | – |
-| 0x3c | burn bounce | 4 | surface 1 (0x140635; L00), damage 1 | jump case | jump case: h 5.5, takeoff 5, g 15·dt², 150 ticks; → 0x7c on level 10 / twice | 0x43 | damage.rs (P2) | – |
-| 0x3d | death | 0x14 | health < 1 in 0/2, landing without health | fade 0x2319b0 on wrap | ground case | 0x45 | damage.rs (P2) | – |
-| 0x3f | Magneboots walk | 1 | walk with 0x13f658 (magnetic floor moby) | 0, 4, 0x71 | own case, gravity mode 1 | 0x5b | boots.rs (P5) | – |
-| 0x40 / 0x41 | fidget state / end | — | fidget record 2 | 1, 0x41 / 6, jumps, 4, 2, 0 | none | idle | stance.rs (P2) | – |
-| 0x42 | grind hurt | 0xf | hit while grinding | grind case | grind case | 0x10 curve −3 | boots.rs (P5) | – |
-| 0x65 / 0x66 / 0x67 | walk to point (0x140990) | 1 / 1 / 0 | scripts (vendor, ship) | 0x67 / 0x65 / 0 | own cases | walk anims | stance.rs (P2) | – |
-| 0x68 / 0x69 / 0x7b | sinking liquid (surface 3, to the level 0x13f644) / jump out / no health | 0x19 | surface 3 (0x140636; L00), level 0xd body contact type 0xb | 0x69 (✕) / jump case / fade | none (the liquid holds him) | 0x71 / 7 | surface.rs (P1) | – |
-| 0x70 | Magneboots wrench swing | 6 | □ with 0x13f658 = 1 | 0 | ground case | 0x5c + row | boots.rs (P5) | – |
-| 0x71 | Magneboots jump | 1 | ✕ in 0 / 4 with 0x13f658 = 1 | 0 | ground case, gravity mode 1 | 0x5e | boots.rs (P5) | – |
-| 0x74 | cable slide (**L**) | 0x1a | fall with 0x13f94c | 6 | spline follower (speed → 14 u/s, spring hang), PartType25 | 0x73 / 0x66 | boots.rs (P5) | – |
-| 0x75 / 0x76 | hurt on the surface / under water | 7 | hit intake in groups 0x12 / 0x11 | 0x37 / 0x34 after 50, 0x6a / 0x82 without health | small cases | 0x70 / 0x6f | damage.rs (P2) | – |
-| 0x77 | death fall | 2 | z below the level's death height and > 2 above ground | fade after 120 (level-specific z shortcuts) | fall-like, random spin (2 draws at entry) | 10 / 0xb | damage.rs (P2) | – |
-| 0x79 | pit fall | 2 | surfaces 8 / 0xc (0x14063a) | fade after 300; 6 / 0 when off the pit surface | fall case | 0xb | damage.rs (P2) | – |
-| 0x7a | pack jump rebound | 0xa | 10 / 0x10 into a wall | 0 on wrap | rebound case (with 0x21) | 0x29 | packs.rs (P4) | – |
-| 0x7c | burn death | 0x14 | surface 1 without health (level 6: 0x3d) | fade | none | 0x71 | damage.rs (P2) | – |
-| 0x7f | sinking death | 0x14 | surface 0xd (0x14063c) sinking | fade after 220 | own case (bubbles, CreateMoby) | 0x74 | damage.rs (P2) | – |
-| 0x80 | hazard death | 0x14 | hit by class 0x4eb / 0x558 | fade | ground case | 0x7c | damage.rs (P2) | – |
-| 0x81 | Thruster-Pack hover | 1 | R1 double tap on the ground (Thruster), idle with latch 0x14161a | 0 / land (✕ or R1 after 20 ticks; lockout 25) | own case (Spring, 0x2338d0) | 0x13 curve −2 | packs.rs (P4) | – |
-| 0x82 | eaten in the water | 0x14 | hit by class 0x28f in water groups | fade | swim-death case | 0x80 | damage.rs (P2) | – |
+| 0x3c | burn bounce | 4 | surface 1 (0x140635; L00), damage 1 | jump case | jump case: h 5.5, takeoff 5, g 15·dt², 150 ticks; → 0x7c on level 10 / twice | 0x43 | damage.rs (P2) | P |
+| 0x3d | death | 0x14 | health < 1 in 0/2, landing without health | fade 0x2319b0 on wrap | ground case | 0x45 | damage.rs (P2) | P |
+| 0x3f | Magneboots walk | 1 | walk / SetState(2) with 0x13f658 = 1 | 4, 0x71, 6, 2 (off the floor), 0 (no stick after 30) | own case: 2..3.5 u/s inside ±70°, TurnTo / SetPlanarVel / gravity in mode 1 | 0x5b | boots.rs (P5) | P |
+| 0x40 / 0x41 | fidget state / end | — | fidget record 2 | 1, 0x41 / 6, jumps, 4, 2, 0 | none | idle | stance.rs (P2) | P |
+| 0x42 | grind hurt | 0xf | hit (0x13f90e) or blocked on the rail, health ≥ 2, the rail ahead clear | 0x28 (wrap, or falling within 0.3) | grind case at 2.5 u/s, hop 10 u/s, g 23·dt²; 1 damage, 77 ticks invulnerable | 0x10 curve −3 | boots.rs (P5) | P |
+| 0x65 / 0x66 / 0x67 | walk to point (0x140990) | 1 / 1 / 0 | scripts (vendor, ship) | 0x67 / 0x65 / 0 | own cases | walk anims | stance.rs (P2) | P |
+| 0x68 / 0x69 / 0x7b | sinking liquid (surface 3, to the level 0x13f644) / jump out / no health | 0x19 | surface 3 (0x140636; L00), level 0xd body contact type 0xb | 0x69 (✕) / jump case / fade | none (the liquid holds him) | 0x71 / 7 | surface.rs (P1) | P |
+| 0x70 | Magneboots wrench swing | 6 | □ with 0x13f658 = 1 (weapon check) | 0 after the row's idle frame | ground case | 0x5c / 0x5d (melee rows 5 / 6) | boots.rs (P5) | P |
+| 0x71 | Magneboots hop | 1 | ✕ in 0 / 4 / 0x3f with 0x13f658 = 1 | 0 after frame 25 | ground case, gravity mode 1 | 0x5e | boots.rs (P5) | P |
+| 0x74 | cable slide (**L**) | 0x1a | fall / rising jump with the hands (0.3, 0, 1.34) at a grind path (0x13f94c; levels 0, 3, 4, 7, 9, 10, 13, 17) | 6 (5 ticks off the end) | spline follower on the hand point (speed → 14 u/s at 9·dt², spring pull), sparks | 0x73 / 0x66 | boots.rs (P5) | P |
+| 0x75 / 0x76 | hurt on the surface / under water | 7 | hit intake in groups 0x12 / 0x11 | 0x37 / 0x34 after 50, 0x6a / 0x82 without health | small cases | 0x70 / 0x6f | damage.rs (P2) | P |
+| 0x77 | death fall | 2 | z below the level's death height and > 2 above ground | fade after 120 (level-specific z shortcuts) | fall-like, random spin (2 draws at entry) | 10 / 0xb | damage.rs (P2) | P |
+| 0x79 | pit fall | 2 | surfaces 8 / 0xc (0x14063a) | fade after 300; 6 / 0 when off the pit surface | fall case | 0xb | damage.rs (P2) | P |
+| 0x7a | pack jump rebound | 0xa | 10 / 0x10 into a wall | 0 on wrap | rebound case (with 0x21) | 0x29 | packs.rs (P4) | P |
+| 0x7c | burn death | 0x14 | surface 1 without health (level 6: 0x3d) | fade | none | 0x71 | damage.rs (P2) | P |
+| 0x7f | sinking death | 0x14 | surface 0xd (0x14063c) sinking | fade after 220 | own case (bubbles, CreateMoby) | 0x74 | damage.rs (P2) | P |
+| 0x80 | hazard death | 0x14 | hit by class 0x4eb / 0x558 | fade | ground case | 0x7c | damage.rs (P2) | P |
+| 0x81 | Thruster-Pack hover | 1 | R1 double tap on the ground (Thruster), idle with latch 0x14161a | 0 / land (✕ or R1 after 20 ticks; lockout 25) | own case (Spring, 0x2338d0) | 0x13 curve −2 | packs.rs (P4) | P |
+| 0x82 | eaten in the water | 0x14 | hit by class 0x28f in water groups | fade | swim-death case | 0x80 | damage.rs (P2) | P |
 
 ### 1.3 Other bodies, Hoverboard, unused (not in this push)
 
@@ -163,8 +163,9 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 
 ### 1.4 Counts
 
-131 ids: 2 unused, 32 other bodies, 6 Hoverboard, 91 Ratchet. Ported 19 (ground 3, walk 2, air 1, jump 5, melee 2,
-swim 6). Not ported, by package: P1 surface 5, P2 damage 11 + stance 7, P3 ledge 6, P4 packs 8, P5 boots 9, P6
+131 ids: 2 unused, 32 other bodies, 6 Hoverboard, 91 Ratchet. Ported now **70** (after the push: the 19 below plus
+P1 5, P2 18, P3 6, P4 8, P5 9, P6 5; the registry's `ported` rows). Before the push: ported 19 (ground 3, walk 2, air
+1, jump 5, melee 2, swim 6). Not ported then, by package: P1 surface 5, P2 damage 11 + stance 7, P3 ledge 6, P4 packs 8, P5 boots 9, P6
 Swingshot 5 = **51 in this push**; later: weapons 7 + melee 5 (0x15, 0x20, 0x21, 0x23, 0x51), scripted 8, jump
 0xc 1. By game group (all ids, ported / not): 0: 1/7, 1: 3/10, 2: 1/8, 3: 0/8, 4: 5/11, 5: 0/2, 6: 2/8, 7: 0/6,
 8: 0/3, 9: 0/6, 0xa: 0/2, 0xb: 0/1, 0xc: 1/0, 0xd: 0/3, 0xe: 0/1, 0xf: 0/5, 0x10: 0/1, 0x11: 3/0, 0x12: 2/0,
@@ -175,19 +176,20 @@ Swingshot 5 = **51 in this push**; later: weapons 7 + melee 5 (0x15, 0x20, 0x21,
 | subsystem | game | port today | needed by |
 |---|---|---|---|
 | jump system (jump block 0x13f720.., vertical 0x2345f0 incl. the scripted curves 0x13f76c, air control 0x234b40, landing picker, descent anim) | shared case | jump.rs for 7/9/0xb/0xe/0x12; curve table 0x17c3e0 only | P3 (0x11, 0x1c), P4 (10, 0xd, 0xf, 0x10), P5 (0x29, 0x2a entries), P1 (0x69), P2 (0x3c) |
-| ledge / wall probes | 0x22c9a0 A, 0x22d090 B, 0x20c758 C; 0x13f504, 0x13f838, 0x13f820/834/848 | stubs called at the game's points | P3, P4 (glide), P1 (carry of 0x13f848) |
-| surface classification | ground probe → 0x140630; reaction 0x22cd48 / L00 0x20b960 → flags 0x140632..0x14063e | water, 0xe, 2, 8/0xc flags | P1 (rules), P2 (hazard deaths), P5 (surface 2) |
-| slopes / sliding | 50° walkable limit, capsule slide, edge brake 0x236a68, steep-wall stop 0x232820, slope ratio 0x13f4bc, pitch/roll 0x13f634/638 | ported | P1 (slippery 0x2f), P5 (gravity mode 1 frame) |
-| platform carry | `HeroPlatformUpdate` 0x249618 + `triggers::platform_delta` / `carry_point`, 0x13f440 / 0x13f44c, 0x13f6b0/6b4 | stub at the start of the move; the move already applies 0x13f440 | P1; the lift 726 / elevators 703 / 715; P3 (hang on a moving ledge) |
-| damage / knockback / invulnerability | hit intake 0x231580 (L00 0x210ce8), hit records 0x178110, `0x210c80` knockback → 0x13f680.., push 0x233850 (ported), `HeroTakeDamage`, 0x13f510, 0x13f53e | push generator only; timers counted down | P2; every hazard state |
-| death / respawn | 0x2319b0 (deaths++, fade, 0x141401) | `fell_out`; the engine respawns on entering 0x77 / 0x3d | P2 with the engine owner |
-| item ownership | `0x13d4c0 + id` | `swim.hydro_pack`, `swim.o2_mask` (synced by gameplay.rs) | P4, P5, P6: replace with one owned-items mirror (`Hero` field synced from `GameState::global.owned`) |
-| back slot (pack module) | item slot 3, `GetClankModule(3)`, back anim table 0x2476d0 (rows 2 / 3 / 4) | `idle::Back` (heli-pack model 607 + Clank 601), no slot state / module id | P4 (module id, pack models 607..609, Hydro model on 0x35) |
-| spline follower | `SplineProject` / `SplineSample` (L00 0x25d808 / …), grind paths section 0x74 (`rc_formats::volumes::GrindPath`), paths 0x70 | none | P5 (grind, cable) |
-| targets | Swingshot targets 0x13fcb4 / 0x13fce0 (+0x78 pvar record), target search in the weapon check | none | P6 (needs the target classes' moby updates) |
-| gravity frame | gravity mode 0x141403 (0x248ad8), gravity dir 0x13f5e0, `SetPlanarVel` / TurnTo in mode 1 | mode computed (rule differs, §4) | P5 |
+| ledge / wall probes | 0x22c9a0 A, 0x22d090 B, 0x22d838 C (L00 0x20c758); 0x13f504, 0x13f838, 0x13f820/834/848 | ported (P3, `ledge.rs`; `Hero::ledge_blk`) | P3, P4 (glide), P1 (carry of 0x13f848) |
+| surface classification | ground probe → 0x140630; reaction 0x22cd48 / L00 0x20b960 → flags 0x140632..0x14063e | ported (P1): every flag, the per-level rules `surface::LEVEL_RULES`, the probe's 3 / 0xb / 1 branches | P1 (rules), P2 (hazard deaths), P5 (surface 2) |
+| slopes / sliding | 50° walkable limit, capsule slide, edge brake 0x236a68, steep-wall stop 0x232820, slope ratio 0x13f4bc, pitch/roll 0x13f634/638 | ported; the slide 0x2f and its slippery variants of the ground code (P1) | P1 (slippery 0x2f), P5 (gravity mode 1 frame) |
+| platform carry | `HeroPlatformUpdate` 0x249618 + `triggers::platform_delta` / `carry_point`, 0x13f440 / 0x13f44c, 0x13f6b0/6b4 | ported (P1, `platform::platform_update`; carriers via `Env::world` = `platform::Carriers`) | P1; the lift 726 / elevators 703 / 715; P3 (hang on a moving ledge) |
+| moby → hero writes | the class updates' stores into the hero block (0x13f440, 0x13f4a0, 0x13f530, 0x13fd20.., 0x13f542 / 544, …) | ported: `services::HeroFields`, applied by the tick after the moby loop (follow-ups) | 679, 726; 613, Swingshot targets, NPCs when ported |
+| damage / knockback / invulnerability | hit intake 0x231580 (L00 0x210ce8), hit records 0x178580 (L00 0x178110), knockback `0x231518` (L00 `0x210c80`) **added to 0x13f430 and 0x13f450** (not 0x13f680: that is not a knockback), `HeroTakeDamage` 0x226fa8 (min(n, 1)), 0x13f510, 0x13f53e | ported (P2, `damage.rs`; the tick hands Ratchet's hit message over, `MobySystem::hit_message`) | every hazard state |
+| death / respawn | 0x2319b0 (deaths++, fade, 0x141401); main loop: death reload `LoadLevelCoreData(0, 1)`, hero at the checkpoint record 0x1bb6b0 (`0x29adc8`) | ported (P2): `damage::death_fade` → `Hero::fell_out`; the engine respawns on the flag only, at the checkpoint (class 805 `0x29ac10`) | — |
+| item ownership | `0x13d4c0 + id` | done (P4): `Hero::owned` (`hero::Owned`, `has(id)` / `set(id, b)`, the whole 37-byte table synced from `GameState::global.owned` by gameplay.rs every tick; tests: `Hero::grant_items(&[ids])`; debug `RC_GIVE_ITEMS=<ids>`); swim reads it | P5, P6 read `h.owned.has(id)` |
+| back slot (pack module) | item slot 3, `GetClankModule(3)`, back anim table 0x2476d0 (rows 2 / 3 / 4) | done (P4): `Hero::back_slot` (`idle::BackSlot` = `idle::ItemSlot` + 0x15ed94 / 0x141628, synced with `equipped[3]` / `temp_back` / `thruster_last` / `clank_hidden`), `Hero::back_module()`; creation (target / saved / 2 or 3), `UpdateWrenchSelected(3)`'s back rules (Hydro-Pack in the water groups, restore after, Heli-Pack request in 8) + the common request / restore swap `ItemSlot::swap_requests`, put-away and re-creation; pack classes by item definition (607 / 608 / 609, `set_back_packs`), `Back::pack_o_class` drawn by moby_attach; 607's update `ClankPackUpdate` (rotor seq 6 in 8). Without classes only the bookkeeping (no swaps) | P5 (feet slot: reuse `ItemSlot`) |
+| spline follower | L00 0x25d7a0 step, 0x25d808 advance (doc name `SplineProject`), 0x25df68 nearest point (doc name `SplineSample`), 0x25da70 / 0x25dcd8 / 0x25db00; grind paths section 0x74 (`rc_formats::volumes::GrindPath`, flag = closed), paths 0x70 | ported (P5): `crate::spline` (`step_index`, `advance`, `nearest`, `band_distance`, `closest_on_segment`, `heading`, `with_lengths`); used by `hero::boots` and the flow class 679 | P5 (grind, cable), moby classes |
+| targets | Swingshot targets 0x13fcb4 / 0x13fce0 (+0x78 pvar record), target search in the weapon check | ported (P6): classes 758 / 803 (`classes::swing_target`, level03 0x2d0bd8), `swingshot::Targets` of the run list (`MobySystem::run_list`, the cuboids by `MobySystem::volumes`) through `HeroWorld::swing_targets`; the searches 0x222158 / 0x221ee0 | — |
+| gravity frame | gravity mode 0x141403 (0x248ad8), gravity dir 0x13f5e0, `SetPlanarVel` / TurnTo in mode 1 | ported (P5): the game's rule (`boots::gravity_mode`); mode 1: gravity along −normal, the probe along 0x13f5e0 = −normal, TurnTo in the hero's frame (0x2323d8), SetPlanarVel along the tilted facing, the step snap 0x233588, the frame alignment 0x236358 (also with 0x13f548); mode 2 (level 16's 0x3e) not ported | P5 |
 | timers | FastDecTimer list of 0x23c710 | all counters now in `Hero` and counted down (§5) | all |
-| hero sounds | class sounds of the anim triggers inside 0x247d48; voices `0x236738` / `0x236810` | `HeroSounds` hook (§5); engine replays the triggers in its sound step | P2 item (below) |
+| hero sounds | class sounds of the anim triggers inside 0x247d48; voices `0x236738` / `0x236810`; sound slots 0x141568.. (`0x236798`, released by 0x2283a8 on a group change) | ported (P2): `audio::class_sounds::HeroClassSounds` inside the hero update (`Game::tick_with_hero_sounds`); the surface sounds (follow-ups, `surface::flush`); queued voices 0x236810 not yet | — |
 
 ## 3. Packages (the "finish Ratchet" push)
 
@@ -216,17 +218,24 @@ reach today (carriers' platform blocks, later grind paths and swing targets). Ad
 in `tick.rs` (`Game::tick_with_sound`) and the hero test constructors. `MobyScene` only exposes collision.
 
 ### P1 — platform carry, surfaces, slopes and sliding
-- Port `HeroPlatformUpdate` 0x249618 in `platform::platform_update` (spec: triggers.md §5; the move already adds
-  0x13f440 and re-collides). Needs `Env::world` for the ground moby's platform block (`triggers::platform_delta`).
-- The superset surface reaction (L00 0x20b960) in `surface.rs`: surfaces 1, 3, 4, 7, 9, 0xb, 0xd and the level-0xd
-  type-0xb contact, with their states (0x3c / 0x7c / 0x7f / 0x79 are P2's: call SetState, P2 ports the states).
-  Data check first: surface ids used per level (collision faces) vs the level's own reaction.
-- States 0x2f (slippery walk; `walk_surface` / `walk_tail` seams), 0x31, 0x68 / 0x69 / 0x7b.
-- Verify: a Novalis script riding the lift 726 (trace 0x13f3d0 / 0x13f440 against the lift's +0x10); PCSX2
-  savestate standing on the lift (record 0x13f440, 0x13f6b0, 0x13f6b4 per tick); surface ids per level printed by
-  a test; sliding: a script up a > 50° slope on Novalis (falls and slides back, unchanged by the port).
+**Done (2026-09-26).** `platform.rs` (the whole of 0x249618, general: any moby with a platform block, snapshot
+`platform::Carriers` in `Env::world`), `surface.rs` (the superset reaction switched per level by `LEVEL_RULES`,
+the states 0x2f / 0x31 / 0x68 / 0x69 / 0x7b, the seams in the ground / walk / idle / melee / probe / capsule code),
+tests `platform::tests`, `surface::tests`, `tests/hero_platform_novalis.rs` (the lift carries Ratchet down, the
+steep bank at its foot, determinism), `tests/hero_surfaces.rs` (surface ids per level vs rules, Aridia quicksand,
+ice on levels 12 / 14, Novalis' flow chutes). Open: ~~the flow class 679~~ (done, "Hero follow-ups" below), the
+landing picker's leading slippery test (jump.rs), the Thruster hover's slippery brake (packs.rs), the sinking
+floor's sand particles (`0x22b140(4, 2)`, the 6-draw `0x286cb0` spawn: still not ported, so the `rand` stream
+diverges from the PS2 while sinking), ~~the surface sounds~~ (done below).
 
 ### P2 — damage, knockback, death, stances, hero sounds
+**Done (2026-09-26).** `damage.rs` (the hit intake 0x231580, the knockback 0x231518 added to 0x13f430 and 0x13f450,
+`HeroTakeDamage` 0x226fa8, the hurts 0x16 / 0x75 / 0x76, the deaths 0x3d / 0x77 / 0x79 / 0x7c / 0x7f / 0x80 / 0x82, the
+burn bounce 0x3c, the death sequence 0x2319b0 → `Hero::fell_out`; the engine respawns on that flag at the checkpoint),
+`stance.rs` (1, 0x1e, 0x40 / 0x41, 0x65..0x67), the hero sounds inside the hero update (`HeroSounds`,
+`audio::class_sounds::HeroClassSounds`, `Game::tick_with_hero_sounds`). Tests `tests/hero_damage.rs`. Open (see the
+module docs): the hurts' and deaths' particles and 0x7f's bubble moby, the queued voices 0x236810, 0x1413f5.
+The original plan:
 - The hit intake 0x231580 (seam `damage::hit_intake`, first call of the transitions): hit record, invulnerability
   0x13f510, knockback 0x210c80 → `Hero::knock`, `HeroTakeDamage`, the hurt state per group; the hit flash 0x13f53e.
 - States in the table (0x16, 0x75, 0x76, the deaths, 0x77 incl. its two RNG draws at entry, 0x79, 0x3c via the jump
@@ -244,6 +253,10 @@ in `tick.rs` (`Game::tick_with_sound`) and the hero test constructors. `MobyScen
   (0x1413d4, 0x13f680..688, 0x1415f8, 0x13f510 per tick), drowning (swim), the death fade.
 
 ### P3 — ledges and the wall jump
+**Done (2026-09-26).** `ledge.rs` (probes A 0x22c9a0, B 0x22d090, C 0x22d838; 0x18..0x1c, the wall jump 0x11;
+`Hero::ledge_blk`, `Hero::ledge_camera_yaw` for the camera), the 0x11 / 0x1c jump parameters in `jump.rs`. Tests
+`ledge::tests`, `tests/hero_ledge_novalis.rs` (grab and climb on Novalis, the digest scripts enter no ledge state).
+Moby ledges (the pvar flag) and the hang on a moving ledge came with the follow-ups. The original plan:
 - Probes A / B / C and the states; 0x11 / 0x1c through the jump system (`jump_block_defaults`-style entry +
   `phys_jump` / `tr_jump`); seams exist: `wall_ledge_probe_a` (jump physics), `wall_ledge_probe_b`
   (`hero_update`), `wall_jump` (jump transitions), `Hero::f838` → 0x18 (fall and jumps).
@@ -252,32 +265,89 @@ in `tick.rs` (`Game::tick_with_sound`) and the hero test constructors. `MobyScen
 - Verify: Novalis ledges (the drop off the spawn plateau): script jumping at a ledge edge; savestate hanging;
   unit tests on a hand-built step (testkit::cell).
 
-### P4 — Heli-Pack and Thruster-Pack
-- Item ownership mirror + back slot module id (item slot 3 state / id) + the pack models on Clank (607..609 and
-  the back table rows 3 / 4 in idle.rs); then the states and seams listed in `packs.rs` (crouch jumps, glide from
-  fall / jumps, R1 taps, stomp, wall rebound, hover 0x81 and its latch, the heli branch of the double-jump boost in
-  0x2345f0, the scripted curves 0x17c3a0 / gp−0x7518 for 0xd / 0xf beside the water jump's).
-- P4 owns `jump.rs` in wave 2.
-- Verify: an engine debug switch like `RC_GIVE_HYDROPACK` (own item 2 / 3, back module 2 / 3) on Novalis: glide from
-  a jump off the plateau, crouch-jump heights (apex against the jump-block model as in player_controller §4.4),
-  the long jumps; PCSX2 savestate on Kerwan (Heli-Pack) for a trace.
+### P4 — Heli-Pack + Thruster-Pack
+**Done (2026-09-26).** `packs.rs` (8, 10, 0xd, 0xf, 0x10, 0x22, 0x7a, 0x81 and the pack tests of crouch / fall / jumps /
+the weapon check's end), `jump.rs` (the four pack jumps' parameters and anims, the curve tables 0x17c3a0 / gp−0x7518,
+the Heli long jump's windup push, the double jump's pack boost, the long-jump glide hold-off, the level00 landing
+picker's slippery test), the owned-items mirror and the back slot (§2), the wall-ahead probe 0x13f598 / 0x13f5a0 /
+0x13f5a4 / 0x13f5a5 of `0x23c458` (physics.rs), the hero's looping-sound slots 0x141568 (`packs::flush_sounds`,
+`HeroSounds::release`), pack hits after the hero update (`packs::deliver_hits`, `HitSink::deliver`). Tests
+`packs::tests` (12), `tests/hero_packs_novalis.rs` (glide, both long jumps, stomp, the Hydro-Pack on the back in the
+lake, determinism). Open: the stomp's camera shake (no general shake in follow_camera), the Thruster jumps'
+after-images `0x277428`, the Thruster flame mobys (class 0xa7), the pad vibration `0x248920`, the ledge climb's
+Thruster voice (0x1c), the Hydro-Pack's bubble jets; in the port the back swap's `rand_range(50, 90)` draws after
+the hero update and before the hand's slot loop (the game: slot 0 first).
 
 ### P5 — Magneboots, Grind Boots, cable
-- Magneboots: the gravity-mode rule 0x248ad8 (fix the port's inverted air-tick test and the missing 0x13d4dc test),
-  the gravity frame in mode 1 (probe, `SetPlanarVel`, TurnTo, capsule along 0x13f5e0), 0x3f / 0x70 / 0x71, the
-  ground-physics magnet branch (seam `boots::ground_magnet`).
-- Grind: one spline follower for 0x28..0x2b / 0x42 and 0x74 (L00 physics 0x217970 case 0x28.., transitions
-  0x229b70 case 0x28..; `SplineProject` / `SplineSample` / 0x25d7a0), the rail contact 0x13f8bc (seam
-  `boots::rail_contact` in walk and fall), grind paths from `Env::world`.
-- Verify: savestates on Orxon (10; magnetic walkways) and a grind level (Gaspar 9 / Kalebo 16); unit tests on a
-  straight and a curved hand-built path.
+**Done (2026-09-26).** `boots.rs` (0x28..0x2b, 0x42, 0x3f, 0x70, 0x71, 0x74; L00 SetState 0x2223f8, physics
+0x217970, transitions 0x229b70), `crate::spline` (the general follower, §2), the rail / cable contacts
+`0x20cf58` / `0x20d330` and the magnetic floor 0x13f658 (`boots::contacts`, after the wall probe in the hero update,
+as L00's 0x2070d0), the gravity-mode rule and the mode-1 frame (§2; physics.rs), the grind's 0.45 sphere instead of
+the capsule (L00 0x2133a8). Findings: the Grind Boots **are** tested (0x13d4dd) by the rail contact; the rail
+contact only exists on levels 0, 4, 6, 7, 8, 9, 10, 13, 14, 16, 17, 18 and on 6 / 0xe / 0x10 only near fixed mount
+points (the rail starts); the cable contact on 0, 3, 4, 7, 9, 10, 13, 17 (Kerwan's three 2-point grind paths are
+cables); the rails' own collision is a pit surface (0xc) just under the spline; 0x13f658 needs the feet item
+moby (0x140430, item slot 2) to be the Magneboots (class 0xad; the port reads the ownership, **L**); SetState(2) with
+0x13f658 = 1 becomes 0x3f (walk.rs); idle and stop take 0x28 on the rail contact (ground.rs). The grind hit
+0x13f90e is `damage::Damage::grind_hit`. Tests: `boots::tests` (11), `spline::tests` (5),
+`tests/hero_boots_grind.rs` (every level's 37 grind paths; Oltanis 14: grind, grind jump, rail switch 2 → 3;
+Kalebo III 16: 20 s on the long rail 1 with the obstacles' grind hurts, deterministic), `tests/hero_boots_magnet.rs`
+(Orxon 10: idle in mode 1, 0x3f, no boots = mode 0). Engine: `RC_GIVE_ITEMS=29 RC_HERO_AT=x,y,z,yaw` (new debug
+placement in gameplay.rs). Open: the grind / cable loop sounds (slot 0x141568, now general: `HeroSounds::release`),
+the type-25 sparks as particles (`Boots::sparks` records them with their draws), the grind wrench's hit sphere
+(`Boots::hits`, queued: needs a sink like the jump attack's shockwave), the moby-armed targeted grind jump
+(0x13f908 / 0x13f90c / 0x13f8a0 / 0x13f918; through the moby → hero channel when its class is ported), level 16's
+class-0x101 bump, the camera look-ahead and body-lean joint records, AirAccel / StickTarget / LandEta in mode 1,
+the feet item slot (0x140430) itself, melee row 6 in `melee::COMBO` (the wrench update's hit window of the second
+0x70 swing uses row 5's).
 
 ### P6 — Swingshot and the other hand items
+**Done (2026-09-26).** `gadgets.rs` (the hand-item mechanism, one table: `HAND_ITEMS` rows = the weapon check's case
+per item (`HandItemKind::fire`) and the item moby's update (`ItemUpdate::Slot` in the slot loop, `ItemUpdate::Hero`
+right after it with the hero's context: `gadgets::after_items`, called by the tick); the request 0x141408 →
+`UpdateWrenchSelected` → held 0x140408 path is items.rs's; the epilogue follows level00 0x227fa0: every switch case
+ends in it, the early returns before the switch skip it), `swingshot.rs` (0x24..0x26, 0x2c, 0x2d; the searches; the
+hand item's update level01 0x2dbdc0 with its hook and rope), `moby_update/classes/swing_target.rs` (758 / 803). Levels:
+pull targets on 2, 3, 4, 5, 7, 10..18; swing targets on 2..7, 9..11, 13..16, 18 (none on 0, 1, 8). Engine: the
+Swingshot (0xd0) and its hook (0xd1) drawn by moby_attach, the rope `0x2dba30` as a camera-facing textured strip
+(effect texture 0xf); `RC_GIVE_ITEMS=12` also requests it into the hand. Tests: `swingshot::tests` (10),
+`classes::swing_target::tests` (2), `tests/hero_swingshot_levels.rs` (Aridia: a pull and a swing; Kerwan: a swing;
+deterministic). Open: the target glints (particle type 60: its draw is made, the particle not created), the targets'
+camera look-at hint `0x2eb4c0`, the look-stance aiming beams `0x20fb60`, the Swingshot's class sounds (queued in
+`SwingItem::sounds`, not played: their pitch-bend draws are missing from the stream, as the wrench's hit sounds), the
+targeted swing from a grind rail (0x13f904), the stats / help counters. The other hand items' rows (weapons, the
+Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original plan:
 - `gadgets::pda_item` (the non-wrench cases of 0x240ed8, must call `packs::pda_epilogue` when the state did not
   change), the target search, 0x24..0x26 (pull), 0x2c / 0x2d (swing), the straightening exclusions.
 - Needs the target mobys' updates (moby_update classes) and their pvar records via `Env::world`.
 - Verify: a Kerwan / Eudora savestate at a target; unit test pulling to a fixed target and swinging on a fixed
   pivot (rope length kept, release into 0x2d).
+
+### Hero follow-ups (the gaps P1 / P2 / P3 left)
+**Done (2026-09-26).**
+- **Moby → hero write channel** (`moby_update::services::HeroFields`): the hero-block fields the game's class
+  updates store into, read and written by a class through `World::hero_fields` / `World::hero_fields_mut` (the
+  block as this tick's earlier classes left it) and applied by the tick right after the moby loop, before the hero
+  update (`tick.rs`, `MobySystem::take_hero_writes`; nothing reads the block between the two in the game). Fields:
+  0x13f440..0x13f44c push, 0x13f4a0 momentum, 0x13f530 the sinking floor's hold, 0x13fd20..0x13fd30 the flow, 0x13f542
+  / 0x13f544 the lift's lockouts (726 now writes them through it). The other class stores found in level01 (613's
+  0x13f4e4 / 0x13f528 / 0x141608, the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec, 0x300de0's 0x13f510, the NPCs'
+  0x13f3d0, …) are listed on the struct for their classes to add.
+- **Flow class 679** `0x2f6328` (`moby_update/classes/flow.rs`; the same function on levels 5 0x3067b8, 8 0x2f74c0,
+  15 0x2d95e8): pushes the sinking hero along its splines (the shared follower `crate::spline`) with the pull back to
+  the spline, holds 0x13f530 = 30, level 1's speed by the length left; off the end the momentum ×0.99. Novalis:
+  instance 691 (splines 43, 44) carries Ratchet down the chute to the landing plateau; 692 has no spline.
+- **Camera while hanging**: `follow_camera.rs` takes `Hero::ledge_camera_yaw` in the type-0 tweaks (0x3111d8, right
+  after the platform carry): yaw rate 12°/tick, the scripted yaw input, look flag; also the glide (group 5) and
+  sinking-floor (group 0x10) look / pivot heights of the same function.
+- **Moby ledges**: `HeroWorld::moby_ledge_flag` (the pvar record's +0x1e bit 0, `triggers::record_ledge_flag`) in
+  probe B's moby test. The bit is set (record +0x1e = 1, 5 or 0x41) on carriers of levels 3 (classes 868, 905, 928),
+7 (1069, 1104, 1129), 12 (240) and 13 (104, 106); none on levels 1, 5, 8, 15.
+- **Surface sounds**: `surface::flush` plays `Surf::events` through `HeroSounds::voice` / `release` right after the
+  physics, the reaction and the transitions (the loop's voice becomes 0x141570; a group change releases it, the slot-2
+  part of 0x2283a8).
+- **`HeroOnMoby`** 0x277fb8's ledge branch (group 3 / state 0x1c: the ledge moby 0x13f848).
+- Tests: `tests/hero_followups.rs`, `classes::flow::tests`, `surface::tests::sinking_floor_state`.
 
 ### Later (not in this push)
 Weapons (0x15 comet, 0x17, 0x20, 0x21, 0x23, 0x27, 0x2e, 0x30, 0x38..0x3a, the bomb glove's throw), scripted
@@ -287,19 +357,24 @@ Hologuise), the Hoverboard. Each gets a module when started; the registry alread
 ## 4. Findings to fix inside the packages (not fixed now: the restructure is behaviour-neutral)
 - **Gravity mode** (`Hero::input_physics_move`): 0x248ad8 returns 1 in state 0 on surface 2 when the Magneboots are
   owned and the air ticks are **below** 4; the port forces 1 with ≥ 4 air ticks and no ownership test. (P5)
+  **Fixed (P5):** `boots::gravity_mode` is the game's rule.
 - **Surface 2 is the magnetic floor** (Magneboots), not "slippery" as an old comment said; the slippery floor is
-  surface 7 (0x140632, level00's reaction). (P1 / P5)
+  surface 7 (0x140632, level00's reaction). (P1 / P5) **Fixed** (P1's reaction, P5's magnetic floor).
 - `HeroItems::f52a` / `f52c` (0x13f52a / 0x13f52c) are set on a swap but never counted down (0x23c710 counts them).
   Nothing reads them yet. (weapons, later)
 - `HeroPdaGadget` 0x240ed8: whether its early returns (no hand moby, slot not ready) skip the Thruster epilogue is
-  not checked; `gadgets::pda_item` / `packs::pda_epilogue` must follow the disassembly. (P4 / P6)
-- The jump buffers read 0x13f524 (1 tick instead of 7 / 9 / 6 while it runs): now in the port (0 until P4 sets it).
+  not checked; `gadgets::pda_item` / `packs::pda_epilogue` must follow the disassembly. (P4 / P6) **Checked (P6):**
+  the early returns skip it; every case of the switch (and an item without a case) ends in it.
+- The jump buffers read 0x13f524 (1 tick instead of 7 / 9 / 6 while it runs): now in the port; P4's glide landing
+  sets it.
 - player_controller.md §3 "noted only" names corrected here: 1 / 0x1e are the look stance (not strafe), 8 the
   pack glide, 10 / 0x10 the pack long jumps, 0xd / 0xf the pack high jumps, 0x22 the Thruster stomp, 0x81 the
   Thruster hover (not strafe-move), 0x16 / 0x75 / 0x76 hurts, 0x17 / 0x27 / 0x30 weapon stances, 0x18..0x1b
   ledge, 0x31 the sinking floor, 0x41 / 0x42 are the fidget end and the grind hurt (not one group).
 
 ## 5. The restructure (2026-09-26)
+
+(The stubs named below have since been filled by P1..P5 and the follow-ups: §3.)
 
 `crates/rc-game/src/hero/`:
 - `registry.rs` — `STATES` (131 rows: name, game group, module, ported), `module_of`, `implemented` (replaces the

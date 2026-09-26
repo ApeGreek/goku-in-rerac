@@ -1435,7 +1435,7 @@ mod chain_tests {
     /// joint 56 or equal key indices). Needs `extracted/levels/01/core`; skipped without it.
     #[test]
     fn ratchet_hand_chain_matches_full_evaluator() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/core");
+        let dir = crate::test_data::root().join("levels/01/core");
         let Ok(blob) = std::fs::read(dir.join("moby_class/0000.bin")) else { eprintln!("skipped: no extracted level 01"); return };
         let class = crate::moby::parse_moby_class(&blob).unwrap();
         let seqs: Vec<Option<MobySequence>> = (0..256)

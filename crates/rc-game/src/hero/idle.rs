@@ -257,11 +257,95 @@ impl Idle {
 // ------------------------------------------------------------------------------------------------
 // The back items.
 
-/// The anim classes of the back items: the pack of back item 2 (class 607 on Novalis) and Clank (601).
+/// The anim classes of the back items: the pack moby of each back item (`CreateMoby` of the item definition's
+/// class +0x10: 2 Heli-Pack 607, 3 Thruster-Pack 608, 4 Hydro-Pack 609, read from level01's definitions at
+/// 0x179f40) and Clank (item 1's 601).
 #[derive(Clone, Debug)]
 pub struct BackClasses {
-    pub pack: MobyAnimClass,
+    /// `(item id, o_class, class)`.
+    pub packs: Vec<(i32, i16, MobyAnimClass)>,
     pub clank: MobyAnimClass,
+}
+
+impl BackClasses {
+    /// The pack class of back item `id`.
+    pub fn pack(&self, id: i32) -> Option<(i16, &MobyAnimClass)> { self.packs.iter().find(|p| p.0 == id).map(|p| (p.1, &p.2)) }
+}
+
+/// An item slot's bookkeeping besides its moby (the records at 0x1403e0 + 0x50·slot and the per-slot globals of
+/// `UpdateWrenchSelected(slot)` 0x2307e0 at 0x141408 / 0x141424 / 0x141440 / 0x14145c / 0x141660 + 4·slot).
+/// [`Hero::back_slot`] is slot 3 (the back: pack and Clank); it exists whether or not the back mobys are
+/// modelled, so `GetClankModule(3)` ([`Hero::back_module`]) answers without class data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemSlot {
+    /// +0x24: 2 ready, 3 being put away, 0 empty (before the first hero update, or after a put-away).
+    pub state: i32,
+    /// +0x28: the item id (slot 3: 2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack).
+    pub id: i32,
+    /// 0x141424 + 4·slot: the item the next creation takes (0: none).
+    pub target: i32,
+    /// 0x141440 / 0x14145c + 4·slot: the item to restore (0x26 = nothing) and its request.
+    pub restore: i32,
+    pub restore_pending: i32,
+    /// 0x141408 + 4·slot: the request (slot 3: `SessionState::temp_back` 0x141414, what `GiveItem` with equip
+    /// writes); 0x141660 + 4·slot: the saved item (slot 3: `equipped[3]` 0x14166c). The engine syncs both.
+    pub request: i32,
+    pub saved: i32,
+    /// +0x20: ticks ready (3 when a swap starts); +0x1b: put-away ticks.
+    pub ticks_ready: i32,
+    pub putaway_ticks: u8,
+}
+
+impl ItemSlot {
+    /// The common part of `UpdateWrenchSelected(slot)` for the slots besides the hand: the restore request
+    /// (0x14145c + 4·slot → target = saved = the restore item, 0x26 meaning none), then the request 0x141408 +
+    /// 4·slot (0x26: nothing; the item is saved unless `keep_unsaved` names it). True when the slot starts a swap
+    /// (ticks ready = 3, request cleared); the caller puts the item away (slot 3: [`Hero::back_swap`]).
+    pub fn swap_requests(&mut self, keep_unsaved: Option<i32>) -> bool {
+        let s = self;
+        let mut changed = false;
+        if s.restore_pending != 0 {
+            s.restore_pending = 0;
+            let mut v = s.restore;
+            if v != 0 && v != s.id {
+                if v == 0x26 { v = 0; }
+                s.restore = 0;
+                s.saved = v;
+                s.target = v;
+                changed = true;
+            }
+        }
+        let r = s.request;
+        if r != 0 {
+            if r == s.target {
+                s.request = 0;
+            } else {
+                if r == 0x26 {
+                    s.target = 0;
+                    s.saved = 0;
+                } else {
+                    s.target = r;
+                    if Some(r) != keep_unsaved { s.saved = r; }
+                }
+                changed = true;
+            }
+        }
+        if !changed { return false; }
+        s.ticks_ready = 3;
+        s.request = 0;
+        true
+    }
+
+}
+
+/// Item slot 3 with the globals only the back reads: 0x15ed94 (the Thruster-Pack was the last back item,
+/// `GameState::global.thruster_last`) and 0x141628 (Clank hidden, `SessionState::clank_hidden`; it hides
+/// the back mobys and disables every pack move). Synced by the engine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BackSlot {
+    pub slot: ItemSlot,
+    pub thruster_last: i32,
+    pub clank_hidden: i16,
 }
 
 /// A back moby's animation (moby+0x50..0x70) and its snapshot frame.
@@ -271,11 +355,15 @@ pub struct BackMoby {
     pub snapshot: Option<MobyFrame>,
 }
 
-/// Item slot 3 (0x1404d0): the pack moby (+0x00), Clank (+0x04), state (+0x24 = 0x1404f4), item id (+0x28).
+/// Item slot 3 (0x1404d0): the pack moby (+0x00), Clank (+0x04), state (+0x24 = 0x1404f4), item id (+0x28) —
+/// the modelled back mobys; `state` / `id` follow [`Hero::back_slot`].
 #[derive(Clone, Debug)]
 pub struct Back {
     pub state: i32,
     pub id: i32,
+    /// The pack moby's item and class (the engine draws that model; `id` can differ while the slot is empty).
+    pub pack_item: i32,
+    pub pack_o_class: i16,
     pub pack: BackMoby,
     pub clank: BackMoby,
     /// Clank's moby+0x90 colour word (the pulsing glow of `0x2278c0`).
@@ -311,7 +399,7 @@ impl Back {
 
     /// `MobyAnimBlend(pack, seq, frame, ticks)` (0x26c660).
     pub fn blend_pack(&mut self, seq: u8, frame: i32, ticks: i32) {
-        let c = &self.classes.pack;
+        let Some((_, c)) = self.classes.pack(self.pack_item) else { return };
         moby_anim::set_sequence(&mut self.pack.anim, c, seq, frame, ticks, &mut self.pack.snapshot);
     }
     pub fn blend_clank(&mut self, seq: u8, frame: i32, ticks: i32) {
@@ -329,11 +417,42 @@ impl Hero {
     /// `0x22ddd8(0)`: the hand item while the hand slot is ready (state 2), else −1.
     pub fn held_item(&self) -> i32 { if self.items.slot.state == 2 { self.items.slot.id } else { -1 } }
 
+    /// `GetClankModule(3)` (0x22ddd8(3)): the back item while slot 3 is ready (state 2), else −1.
+    pub fn back_module(&self) -> i32 { if self.back_slot.slot.state == 2 { self.back_slot.slot.id } else { -1 } }
+
     /// Give the hero the back items' classes (the pack of back item 2 and Clank): they are created on the next
     /// hero update, as `HeroItemsCreate` does on the first one. Without them the back is not modelled (no back
-    /// table draws, no Clank fidget or blink).
-    pub fn set_back_classes(&mut self, pack: MobyAnimClass, clank: MobyAnimClass) {
-        self.back_classes = Some(Arc::new(BackClasses { pack, clank }));
+    /// table draws, no Clank fidget or blink, no back swaps: the slot keeps the item it was created with).
+    /// More packs: [`Hero::add_back_pack`].
+    pub fn set_back_classes(&mut self, pack: MobyAnimClass, clank: MobyAnimClass) { self.set_back_packs(vec![(2, 607, pack)], clank); }
+
+    /// [`Hero::set_back_classes`] with every pack the level has: `(back item id, o_class, class)`.
+    pub fn set_back_packs(&mut self, packs: Vec<(i32, i16, MobyAnimClass)>, clank: MobyAnimClass) {
+        self.back_classes = Some(Arc::new(BackClasses { packs, clank }));
+    }
+
+    /// The pack moby class of back item `id` (`o_class` = the item definition's +0x10), after
+    /// [`Hero::set_back_classes`].
+    pub fn add_back_pack(&mut self, id: i32, o_class: i16, class: MobyAnimClass) {
+        let Some(c) = self.back_classes.as_mut() else { return };
+        let c = Arc::make_mut(c);
+        c.packs.retain(|p| p.0 != id);
+        c.packs.push((id, o_class, class));
+    }
+
+    /// Test / debug helper: the saved back item 0x14166c (`equipped[3]`) and, once the slot exists, the slot's
+    /// item itself (no put-away).
+    pub fn equip_back(&mut self, id: i32) {
+        let s = &mut self.back_slot.slot;
+        s.saved = id;
+        if s.state != 0 { s.id = id; s.state = 2; }
+        if let Some(b) = self.back.as_mut() {
+            if let Some((o, c)) = b.classes.pack(id).map(|(o, c)| (o, c.clone())) {
+                b.pack = BackMoby { anim: AnimState::spawn(&c), snapshot: None };
+                (b.pack_item, b.pack_o_class) = (id, o);
+            }
+            (b.state, b.id) = (s.state, s.id);
+        }
     }
 
     /// `0x247800` (the end of Ratchet's advance): in mode 0 with the back ready, a table row for Ratchet's
@@ -371,21 +490,121 @@ impl Hero {
         if b.clank.anim.seq_b != 1 { b.blend_clank(1, 0, t); }
     }
 
-    /// `HeroItemsCreate` 0x22f3c0 / `HeroItemsAttach` 0x22fec0 for slot 3 (after the write-back): the pack
-    /// and Clank are created once (state 2, back item 2: 0x141430 = 0x14166c = 0 and 0x15ed94 = 0 on a new
-    /// game), then advanced every tick (`MobyAnimAdvance`, sound triggers not modelled).
-    pub(super) fn back_items_update(&mut self) {
-        if self.back.is_none() {
-            let Some(c) = self.back_classes.clone() else { return };
-            let pack = BackMoby { anim: AnimState::spawn(&c.pack), snapshot: None };
-            let clank = BackMoby { anim: AnimState::spawn(&c.clank), snapshot: None };
-            self.back = Some(Back { state: 2, id: 2, pack, clank, clank_color: 0, classes: c });
+    /// `HeroItemsCreate` 0x22f3c0 / `HeroItemsAttach` 0x22fec0 / the slot loop 0x231088 for slot 3 (after the
+    /// write-back). Creation: an empty slot takes the target 0x141430, else the saved back item 0x14166c, else 2
+    /// (3 when 0x15ed94) — back item 2 on a new game — state 2; the pack moby is the item's class, Clank is created
+    /// once. Then both advance every tick (`MobyAnimAdvance`, sound triggers not modelled) and the slot loop runs
+    /// [`Hero::back_slot_loop`]. Without the classes only the slot's bookkeeping exists (created, never swapped).
+    pub(super) fn back_items_update(&mut self, rng: &mut Rng) {
+        let s = &mut self.back_slot.slot;
+        let created = s.state == 0;
+        if created {
+            let mut id = s.target;
+            if id == 0 {
+                id = s.saved;
+                if id == 0 { id = if self.back_slot.thruster_last != 0 { 3 } else { 2 }; }
+            }
+            s.id = id;
+            s.state = 2;
+        }
+        let (state, id) = (s.state, s.id);
+        if let Some(c) = self.back_classes.clone() {
+            let pack = c.pack(id).map(|(o, pc)| (o, BackMoby { anim: AnimState::spawn(pc), snapshot: None }));
+            match (self.back.as_mut(), pack) {
+                (None, Some((o, pack))) => {
+                    let clank = BackMoby { anim: AnimState::spawn(&c.clank), snapshot: None };
+                    self.back = Some(Back { state, id, pack_item: id, pack_o_class: o, pack, clank, clank_color: 0, classes: c });
+                }
+                (Some(b), Some((o, pack))) if created => {
+                    (b.pack, b.pack_item, b.pack_o_class) = (pack, id, o);
+                }
+                _ => {}
+            }
         }
         if let Some(b) = self.back.as_mut() {
+            (b.state, b.id) = (state, id);
             let c = b.classes.clone();
-            moby_anim::advance(&mut b.pack.anim, &c.pack);
+            if let Some((_, pc)) = c.pack(b.pack_item) { moby_anim::advance(&mut b.pack.anim, pc); }
             moby_anim::advance(&mut b.clank.anim, &c.clank);
+            self.back_slot_loop(rng);
         }
+    }
+
+    /// The slot loop 0x231088 for slot 3 with the back modelled. Ready (2): `UpdateWrenchSelected(3)`
+    /// ([`Hero::back_swap`]); a wrapped pack on sequence 0 blends to 1 (2 ticks). Put away (3): once the pack's
+    /// put-away animation wraps the pack is deleted (`0x2305e8`: the slot is empty; the next hero update creates
+    /// the target item). Then the pack moby's own update (+0x74, [`Hero::back_pack_update`]).
+    fn back_slot_loop(&mut self, rng: &mut Rng) {
+        self.back_slot_states(rng);
+        self.back_pack_update();
+    }
+
+    /// The pack moby's update `(*moby+0x74)(moby)` in the slot loop: only the Heli-Pack's class 607 has one
+    /// (`ClankPackUpdate` 0x2f30c0: in the glide 8 the rotor sequence 6, blended over 10 ticks); 608 / 609 have
+    /// none (docs/plan/moby_update_catalogue.md).
+    fn back_pack_update(&mut self) {
+        let state = self.state;
+        let Some(b) = self.back.as_mut() else { return };
+        if b.state == 0 { return; }
+        if b.pack_o_class == 607 && state == 8 && b.pack.anim.seq_b != 6 { b.blend_pack(6, 0, ticks(10)); }
+    }
+
+    fn back_slot_states(&mut self, rng: &mut Rng) {
+        match self.back_slot.slot.state {
+            2 => {
+                self.back_slot.slot.ticks_ready += 1;
+                self.back_swap(rng);
+                let Some(b) = self.back.as_mut() else { return };
+                if b.pack.anim.flags & 2 != 0 && b.pack.anim.seq_b == 0 { b.blend_pack(1, 0, 2); }
+            }
+            3 => {
+                let s = &mut self.back_slot.slot;
+                s.putaway_ticks = s.putaway_ticks.wrapping_add(1);
+                let Some(b) = self.back.as_mut() else { return };
+                if b.pack.anim.flags & 2 != 0 {
+                    (s.state, s.id) = (0, 0);
+                    (b.state, b.id) = (0, 0);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `UpdateWrenchSelected(3)` 0x2307e0, the back's rules: in the water groups (`0x22dea8`: groups 0x11 / 0x12,
+    /// states 0x6a / 0x82 / 0x75 / 0x76) with the Hydro-Pack owned the back becomes the Hydro-Pack (request 4, the
+    /// current item kept to restore; 4 is not saved); out of the water (not 0x12) the Hydro-Pack restores that
+    /// item; the glide 8 with the Hydro-Pack saved requests the Heli-Pack. Then the slots' common swap
+    /// ([`Hero::slot_swap`]).
+    fn back_swap(&mut self, rng: &mut Rng) {
+        let water = matches!(self.group, 0x11 | 0x12) || matches!(self.state, 0x6a | 0x82 | 0x75 | 0x76);
+        let hydro = self.owned.has(super::swim::ITEM_HYDRO_PACK);
+        let s = &mut self.back_slot.slot;
+        let mut keep_unsaved = None;
+        if !water && self.state != 0x12 {
+            if s.id == 4 && s.restore != 0 { s.restore_pending = 1; }
+        } else if s.saved != 4 && s.id != 4 && hydro {
+            s.request = 4;
+            keep_unsaved = Some(4);
+            s.restore = s.id;
+        }
+        if self.state == 8 && s.saved == 4 { s.request = 2; }
+        if !s.swap_requests(keep_unsaved) { return; }
+        // Slot 3's part of the swap: 0x15ed94 from the item being put away; the pack plays its put-away
+        // (sequence 2, 2 ticks); Clank is not blended.
+        self.back_slot.thruster_last = (self.back_slot.slot.id == 3) as i32;
+        self.clear_look_and_rearm(rng);
+        if let Some(b) = self.back.as_mut() {
+            b.blend_pack(2, 0, 2);
+            b.state = 3;
+        }
+        self.back_slot.slot.state = 3;
+    }
+
+    /// The swap's `FUN_0022b8e8` (head look and idle secondaries cleared) and the fidget timer 0x140360 =
+    /// `rand_range(50, 90)`.
+    fn clear_look_and_rearm(&mut self, rng: &mut Rng) {
+        self.idle.clear_look();
+        self.fidget_timer = rng.rand_range(ticks(50), ticks(90));
     }
 
     // --------------------------------------------------------------------------------------------
@@ -400,6 +619,8 @@ impl Hero {
             if c.anim.view().seq_b != idle { self.set_anim(c.anim, c.rng, Pf::b(0xc000_0000), idle, 0); }
             can_fidget = false;
         }
+        // No fidgets on a slippery floor (0x140632, level00; super::surface).
+        if super::surface::slippery(self) { can_fidget = false; }
         let (head_y, head_z) = self.idle.head();
         if let Some(b) = self.back.as_mut() {
             if b.state == 2 {
@@ -736,7 +957,7 @@ mod tests {
         fn tick(&mut self) -> usize {
             self.pad.update(Some(&PadInput::neutral().bytes()), false);
             let (cam_rows, cam_yaw) = cam_x();
-            let env = Env { coll: &self.coll, pad: &self.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+            let env = Env { coll: &self.coll, pad: &self.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
             let before = self.rng;
             hero_update(&mut self.hero, &mut self.moby, &env, &mut self.anim, &mut self.rng);
             draws(before, self.rng)
@@ -863,7 +1084,7 @@ mod tests {
     fn set_state_blink_period() {
         let mut t = Idler::new(1, 150);
         let (cam_rows, cam_yaw) = cam_x();
-        let env = Env { coll: &t.coll, pad: &t.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+        let env = Env { coll: &t.coll, pad: &t.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
         let mut c = super::super::states::Ctx { env: &env, anim: &mut t.anim, rng: &mut t.rng };
         t.hero.idle.look_yaw = 0.5;
         t.hero.set_state(&mut c, 0, true);
@@ -875,9 +1096,9 @@ mod tests {
 
     #[test]
     fn back_table_pick() {
-        let classes = Arc::new(BackClasses { pack: MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] }, clank: MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] } });
+        let classes = Arc::new(BackClasses { packs: vec![(2, 607, MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] })], clank: MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] } });
         let m = || BackMoby { anim: AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false }, snapshot: None };
-        let b = Back { state: 2, id: 2, pack: m(), clank: m(), clank_color: 0, classes };
+        let b = Back { state: 2, id: 2, pack_item: 2, pack_o_class: 607, pack: m(), clank: m(), clank_color: 0, classes };
         let mut r = Rng::new();
         r.srand(1234);
         let mut p = r;

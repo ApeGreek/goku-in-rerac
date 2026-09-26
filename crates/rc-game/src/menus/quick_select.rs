@@ -792,7 +792,7 @@ mod tests {
     /// The overlay's tables and constants are the values above (skipped without `extracted/`).
     #[test]
     fn overlay_tables_match_level01() {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/overlay.bin");
+        let p = rc_formats::test_data::root().join("levels/01/overlay.bin");
         let Ok(bytes) = std::fs::read(&p) else { eprintln!("skipped: no {}", p.display()); return };
         let ov = Overlay::parse(&bytes).unwrap();
         assert_eq!(QsConsts::load(&ov).unwrap(), consts());

@@ -4,14 +4,13 @@
 //! Skipped when `extracted/` is not present (the data never ships with the repo).
 
 use rc_formats::{gameplay, level, occlusion::*, tfrag, tie, wad};
-use std::path::PathBuf;
 
 /// Visible tfrags per populated cell on level 01, as `rc_extract occlusion` prints them (min, max).
 const NOVALIS_TFRAGS_PER_CELL: (usize, usize) = (5, 522);
 
 #[test]
 fn novalis_frame_masks() {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+    let dir = rc_formats::test_data::root().join("levels/01");
     if !dir.join("core_data.bin").exists() { eprintln!("skipped: no extracted/levels/01"); return; }
     let read = |n: &str| std::fs::read(dir.join(n)).unwrap();
     let data = wad::decompress(&read("core_data.bin")).unwrap();

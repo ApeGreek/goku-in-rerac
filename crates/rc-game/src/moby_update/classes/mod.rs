@@ -11,14 +11,20 @@
 //! | 149, 348, 349, 354–359, 363, 364 (debris pieces) | 0x2c5218 `DebrisUpdate` | [`debris`] |
 //! | 112, 1192 (explosion flashes) | 0x2c22a8 `FlashUpdate` | [`debris`] |
 //! | 726 (path platform / lift) | 0x2b9eb0 `PathPlatformUpdate` | [`path_platform`] |
+//! | 805 (checkpoint triggers) | 0x300220 `CheckpointTriggerUpdate` | [`checkpoint`] |
+//! | 679 (flow chutes; levels 1, 5, 8, 15) | 0x2f6328 `FlowUpdate` | [`flow`] |
+//! | 758, 803 (Swingshot pull / swing targets; not on level01) | level03 0x2d0bd8 | [`swing_target`] |
 
 pub mod bolt;
+pub mod checkpoint;
 pub mod crate_;
 pub mod debris;
+pub mod flow;
 pub mod flyer;
 pub mod grass;
 pub mod item_offer;
 pub mod path_platform;
+pub mod swing_target;
 pub mod teleporter;
 
 use crate::moby_runtime::MobyId;
@@ -36,10 +42,13 @@ pub enum ClassUpdate {
     Debris,
     Flash,
     PathPlatform,
+    Checkpoint,
+    Flow,
+    SwingTarget,
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 9] = [
+    pub const ALL: [ClassUpdate; 12] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -49,6 +58,9 @@ impl ClassUpdate {
         ClassUpdate::Debris,
         ClassUpdate::Flash,
         ClassUpdate::PathPlatform,
+        ClassUpdate::Checkpoint,
+        ClassUpdate::Flow,
+        ClassUpdate::SwingTarget,
     ];
 
     /// The level01 class-table address of this update.
@@ -63,6 +75,9 @@ impl ClassUpdate {
             ClassUpdate::Debris => debris::UPDATE_FN,
             ClassUpdate::Flash => debris::FLASH_UPDATE_FN,
             ClassUpdate::PathPlatform => path_platform::UPDATE_FN,
+            ClassUpdate::Checkpoint => checkpoint::UPDATE_FN,
+            ClassUpdate::Flow => flow::UPDATE_FN,
+            ClassUpdate::SwingTarget => swing_target::UPDATE_FN,
         }
     }
 
@@ -80,6 +95,9 @@ impl ClassUpdate {
             ClassUpdate::Debris => &debris::CLASSES,
             ClassUpdate::Flash => &debris::FLASH_CLASSES,
             ClassUpdate::PathPlatform => &path_platform::CLASSES,
+            ClassUpdate::Checkpoint => &checkpoint::CLASSES,
+            ClassUpdate::Flow => &flow::CLASSES,
+            ClassUpdate::SwingTarget => &swing_target::CLASSES,
         }
     }
 }
@@ -99,6 +117,9 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::Debris => debris::update(w, id),
         ClassUpdate::Flash => debris::flash_update(w, id),
         ClassUpdate::PathPlatform => path_platform::update(w, id),
+        ClassUpdate::Checkpoint => checkpoint::update(w, id),
+        ClassUpdate::Flow => flow::update(w, id),
+        ClassUpdate::SwingTarget => swing_target::update(w, id),
     }
 }
 

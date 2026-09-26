@@ -21,6 +21,8 @@ impl Hero {
                 self.fidget_timer = c.rng.rand_range(ticks(50), ticks(100));
                 self.idle.clear_look();
                 self.momentum = self.eff;
+                // Sliding on a slippery floor (0x140632) → 0x2f (level00; super::surface).
+                if let Some(r) = super::surface::idle_entry(self, c) { return Some(r); }
                 if self.f063a != 0 && self.f65c == 0 { return Some(self.set_state(c, 0x79, true) && false); }
                 self.idle.blink_period = 0x68;
                 if play {
@@ -31,6 +33,8 @@ impl Hero {
                 self.group = 1;
                 self.f15d4 = 0;
                 self.momentum = self.eff;
+                // A slippery floor (0x140632) → 0x2f (level00; super::surface).
+                if let Some(r) = super::surface::stop_entry(self, c) { return Some(r); }
                 if self.f063a != 0 && self.f65c == 0 { return Some(self.set_state(c, 0x79, true) && false); }
                 if self.idle_seq() == 0x54 {
                     if self.set_state(c, 0, false) { self.set_anim(c.anim, c.rng, blend(18), 0x54, 0); }
@@ -66,7 +70,8 @@ impl Hero {
 
     /// Ground states 0, 3, 4 (0x23713c).
     pub(super) fn phys_ground(&mut self, env: &Env, anim: &mut dyn super::anim::AnimCtl, rng: &mut crate::rng::Rng) {
-        self.drag(Pf::b(0x3f00_0000), DT + DT);
+        // The drag 0x233850 (0.5, 2·dt; on a slippery floor 0.7, 0: super::surface).
+        super::surface::ground_drag(self);
         self.edge_brake(env, Pf::b(0x406c_cccd), Pf::ZERO);
         self.stick_target(env, Pf::ONE);
         // State 3: 0x242858 (weapon draw from a stop) needs a weapon in hand; never on foot here.
@@ -105,7 +110,8 @@ impl Hero {
             }
             dec
         } else if self.state == state::CROUCH {
-            DT2 * Pf::b(0x40cf_5c29)
+            // 6.48·dt² (1.7·dt² on a slippery floor: super::surface).
+            super::surface::crouch_decel(self)
         } else {
             DT2 * Pf::b(0x4149_999a)
         };
@@ -151,6 +157,10 @@ impl Hero {
             let v = c.anim.view();
             if !(v.seq_b == 0x1a && v.frame < 108.0) { self.set_state(c, 4, true); return; }
         }
+        // A grind rail under the feet (0x13f8bc, level00): 0x28 (super::boots).
+        if super::boots::rail_contact(self) { self.set_state(c, 0x28, true); return; }
+        // A slippery floor steeper than 5° → the slide 0x2f (level00; super::surface).
+        if super::surface::idle_slide(self, c) { return; }
         if (self.prev_state == 1 || self.prev_state == 0x1e) && self.timer < ticks(24) && self.f658 == 0 {
             self.stick_target(c.env, Pf::ONE);
             if Pf::b(0x3f9c_61aa) < fast_diff_rots(self.target_yaw, c.env.cam_yaw) { return; }
@@ -167,6 +177,8 @@ impl Hero {
         }
         if ticks(8) < self.air_ticks as i32 && Pf::b(0x3e99_999a) < self.height { self.set_state(c, 6, true); return; }
         if c.anim.view().flags & 2 != 0 { self.set_state(c, 0, true); return; }
+        // A grind rail under the feet (0x13f8bc, level00): 0x28 (super::boots).
+        if super::boots::rail_contact(self) { self.set_state(c, 0x28, true); return; }
         if !(Pf::b(0x3e4c_cccd) < self.stick_mag) { return; }
         if self.health == 1 {
             if 10.0 < c.anim.view().frame && self.set_state(c, 0, false) { self.set_anim(c.anim, c.rng, blend(17), 0x54, 0); }

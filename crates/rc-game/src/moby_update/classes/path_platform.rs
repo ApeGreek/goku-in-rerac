@@ -39,7 +39,8 @@
 //!
 //! Standard `f32`; `dt` is `0x15ed6c`. Not modelled: the voice slot table (a voice counts as alive until this
 //! update releases it; with no sound sink `PlayClassSound` returns −1, so the loop sound is requested every
-//! moving tick), the hero writes of pvar+0xc8 = 0 (counted: 0xc8 = 1 on every disc instance). Carrying
+//! moving tick). The hero writes of pvar+0xc8 = 0 go through `World::hero_fields_mut` (0xc8 = 1 on every disc
+//! instance, so none happen in RAC1). Carrying
 //! Ratchet is the hero's side (`HeroPlatformUpdate` 0x249618, triggers.md §5).
 
 use crate::moby_runtime::MobyId;
@@ -173,8 +174,10 @@ fn depart(w: &mut World, id: MobyId, dir: f32) {
 /// the platform on the path (piecewise linear between the path points).
 fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32; 4]) {
     if p::i32(&w.m(id).pvars, 0xc8) == 0 && w.hero_on_moby(id) {
-        // 0x13f544 = 4 (edge brake), 0x13f542 = 4 (jump lockout): hero globals, not writable from here.
-        w.svc.unported("path platform: rider edge brake / jump lockout");
+        // 0x13f544 = 4 (edge brake), 0x13f542 = 4 (jump lockout), through the hero-block writes.
+        let f = w.hero_fields_mut();
+        f.edge_brake = 4;
+        f.jump_lockout = 4;
     }
     let pos = w.m(id).position;
     let mut pause = p::i16(&w.m(id).pvars, 0xba) != 0;
@@ -401,7 +404,7 @@ mod tests {
     /// called from the bottom end it descends in 4 s of travel plus the 1 s ramp and stops on the last point.
     #[test]
     fn novalis_lift() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/gameplay_ntsc.dec");
+        let path = rc_formats::test_data::root().join("levels/01/gameplay_ntsc.dec");
         let Ok(g) = std::fs::read(path) else { eprintln!("skipped: no extracted/levels/01"); return };
         let inst = rc_formats::gameplay::parse_moby_instances(&g).unwrap();
         let pvars = rc_formats::gameplay::parse_pvars(&g).unwrap();

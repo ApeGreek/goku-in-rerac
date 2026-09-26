@@ -282,7 +282,7 @@ fn blink_cadence_22_on_8_off() {
 /// The disc's page tree (skipped without `extracted/`).
 #[test]
 fn overlay_page_tree() {
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/overlay.bin");
+    let p = rc_formats::test_data::root().join("levels/01/overlay.bin");
     let Ok(bytes) = std::fs::read(&p) else { eprintln!("skipped: no {}", p.display()); return };
     let m = PageMenu::load(&Overlay::parse(&bytes).unwrap()).unwrap();
     let root = &m.pages[&page::ROOT];
@@ -304,7 +304,7 @@ fn overlay_page_tree() {
 #[test]
 fn port_page_from_the_disc() {
     use super::port::{self, Setting};
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/overlay.bin");
+    let p = rc_formats::test_data::root().join("levels/01/overlay.bin");
     let Ok(bytes) = std::fs::read(&p) else { eprintln!("skipped: no {}", p.display()); return };
     let ov = Overlay::parse(&bytes).unwrap();
     let mut m = PageMenu::load(&ov).unwrap();

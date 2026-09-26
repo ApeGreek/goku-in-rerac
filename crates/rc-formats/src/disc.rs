@@ -10,6 +10,7 @@ use crate::iso9660::{bad, IsoImage, Result, SECTOR_SIZE};
 use crate::level::{parse_level_data_header, ByteRange};
 use crate::toc::{self, LevelHeader, SectorRange, StreamLump, LEVEL_HEADER_SIZE, TOC_SECTOR};
 use crate::buf::Buf;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek};
 use std::path::Path;
@@ -83,6 +84,85 @@ impl LevelFiles {
 
     pub fn total_bytes(&self) -> usize { self.files().iter().map(|(_, b)| b.len()).sum() }
 }
+
+/// How a global-header field addresses its lumps (`EntryKind` in src/core/toc.h).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlobalKind {
+    /// `{sector, sectors}`: whole sectors.
+    SectorRange,
+    /// `{sector, bytes}`: exact byte size.
+    SectorByteRange,
+    /// A bare sector; the size is probed from a VAG or WAD header (`toc::probe_lump_size`).
+    Sector32,
+}
+
+/// One field of the RAC1 global header: `count` entries of `kind` at byte `offset` of the TOC.
+#[derive(Clone, Copy, Debug)]
+pub struct GlobalField { pub name: &'static str, pub offset: usize, pub count: usize, pub kind: GlobalKind }
+
+const fn gf(name: &'static str, offset: usize, count: usize, kind: GlobalKind) -> GlobalField { GlobalField { name, offset, count, kind } }
+const SR: GlobalKind = GlobalKind::SectorRange;
+const SBR: GlobalKind = GlobalKind::SectorByteRange;
+const S32: GlobalKind = GlobalKind::Sector32;
+
+/// The RAC1 global header fields in TOC order (`rac1_global_fields` in src/core/toc.cpp, minus the level table).
+/// A field with `count == 1` is written as `global/<name>.bin`, else as `global/<name>/NNN.bin`.
+pub const RAC1_GLOBAL_FIELDS: &[GlobalField] = &[
+    gf("debug_font", 0x0008, 1, SR),
+    gf("save_game", 0x0010, 1, SR),
+    gf("ratchet_seqs", 0x0018, 28, SR),
+    gf("hud_seqs", 0x00f8, 20, SR),
+    gf("vendor", 0x0198, 1, SR),
+    gf("vendor_audio", 0x01a0, 37, SR),
+    gf("help_controls", 0x02c8, 12, SR),
+    gf("help_moves", 0x0328, 15, SR),
+    gf("help_weapons", 0x03a0, 15, SR),
+    gf("help_gadgets", 0x0418, 14, SR),
+    gf("help_ss", 0x0488, 7, SR),
+    gf("options_ss", 0x04c0, 7, SR),
+    gf("frontbin", 0x04f8, 1, SR),
+    gf("mission_ss", 0x0500, 81, SR),
+    gf("planets", 0x0788, 19, SR),
+    gf("unknown_0820", 0x0820, 38, SR),
+    gf("goodies_images", 0x0950, 10, SR),
+    gf("character_sketches", 0x09a0, 19, SR),
+    gf("character_renders", 0x0a38, 19, SR),
+    gf("skill_images", 0x0ad0, 31, SR),
+    gf("epilogue_english", 0x0bc8, 12, SR),
+    gf("epilogue_french", 0x0c28, 12, SR),
+    gf("epilogue_italian", 0x0c88, 12, SR),
+    gf("epilogue_german", 0x0ce8, 12, SR),
+    gf("epilogue_spanish", 0x0d48, 12, SR),
+    gf("sketchbook", 0x0da8, 30, SR),
+    gf("commercials", 0x0e98, 4, SR),
+    gf("item_images", 0x0eb8, 9, SR),
+    gf("qwark_boss_audio", 0x0f00, 240, S32),
+    gf("irx", 0x12c0, 1, SR),
+    gf("spaceships", 0x12c8, 4, SR),
+    gf("unknown_12e8", 0x12e8, 20, SR),
+    gf("space_plates", 0x1388, 6, SR),
+    gf("transition", 0x13b8, 1, SR),
+    gf("space_audio", 0x13c0, 36, SR),
+    gf("sound_bank", 0x14e0, 1, SR),
+    gf("unknown_14e8", 0x14e8, 1, SR),
+    gf("music", 0x14f0, 1, SR),
+    gf("hud_header", 0x14f8, 1, SR),
+    gf("hud_banks", 0x1500, 5, SR),
+    gf("all_text", 0x1528, 1, SR),
+    gf("unknown_1530", 0x1530, 28, SR),
+    gf("post_credits_helpdesk_girl_seq", 0x1610, 1, SR),
+    gf("post_credits_audio", 0x1618, 18, SR),
+    gf("credits_images_ntsc", 0x16a8, 20, SR),
+    gf("credits_images_pal", 0x1748, 20, SR),
+    gf("unknown_17e8", 0x17e8, 2, SR),
+    gf("mpegs", 0x17f8, 88, SBR),
+    gf("help_audio", 0x1ab8, 900, S32),
+];
+
+/// One file of the Tier 0 archive: `bytes` contiguous user-data bytes of the image at byte `offset`
+/// (= sector * 2048 + offset in sector), written as `path` (relative, `/`-separated, as under `extracted/`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscFile { pub path: String, pub offset: u64, pub bytes: u64 }
 
 pub struct Disc<R = File> {
     iso: IsoImage<R>,
@@ -187,6 +267,92 @@ impl<R: Read + Seek> Disc<R> {
         })
     }
 
+    /// Every global lump, in TOC order, exactly as `rc_extract unpack` names and sizes them: `name` is the
+    /// path under `global/` minus `.bin` (`save_game`, `mpegs/073`). Entries with sector 0 and size 0 are
+    /// skipped; a repeated name gets `.2`, `.3`, … (the C++ `seen[name]` rule; unused on the retail disc).
+    pub fn global_lumps(&self) -> Result<Vec<StreamLump>> {
+        let b = Buf(&self.toc.raw);
+        let mut out = Vec::new();
+        let mut seen: HashMap<String, u32> = HashMap::new();
+        for f in RAC1_GLOBAL_FIELDS {
+            for i in 0..f.count {
+                let base = if f.count == 1 { f.name.to_string() } else { format!("{}/{i:03}", f.name) };
+                let (sector, bytes) = match f.kind {
+                    GlobalKind::SectorRange | GlobalKind::SectorByteRange => {
+                        let (off, size) = (b.i32(f.offset + i * 8)?, b.i32(f.offset + i * 8 + 4)?);
+                        if off == 0 && size == 0 { continue; }
+                        if off < 0 || size < 0 { return bad(format!("TOC: negative range for global {base}")); }
+                        (off as u32, if f.kind == GlobalKind::SectorRange { size as u64 * SS } else { size as u64 })
+                    }
+                    GlobalKind::Sector32 => {
+                        let off = b.i32(f.offset + i * 4)?;
+                        if off == 0 { continue; }
+                        if off < 0 { return bad(format!("TOC: negative sector for global {base}")); }
+                        (off as u32, toc::probe_lump_size(&self.iso.read_sectors(off as u32, 1)?).0)
+                    }
+                };
+                let n = seen.entry(base.clone()).or_insert(0);
+                *n += 1;
+                let name = if *n > 1 { format!("{base}.{n}") } else { base };
+                out.push(StreamLump { name, sector, bytes });
+            }
+        }
+        Ok(out)
+    }
+
+    /// The complete Tier 0 archive plan: every file `rc_extract unpack` writes as a raw lump (its `.bin`
+    /// files and the boot files; none of its derived `.dec`, split, dump or preview files), in its order:
+    /// - `boot/<NAME>`: every ISO 9660 file (on RAC1: `SYSTEM.CNF`, the boot ELF, `IOPRP243.IMG`);
+    /// - `toc.bin`; `global/…` (`global_lumps`);
+    /// - per level `levels/NN/`: `level_header.bin`, the `LevelFiles::files` members, then the
+    ///   `level_stream_lumps` (`bindata/`, `music/`, `speech/`, `scene/`).
+    ///
+    /// Every file is one contiguous byte range of the image, checked to lie inside it.
+    pub fn archive_files(&self) -> Result<Vec<DiscFile>> {
+        let mut out = Vec::new();
+        let mut entries: Vec<&crate::iso9660::IsoEntry> = self.iso.entries().iter().filter(|e| !e.is_directory).collect();
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        for e in entries {
+            out.push(DiscFile { path: format!("boot{}", e.path), offset: e.lba as u64 * SS, bytes: e.size as u64 });
+        }
+        out.push(DiscFile { path: "toc.bin".into(), offset: TOC_SECTOR * SS, bytes: self.toc.raw.len() as u64 });
+        for l in self.global_lumps()? {
+            out.push(DiscFile { path: format!("global/{}.bin", l.name), offset: l.sector as u64 * SS, bytes: l.bytes });
+        }
+        for lv in &self.toc.levels {
+            let (h, id) = (lv.header, lv.header.id);
+            let dir = format!("levels/{id:02}");
+            out.push(DiscFile { path: format!("{dir}/level_header.bin"), offset: lv.header_sector as u64 * SS, bytes: LEVEL_HEADER_SIZE as u64 });
+            if h.data.offset <= 0 || h.data.size <= 0 { return bad(format!("level {id}: empty data range")); }
+            let (data_at, data_len) = (h.data.offset as u64 * SS, h.data.size as u64 * SS);
+            let dh = parse_level_data_header(&self.iso.read_bytes(data_at, SS.min(data_len))?)?;
+            let mut members: Vec<(String, ByteRange)> = vec![
+                ("overlay".into(), dh.overlay), ("sound_bank".into(), dh.sound_bank), ("core_index".into(), dh.core_index),
+                ("gs_ram".into(), dh.gs_ram), ("hud_header".into(), dh.hud_header),
+            ];
+            members.extend(dh.hud_banks.iter().enumerate().map(|(i, r)| (format!("hud_bank_{i}"), *r)));
+            members.push(("core_data".into(), dh.core_data));
+            for (name, r) in members {
+                if !r.present() { continue; }
+                if r.offset as u64 + r.size as u64 > data_len { return bad(format!("level {id}: {name} runs past the data container")); }
+                out.push(DiscFile { path: format!("{dir}/{name}.bin"), offset: data_at + r.offset as u64, bytes: r.size as u64 });
+            }
+            for (name, r) in [("gameplay_ntsc", h.gameplay_ntsc), ("gameplay_pal", h.gameplay_pal), ("occlusion", h.occlusion)] {
+                if r.offset == 0 && r.size == 0 { continue; }
+                if r.offset < 0 || r.size < 0 { return bad(format!("level {id}: negative {name} range")); }
+                out.push(DiscFile { path: format!("{dir}/{name}.bin"), offset: r.offset as u64 * SS, bytes: r.size as u64 * SS });
+            }
+            for l in self.level_stream_lumps(id as u32)? {
+                out.push(DiscFile { path: format!("{dir}/{}.bin", l.name), offset: l.sector as u64 * SS, bytes: l.bytes });
+            }
+        }
+        let end = self.iso.sector_count() as u64 * SS;
+        if let Some(f) = out.iter().find(|f| f.offset.checked_add(f.bytes).is_none_or(|e| e > end)) {
+            return bad(format!("{} ({:#x}+{:#x}) lies beyond the end of the image", f.path, f.offset, f.bytes));
+        }
+        Ok(out)
+    }
+
     /// The global `save_game` lump (TOC +0x10, whole sectors = `extracted/global/save_game.bin`): the
     /// memory-card icon files and the blank save template (`rc_formats::save_game::SaveGameLump`).
     pub fn save_game_lump(&self) -> Result<Vec<u8>> {
@@ -286,5 +452,46 @@ mod tests {
         assert_eq!(streams, [StreamLump { name: "music/000".into(), sector: 1518, bytes: 0x50 }]);
         assert_eq!(disc.read_lump(&streams[0]).unwrap(), &img[1518 * SECTOR_SIZE..1518 * SECTOR_SIZE + 0x50]);
         assert!(disc.level(4).is_err());
+    }
+
+    #[test]
+    fn global_lumps_and_archive_plan_follow_the_cpp_unpack_rules() {
+        let (mut img, _) = disc_image();
+        let put = |img: &mut Vec<u8>, at: usize, v: i32| img[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let toc = TOC_SECTOR as usize * SECTOR_SIZE;
+        put(&mut img, toc + 0x10, 1520);            // save_game: SectorRange, 2 sectors
+        put(&mut img, toc + 0x14, 2);
+        put(&mut img, toc + 0xf00, 1541);           // qwark_boss_audio[0]: Sector32, neither VAG nor WAD -> 1 sector
+        put(&mut img, toc + 0x17f8 + 3 * 8, 1530);  // mpegs[3]: SectorByteRange, 100 bytes
+        put(&mut img, toc + 0x17f8 + 3 * 8 + 4, 100);
+        put(&mut img, toc + 0x1ab8 + 5 * 4, 1540);  // help_audio[5]: Sector32 VAG of 0x30 + 0x40 bytes
+        let v = 1540 * SECTOR_SIZE;
+        img[v..v + 4].copy_from_slice(b"VAGp");
+        img[v + 0x0c..v + 0x10].copy_from_slice(&0x40u32.to_be_bytes());
+        let disc = Disc::new(IsoImage::new(Cursor::new(img)).unwrap()).unwrap();
+
+        let g = disc.global_lumps().unwrap();
+        let names: Vec<(&str, u32, u64)> = g.iter().map(|l| (l.name.as_str(), l.sector, l.bytes)).collect();
+        assert_eq!(names, [("save_game", 1520, 0x1000), ("qwark_boss_audio/000", 1541, 0x800), ("mpegs/003", 1530, 100), ("help_audio/005", 1540, 0x70)]);
+        assert_eq!(disc.save_game_lump().unwrap().len(), 0x1000);
+
+        let plan = disc.archive_files().unwrap();
+        let paths: Vec<&str> = plan.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, [
+            "boot/DATA/A.BIN", "boot/SCUS_971.99", "boot/SYSTEM.CNF", "toc.bin",
+            "global/save_game.bin", "global/qwark_boss_audio/000.bin", "global/mpegs/003.bin", "global/help_audio/005.bin",
+            "levels/03/level_header.bin", "levels/03/overlay.bin", "levels/03/core_index.bin", "levels/03/gs_ram.bin",
+            "levels/03/core_data.bin", "levels/03/gameplay_ntsc.bin", "levels/03/music/000.bin",
+        ]);
+        // Every planned byte range reproduces what the per-member readers return.
+        let l = disc.level(3).unwrap();
+        for f in &plan {
+            let bytes = disc.iso().read_bytes(f.offset, f.bytes).unwrap();
+            if let Some(name) = f.path.strip_prefix("levels/03/") {
+                if let Some(m) = l.file(name) { assert_eq!(bytes, m, "{}", f.path); }
+            }
+        }
+        assert_eq!(plan[3], DiscFile { path: "toc.bin".into(), offset: TOC_SECTOR * 2048, bytes: toc::TOC_SIZE as u64 });
+        assert_eq!(plan[9].offset, 1515 * 2048 + 0x80);
     }
 }

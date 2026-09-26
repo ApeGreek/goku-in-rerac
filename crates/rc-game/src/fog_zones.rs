@@ -352,7 +352,7 @@ mod tests {
     /// Novalis disc: stepping into zone 3 (a cave mouth, flags 3) from the outdoor values.
     #[test]
     fn novalis_zone_3_step() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/gameplay_ntsc.bin");
+        let path = rc_formats::test_data::root().join("levels/01/gameplay_ntsc.bin");
         let Ok(wad) = std::fs::read(&path) else { eprintln!("skipped: no {}", path.display()); return };
         let gp = rc_formats::wad::decompress(&wad).unwrap();
         let zones = rc_formats::gameplay::parse_fog_zones(&gp).unwrap();

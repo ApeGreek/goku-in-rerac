@@ -13,6 +13,8 @@
 //! * **Glints** (0x16eec0, 16 × 0x20: `FUN_002208a0` create, `FUN_00220928` update): [`Glints`].
 //! * **Save / game-state writes** of the bolt pickup: [`SaveBits`], [`GameCounters`].
 //! * **Timers**: `ticks(n)` 0x220e30, `multiply_global_scale` 0x220e20, `FastDecTimer` 0x220ea8 / 0x220ed8.
+//! * **Hero-block writes** (the classes' stores into 0x13f350..0x141660): [`HeroFields`], [`World::hero_fields`] /
+//!   [`World::hero_fields_mut`], applied by the tick after the moby loop ([`crate::tick::MobySystem::take_hero_writes`]).
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern, clippy::needless_range_loop, clippy::too_many_arguments)] // FPU compare semantics, op order and lane loops are spelled out on purpose.
 
 use std::collections::HashMap;
@@ -577,6 +579,8 @@ pub struct SaveBits {
     pub killed: HashMap<i16, u8>,
     /// `0x1bbb04[id] = mission + 2` (persistent: a collected placed bolt does not respawn).
     pub collected: HashMap<i16, u8>,
+    /// `0x1bb6b0..`: the checkpoint record (class 805, `FUN_0029ac10`): the death reload's respawn point.
+    pub checkpoint: Option<crate::moby_update::classes::checkpoint::Record>,
 }
 
 /// Game-state words the ported classes read or add to (owned here until the game-state port takes them).
@@ -763,6 +767,12 @@ pub struct Services {
     /// The level's volume sections (cuboids 0x1600ec, spheres, cylinders, pills, paths, grind paths) for the
     /// trigger tests ([`crate::moby_update::triggers`], [`Services::set_volumes`]).
     pub volumes: Arc<rc_formats::volumes::Volumes>,
+    /// The hero-block fields this tick's class updates wrote ([`HeroFields`], stamped with the tick counter
+    /// 0x15f5cc of the moby loop that wrote them); taken and applied by the tick before the hero update.
+    pub hero_writes: Option<(u64, HeroFields)>,
+    /// The camera shake requests this tick's class updates made (their stores into 0x167260 / 0x167270), in order;
+    /// taken by the tick and applied to the camera before the hero update ([`World::shake_camera`]).
+    pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
 }
 
 impl Default for Services {
@@ -796,8 +806,14 @@ impl Services {
             pose_cache: Arc::new(Mutex::new(PoseCache::default())),
             joint_lists: HashMap::new(),
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
+            hero_writes: None,
+            camera_shakes: Vec::new(),
         }
     }
+
+    /// The hero-block writes of the moby loop, for the tick to apply ([`HeroFields::apply`]); None: no class
+    /// wrote the hero this tick.
+    pub fn take_hero_writes(&mut self) -> Option<HeroFields> { self.hero_writes.take().map(|(_, f)| f) }
 
     /// Counts a reached-but-unported state or branch of a ported class (the stats line / trace report).
     pub fn unported(&mut self, what: &'static str) { *self.fx.unported.entry(what).or_default() += 1; }
@@ -833,6 +849,65 @@ impl Services {
     /// The splines from `rc_formats::gameplay::parse_splines`, as raw words.
     pub fn set_splines(&mut self, s: &[Vec<[f32; 4]>]) {
         self.splines = s.iter().map(|v| v.iter().map(|p| p.map(f32::to_bits)).collect()).collect();
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Hero-block writes
+
+/// The hero-block fields the moby classes write (level01 stores found in the class updates; every class that
+/// writes the hero goes through this, none writes `Hero` itself). In the game the classes store straight into the
+/// hero block during the moby loop; the port's loop sees the hero read-only ([`World::hero`], last tick's block), so
+/// a class reads and writes these fields through [`World::hero_fields`] / [`World::hero_fields_mut`] (the block as
+/// this tick's earlier writes left it: a second class sees the first one's writes, as in the game), and the tick
+/// applies the result ([`HeroFields::apply`]) right after the moby loop and before the hero update
+/// (`crate::tick::Game::tick_with_hero_sounds`). Nothing reads the hero block between the two in the game's order,
+/// so the hero update sees exactly what the classes left. Values keep the hero block's bits (no conversion).
+///
+/// | field | address | writers (level01) |
+/// |---|---|---|
+/// | `platform` | 0x13f440..0x13f44c (the push the move adds, its yaw) | flow 679 `0x2f6328` ([`super::classes::flow`]); water current 613 `0x2f3120` (not ported) |
+/// | `momentum` | 0x13f4a0..0x13f4ac (carried momentum) | flow 679 |
+/// | `sink_hold` | 0x13f530 (s16, holds the sinking floor 0x31) | flow 679 |
+/// | `flow` | 0x13fd20 yaw, 0x13fd24 pitch, 0x13fd28, 0x13fd2c speed, 0x13fd30 pull | flow 679 |
+/// | `jump_lockout` / `edge_brake` | 0x13f542 / 0x13f544 (s16) | path lift 726 `0x2b9eb0` while ridden with pvar+0xc8 = 0 |
+///
+/// Other class stores into the block, for the classes that are not ported yet (add a field here when one is):
+/// 613 also 0x13f4e4 (speed), 0x13f528, 0x141608; the camera / focus objects 0x13fda0; talking NPCs 0x13f3d0
+/// (position); the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec (`0x2dbdc0`); `0x300de0` 0x13f510 / 0x1415f8;
+/// the checkpoint record's respawn `0x29adc8` (position / Euler: the engine's respawn); the mode / control bytes
+/// 0x1413f5 / 0x1413fc of the vendor, ship and teleporter code.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeroFields {
+    pub platform: [f32; 4],
+    pub momentum: [f32; 4],
+    pub sink_hold: i16,
+    pub flow: [f32; 5],
+    pub jump_lockout: i16,
+    pub edge_brake: i16,
+}
+
+impl HeroFields {
+    /// The fields of `h` now.
+    pub fn of(h: &Hero) -> HeroFields {
+        HeroFields {
+            platform: fv(h.platform),
+            momentum: fv(h.momentum),
+            sink_hold: h.f530,
+            flow: h.surf.flow,
+            jump_lockout: h.jump_lockout,
+            edge_brake: h.edge_brake,
+        }
+    }
+
+    /// Stores the fields into `h` (bit for bit: a field no class changed keeps its value).
+    pub fn apply(&self, h: &mut Hero) {
+        h.platform = pv(self.platform);
+        h.momentum = pv(self.momentum);
+        h.f530 = self.sink_hold;
+        h.surf.flow = self.flow;
+        h.jump_lockout = self.jump_lockout;
+        h.edge_brake = self.edge_brake;
     }
 }
 
@@ -931,6 +1006,26 @@ impl<'a> World<'a> {
     pub fn m(&self, id: MobyId) -> &Moby { &self.table.mobys[id] }
     pub fn mm(&mut self, id: MobyId) -> &mut Moby { &mut self.table.mobys[id] }
     pub fn ticks(&self, n: i32) -> i32 { self.svc.ticks(n) }
+
+    /// The hero-block fields the classes write ([`HeroFields`]) as this tick's earlier class updates left them
+    /// (else the hero's own).
+    pub fn hero_fields(&self) -> HeroFields {
+        match self.svc.hero_writes {
+            Some((c, f)) if c == self.counter => f,
+            _ => HeroFields::of(self.hero),
+        }
+    }
+
+    /// Write access to the hero-block fields of [`HeroFields`] (a store of the game's class into the hero block);
+    /// the tick applies them before the hero update.
+    pub fn hero_fields_mut(&mut self) -> &mut HeroFields {
+        let f = self.hero_fields();
+        &mut self.svc.hero_writes.insert((self.counter, f)).1
+    }
+
+    /// A camera shake (a class's stores into the shake record 0x167260 / 0x167270: amplitude, ticks); the camera
+    /// applies it in this tick's `CameraUpdate` (`crate::follow_camera::Shake`).
+    pub fn shake_camera(&mut self, r: crate::follow_camera::ShakeRequest) { self.svc.camera_shakes.push(r); }
 
     /// The bolt pickup radii `(0x1415d8 xy, 0x1415dc z)`: hero init 0x226b70 writes 2.125 / 1.25; every hero
     /// tick (`HeroTickStateTimer` 0x23c710) rewrites them as 3.0 / 1.75, or 12 / 4.5 with the bolt grabber
@@ -1352,6 +1447,13 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
         let mut s = self.svc.borrow_mut();
         deliver_hit_in(table, &mut s.hits, target, tmpl);
     }
+    fn hit_message(&self, table: &MobyTable, target: MobyId) -> Option<HitRecord> { self.svc.borrow().hits.current(table, target).copied() }
+    fn take_hero_writes(&mut self) -> Option<HeroFields> { self.svc.borrow_mut().take_hero_writes() }
+    fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { std::mem::take(&mut self.svc.borrow_mut().camera_shakes) }
+    fn run_list(&self, table: &MobyTable, camera: V4) -> Option<Vec<MobyId>> {
+        Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
+    }
+    fn volumes(&self) -> Option<Arc<rc_formats::volumes::Volumes>> { Some(self.svc.borrow().volumes.clone()) }
 }
 
 /// `Quad(a, b, c, &r0, &r1)` 0x26e520: roots of `a·t² + b·t + c`: `(count, larger root)`.

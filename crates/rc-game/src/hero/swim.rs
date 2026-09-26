@@ -96,9 +96,6 @@ pub enum SwimEvent {
 /// The hero block's swim fields (level01 addresses; boot .bss, same in every level).
 #[derive(Clone, Debug, Default)]
 pub struct Swim {
-    /// 0x13d4c4 / 0x13d4c6: Hydro-Pack / O2 mask owned (the game state's item table; the engine syncs them).
-    pub hydro_pack: bool,
-    pub o2_mask: bool,
     /// 0x1415f0: air left, 0..10000 (drains 11 per tick under water without the O2 mask: 15 s).
     pub oxygen: i32,
     /// 0x13f9e0 / 0x13f9e4: surface bob offset and its velocity.
@@ -158,7 +155,7 @@ impl Hero {
     fn water_depth(&self) -> f32 { f(self.f15f4) }
 
     /// The dive state a □ / R1 press picks: 0x35 with the Hydro-Pack and R1|R2 held, else 0x33.
-    fn dive_state(&self, held: u32) -> i32 { if self.swim.hydro_pack && held & R12 != 0 { id::HYDRO } else { id::UNDERWATER } }
+    fn dive_state(&self, held: u32) -> i32 { if self.owned.has(ITEM_HYDRO_PACK) && held & R12 != 0 { id::HYDRO } else { id::UNDERWATER } }
 
     /// `0x22a718(0x17c440, 30)`: the stroke factor at Ratchet's frame readout: `frac·T[i] + (step − frac)·T[i−1]`
     /// (`T[29]` right after a wrap), `step` = how far the readout moved this tick.
@@ -227,7 +224,7 @@ impl Hero {
     /// solid face just above the water (a line from level + 0.01 to + 0.31) pushes him under.
     pub fn underwater_check(&mut self, c: &mut Ctx) -> bool {
         if self.group == 0x11 {
-            let drain = if self.swim.o2_mask { 0 } else { 10000 / (ticks(60) * 15) };
+            let drain = if self.owned.has(ITEM_O2_MASK) { 0 } else { 10000 / (ticks(60) * 15) };
             self.swim.oxygen = (self.swim.oxygen - drain).max(0);
             let (w, z) = (f(self.water_level), f(self.pos[2]));
             if self.swim.oxygen == 0 {
@@ -548,7 +545,7 @@ impl Hero {
                 return;
             }
         }
-        if !(self.swim.hydro_pack && held & R12 != 0) {
+        if !(self.owned.has(ITEM_HYDRO_PACK) && held & R12 != 0) {
             if self.state != id::HYDRO { return; }
             if 0.5 < stick {
                 self.set_state(c, id::UNDERWATER, true);
@@ -567,7 +564,7 @@ impl Hero {
         let v = c.anim.view();
         if v.flags & 2 != 0 && v.seq_b != 0x3c { self.set_anim(c.anim, c.rng, Pf::from_i32(ticks(11)), 0x3c, 0); }
         let held = c.env.pad.held;
-        if f(self.stick_mag) <= 0.2 && held & (X | SQ) == 0 && (!self.swim.hydro_pack || held & R12 == 0) { return; }
+        if f(self.stick_mag) <= 0.2 && held & (X | SQ) == 0 && (!self.owned.has(ITEM_HYDRO_PACK) || held & R12 == 0) { return; }
         let s = self.dive_state(held);
         self.set_state(c, s, true);
     }
@@ -605,7 +602,7 @@ impl Hero {
         }
         self.items.f13f7 = 1;
         if self.swim.dive_lock == 0
-            && (pad.pressed_within(SQ, ticks(7)).is_some() || (self.swim.hydro_pack && pad.pressed_within(R12, ticks(7)).is_some()))
+            && (pad.pressed_within(SQ, ticks(7)).is_some() || (self.owned.has(ITEM_HYDRO_PACK) && pad.pressed_within(R12, ticks(7)).is_some()))
         {
             let s = self.dive_state(pad.held);
             self.set_state(c, s, true);
@@ -622,7 +619,8 @@ impl Hero {
     /// 0x6a (the death group's rule): when the sequence ends, `0x2319b0` (deaths, fade, 0x141401 = 1).
     pub fn tr_drown(&mut self, c: &mut Ctx) {
         if c.anim.view().flags & 2 != 0 && self.fell_out == 0 {
-            self.fell_out = 1;
+            // The one death sequence (deaths, the killer's mission, 0x141401 = 1): super::damage.
+            super::damage::death_fade(self);
             self.swim.events.push(SwimEvent::Drowned);
         }
     }

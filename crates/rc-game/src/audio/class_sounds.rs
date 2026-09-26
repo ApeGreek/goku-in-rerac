@@ -7,14 +7,17 @@
 //!   ([`AudioSystem::play_class_sound`], `SoundSlotAlloc` 0x2a13a0), so its pitch-bend `randi` lands in the moby
 //!   order. The listener is the camera 0x167240 as the previous tick's camera update left it.
 //! * **Ratchet's animation triggers**: `RatchetAnimAdvance` 0x247d48 plays the class sound of the first trigger
-//!   whose time its key time passed this tick ([`ratchet_trigger`]). The hero code is ported without the
-//!   sound layer, so [`TriggerAnim`] wraps its [`AnimCtl`] and records the fired sounds; [`sound_step`] plays
-//!   them before `sound_update`. Their pitch-bend draws therefore come after the particles' draws of the tick
-//!   instead of inside the hero update (same count per tick, inferred order inside the tick).
+//!   whose time its key time passed this tick ([`ratchet_trigger`]), inside the hero update: [`HeroClassSounds`]
+//!   is the hero's [`HeroSounds`] (`Game::tick_with_hero_sounds` → `hero_update_with_sounds` calls it right
+//!   after the advance), so the pitch-bend draw lands where the game makes it (before the back items' draw
+//!   0x247800 and the hero's physics). The owner is Ratchet's moby as the last write-back left it; the listener
+//!   is the camera of the previous tick (the camera updates after the hero), as for the moby sounds.
+//! * **Ratchet's voices** `0x236738(index, flags)` (`PlayClassSound` on his moby: the hurt / death voices of
+//!   `hero::damage`): [`HeroClassSounds`] too ([`HeroSounds::voice`]).
 //! * **The sound step** [`sound_step`]: after the camera, before the counter increment (level01 `FUN_002aba68`,
-//!   docs/plan/trace_results_novalis.md "Second savestate"): the recorded trigger sounds, then the EE frame
-//!   (`sound_update` 0x2a0638: occlusion origin = 3 draws every frame, the 6-origin batch per new occluded
-//!   sound, the sound instances' plays) and its 800 samples.
+//!   docs/plan/trace_results_novalis.md "Second savestate"): the EE frame (`sound_update` 0x2a0638: occlusion
+//!   origin = 3 draws every frame, the 6-origin batch per new occluded sound, the sound instances' plays) and its
+//!   800 samples.
 //!
 //! Clank (601) and the back packs (607–609) have no class sound defs on any level (class header +0x0d = 0), so
 //! the triggers of their `MobyAnimAdvance` never play or draw; the hand items' triggers (wrench 71, …) are not
@@ -23,14 +26,13 @@
 use super::voices::{Listener, Owner};
 use super::{AudioSystem, FrameInput};
 use crate::follow_camera::CameraView;
-use crate::hero::{AnimCtl, AnimView, Hero};
+use crate::hero::{AnimView, Hero, HeroSounds};
 use crate::moby_runtime::{MobyId, MobyTable};
 use crate::moby_update::services::{SoundEvent, SoundSink};
-use crate::ps2v::Pf;
 use crate::rng::Rng;
-use rc_formats::moby_anim::{MobyAnimClass, Rows};
+use rc_formats::moby_anim::MobyAnimClass;
 use rc_formats::sound_bank::SoundOwner;
-use std::cell::RefCell;
+use std::ops::DerefMut;
 
 /// Class 0x472 (1138): its sounds may use slots 26..29 like the hero's.
 pub const PRIVILEGED_CLASS: i16 = 0x472;
@@ -96,52 +98,72 @@ pub fn ratchet_trigger(class: &MobyAnimClass, before: &AnimView, after: &AnimVie
     }).map(|&w| (w & 0xffff) as u16)
 }
 
-/// Ratchet's [`AnimCtl`] with the trigger check of his advance: every class sound [`ratchet_trigger`] fires is
-/// appended to `fired` (drained by [`sound_step`]).
-pub struct TriggerAnim<'a> {
-    pub inner: &'a mut dyn AnimCtl,
+/// The hero's sounds on the audio layer ([`HeroSounds`]): `audio` gives the sound system when there is one (the
+/// callers share it with the moby loop's sink and the sound step, e.g. through a `RefCell`); `class` is
+/// Ratchet's class (its sequences' triggers), `listener` the camera the hero update sees (the previous tick's),
+/// `hero` his moby, `counter` the tick counter 0x15f5cc.
+pub struct HeroClassSounds<'a, F> {
+    pub audio: F,
     pub class: &'a MobyAnimClass,
-    pub fired: &'a RefCell<Vec<u16>>,
+    pub listener: Listener,
+    pub hero: MobyId,
+    pub counter: u64,
 }
 
-impl AnimCtl for TriggerAnim<'_> {
-    fn set_anim(&mut self, blend: Pf, seq: u8, frame: i32) { self.inner.set_anim(blend, seq, frame) }
-    fn advance(&mut self, speed: Pf) {
-        let before = self.inner.view();
-        self.inner.advance(speed);
-        if let Some(s) = ratchet_trigger(self.class, &before, &self.inner.view()) { self.fired.borrow_mut().push(s); }
+impl<F> HeroClassSounds<'_, F> {
+    /// `PlayClassSound(index, flags, Ratchet)` on `audio`.
+    fn play(&self, audio: &mut AudioSystem, moby: &crate::moby_runtime::Moby, index: i32, flags: u32, rng: &mut Rng) -> i32 {
+        let ev = SoundEvent {
+            index,
+            flags,
+            moby: self.hero,
+            o_class: moby.o_class,
+            sound_class: moby.o_class,
+            pos: [moby.position[0], moby.position[1], moby.position[2]],
+            tick: self.counter,
+        };
+        audio.play_class_sound(&ev, Some(self.hero), &self.listener, rng)
     }
-    fn view(&self) -> AnimView { self.inner.view() }
-    fn frame_count(&self, seq: u8) -> u8 { self.inner.frame_count(seq) }
-    fn set_loop(&mut self, start: i32, end: i32) { self.inner.set_loop(start, end) }
-    fn clear_loop(&mut self) { self.inner.clear_loop() }
-    fn eval_chains(&self, chains: &[&[u8]]) -> Vec<Rows> { self.inner.eval_chains(chains) }
-    fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> { self.inner.pose_frame() }
 }
 
-/// The tick's sound step (module docs): Ratchet's triggered class sounds (`fired`, drained; owner = his moby
-/// `hero_moby`), then [`AudioSystem::tick_with`] with the listener = `cam` (this tick's camera), the hero
-/// position for the music boxes, the counter 0x15f5cc and the moby table resolving the slot owners. The 800
-/// samples are appended to `out`.
-#[allow(clippy::too_many_arguments)]
+impl<F, A> HeroSounds for HeroClassSounds<'_, F>
+where
+    F: FnMut() -> Option<A>,
+    A: DerefMut<Target = AudioSystem>,
+{
+    fn anim_advanced(&mut self, moby: &crate::moby_runtime::Moby, before: &AnimView, after: &AnimView, rng: &mut Rng) {
+        let Some(idx) = ratchet_trigger(self.class, before, after) else { return };
+        let Some(mut a) = (self.audio)() else { return };
+        self.play(&mut a, moby, idx as i32, 0, rng);
+    }
+
+    fn voice(&mut self, moby: &crate::moby_runtime::Moby, index: i32, flags: u32, rng: &mut Rng) -> i32 {
+        let Some(mut a) = (self.audio)() else { return -1 };
+        self.play(&mut a, moby, index, flags, rng)
+    }
+
+    fn release(&mut self, _moby: &crate::moby_runtime::Moby, slot: i32) {
+        let Some(mut a) = (self.audio)() else { return };
+        // Only a slot that still plays Ratchet's sound (the game checks the slot's owner and state).
+        let ours = usize::try_from(slot).ok().and_then(|i| a.slots.slots.get(i)).is_some_and(|s| s.owner.is_some_and(|o| o.id == self.hero as u32));
+        if ours { a.slots.release(slot); }
+    }
+}
+
+/// The tick's sound step (module docs): [`AudioSystem::tick_with`] with the listener = `cam` (this tick's
+/// camera), the hero position for the music boxes, the counter 0x15f5cc and the moby table resolving the slot
+/// owners. The 800 samples are appended to `out`. (Ratchet's own sounds are played inside the hero update:
+/// [`HeroClassSounds`].)
 pub fn sound_step(
     audio: &mut AudioSystem,
     table: &MobyTable,
     hero: &Hero,
-    hero_moby: MobyId,
     cam: &CameraView,
     rng: &mut Rng,
     counter: u64,
-    fired: &mut Vec<u16>,
     out: &mut Vec<[i16; 2]>,
 ) {
     let listener = listener_of(cam);
-    let o_class = table.mobys.get(hero_moby).map_or(0, |m| m.o_class);
-    let pos = owner_position(table, hero_moby as u32).unwrap_or(listener.pos);
-    for idx in fired.drain(..) {
-        let ev = SoundEvent { index: idx as i32, flags: 0, moby: hero_moby, o_class, sound_class: o_class, pos, tick: counter };
-        audio.play_class_sound(&ev, Some(hero_moby), &listener, rng);
-    }
     let input = FrameInput { listener, hero_pos: [hero.pos[0].to_f32(), hero.pos[1].to_f32(), hero.pos[2].to_f32()] };
     audio.tick_with(&input, counter as u32, rng, &|id| owner_position(table, id), out);
 }

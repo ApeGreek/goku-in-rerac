@@ -554,7 +554,7 @@ mod tests {
     /// Novalis (level 01, NTSC gameplay): the 11 records of docs/plan/world_animation.md §5.
     #[test]
     fn fog_zones_novalis_disc() {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/gameplay_ntsc.bin");
+        let path = crate::test_data::root().join("levels/01/gameplay_ntsc.bin");
         let Ok(wad) = std::fs::read(&path) else { eprintln!("skipped: no {}", path.display()); return };
         let g = crate::wad::decompress(&wad).unwrap();
         let z = parse_fog_zones(&g).unwrap();

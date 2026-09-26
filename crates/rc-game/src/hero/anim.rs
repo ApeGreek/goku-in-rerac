@@ -74,6 +74,9 @@ pub trait AnimCtl {
     fn set_loop(&mut self, start: i32, end: i32);
     /// `0x247d00()`: clear the loop range (also done by every `set_anim`).
     fn clear_loop(&mut self);
+    /// One step of the eased blend curve right away (`moby+0x54 = curve[0x13fdf4++]`, what the hurt entries
+    /// 0x16 / 0x75 / 0x76 do after their `SetAnim(−3, …)`); nothing outside a curve blend.
+    fn curve_step(&mut self) {}
     /// The pose matrices `P_j` of the last joints of `chains` (root-to-joint byte lists of Ratchet's joint
     /// lists) in Ratchet's current pose (`fun_00210850` / `fun_002109b8`,
     /// `rc_formats::moby_anim::evaluate_chains`). Empty when there is no class data.
@@ -305,6 +308,13 @@ impl AnimCtl for RatchetAnimCtl<'_> {
     }
 
     fn clear_loop(&mut self) { self.a.loop_range = None; }
+    fn curve_step(&mut self) {
+        let a = &mut *self.a;
+        if a.curve < 0 || a.state.seq_a == a.state.seq_b { return; }
+        let c = CURVES.get(a.curve as usize).copied().unwrap_or(&[0x3f80_0000]);
+        a.state.t = Pf(c[a.curve_pos.min(c.len() - 1)]).to_f32();
+        a.curve_pos += 1;
+    }
 
     fn eval_chains(&self, chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> {
         rc_formats::moby_anim::evaluate_chains(self.class, &self.a.state, self.a.snapshot.as_ref(), chains)

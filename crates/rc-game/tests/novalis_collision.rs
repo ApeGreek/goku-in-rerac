@@ -4,7 +4,6 @@
 use rc_formats::{collision, gameplay, level, tfrag};
 use rc_game::collision_query::{cells_for_line, coll_capsule, coll_line, coll_sphere, CollOutput, QueryFlags};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 
 struct Novalis {
     mesh: collision::Collision,
@@ -15,7 +14,7 @@ struct Novalis {
 }
 
 fn novalis() -> Option<Novalis> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+    let dir = rc_formats::test_data::root().join("levels/01");
     let data = std::fs::read(dir.join("core_data.dec")).ok()?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
     let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;

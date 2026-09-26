@@ -37,5 +37,6 @@ pub mod water;
 pub mod save_game;
 pub mod scene;
 pub mod volumes;
+pub mod test_data;
 
 pub use buf::{Buf, FormatError};

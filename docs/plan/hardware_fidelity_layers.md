@@ -1,6 +1,6 @@
 # Hardware fidelity layers (and how to go native later)
 
-randcre is a rewrite, not an emulator: no MIPS/VU interpreter, no DMA/VIF/GS/IOP model, no BIOS, and none of the game's original code runs. To make
+randcrw is a rewrite, not an emulator: no MIPS/VU interpreter, no DMA/VIF/GS/IOP model, no BIOS, and none of the game's original code runs. To make
 output identical to the PS2, some parts of the port still reproduce PS2 hardware or Sony-library behaviour on purpose. This file lists those
 **fidelity layers**: what each one reproduces, what it buys, what a native replacement would be, and what switching would cost. It covers (A)
 hardware-like models, (B) SDK/library reproductions, (D) timing and resolution conventions, and lists (C) format decoding separately, because reading
@@ -275,7 +275,31 @@ GPU clipping replaces the VU1 guard-band and clip programs. Bevy phases replace 
 window resolution. The world blends in linear light. Several CPU replays run in `f32`, not the PS2 model: `tfrag_lod.rs` culls, `moby_lod.rs`,
 `shrub_render.rs` rules, `particle_render.rs` pass 1, `moby_spawn.rs` ground probe, the sky shell rotation angle (`sky_render.rs`
 `ShellRotation::theta` in `f64` + `Quat`), and the particle cull's `1/cos(atan t)` computed as `√(1 + t²)` (`rc-game/src/particles.rs`). The moby
-lighting on the GPU is `f32` plus A2's grid emulation.
+lighting on the GPU is `f32` plus A2's grid emulation. The hero's ledges and wall jump (`rc-game/src/hero/ledge.rs`, package
+P3: probes A / B / C, states 0x11 and 0x18..0x1c) compute in `f32` with `std` trig and store back into the `Pf` hero block; no
+PS2 effect was noticeable enough to reproduce there (the probes' 0.03 / 0.07 edge steps and the collision kernels decide the
+hang point, not the float model).
+The hero's damage / death / stance states (`rc-game/src/hero/damage.rs`, `stance.rs`, package P2) use the ported `Pf`
+primitives for the shared steps (clamps, approach, gravity) and standard `f32` for the new formulas: the knockback
+vector, 0x77's tumble about the body point (`std` `atan2` for the game's `FastArcTan` in the Euler extraction
+`0x2721f0`); no PS2 effect there was noticeable enough to reproduce.
+The spline follower (`rc-game/src/spline.rs`: the level00 grind-path library 0x25d7a0 / 0x25d808 / 0x25df68 /
+0x25da70 / 0x25dcd8, used by the hero's boots and the flow class 679) and the boots (`rc-game/src/hero/boots.rs`,
+package P5: the grind, grind jumps, rail switch, grind wrench / hurt, the Magneboots and the cable) run in `f32` with
+`std` sqrt / trig; the random draws are the game's, in its order. The gravity-mode-1 frame is reproduced at result
+level: TurnTo in the hero's own frame (0x2323d8) and the floor alignment (0x236358 / 0x236098, which the game builds
+from two Euler rotations about the cross axis) are one axis-angle (Rodrigues) rotation of the rows by the game's spring
+step, converted back with the ported `MatrixToEuler` (`services::rows_euler`). No PS2 effect there was noticeable
+enough to reproduce (the rails' w words are the exact chords on every level, `tests/hero_boots_grind.rs`).
+The Swingshot (`rc-game/src/hero/swingshot.rs`, package P6: the target searches, 0x24..0x26, 0x2c, 0x2d, the hand
+item's hook update; `moby_update/classes/swing_target.rs`, classes 758 / 803) runs in `f32` with `std` sqrt / trig /
+`atan2` (for `FastArcTan` / `fast_sin` / `fast_cos`), the ported `turn_spring` (0x270b58) for the body lean, and the
+game's draw order (the target glint's `randi(0xff)`). The swing's body lean rotates the target direction into the
+hero's yaw frame with a plain 2-D rotation (the game builds `EulerToMatrix(0, 0, yaw)`, transposes it and multiplies:
+the same numbers up to rounding). The rope (`0x2dba30`) is a Bevy mesh rebuilt each tick from the same quads
+(`rc-engine/src/moby_attach.rs` `rope_quads`) with a `StandardMaterial` (unlit, alpha-blended, the effect texture's GS
+alpha doubled), not a GS packet. No PS2 effect was noticeable enough to reproduce (the swing's period matches
+`π·√(L / g)` in `tests/hero_swingshot_levels.rs`).
 
 ## Suggested order if going native (cheapest, least visible first)
 
@@ -314,6 +338,31 @@ lighting on the GPU is `f32` plus A2's grid emulation.
   arrive as `PAN_RESET`/`PAN_DONT_CHANGE`.
 - **Sound remap out-of-range reads.** Def index −1 reads the u16 before the map, and the per-class copy walks
   past its list (`rc-formats/src/sound_bank.rs`; audio.md "In the port").
+- **Shimmy yaw extrapolation.** The ledge shimmy (0x1a / 0x1b physics) turns toward `y1 + (y1 − y2)/2` of the two
+  probed wall yaws (`fast_subtract_rotations(y1, y2)·0.5` added to y1, as the instructions order it), not their
+  midpoint; on a straight ledge y1 = y2 (`rc-game/src/hero/ledge.rs` `shimmy_physics`).
+- **Hero damage rules** (P2, `rc-game/src/hero/damage.rs`): `HeroTakeDamage` takes `min(n, 1)` (a hit's damage
+  above 1 still costs one point; a negative one gives health back); the hit intake applies its knockback even when
+  SetState refuses the hurt state; a push away from the attacker keeps only the direction's xy (z = the fixed up
+  speed); 0x77's death heights are per level (3: z < 5, 6: z < 50, 16: z < 77 or a capsule hit while rising).
+- **Platform carry and surfaces** (P1, `rc-game/src/hero/{platform,surface}.rs`): the carry drops the attachment
+  when a tick's correction jumps by more than 0.1 from last tick's applied platform step 0x13f490 (so a platform
+  that starts at more than 0.1/tick lets go for one tick, then re-attaches), airborne decays the stored correction
+  by `k·air_ticks` from the stored value (linear, the two `ticks(120)` calls are dead), `FUN_002753b0` adds
+  `ClampLen(Δ, 1)` when Ratchet's class slot is below the carrier's (update-order patch), and with block flag
+  bit 2 the local point creeps by the displacement every tick; in the ledge states the hang point is stored in
+  0x13f680, which the game shares with the knockback magnitude / pitch / yaw (the port keeps it apart:
+  `Carry::hang_local`, the knockback is never live while hanging). The slippery floor's capsule is top 0.8 /
+  bottom 0.9 (the bottom above the top). Level 1's ground probe (the port's) re-cast the surface-0xd hit from
+  the end point instead of the start point (a port bug, fixed: the re-cast starts 0.01 below the liquid's top).
+- **Not reproduced: carry Euler round trips.** The game rebuilds the rider's yaw every carried tick through
+  `MatrixToEuler(EulerToMatrix(rot)·M)` (VU sine, `FastArcTan`), which moves it by a few ULP; the port leaves the
+  yaw untouched when the carrier does not rotate (every carrier on the disc) and composes in `f64` otherwise.
+- **Swingshot rules** (P6, `rc-game/src/hero/swingshot.rs`): the pull search keeps the last target in 0x13fcb4 when
+  nothing qualifies (only 0x13fcb8 drops), the swing search clears 0x13fce0; 0x25 re-issues `SetAnim(16, 10)` every tick
+  of its last 22 (a blend restarted each tick, as the game does); the hooked flag 0x13fcec is only cleared by the next
+  swing's entry; SetState(0x2c) writes the record's +0x14 (+0x10 or +0x0c) into the target's pvars, which nothing
+  reads (not reproduced).
 - **Low-LOD joint rule.** Low-LOD packets skin with only class[9] palette slots (slot 0 = identity when 0)
   (`rc-engine/src/moby_lod.rs`).
 - **Not reproduced (documented only).** The fog-zone lookup's extra stale slot past the last circle

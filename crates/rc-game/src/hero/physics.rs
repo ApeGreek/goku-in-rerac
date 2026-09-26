@@ -252,6 +252,9 @@ pub struct Env<'a> {
     /// The level's water-height tables (`0x26ed38`: ripple patches, flat planes) the ground probe refines a
     /// water hit with (None: the hit's own z).
     pub water: Option<&'a dyn super::swim::WaterQuery>,
+    /// The level / moby data outside the hero block the hero code reads: the carriers' platform blocks for the
+    /// platform carry ([`super::platform::HeroWorld`]; None: nothing carries the hero).
+    pub world: Option<&'a dyn super::platform::HeroWorld>,
 }
 
 impl Env<'_> {
@@ -309,6 +312,8 @@ impl Hero {
     /// `TurnTo(k, d, max)` (0x232490) in gravity mode 0: the angular spring on yaw toward the target yaw;
     /// the residual goes to 0x13f4d8.
     pub fn turn_to(&mut self, k: Pf, d: Pf, max: Pf) {
+        // Gravity modes 1 / 2: the turn in the hero's own frame (0x2323d8, super::boots).
+        if self.gravity_mode != 0 { return super::boots::frame_turn(self, k, d, max); }
         let (mut yaw, mut v) = (self.rot[2], self.yaw_vel);
         self.yaw_residual = turn_spring(self.target_yaw, k, d, max, &mut yaw, &mut v, 0);
         self.rot[2] = yaw;
@@ -341,6 +346,8 @@ impl Hero {
     /// current yaw; `vel = ((cos y · s) · cos p, (sin y · s) · cos p, sin p · s)` with p = ground pitch
     /// 0x13f634 (so on a slope the velocity follows the slope; vel.z is overwritten).
     pub fn set_planar_vel(&mut self, yaw: Pf) {
+        // Gravity modes ≠ 0: along the moby's (tilted) facing (super::boots).
+        if self.gravity_mode != 0 { return super::boots::frame_planar_vel(self); }
         let y = if PI < yaw { self.rot[2] } else { yaw };
         let s = self.speed;
         let cp = fast_cos(self.pitch);
@@ -529,7 +536,7 @@ impl Hero {
     }
 
     /// `0x2342d8(k)`: scale disp, eff, vel, momentum (xyz) and the speed.
-    fn scale_motion(&mut self, k: Pf) {
+    pub(super) fn scale_motion(&mut self, k: Pf) {
         self.disp = vscale(self.disp, k);
         self.eff = vscale(self.eff, k);
         self.vel = vscale(self.vel, k);
@@ -636,6 +643,8 @@ impl Hero {
         } else if self.group == 0x11 || self.group == 0x12 {
             self.cap_bottom_target = Pf::ZERO;
             self.cap_top_target = Pf::ZERO;
+        } else if super::surface::slippery_capsule(self) {
+            // Grounded on a slippery floor: the raised capsule (level00; super::surface).
         } else if self.state == 0x7f {
             self.cap_radius_target = Pf::b(0x3f4c_cccd);
         }
@@ -677,6 +686,9 @@ impl Hero {
                     coll_sphere_m(env.coll, sc, to_f32x3(self.pos), (SCALE60 * Pf::b(0x3ecc_cccd)).to_f32(), flags, ig)
                 } else if self.group == 0x11 {
                     coll_sphere_m(env.coll, sc, to_f32x3(self.pos), 0.6, flags, ig)
+                } else if self.group == 0xf {
+                    // Grinding (level00 0x2133a8; level01 has no grind): a 0.45 sphere (super::boots).
+                    coll_sphere_m(env.coll, sc, to_f32x3(self.pos), (SCALE60 * Pf::b(0x3ee6_6666)).to_f32(), flags, ig)
                 } else {
                     let mut h = self.cap_top - self.cap_bottom;
                     if h < Pf::b(0x3d4c_cccd) { h = Pf::b(0x3d4c_cccd); }
@@ -731,6 +743,8 @@ impl Hero {
         if p1[2] < Pf::ZERO { p1[2] = Pf::ZERO; }
         let mut p0 = self.pos;
         p0[2] = self.pos[2] + up;
+        // Gravity modes ≠ 0: the line runs along the gravity direction 0x13f5e0 (0x232cc0, super::boots).
+        if self.gravity_mode != 0 { (p0, p1) = super::boots::frame_probe_line(self, up); }
         let mut hit = env.line(p0, p1, 2);
         'probe: {
             let Some(mut o) = hit else { break 'probe };
@@ -748,11 +762,15 @@ impl Hero {
                 self.footstep = if matches!(self.idle.level, 1 | 0x12) { 3 } else { o.sound_class() as u8 };
             }
             if self.surface_id == 0xd {
+                // The re-cast starts just below the liquid's top (the start point's z: sp+0x18 at 0x232fe8), so
+                // it finds the floor under the liquid, not the liquid again.
                 let z = Pf::f(o.point[2]);
                 self.water_level = z;
-                p1[2] = z - Pf::b(0x3c23_d70a);
+                p0[2] = z - Pf::b(0x3c23_d70a);
                 match env.line(p0, p1, 4) { Some(o3) => o = o3, None => { self.gravity_frame(); return; } }
             }
+            // Surfaces 3 / 0xb (the liquid level 0x13f644) and 1 under the burn deaths (level00's probe): super::surface.
+            if !super::surface::probe_surface(self, env, &mut p0, p1, &mut o) { self.gravity_frame(); return; }
             if self.surface_id == 0xb {
                 self.gravity_frame();
                 return;
@@ -785,6 +803,8 @@ impl Hero {
     /// The tail of the probe (0x2331e8): gravity direction and the ground pitch / roll under the hero.
     fn gravity_frame(&mut self) {
         self.gravity_dir = [Pf::ZERO, Pf::ZERO, Pf::b(0xbf80_0000), Pf::ZERO];
+        // Gravity mode 1: against the ground normal (the Magneboots, super::boots).
+        if self.gravity_mode == 1 { self.gravity_dir = [-self.ground_normal[0], -self.ground_normal[1], -self.ground_normal[2], Pf::ZERO]; }
         self.pitch = Pf::ZERO;
         self.roll = Pf::ZERO;
         if matches!(self.group, 0xf | 0x15 | 6 | 4 | 5 | 3) { return; }
@@ -809,6 +829,8 @@ impl Hero {
 
     /// Step-up / snap `0x233588` (mode 0).
     fn step_snap(&mut self) {
+        // Gravity modes ≠ 0: along the normal (super::boots).
+        if self.gravity_mode != 0 { return super::boots::frame_snap(self); }
         if self.air_ticks != 0 || !(self.pos[2] < self.ground_z) {
             self.f654 = Pf::ZERO;
             return;
@@ -918,10 +940,39 @@ impl Hero {
         }
     }
 
+    /// The wall-ahead probe of `0x23c458` after the move pipeline (moved or frozen), every third tick
+    /// (`0x15f5cc % 3 == 0`): `0x22b628(0.7, 4.0)` — a line (flags 2) 0.7 above the feet from r − 0.02 to 4.0
+    /// ahead in the hero's frame; a hit sets 0x13f598 = the xy distance feet → hit point, 0x13f5a0 = the elevation
+    /// of the hit normal (`FastArcTan(n.z, |n.xy|)`), 0x13f5a5 = a moby was hit, 0x13f5a4 = that moby is a crate
+    /// (class 500..=540, `0x273278`); no hit: 4.0 and both flags 0 (0x13f5a0 keeps its value). The every-fifth-tick
+    /// edge look (0x13f5a8..0x13f5b0) is not ported. Native `f32`.
+    pub fn wall_ahead_probe(&mut self, env: &Env) {
+        if self.idle.counter.wrapping_sub(1).rem_euclid(3) != 0 { return; }
+        self.wall_ahead[0] = 4.0;
+        self.f5a4 = 0;
+        self.f5a5 = 0;
+        let r = self.rows.map(to_f32x3);
+        let pos = to_f32x3(self.pos);
+        let local = |fwd: f32| from_f32x3([0, 1, 2].map(|k| (r[0][k] * fwd + r[2][k] * 0.7) + pos[k]));
+        let Some(o) = env.line(local(self.cap_radius.to_f32() - 0.02), local(4.0), 2) else { return };
+        self.wall_ahead[0] = ((o.point[0] - pos[0]).powi(2) + (o.point[1] - pos[1]).powi(2)).sqrt();
+        let n = from_f32x3(o.normal);
+        self.wall_ahead[1] = fast_arctan(n[2], len2(n)).to_f32();
+        if let Some(id) = o.moby {
+            self.f5a5 = 1;
+            let crate_ = env.mobys.and_then(|m| m.mobys.moby(id)).is_some_and(|m| (500..=540).contains(&m.o_class));
+            if crate_ { self.f5a4 = 1; }
+        }
+    }
+
     /// Post-move `0x23c710` (timers, stuck-in-air counter, edge nudge, body/shadow points, death plane).
     /// The Euler x/y straightening 0x236520 is a no-op on foot (x = y = 0) and not ported.
     pub fn post_move(&mut self, env: &Env) {
-        if self.frozen == 0 { self.straighten_euler(); }
+        if self.frozen == 0 {
+            // Gravity modes 1 / 2 or the raised capsule 0x13f548: the frame aligns with the floor (0x236358,
+            // super::boots); else the straightening 0x236520.
+            if self.gravity_mode == 1 || self.gravity_mode == 2 || self.f548 != 0 { super::boots::frame_align(self); } else { self.straighten_euler(); }
+        }
         self.timer += 1;
         self.f4ec += 1;
         self.substate_timer += 1;

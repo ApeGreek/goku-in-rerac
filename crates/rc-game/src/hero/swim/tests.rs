@@ -110,7 +110,7 @@ fn surface_swim_speed_and_stop() {
 #[test]
 fn no_pack_dives_slowly_and_r1_does_nothing() {
     let (coll, mut r) = floating();
-    assert!(!r.hero.swim.hydro_pack);
+    assert!(!r.hero.owned.has(ITEM_HYDRO_PACK));
     // R1 alone on the surface: no dive without the pack.
     run(&mut r, &coll, PadInput::neutral().press(button::R1), 10);
     assert_eq!(r.hero.state, id::SURFACE_IDLE);
@@ -135,7 +135,7 @@ fn no_pack_dives_slowly_and_r1_does_nothing() {
 #[test]
 fn hydro_pack_dive_thrust_and_surface() {
     let (coll, mut r) = floating();
-    r.hero.swim.hydro_pack = true;
+    r.hero.owned.set(ITEM_HYDRO_PACK, true);
     run(&mut r, &coll, PadInput::neutral(), 2);
     // R1 pressed on the surface dives with the pack, straight into 0x35 while held.
     run(&mut r, &coll, PadInput::neutral().press(button::R1), 1);
@@ -165,12 +165,12 @@ fn hydro_pack_dive_thrust_and_surface() {
 #[test]
 fn out_of_air_drowns_unless_masked() {
     let (coll, mut r) = floating();
-    r.hero.swim.o2_mask = true;
+    r.hero.owned.set(ITEM_O2_MASK, true);
     run(&mut r, &coll, PadInput::neutral().press(button::SQUARE), 1);
     run(&mut r, &coll, PadInput::neutral(), 1000);
     assert_eq!(r.hero.group, 0x11, "state {:#x}", r.hero.state);
     assert_eq!(r.hero.swim.oxygen, OXYGEN_MAX);
-    r.hero.swim.o2_mask = false;
+    r.hero.owned.set(ITEM_O2_MASK, false);
     let mut t = 0;
     while r.hero.state != id::DROWN && t < 1000 { r.tick(&coll, PadInput::neutral()); t += 1; }
     eprintln!("drowned after {t} ticks");

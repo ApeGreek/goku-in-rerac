@@ -407,7 +407,7 @@ pub fn check_rng(ee: &EeImage, sim: &PortSim, tl: &Timeline, out: &mut Out) -> R
     let snd: u64 = sim.sound_draws.iter().sum();
     let a = sim.audio.as_ref().map(|a| a.stats);
     out.line(format!(
-        "  of which the sound step (trigger sounds + sound_update): {snd} ({:.2} per tick){}",
+        "  of which the sound step (sound_update; Ratchet's trigger sounds draw inside the hero update): {snd} ({:.2} per tick){}",
         snd as f64 / sim.sound_draws.len().max(1) as f64,
         a.map_or(" [no sound layer]".to_string(), |s| format!("; sound: {} plays, {} class sounds requested ({} got a slot)", s.plays, s.class_sounds, s.class_slots))
     ));

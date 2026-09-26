@@ -8,7 +8,6 @@ use rc_game::hero::anim::RatchetAnim;
 use rc_game::moby_runtime::{ClassInfo, Moby, MobyTable};
 use rc_game::pad::{button, PadInput};
 use rc_game::tick::{Game, GameOptions, TickHooks};
-use std::path::PathBuf;
 
 struct Novalis {
     mesh: collision::Collision,
@@ -19,7 +18,7 @@ struct Novalis {
 }
 
 fn novalis() -> Option<Novalis> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+    let dir = rc_formats::test_data::root().join("levels/01");
     let data = std::fs::read(dir.join("core_data.dec")).ok()?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
     let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;
@@ -155,7 +154,7 @@ fn novalis_idle_run_jump_and_camera() {
 
 /// Class `o_class` of level 1 (`core/moby_class/NNNN.bin`) as an anim class.
 fn level_class(o_class: u32) -> Option<MobyAnimClass> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01/core/moby_class");
+    let dir = rc_formats::test_data::root().join("levels/01/core/moby_class");
     let blob = std::fs::read(dir.join(format!("{o_class:04}.bin"))).ok()?;
     let c = rc_formats::moby::parse_moby_class(&blob).ok()?;
     let seqs = rc_formats::moby_anim::parse_sequences(&blob, &c).ok()?;
@@ -289,7 +288,7 @@ fn novalis_walk_into_the_lake_swim_and_dive() {
     for pack in [false, true] {
         let (mut g, _) = game(&n);
         g.finish_load();
-        g.hero.swim.hydro_pack = pack;
+        g.hero.owned.set(rc_game::hero::swim::ITEM_HYDRO_PACK, pack);
         let script = format!("{LAKE_SCRIPT}{DIVE_SCRIPT}");
         let mut d = Driver::new(&n.ratchet);
         let mut first_water = None;
@@ -342,7 +341,7 @@ fn novalis_hero_digest() {
     for (name, script, pack, ticks) in runs {
         let (mut g, _) = game(&n);
         g.finish_load();
-        g.hero.swim.hydro_pack = pack;
+        g.hero.owned.set(rc_game::hero::swim::ITEM_HYDRO_PACK, pack);
         let mut anim = RatchetAnim::new(&n.ratchet);
         let mut mobys = |_: &mut MobyTable, _: &rc_game::hero::Hero, _: &mut rc_game::rng::Rng, _: &rc_game::follow_camera::CameraView, _: &collision::Collision, _: u64| {};
         let mut parts = |_: &rc_game::hero::Hero, _: &rc_game::follow_camera::CameraView, _: &mut rc_game::rng::Rng, _: u64| {};
@@ -351,8 +350,23 @@ fn novalis_hero_digest() {
             let input = script_input_ext(&script, t);
             let r = g.tick(Some(&input.bytes()), &n.mesh, &mut anim.ctl(&n.ratchet), &mut hooks);
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            let mut text = format!("{:?}|{:?}|{:?}|{:?}|{:?}|{:?}", g.hero, anim.state, g.camera, g.pad, g.rng, r.hero);
+            // The fields after `surf` (package P4: item ownership, the back slot, the pack block, the wall-ahead
+            // probe) are cut, and the Hydro-Pack / O2 mask flags the swim block printed before the owned mirror
+            // are put back.
+            let mut hero = format!("{:?}", g.hero);
+            if let Some(i) = hero.find(", owned: ") { hero.truncate(i); hero.push_str(" }"); }
+            let hero = hero.replacen("swim: Swim { ", &format!("swim: Swim {{ hydro_pack: {pack}, o2_mask: false, "), 1);
+            let mut text = format!("{hero}|{:?}|{:?}|{:?}|{:?}|{:?}", anim.state, g.camera, g.pad, g.rng, r.hero);
             for f in DIGEST_NEW_FIELDS { text = text.replace(&format!(", {f}: 0"), ""); }
+            // The ledge block (package P3) while it holds its defaults.
+            text = text.replace(&format!(", ledge_blk: {:?}", rc_game::hero::LedgeBlock::default()), "");
+            // The platform carry and surface fields (package P1) print 0 while untouched.
+            for f in ["carry", "surf"] { text = text.replace(&format!(", {f}: 0"), ""); }
+            // The damage and walk-to-point blocks (package P2) while they hold their defaults.
+            text = text.replace(&format!(", damage: {:?}", rc_game::hero::damage::Damage::default()), "");
+            text = text.replace(&format!(", walk_to: {:?}", rc_game::hero::stance::WalkTo::default()), "");
+            // The camera's shake records (hero polish) while idle.
+            text = text.replace(&format!(", shake: {:?}", [rc_game::follow_camera::Shake::default(); 2]), "");
             text.hash(&mut h);
             let _ = writeln!(out, "{name} {t} state {:#x} timer {} pos {:?} {:016x}", g.hero.state, g.hero.timer, g.hero.position(), h.finish());
         }

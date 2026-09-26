@@ -283,6 +283,8 @@ impl Hero {
 
     /// 0x13, the ground combo (0x239780).
     pub(super) fn phys_combo(&mut self, env: &Env, anim: &mut dyn AnimCtl) {
+        // On a slippery floor (0x140632) the combo only slides (level00 case 0x13 → 0x2167d0; super::surface).
+        if super::surface::slippery(self) { super::surface::slide_move(self, env); return; }
         let v = anim.view();
         let frame = Pf::f(v.frame);
         let blending = v.blending();
@@ -653,7 +655,7 @@ mod tests {
 
     fn tick(r: &mut crate::hero::testkit::Runner, coll: &rc_formats::collision::Collision, a: &mut FrameAnim, input: PadInput) -> HeroTick {
         r.pad.update(Some(&input.bytes()), false);
-        let env = Env { coll, pad: &r.pad, cam_yaw: r.cam_yaw, cam_rows: r.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+        let env = Env { coll, pad: &r.pad, cam_yaw: r.cam_yaw, cam_rows: r.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
         hero_update(&mut r.hero, &mut r.moby, &env, a, &mut r.rng)
     }
 

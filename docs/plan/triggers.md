@@ -153,9 +153,9 @@ The helpers return "inside now"; nothing in the engine remembers the previous an
   `EulerToMatrix(rot_old)ᵀ · EulerToMatrix(rot_new)` (`FUN_002721f0`), +0x10 = `delta` (4 words). Callers pass
   `pos − old_pos` and their own +0x40 twice, so the rotation part is the identity: Euler (0, 0, 0).
   Port: `triggers::carry_riders`, read back with `triggers::platform_delta`.
-- **Ride test:** `HeroOnMoby(m)` 0x277fb8: in group 3 or state 0x1c, `0x13f848 == m` (an attach moby the hero
-  port does not model); otherwise `0x13f65e == 0 && 0x13f64c == m`. Port: `World::hero_on_moby`.
-- **Hero side (not ported, hero code):** `HeroPlatformUpdate` 0x249618, called from the move pipeline
+- **Ride test:** `HeroOnMoby(m)` 0x277fb8: in group 3 or state 0x1c, `0x13f848 == m` (the ledge moby probe B
+  records, `Hero::ledge_blk.moby`); otherwise `0x13f65e == 0 && 0x13f64c == m`. Port: `World::hero_on_moby`.
+- **Hero side (ported: `rc-game/src/hero/platform.rs`):** `HeroPlatformUpdate` 0x249618, called from the move pipeline
   0x233de0. Outline:
   1. Pick the platform 0x13f6b0: the ground moby when grounded; in state 0x1c or group 3 the attach moby
      0x13f848; while airborne keep the last one, with a fade by air ticks (`ticks(120)`).
@@ -177,9 +177,12 @@ The helpers return "inside now"; nothing in the engine remembers the previous an
   probe, if the ground moby (or the last one while airborne, faded) is a carrier, add
   `platform_delta(m).displacement` (726 / 703 / 715 never rotate) to `0x13f440`, i.e. to the position, and
   keep the local-attachment path of step 3–4 for idle Ratchet. The mobys run before the hero in a tick, so the
-  block always holds this tick's move. Also the two writes 726 makes while ridden when its pvar+0xc8 = 0
-  (0x13f544 edge brake = 4, 0x13f542 jump lockout = 4) need a hero-side input (every disc instance has 1, so
-  none happen in RAC1).
+  block always holds this tick's move. The two writes 726 makes while ridden when its pvar+0xc8 = 0 (0x13f544 edge
+  brake = 4, 0x13f542 jump lockout = 4) go through the hero-block write channel (`services::HeroFields`, applied by
+  the tick after the moby loop; every disc instance has 1, so none happen in RAC1).
+- **Moby ledges:** probe B accepts a ledge top on a moby when its pvar record (`FUN_002711f8`: pvar+0x00, a
+  block-relative pointer) has bit 0 of the u16 at +0x1e, or its platform block's flags +0x3c bit 0
+  (`triggers::record_ledge_flag`, `HeroWorld::moby_ledge_flag`).
 
 ## 6. First consumer: path lift 726
 
@@ -224,10 +227,11 @@ plateau's edge).
 - Tick 0: Ratchet more than 2 away in XY → re-armed (+0xb8 = 1). Ticks 110–114: he lands on its deck (the hero's
   ground probe finds the lift's class collision: ground moby = the lift, air ticks 0) → `HeroOnMoby` → it
   departs (state 2) and ramps up.
-- Frame 100 (before): Ratchet a step from the lift, which sits at the top. Frame 200 (after): the lift is
-  going down the cliff face (about (162.9, 151.8, 58.0) on the path); Ratchet, **not carried** (the hero side
-  of §5 is not ported), was left behind when the deck slid from under him at tick ~155 and is falling to the
-  meadow below (z 51.9 at tick 199, lands at z 40).
+- Frame 100 (before): Ratchet a step from the lift, which sits at the top. Frames 200 / 300 (after the hero
+  carry, P1 `hero::platform`): the lift is going down the cliff face with Ratchet idle on its deck, pinned in its
+  local space (carry flags 3): (164.75, 152.39, 57.96) at tick 200, (169.57, 157.76, 48.19) at tick 300; he
+  arrives with it at the bottom (tick 384). Before the carry he was left behind when the deck slid from under
+  him at tick ~155 and fell to the meadow. Headless: `tests/hero_platform_novalis.rs`, the same positions.
 - A headless run of the same script (the port without Bevy) has the lift arrive at the bottom
   (174.50, 159.50, 41.00) at tick ~386, state 0.
 - Determinism: two runs to frame 200 give byte-identical screenshots (md5 6eb46855…) and identical per-tick
@@ -235,7 +239,7 @@ plateau's edge).
 
 ## 8. Not ported / open
 
-- The hero carry (`HeroPlatformUpdate`, §5) and the 0x13f848 attach moby.
+- ~~`HeroOnMoby`'s attach-moby branch~~ (ported: the ledge moby `Hero::ledge_blk.moby`).
 - The camera-collision grid and its users (0x20fdb0, 0x30f358, 0x318c40), the grind rails.
 - `CarryRiders` with a real rotation change (no caller has one).
 - The sound voice table: a voice counts as alive until released; without a sound sink the lift requests its

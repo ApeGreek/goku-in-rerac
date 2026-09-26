@@ -29,10 +29,18 @@ impl Hero {
             self.speed = Pf::ZERO;
         }
         if self.f063a != 0 && self.f65c == 0 { return Some(self.set_state(c, 0x79, true) && false); }
+        // A slippery floor (0x140632) or 0x2f itself: the slide's branch (level00; super::surface).
+        if let Some(r) = super::surface::slippery_walk_entry(self, c, id) { return r; }
         if self.f13f9 != 0 || id == 0x73 {
             // Wading 0x73 (the walk in 0.25..0.85 of water; its anim is set even without `play`).
             self.state = 0x73;
             self.set_anim(c.anim, c.rng, blend(8), 0x60, 0);
+            return None;
+        }
+        if self.f658 == 1 || id == 0x3f {
+            // The Magneboots walk 0x3f (super::boots; its anim is set even without `play`).
+            self.state = 0x3f;
+            self.set_anim(c.anim, c.rng, blend(8), 0x5b, 0);
             return None;
         }
         self.substate = 0;

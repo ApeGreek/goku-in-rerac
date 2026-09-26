@@ -20,8 +20,13 @@ pub(super) const QUARTER_PI: Pf = Pf::b(0x3f49_0fdb);
 pub(super) fn blend(n: i32) -> Pf { Pf::from_i32(ticks(n)) }
 
 impl Hero {
-    /// Idle sequence `0x226f10(0)`: 0, or 0x54 at health 1.
-    pub fn idle_seq(&self) -> u8 { if self.health == 1 { 0x54 } else { 0 } }
+    /// Idle sequence `0x226f10(0)`: 0, 0x54 at health 1, 0x6e on a slippery floor.
+    pub fn idle_seq(&self) -> u8 {
+        if self.health == 1 { return 0x54; }
+        // On a slippery floor (0x140632, level00's 0x205000): 0x6e (super::surface).
+        if super::surface::slippery(self) { return 0x6e; }
+        0
+    }
 
     /// Yaw `n` ticks ago from the 32-entry ring (`0x22df98`).
     pub(super) fn yaw_ago(&self, n: i32) -> Pf {

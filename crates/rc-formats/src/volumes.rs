@@ -266,7 +266,7 @@ mod tests {
     /// the inverse of the stored matrix (row-vector convention), and the grind splines are well formed.
     #[test]
     fn all_levels_disc() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels");
+        let root = crate::test_data::root().join("levels");
         // (cuboids, spheres, cylinders, pills, paths, grind paths) per level 0..18.
         let expect: [(usize, usize, usize, usize, usize, usize); 19] = [
             (14, 0, 0, 0, 42, 0), (83, 0, 0, 0, 82, 0), (86, 0, 3, 0, 32, 0), (74, 1, 5, 0, 112, 3),

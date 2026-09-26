@@ -1,14 +1,15 @@
-# randcre
+# randcrw
 
 A faithful reimplementation of Ratchet & Clank (2002, PS2) in Rust on Bevy, run from the
-owner's own disc image. This is a personal project: it is not redistributed, and nothing from
-the disc (assets, code, dumps, savestates) is stored in this repository. Everything
-disc-derived lives in git-ignored directories (`extracted/`, `ghidra/`, `decomp/export/`).
+owner's own disc, extracted once from their disc image. This is a personal project: it is not
+redistributed, and nothing from the disc (assets, code, dumps, savestates) is stored in this
+repository. Everything disc-derived lives in git-ignored directories (`extracted/`, `ghidra/`,
+`decomp/export/`) or in the user's own data folder.
 
 | Path | What it is |
 |---|---|
 | `crates/rc-formats` | Disc and level format readers plus bit-exact ports of load-time passes (lighting, animation), golden-tested against the C++ extractor |
-| `crates/rc-engine` | Bevy app: level viewer replaying the game's per-frame render decisions (LOD, culling, fog, sky) |
+| `crates/rc-engine` | Bevy app (the `randcrw` executable): level viewer replaying the game's per-frame render decisions (LOD, culling, fog, sky) |
 | `crates/rc-game` | Game logic ports (collision queries so far) |
 | `crates/rc-trace` | PCSX2 harness: compares our results with the game's EE RAM (savestate or PINE) |
 | `src/core`, `tools/extract` | C++ format oracle and extractor (`rc_extract`), the reference the Rust ports are checked against |
@@ -27,6 +28,7 @@ cargo run --release -p rc-engine # release / profiling build
 ```
 
 `cargo dev` and `cargo dev-build` are aliases in `.cargo/config.toml` (`-p rc-engine --features dev`).
+The crate is `rc-engine`; its executable is `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
 
 The C++ extractor (CMake + Ninja):
 
@@ -37,13 +39,59 @@ cmake -S . -B build -G Ninja && cmake --build build
 ./build/tools/extract/rc_extract unpack   # writes extracted/
 ```
 
-## Disc image
+## Game data
 
-The engine reads the level straight from the disc image: `RC_ISO` if set, else the default
-`~/PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso` (NTSC-U, SCUS-97199). Without an
-image it falls back to the files `rc_extract unpack` wrote to `extracted/`. The Rust disc reader
-is golden-tested byte for byte against `extracted/` for all 19 levels, so both sources give the
-same bytes.
+The engine never reads the disc image. The user extracts their own disc once with
+`randcrw-extract` (`crates/rc-extract`; the launcher runs it), and the game then reads only that
+data folder (layout: `docs/plan/launcher_extractor.md` §4.1; contract:
+`docs/plan/launcher_contract.md`):
+
+```
+cargo run --release -p rc-extract -- extract --iso "<your disc>.iso" --out <data folder>
+cargo dev -- --data-dir <data folder>     # or RC_DATA_DIR=<data folder> cargo dev
+cargo dev -- --version-json               # {"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}
+```
+
+The data folder is chosen in this order:
+
+1. `--data-dir <folder>` (also `--data-dir=<folder>`), how the launcher starts the game;
+2. `RC_DATA_DIR`;
+3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (the C++ `rc_extract unpack`
+   tree, same layout).
+
+The folder must exist and hold `toc.bin`, and for 1 and 2 also the extractor's
+`extract-info.json` with a matching `data_format` (the development tree may lack it: one
+warning). Otherwise the engine prints one `error:` line saying what to do (re-extract via the
+launcher) and exits before opening a window: code 3 (folder missing, not a data folder, or
+extraction incomplete), code 4 (data format mismatch or unreadable `extract-info.json`), code 2
+(`--data-dir` without a value). `--version-json` prints the contract line and exits without
+touching any data.
+
+Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
+`rc_formats::test_data::root()`), because they also use the C++-derived files it holds (`.dec`,
+dumps, `core/` and `gameplay/` splits, `overlay.elf`); they skip when it is absent.
+
+Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/randcrw/settings.toml`
+(macOS), `$XDG_CONFIG_HOME/randcrw/` (Linux) or `%APPDATA%\randcrw\` (Windows); an older
+`randcre/settings.toml` there is copied over once on the first start. `RC_SETTINGS_FILE` overrides.
+
+## Packaging
+
+```
+tools/package/package.sh              # release build of randcrw + randcrw-extract, then package
+tools/package/package.sh --no-build   # package the binaries already in target/release
+```
+
+It writes `dist/randcrw-<version>-<os>-<arch>/` and a `.zip` of it (`dist/` is git-ignored). The folder is a
+launcher version (`docs/plan/launcher_contract.md`): `randcrw`, `randcrw-extract`, `assets/shaders/*.wgsl`,
+`randcrw-manifest.json` (version from `crates/rc-engine/Cargo.toml`) and `README.txt`. The script fails if anything
+else ends up in the folder, so no disc data can be packaged, and it checks the packaged `randcrw --version-json`.
+The build is a plain `--release` build without `--features dev`. macOS is tested; the Linux and Windows (Git Bash)
+branches are written but untested. No signing yet: a downloaded zip is quarantined by macOS Gatekeeper.
+
+The runtime loads its shaders from `assets/` next to its (symlink-resolved) executable, or from
+`../Resources/assets` in a macOS `.app`; when neither exists (`cargo dev`, `target/*/randcrw`) it uses the repo's
+`crates/rc-engine/assets` (`main.rs` `asset_dir`).
 
 ## Engine environment switches
 
@@ -51,9 +99,8 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 
 | Variable | Effect |
 |---|---|
-| `RC_ISO` | Path of the disc image (default above) |
-| `RC_SOURCE` | `iso` or `extracted`: force the data source (default: image if found, else `extracted/`) |
-| `RC_EXTRACTED` | Root of the extracted tree (default `<repo>/extracted`) |
+| `RC_DATA_DIR` | Game data folder when `--data-dir` is not given (see "Game data") |
+| `RC_EXTRACTED` | Development data tree (default `<repo>/extracted`); the engine's fallback when neither `--data-dir` nor `RC_DATA_DIR` is set, and the tests' root |
 | `RC_LEVEL` | Level index to load (default 1, Novalis) |
 | `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target, game units) |
 | `RC_SCREENSHOT` | Save a screenshot to this path, then exit |
@@ -74,6 +121,8 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 | `RC_OCCL` | `0`: occlusion off; `1`: freeze the mask built from the starting camera |
 | `RC_OCCL_STATS` | `1`: print occlusion cell and cull counts, at most once a second |
 | `RC_GIVE_HYDROPACK` | `1`: own the Hydro-Pack (item 4) from the start (debug; the swim code reads it) |
+| `RC_GIVE_ITEMS` | `id,id,…` (decimal or `0x` hex): own those items from the start (debug); the last back item among them (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack) is the saved back item Clank wears, and the last hand item (e.g. 12, the Swingshot) is requested into the hand |
+| `RC_HERO_AT` | `x,y,z[,yaw]`: place Ratchet there at the level load, before the hero init's ground snap (debug; e.g. on a grind rail with `RC_GIVE_ITEMS=29`) |
 
 ## PCSX2 harness
 

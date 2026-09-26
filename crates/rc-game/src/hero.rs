@@ -38,17 +38,19 @@ mod jump;
 mod walk;
 
 // Package modules (docs/plan/hero_states.md "Packages").
-mod boots;
-mod damage;
-mod gadgets;
+pub mod boots;
+pub mod damage;
+pub mod fx;
+pub mod gadgets;
 mod ledge;
-mod packs;
-mod platform;
-mod stance;
-mod surface;
-mod swingshot;
+pub mod packs;
+pub mod platform;
+pub mod stance;
+pub mod surface;
+pub mod swingshot;
 
 use crate::ps2v::Pf;
+pub use ledge::LedgeBlock;
 use physics::V4;
 
 /// Hero state ids (`0x1413d4`) the port implements.
@@ -277,6 +279,12 @@ pub struct Hero {
     pub jump: JumpBlock,
     /// 0x13f838: ledge found by the ledge probes (the fall and the jumps take 0x18 while it is set; [`ledge`]).
     pub f838: i32,
+    /// The ledge / wall-jump fields of the block (0x13f7b0..0x13f7cc, 0x13f820..0x13f848, 0x141604; [`ledge`]).
+    pub ledge_blk: LedgeBlock,
+    /// The damage fields: this tick's hit message, the killer 0x1415d0, 0x77's tumble, the events ([`damage`]).
+    pub damage: damage::Damage,
+    /// 0x140990 / 0x14099c / 0x1409a0: the walk-to-point target of 0x65..0x67 ([`stance`]).
+    pub walk_to: stance::WalkTo,
     /// 0x13fc70: external push (knockback); 0x13fc80: its strength; 0x13fc90: group gravity; 0x13fc94.
     pub push: V4,
     pub push_strength: Pf,
@@ -378,6 +386,54 @@ pub struct Hero {
     pub back_classes: Option<std::sync::Arc<idle::BackClasses>>,
     /// The swim fields (bob, oxygen, pitch / roll springs, the Hydro-Pack / O2 mask flags) and swim events.
     pub swim: swim::Swim,
+    /// The platform carry fields 0x13f660..0x13f6b4 ([`platform`], package P1).
+    pub carry: platform::Carry,
+    /// The surface fields: the reaction's other flags, the liquid level 0x13f644, the slide and sinking-floor
+    /// fields (`surface`, package P1).
+    pub surf: surface::Surf,
+    /// The game state's item-owned table `0x13d4c0 + id` as the hero code reads it ([`Owned`]).
+    pub owned: Owned,
+    /// Item slot 3's bookkeeping (`GetClankModule(3)`, the back item's swap; [`idle::BackSlot`]).
+    pub back_slot: idle::BackSlot,
+    /// The Heli-Pack / Thruster-Pack fields (stomp, rebound, hover latch and taps, the hero's looping sound
+    /// slots; [`packs`], package P4).
+    pub packs: packs::Packs,
+    /// 0x13f598 / 0x13f5a0: the wall-ahead probe of `0x23c458` (every third tick: distance to the wall 0.7 above
+    /// the feet within 4 ahead, 4.0 without one; the elevation of its normal). Native `f32`.
+    pub wall_ahead: [f32; 2],
+    /// The grind / cable / Magneboots fields 0x13f850..0x13f96c ([`boots`], package P5).
+    pub boots: boots::Boots,
+    /// The hand-item mechanism's pending item update ([`gadgets`], package P6).
+    pub gadgets: gadgets::Gadgets,
+    /// The Swingshot fields 0x13fcb0..0x13fd1c and its hand item's ([`swingshot`], package P6).
+    pub swing: swingshot::Swing,
+    /// The hero's requests of other systems (camera shakes, …) queued for the tick ([`fx`]).
+    pub fx: fx::HeroFx,
+}
+
+/// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
+/// `GameState::global.owned`), mirrored into the hero by the engine before every tick. Item ids:
+/// docs/plan/hero_states.md §0.1 (`crate::game_state::item`). Tests grant items with [`Hero::grant_items`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Owned(pub [u8; rc_formats::save_game::ITEM_COUNT]);
+
+impl Default for Owned {
+    fn default() -> Self { Owned([0; rc_formats::save_game::ITEM_COUNT]) }
+}
+
+impl std::fmt::Debug for Owned {
+    /// The owned ids only.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries((0..self.0.len()).filter(|&i| self.has(i))).finish()
+    }
+}
+
+impl Owned {
+    /// `0x13d4c0[id] != 0`.
+    pub fn has(&self, id: usize) -> bool { self.0.get(id).is_some_and(|&b| b != 0) }
+    pub fn set(&mut self, id: usize, owned: bool) {
+        if let Some(b) = self.0.get_mut(id) { *b = owned as u8; }
+    }
 }
 
 impl Default for Hero {
@@ -402,7 +458,7 @@ impl Hero {
             ground_normal: [z, z, Pf::ONE, z], gravity_dir: [z, z, -Pf::ONE, z], ground_point: v,
             ground_z: z, height: z, slope: z, pitch: z, roll: z, slope_yaw: z,
             ground_moby: None, grounded_ticks: 0, f654: z, f658: 0, f65a: 0, air_ticks: 0,
-            turn_to_target: 0, sharp_turn: 0, jump: JumpBlock::default(), f838: 0,
+            turn_to_target: 0, sharp_turn: 0, jump: JumpBlock::default(), f838: 0, ledge_blk: LedgeBlock::default(), damage: damage::Damage::default(), walk_to: stance::WalkTo::default(),
             push: v, push_strength: z, group_gravity: z, fc94: z, anim_speed: Pf::ONE,
             pos_hist: [v; HISTORY], pos_hist_idx: 0, pos_hist_count: 0,
             yaw_hist: [z; HISTORY], yaw_hist_idx: 0, yaw_hist_count: 0, stick: [z, z],
@@ -415,7 +471,15 @@ impl Hero {
             body_point: v, shadow_point: v, frozen: 0, fell_out: 0, unimplemented_seen: Vec::new(),
             melee: melee::Melee::default(), items: items::HeroItems::default(), shockwave: None,
             idle: idle::Idle::new(), back: None, back_classes: None, swim: swim::Swim::new(),
+            carry: platform::Carry::default(), surf: surface::Surf::default(),
+            owned: Owned::default(), back_slot: idle::BackSlot::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
+            gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
         }
+    }
+
+    /// Test / debug helper: mark `ids` owned in the hero's mirror (the engine overwrites it from the game state).
+    pub fn grant_items(&mut self, ids: &[usize]) {
+        for &i in ids { self.owned.set(i, true); }
     }
 
     /// Place the hero (spawn / respawn): position, yaw, rows; velocities and histories cleared.
@@ -448,7 +512,7 @@ impl Hero {
         moby.mode |= crate::moby_runtime::mode::NO_UPDATE;
         let mut h = Hero::spawn([moby.position[0], moby.position[1], moby.position[2]], moby.rotation[2]);
         let env_pad = crate::pad::PadState::default();
-        let env = Env { coll, pad: &env_pad, cam_yaw: Pf::ZERO, cam_rows: [physics::V0; 3], mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+        let env = Env { coll, pad: &env_pad, cam_yaw: Pf::ZERO, cam_rows: [physics::V0; 3], mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
         h.ground_probe(&env);
         h.write_back(moby);
         h.fidget_timer = rng.rand_range(physics::ticks(180), physics::ticks(300));
@@ -500,10 +564,8 @@ impl Hero {
     /// The driver `0x231d18`: stick (d-pad fallback below 0.25), per-state physics, the yaw and position
     /// histories, the rows, capsule sizing, the move and the post-move.
     pub fn input_physics_move(&mut self, env: &Env, anim: &mut dyn AnimCtl, rng: &mut crate::rng::Rng) -> bool {
-        // 0x248ad8: gravity mode.
-        let forced = matches!(self.state, 0x3f | 0x70 | 0x71)
-            || (self.f0637 != 0 && self.state == 0 && !((self.air_ticks as i32) < physics::ticks(4)));
-        self.gravity_mode = if forced { 1 } else { self.f658 as u8 };
+        // 0x248ad8: gravity mode (super::boots).
+        self.gravity_mode = boots::gravity_mode(self);
         // 0x231ed8: magnitude of LAST tick's stick.
         let l = crate::pad::len2(self.stick[0], self.stick[1]);
         self.stick_mag = if Pf::ONE < l { Pf::ONE } else { l };
@@ -525,6 +587,8 @@ impl Hero {
         self.rows = physics::euler_rows(self.rot);
         self.size_capsule();
         if self.frozen == 0 { self.move_collide(env); }
+        // 0x23c458's probes after the move: the wall ahead (every third tick; 0x13f598..0x13f5a5).
+        self.wall_ahead_probe(env);
         self.post_move(env);
         true
     }
@@ -549,6 +613,12 @@ pub trait HeroSounds {
     /// the last write-back left it (the sound's owner / position); `before` / `after` are his anim views around
     /// the advance (`audio::class_sounds::ratchet_trigger` finds the trigger).
     fn anim_advanced(&mut self, moby: &crate::moby_runtime::Moby, before: &AnimView, after: &AnimView, rng: &mut crate::rng::Rng);
+    /// `0x236738(index, flags)`: `PlayClassSound(index, flags, Ratchet)` (the hurt / death voices of
+    /// [`damage`]); returns the sound slot (−1: none). Played right after the transitions ([`damage`] module doc).
+    fn voice(&mut self, _moby: &crate::moby_runtime::Moby, _index: i32, _flags: u32, _rng: &mut crate::rng::Rng) -> i32 { -1 }
+    /// `release_voice_slot(slot)` when the slot still plays a sound of Ratchet's (`moby`): the stop of a looping
+    /// sound the hero started with [`HeroSounds::voice`] (flags 4; [`packs`]).
+    fn release(&mut self, _moby: &crate::moby_runtime::Moby, _slot: i32) {}
 }
 
 /// No sound layer: [`hero_update`].
@@ -597,12 +667,23 @@ pub fn hero_update_with_sounds(
     sounds.anim_advanced(moby, &before, &anim.view(), rng);
     hero.back_follow_speed(anim.view().seq_b, rng);
     hero.input_physics_move(env, anim, rng);
+    // The sounds the per-state physics started (the packs' loops, 0x236798): played at the physics' point.
+    packs::flush_sounds(hero, moby, sounds, rng);
+    surface::flush(hero, moby, sounds, rng);
     hero.surface_reaction(env, anim, rng);
-    ledge::wall_ledge_probe_b(hero, env);
+    surface::flush(hero, moby, sounds, rng);
+    ledge::wall_ledge_probe_b(hero, env, &anim.view());
+    // The magnetic floor 0x13f658, the rail contact 0x20cf58 and the cable contact 0x20d330 (L00; super::boots).
+    boots::contacts(hero, env);
+    let group = hero.group;
     hero.transitions(env, anim, rng);
+    // A group change stops the hero's looping sounds (0x2283a8 at the end of 0x242930).
+    packs::after_transitions(hero, moby, sounds, rng, group);
+    surface::after_transitions(hero, moby, sounds, rng, group);
+    damage::flush(hero, moby, sounds, rng);
     if hero.mode == 0 { hero.idle_updates(anim.view().seq_b, counter, rng); }
     hero.write_back(moby);
-    hero.back_items_update();
+    hero.back_items_update(rng);
     HeroTick::Ran
 }
 
@@ -685,7 +766,7 @@ pub mod testkit {
         /// One tick with `input`.
         pub fn tick(&mut self, coll: &Collision, input: PadInput) -> HeroTick {
             self.pad.update(Some(&input.bytes()), false);
-            let env = Env { coll, pad: &self.pad, cam_yaw: self.cam_yaw, cam_rows: self.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: self.water.as_deref() };
+            let env = Env { coll, pad: &self.pad, cam_yaw: self.cam_yaw, cam_rows: self.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: self.water.as_deref(), world: None };
             let r = hero_update(&mut self.hero, &mut self.moby, &env, &mut self.anim, &mut self.rng);
             self.log.push((self.hero.state, self.hero.timer, self.hero.position()));
             r
@@ -693,6 +774,13 @@ pub mod testkit {
 
         pub fn run(&mut self, coll: &Collision, input: PadInput, n: usize) {
             for _ in 0..n { self.tick(coll, input); }
+        }
+
+        /// Run `f` with the SetState context of the last tick's pad (e.g. a SetState from outside the tick).
+        pub fn with_ctx<R>(&mut self, coll: &Collision, f: impl FnOnce(&mut Hero, &mut states::Ctx) -> R) -> R {
+            let env = Env { coll, pad: &self.pad, cam_yaw: self.cam_yaw, cam_rows: self.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: self.water.as_deref(), world: None };
+            let mut c = states::Ctx { env: &env, anim: &mut self.anim, rng: &mut self.rng };
+            f(&mut self.hero, &mut c)
         }
     }
 }
@@ -741,7 +829,7 @@ mod tests {
         if state_id == 9 {
             // Straight into 9 through SetState (a running jump from rest).
             let env_pad = r.pad.clone();
-            let env = Env { coll: &coll, pad: &env_pad, cam_yaw: r.cam_yaw, cam_rows: r.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None };
+            let env = Env { coll: &coll, pad: &env_pad, cam_yaw: r.cam_yaw, cam_rows: r.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
             let mut c = states::Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng };
             r.hero.set_state(&mut c, 9, true);
         }
@@ -853,10 +941,14 @@ mod tests {
         let coll = floor(100.0, 100, 106, 100, 106);
         let mut r = Runner::new([410.0, 410.0, 100.0], 0.0);
         r.run(&coll, PadInput::neutral(), 2);
+        // The look stance 1 is ported (package P2): L1 enters it and it runs. A state no package ports yet (the
+        // weapon stance 0x17) freezes the hero.
         r.tick(&coll, PadInput::neutral().press(button::L1));
         assert_eq!(r.hero.state, 1);
-        assert_eq!(r.tick(&coll, PadInput::neutral().press(button::L1)), HeroTick::Unimplemented(1));
-        assert_eq!(r.hero.unimplemented_seen, vec![1]);
+        assert_eq!(r.tick(&coll, PadInput::neutral().press(button::L1)), HeroTick::Ran);
+        r.with_ctx(&coll, |h, c| h.set_state(c, 0x17, true));
+        assert_eq!(r.tick(&coll, PadInput::neutral()), HeroTick::Unimplemented(0x17));
+        assert_eq!(r.hero.unimplemented_seen, vec![0x17]);
     }
 
     #[test]

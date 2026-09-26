@@ -6,7 +6,7 @@ use rc_formats::{level, tfrag, wad, Buf};
 use std::path::PathBuf;
 
 fn extracted() -> Option<PathBuf> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted");
+    let root = rc_formats::test_data::root();
     root.join("toc.bin").exists().then_some(root)
 }
 

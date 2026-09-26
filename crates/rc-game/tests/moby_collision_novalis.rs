@@ -13,7 +13,6 @@ use rc_game::moby_update::services::World;
 use rc_game::moby_update::{ClassTable, Services};
 use rc_game::ps2v::Pf;
 use rc_game::tick::{Game, GameOptions};
-use std::path::PathBuf;
 
 struct Level {
     mesh: collision::Collision,
@@ -26,7 +25,7 @@ struct Level {
 }
 
 fn load() -> Option<Level> {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+    let dir = rc_formats::test_data::root().join("levels/01");
     let data = std::fs::read(dir.join("core_data.dec")).ok()?;
     let idx = std::fs::read(dir.join("core_index.bin")).ok()?;
     let gp = std::fs::read(dir.join("gameplay_ntsc.dec")).ok()?;

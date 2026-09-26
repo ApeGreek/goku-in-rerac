@@ -1,4 +1,4 @@
-//! Reads one level's disc-derived lumps from `extracted/` and parses what the renderer needs.
+//! Reads one level's disc-derived lumps from the game data folder and parses what the renderer needs.
 //!
 //! Inputs (written by `rc_extract`, never shipped with the repo):
 //! `levels/NN/core_index.bin`, `levels/NN/core_data.bin` (WAD-compressed), `levels/NN/gs_ram.bin`.
@@ -67,13 +67,8 @@ impl LoadTimings {
     pub fn total(&self) -> Duration { self.read + self.decompress + self.parse_core + self.parse_tfrags + self.parse_textures }
 }
 
-/// `RC_EXTRACTED`, else `<workspace>/extracted` (resolved from this crate's manifest dir at compile time,
-/// so `cargo dev` works from any cwd).
-pub fn extracted_root() -> PathBuf {
-    std::env::var_os("RC_EXTRACTED")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted"))
-}
+/// The game data folder (`--data-dir`, `RC_DATA_DIR`, else the development `extracted/`; crate::disc_source).
+pub fn extracted_root() -> PathBuf { crate::disc_source::data_root() }
 
 /// `RC_LEVEL` (decimal level index), else Novalis.
 pub fn level_index() -> u32 {
@@ -84,7 +79,7 @@ pub fn level_index() -> u32 {
 }
 
 pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
-    // The user's disc image when present, else extracted/ (crate::disc_source; same bytes either way).
+    // The game data folder (crate::disc_source).
     let read = |name: &str| crate::disc_source::level_file(root, index, name);
     let mut t = LoadTimings::default();
 

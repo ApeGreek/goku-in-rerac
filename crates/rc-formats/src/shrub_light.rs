@@ -434,7 +434,7 @@ mod tests {
     /// the colours respect the clamp, and the level-load inputs stay in the ranges the renderer assumes.
     #[test]
     fn lights_every_retail_instance() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted");
+        let root = crate::test_data::root();
         if !root.join("toc.bin").exists() { eprintln!("skipped: no extracted/"); return; }
         let (mut total, mut quirk_packets) = (0usize, 0usize);
         for i in 0..19 {

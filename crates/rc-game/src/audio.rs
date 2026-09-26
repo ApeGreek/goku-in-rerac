@@ -756,7 +756,7 @@ mod tests {
     #[test]
     fn novalis_start_renders_music_and_ambience() {
         let _lock = scene::TEST_INBOX.lock().unwrap_or_else(|e| e.into_inner());
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+        let root = rc_formats::test_data::root().join("levels/01");
         let Ok(bank) = std::fs::read(root.join("sound_bank.bin")) else { eprintln!("skipped: no extracted/"); return };
         let rd = |n: &str| std::fs::read(root.join(n)).unwrap();
         let idx = rd("core_index.bin");

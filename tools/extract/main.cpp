@@ -331,7 +331,7 @@ int cmd_tfrag(const std::string& out, int level) {
     std::vector<rc::u8> blk = rc::read_file(std::string(d) + "/core/tfrags.bin");
     std::vector<rc::Tfrag> tfrags = rc::parse_tfrags(rc::Buffer(blk));
     size_t bad_vert = 0, bad_tri = 0, tri_total = 0, vinfo_total = 0;
-    std::string obj = "# randcre tfrag LOD0 export\n";
+    std::string obj = "# randcrw tfrag LOD0 export\n";
     size_t vbase = 1;
     float minx = 1e30f, miny = 1e30f, maxx = -1e30f, maxy = -1e30f, minz = 1e30f, maxz = -1e30f;
     TopDown raster;

@@ -78,55 +78,55 @@ use Module::*;
 /// Every hero state id 0..=0x82 (`0x1413d4`). Names and groups: docs/plan/hero_states.md (confidence there).
 pub static STATES: [StateInfo; 0x83] = [
     s("idle", 0, Ground, true),                                  // 0x00
-    s("look stance (L1/L2 first-person)", 0, Stance, false),      // 0x01
+    s("look stance (L1/L2 first-person)", 0, Stance, true),       // 0x01
     s("walk / run", 1, Walk, true),                               // 0x02
     s("stop / skid", 1, Ground, true),                            // 0x03
     s("crouch", 0xc, Ground, true),                               // 0x04
     s("(none)", -1, Unused, false),                               // 0x05
     s("fall", 2, Air, true),                                      // 0x06
     s("jump", 4, Jump, true),                                     // 0x07
-    s("pack glide / hover (Heli-Pack ✕ held)", 5, Packs, false),  // 0x08
+    s("pack glide / hover (Heli-Pack ✕ held)", 5, Packs, true),   // 0x08
     s("running jump", 4, Jump, true),                             // 0x09
-    s("Heli-Pack long jump", 4, Packs, false),                    // 0x0a
+    s("Heli-Pack long jump", 4, Packs, true),                     // 0x0a
     s("side / back flip", 4, Jump, true),                         // 0x0b
     s("jump variant (defaults only; source unknown)", 4, Jump, false), // 0x0c
-    s("Thruster-Pack high jump", 4, Packs, false),                // 0x0d
+    s("Thruster-Pack high jump", 4, Packs, true),                 // 0x0d
     s("double jump", 4, Jump, true),                              // 0x0e
-    s("Heli-Pack high jump", 4, Packs, false),                    // 0x0f
-    s("Thruster-Pack long jump", 4, Packs, false),                // 0x10
-    s("wall jump", 4, Ledge, false),                              // 0x11
+    s("Heli-Pack high jump", 4, Packs, true),                     // 0x0f
+    s("Thruster-Pack long jump", 4, Packs, true),                 // 0x10
+    s("wall jump", 4, Ledge, true),                               // 0x11
     s("jump out of the water", 4, Jump, true),                    // 0x12
     s("wrench combo", 6, Melee, true),                            // 0x13
     s("wrench jump attack", 6, Melee, true),                      // 0x14
     s("comet strike (crouch + □)", 6, Melee, false),              // 0x15
-    s("hurt (knockback)", 7, Damage, false),                      // 0x16
+    s("hurt (knockback)", 7, Damage, true),                       // 0x16
     s("weapon fire stance", 8, Weapons, false),                   // 0x17
-    s("ledge grab", 3, Ledge, false),                             // 0x18
-    s("ledge hang", 3, Ledge, false),                             // 0x19
-    s("ledge shimmy left", 3, Ledge, false),                      // 0x1a
-    s("ledge shimmy right", 3, Ledge, false),                     // 0x1b
-    s("ledge climb / jump up", 4, Ledge, false),                  // 0x1c
+    s("ledge grab", 3, Ledge, true),                              // 0x18
+    s("ledge hang", 3, Ledge, true),                              // 0x19
+    s("ledge shimmy left", 3, Ledge, true),                       // 0x1a
+    s("ledge shimmy right", 3, Ledge, true),                      // 0x1b
+    s("ledge climb / jump up", 4, Ledge, true),                   // 0x1c
     s("scripted (no control)", 9, Scripted, false),               // 0x1d
-    s("look stance (set by mobys)", 0, Stance, false),            // 0x1e
+    s("look stance (set by mobys)", 0, Stance, true),             // 0x1e
     s("scripted idle", 9, Scripted, false),                       // 0x1f
     s("gadget lunge (hand item swing)", 6, Melee, false),         // 0x20
     s("wrench rebound", 10, Melee, false),                        // 0x21
-    s("Thruster-Pack stomp (R1 in the air)", 0xb, Packs, false),  // 0x22
+    s("Thruster-Pack stomp (R1 in the air)", 0xb, Packs, true),   // 0x22
     s("melee 0x23 (hand item)", 6, Melee, false),                 // 0x23
-    s("Swingshot fire", 0xd, Swingshot, false),                   // 0x24
-    s("Swingshot pull", 0xd, Swingshot, false),                   // 0x25
-    s("Swingshot arrive", 0xd, Swingshot, false),                 // 0x26
+    s("Swingshot fire", 0xd, Swingshot, true),                   // 0x24
+    s("Swingshot pull", 0xd, Swingshot, true),                   // 0x25
+    s("Swingshot arrive", 0xd, Swingshot, true),                 // 0x26
     s("weapon stance 2", 8, Weapons, false),                      // 0x27
-    s("grind", 0xf, Boots, false),                                // 0x28
-    s("grind jump", 0xf, Boots, false),                           // 0x29
-    s("grind rail-switch jump", 0xf, Boots, false),               // 0x2a
-    s("grind wrench swing", 0xf, Boots, false),                   // 0x2b
-    s("Swingshot swing", 0xe, Swingshot, false),                  // 0x2c
-    s("fall after a swing", 2, Swingshot, false),                 // 0x2d
+    s("grind", 0xf, Boots, true),                                // 0x28
+    s("grind jump", 0xf, Boots, true),                           // 0x29
+    s("grind rail-switch jump", 0xf, Boots, true),               // 0x2a
+    s("grind wrench swing", 0xf, Boots, true),                   // 0x2b
+    s("Swingshot swing", 0xe, Swingshot, true),                  // 0x2c
+    s("fall after a swing", 2, Swingshot, true),                 // 0x2d
     s("weapon draw walk", 1, Weapons, false),                     // 0x2e
-    s("slippery-floor walk (surface 7)", 1, Surface, false),      // 0x2f
+    s("slippery-floor walk (surface 7)", 1, Surface, true),       // 0x2f
     s("weapon fire stance 3", 8, Weapons, false),                 // 0x30
-    s("sinking floor, surface 4", 0x10, Surface, false),          // 0x31
+    s("sinking floor, surface 4", 0x10, Surface, true),           // 0x31
     s("scripted freeze", 9, Scripted, false),                     // 0x32
     s("underwater stroke", 0x11, Swim, true),                     // 0x33
     s("underwater drift", 0x11, Swim, true),                      // 0x34
@@ -137,13 +137,13 @@ pub static STATES: [StateInfo; 0x83] = [
     s("gadget pose 2", 0x13, Weapons, false),                     // 0x39
     s("gadget pose 3", 0x13, Weapons, false),                     // 0x3a
     s("scripted item use", 9, Scripted, false),                   // 0x3b
-    s("burn bounce (surface 1)", 4, Damage, false),               // 0x3c
-    s("death", 0x14, Damage, false),                              // 0x3d
+    s("burn bounce (surface 1)", 4, Damage, true),                // 0x3c
+    s("death", 0x14, Damage, true),                               // 0x3d
     s("level 16 group-0x15 state (unknown)", 0x15, Hoverboard, false), // 0x3e
-    s("Magneboots walk", 1, Boots, false),                        // 0x3f
-    s("fidget state", -1, Stance, false),                         // 0x40
-    s("fidget state end", -1, Stance, false),                     // 0x41
-    s("grind hurt", 0xf, Boots, false),                           // 0x42
+    s("Magneboots walk", 1, Boots, true),                        // 0x3f
+    s("fidget state", -1, Stance, true),                          // 0x40
+    s("fidget state end", -1, Stance, true),                      // 0x41
+    s("grind hurt", 0xf, Boots, true),                           // 0x42
     s("Clank idle", 0, Bodies, false),                            // 0x43
     s("Clank walk", 1, Bodies, false),                            // 0x44
     s("Clank fall", 2, Bodies, false),                            // 0x45
@@ -178,36 +178,36 @@ pub static STATES: [StateInfo; 0x83] = [
     s("Giant Clank death", 0x14, Bodies, false),                  // 0x62
     s("cutscene control", 0x18, Scripted, false),                 // 0x63
     s("cutscene control / respawn", 0x18, Scripted, false),       // 0x64
-    s("walk to point", 1, Stance, false),                         // 0x65
-    s("walk to point: stop", 1, Stance, false),                   // 0x66
-    s("walk to point: turn", 0, Stance, false),                   // 0x67
-    s("sinking liquid, surface 3", 0x19, Surface, false),         // 0x68
-    s("jump out of the sinking liquid", 0x19, Surface, false),    // 0x69
+    s("walk to point", 1, Stance, true),                          // 0x65
+    s("walk to point: stop", 1, Stance, true),                    // 0x66
+    s("walk to point: turn", 0, Stance, true),                    // 0x67
+    s("sinking liquid, surface 3", 0x19, Surface, true),          // 0x68
+    s("jump out of the sinking liquid", 0x19, Surface, true),     // 0x69
     s("drowned", 0x14, Swim, true),                               // 0x6a
     s("Hoverboard ride", 0x16, Hoverboard, false),                // 0x6b
     s("Hoverboard 0x6c", 0x16, Hoverboard, false),                // 0x6c
     s("Hoverboard 0x6d", -1, Hoverboard, false),                  // 0x6d
     s("Hoverboard into water", -1, Hoverboard, false),            // 0x6e
     s("Hoverboard 0x6f", -1, Hoverboard, false),                  // 0x6f
-    s("Magneboots wrench swing", 6, Boots, false),                // 0x70
-    s("Magneboots jump", 1, Boots, false),                        // 0x71
+    s("Magneboots wrench swing", 6, Boots, true),                // 0x70
+    s("Magneboots hop", 1, Boots, true),                        // 0x71
     s("scripted 0x72", 9, Scripted, false),                       // 0x72
     s("wade", 1, Walk, true),                                     // 0x73
-    s("cable slide (spline)", 0x1a, Boots, false),                // 0x74
-    s("hurt on the water surface", 7, Damage, false),             // 0x75
-    s("hurt under water", 7, Damage, false),                      // 0x76
-    s("death fall (below the level's death height)", 2, Damage, false), // 0x77
+    s("cable slide (spline)", 0x1a, Boots, true),                // 0x74
+    s("hurt on the water surface", 7, Damage, true),              // 0x75
+    s("hurt under water", 7, Damage, true),                       // 0x76
+    s("death fall (below the level's death height)", 2, Damage, true),  // 0x77
     s("scripted fall", 9, Scripted, false),                       // 0x78
-    s("pit fall (surface 8 / 0xc)", 2, Damage, false),            // 0x79
-    s("pack jump wall rebound", 10, Packs, false),                // 0x7a
-    s("sinking liquid, no health (surface 3)", 0x19, Surface, false), // 0x7b
-    s("burn death (surface 1)", 0x14, Damage, false),             // 0x7c
+    s("pit fall (surface 8 / 0xc)", 2, Damage, true),             // 0x79
+    s("pack jump wall rebound", 10, Packs, true),                 // 0x7a
+    s("sinking liquid, no health (surface 3)", 0x19, Surface, true), // 0x7b
+    s("burn death (surface 1)", 0x14, Damage, true),              // 0x7c
     s("Clank burn (surface 1)", 0x14, Bodies, false),             // 0x7d
     s("(walk-case label only)", -1, Unused, false),               // 0x7e
-    s("sinking death (surface 0xd)", 0x14, Damage, false),        // 0x7f
-    s("death by a hazard moby (0x4eb / 0x558)", 0x14, Damage, false), // 0x80
-    s("Thruster-Pack hover", 1, Packs, false),                    // 0x81
-    s("eaten in the water (class 0x28f)", 0x14, Damage, false),   // 0x82
+    s("sinking death (surface 0xd)", 0x14, Damage, true),         // 0x7f
+    s("death by a hazard moby (0x4eb / 0x558)", 0x14, Damage, true),  // 0x80
+    s("Thruster-Pack hover", 1, Packs, true),                     // 0x81
+    s("eaten in the water (class 0x28f)", 0x14, Damage, true),    // 0x82
 ];
 
 /// The registry row of `id` (None outside 0..=0x82).
@@ -321,7 +321,21 @@ mod tests {
     #[test]
     fn implemented_set_unchanged() {
         let got: Vec<i32> = (0..0x100).filter(|&s| implemented(s)).collect();
-        assert_eq!(got, vec![0, 2, 3, 4, 6, 7, 9, 0xb, 0xe, 0x12, 0x13, 0x14, 0x33, 0x34, 0x35, 0x36, 0x37, 0x6a, 0x73]);
+        let mut want = vec![0, 2, 3, 4, 6, 7, 9, 0xb, 0xe, 0x12, 0x13, 0x14, 0x33, 0x34, 0x35, 0x36, 0x37, 0x6a, 0x73];
+        // Package P3 (ledge.rs).
+        want.extend([0x11, 0x18, 0x19, 0x1a, 0x1b, 0x1c]);
+        // Package P2 (damage.rs, stance.rs).
+        want.extend([0x16, 0x3c, 0x3d, 0x75, 0x76, 0x77, 0x79, 0x7c, 0x7f, 0x80, 0x82, 1, 0x1e, 0x40, 0x41, 0x65, 0x66, 0x67]);
+        // Package P1 (surface.rs).
+        want.extend([0x2f, 0x31, 0x68, 0x69, 0x7b]);
+        // Package P4 (packs.rs).
+        want.extend([8, 10, 0xd, 0xf, 0x10, 0x22, 0x7a, 0x81]);
+        // Package P5 (boots.rs).
+        want.extend([0x28, 0x29, 0x2a, 0x2b, 0x3f, 0x42, 0x70, 0x71, 0x74]);
+        // Package P6 (swingshot.rs).
+        want.extend([0x24, 0x25, 0x26, 0x2c, 0x2d]);
+        want.sort_unstable();
+        assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));
     }
 
@@ -330,7 +344,7 @@ mod tests {
     fn stubs_own_no_ported_state() {
         for (id, s) in STATES.iter().enumerate() {
             if s.ported {
-                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim), "state {id:#x} ported in {:?}", s.module);
+                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot), "state {id:#x} ported in {:?}", s.module);
             }
         }
     }

@@ -20,6 +20,7 @@
 //! * [`menus`]: the mode system, the quick-select ring and the mode-3 page menus (`docs/plan/menus.md`).
 //! * [`fog_zones`]: fog zones, the underwater test and `UpdateFog`'s fog selection (`docs/plan/world_animation.md` §5, §6).
 //! * [`scene_player`]: the in-engine scene (cutscene) player, game mode 2 (`docs/plan/cutscenes_transitions.md` §3).
+//! * [`spline`]: the spline follower (paths and grind paths: step, advance, nearest point) the rail riders use.
 //! * [`game_state`]: the saved game state, new game, level-start rules, transitions, saves and options (`docs/plan/game_state.md`).
 
 pub mod collision_query;
@@ -40,3 +41,4 @@ pub mod audio;
 pub mod game_state;
 pub mod menus;
 pub mod scene_player;
+pub mod spline;

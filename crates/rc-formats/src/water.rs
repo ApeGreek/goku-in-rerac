@@ -370,7 +370,7 @@ mod tests {
 
     /// overlay, core index, core data (WAD), gameplay (WAD) of Novalis from `extracted/`.
     fn novalis() -> Option<[Vec<u8>; 4]> {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+        let root = crate::test_data::root().join("levels/01");
         let read = |n: &str| std::fs::read(root.join(n)).ok();
         Some([read("overlay.bin")?, read("core_index.bin")?, read("core_data.bin")?, read("gameplay_ntsc.bin")?])
     }

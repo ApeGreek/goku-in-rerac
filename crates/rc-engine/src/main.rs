@@ -1,8 +1,11 @@
-//! Runtime entry point: loads one level's terrain from `extracted/` and shows it with a fly camera.
+//! Runtime entry point: loads one level from the game data folder and runs it.
+//!
+//! Arguments (launcher contract, docs/plan/launcher_contract.md; crate::disc_source):
+//! - `--data-dir <dir>` the game data folder (`randcrw-extract` output); `--version-json` print the version and exit
 //!
 //! Environment:
+//! - `RC_DATA_DIR`   the game data folder when `--data-dir` is absent; else `RC_EXTRACTED`, else `<workspace>/extracted`
 //! - `RC_LEVEL`      level index (default 1 = Novalis)
-//! - `RC_EXTRACTED`  extraction root (default `<workspace>/extracted`)
 //! - `RC_SCREENSHOT` if set, save a PNG of the window there after the scene has rendered, then exit
 //! - `RC_SCREENSHOT_DELAY` seconds to wait before that capture (default 3); with `RC_SCREENSHOT_FRAME`
 //!   the capture is frame-exact instead (crate::determinism) and this wall-clock one is not scheduled
@@ -77,7 +80,8 @@ struct ScreenshotRequest {
 }
 
 fn main() -> anyhow::Result<()> {
-    let root = level_load::extracted_root();
+    // `--version-json` exits here; a missing or wrong data folder exits with a clear error (crate::disc_source).
+    let root = disc_source::startup();
     let index = level_load::level_index();
     let mut level = level_load::load_level(&root, index)?;
     // The loader's ship and the load-time update pass (crate::moby_spawn; RC_SPAWN_RULES=0 skips it).
@@ -99,10 +103,10 @@ fn main() -> anyhow::Result<()> {
         DefaultPlugins
             .set(WindowPlugin {
                 // 2x the NTSC 512x416 GS draw buffer (docs/plan/render_pipeline.md).
-                primary_window: Some(Window { title: "randcre".into(), resolution: (1024u32, 832u32).into(), ..default() }),
+                primary_window: Some(Window { title: "randcrw".into(), resolution: (1024u32, 832u32).into(), ..default() }),
                 ..default()
             })
-            .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/assets").into(), ..default() }),
+            .set(AssetPlugin { file_path: asset_dir(), ..default() }),
     )
     // Frame-exact ticks / capture and the deterministic phase order, before anything spawns a camera.
     .add_plugins(determinism::DeterminismPlugin)
@@ -148,6 +152,20 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn ms(d: Duration) -> f64 { d.as_secs_f64() * 1e3 }
+
+/// The shader folder: `assets/` next to the executable (a packaged version, `tools/package`), or
+/// `../Resources/assets` inside a macOS `.app`; otherwise the repo's `crates/rc-engine/assets` (`cargo dev`,
+/// `target/*/randcrw`). The executable path is resolved through symlinks first, so a symlinked binary finds the
+/// folder beside its real file.
+fn asset_dir() -> String {
+    let exe = std::env::current_exe().and_then(std::fs::canonicalize).ok();
+    let dir = exe.as_deref().and_then(std::path::Path::parent);
+    [dir.map(|d| d.join("assets")), dir.map(|d| d.join("../Resources/assets"))]
+        .into_iter()
+        .flatten()
+        .find(|p| p.join("shaders").is_dir())
+        .map_or_else(|| concat!(env!("CARGO_MANIFEST_DIR"), "/assets").to_string(), |p| p.to_string_lossy().into_owned())
+}
 
 fn setup(
     mut commands: Commands,

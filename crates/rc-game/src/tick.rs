@@ -26,10 +26,10 @@
 
 use crate::follow_camera::{CamInput, Camera, CameraOptions, CameraView};
 use crate::hero::items::{items_update, HitSink, ItemData, ItemEnv, ItemGlobals, NoHits};
-use crate::hero::{hero_update, AnimCtl, Env, Hero, HeroTick};
+use crate::hero::{hero_update_with_sounds, AnimCtl, Env, Hero, HeroSounds, HeroTick, NoHeroSounds};
 use crate::collision_query::OwnedScene;
 use crate::moby_runtime::{MobyId, MobyTable};
-use crate::moby_update::services::HitTemplate;
+use crate::moby_update::services::{HitRecord, HitTemplate};
 use crate::pad::PadState;
 use crate::ps2v::Pf;
 use crate::rng::Rng;
@@ -72,6 +72,8 @@ pub struct Game {
     /// `CutsceneModeUpdate` 0x2aca80) runs the mobys and the particles but never the follow camera, whose
     /// springs resume where they were on the first mode-0 tick.
     pub camera_paused: bool,
+    /// The level's grind paths (gameplay section 0x74) the hero rides (`hero::boots`; empty: no rails).
+    pub grind_paths: std::sync::Arc<Vec<rc_formats::volumes::GrindPath>>,
 }
 
 /// The moby hook: `(table, hero, rng, camera, collision, counter)`.
@@ -98,6 +100,20 @@ pub trait MobySystem {
     /// The level's water-height tables for the hero's ground probe (`0x26ed38`: the class-751 ripple patches;
     /// None: the water faces' own heights).
     fn water(&self) -> Option<&dyn crate::hero::swim::WaterQuery> { None }
+    /// The hit message of moby `target` (`MobyGetHitMessage`'s lookup: the record of slot `+0xa4` when it is
+    /// for `target`; None: no record). The hero's hit intake reads Ratchet's (docs/plan/hero_states.md P2).
+    fn hit_message(&self, _table: &MobyTable, _target: MobyId) -> Option<HitRecord> { None }
+    /// The hero-block fields the moby loop's class updates wrote this tick (`moby_update::services::HeroFields`;
+    /// None: none), applied to the hero right after the moby loop.
+    fn take_hero_writes(&mut self) -> Option<crate::moby_update::services::HeroFields> { None }
+    /// The camera shake requests the moby loop's class updates made this tick (`World::shake_camera`), in order;
+    /// the tick stores them into the camera's shake records right after the moby loop.
+    fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { Vec::new() }
+    /// The moby loop's run list for the camera at `camera` (the `0x15ffe4` chain the hero's Swingshot target
+    /// searches walk: `moby_update::scheduler::build_active_list`); None: every live moby in table order.
+    fn run_list(&self, _table: &MobyTable, _camera: crate::hero::physics::V4) -> Option<Vec<MobyId>> { None }
+    /// The level's volume sections (the cuboids the Swingshot targets' records name); None: none.
+    fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { None }
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -139,7 +155,7 @@ impl Game {
         let hero = Hero::init_from_moby(&mut mobys.mobys[hero_moby], coll, &mut rng);
         let pad = PadState::default();
         let camera = Camera::new(&CamInput { hero: &hero, pad: &pad, coll, mobys: None, hero_moby: None }, options.camera);
-        Game { pad, mobys, hero_moby, hero, camera, rng, counter: 0, options, death_z: Pf::f(death_z), item_data: None, item_globals: ItemGlobals::default(), camera_paused: false }
+        Game { pad, mobys, hero_moby, hero, camera, rng, counter: 0, options, death_z: Pf::f(death_z), item_data: None, item_globals: ItemGlobals::default(), camera_paused: false, grind_paths: Default::default() }
     }
 
     /// The end of the level load (`LoadLevelCoreData` 0x258128): `0x15f5cc++` right after
@@ -159,7 +175,8 @@ impl Game {
     }
 
     /// [`Game::tick_with_hits`] with the sound step `sound` (None: no sound layer) after the camera and before
-    /// the counter increment, in game modes 0 and 2 alike (`sound_update` runs in both).
+    /// the counter increment, in game modes 0 and 2 alike (`sound_update` runs in both). The hero's own sounds
+    /// are not played ([`Game::tick_with_hero_sounds`]).
     pub fn tick_with_sound(
         &mut self,
         pad_data: Option<&[u8]>,
@@ -169,12 +186,41 @@ impl Game {
         hits: &mut dyn HitSink,
         sound: Option<&mut SoundHook>,
     ) -> TickReport {
+        self.tick_with_hero_sounds(pad_data, coll, anim, hooks, hits, sound, &mut NoHeroSounds)
+    }
+
+    /// [`Game::tick_with_sound`] with the hero's sounds (`hero_update_with_sounds`: the class sound of Ratchet's
+    /// animation trigger right after his advance, the hurt / death voices after the transitions) played at
+    /// their points inside the hero update through `hero_sounds`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick_with_hero_sounds(
+        &mut self,
+        pad_data: Option<&[u8]>,
+        coll: &Collision,
+        anim: &mut dyn AnimCtl,
+        hooks: &mut TickHooks,
+        hits: &mut dyn HitSink,
+        sound: Option<&mut SoundHook>,
+        hero_sounds: &mut dyn HeroSounds,
+    ) -> TickReport {
         self.pad.update(pad_data, self.options.mirror);
         self.mobys.free_slot_pass(self.counter);
         (hooks.mobys)(&mut self.mobys, &self.hero, &mut self.rng, &self.camera.out, coll, self.counter);
+        // The classes' stores into the hero block (the flow 679's push, the lift's lockouts …) land before the hero
+        // update, as in the game (moby_update::services::HeroFields).
+        if let Some(f) = hooks.world.as_deref_mut().and_then(|w| w.take_hero_writes()) { f.apply(&mut self.hero); }
+        // Their camera shakes (stores into 0x167260 / 0x167270; the camera update at the end of the tick applies them).
+        for r in hooks.world.as_deref_mut().map(|w| w.take_camera_shakes()).unwrap_or_default() { self.camera.request_shake(r); }
         let hero_moby = Some(self.hero_moby);
+        // Ratchet's hit message as the moby loop left it (the hit intake 0x231580 and the hurt entries read it).
+        self.hero.damage.hit = hooks.world.as_deref().and_then(|w| w.hit_message(&self.mobys, self.hero_moby)).map(|r| hero_hit(&self.mobys, &r));
         // The hero's queries see the table as the moby loop left it (a snapshot: the hero holds its own moby).
         let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
+        // The carriers' platform blocks as the moby loop left them (`HeroPlatformUpdate`, hero::platform).
+        let mut carriers = crate::hero::platform::Carriers::collect(&self.mobys, self.hero_moby);
+        carriers.grind = self.grind_paths.clone();
+        // The Swingshot targets of the moby loop's run list (hero::swingshot, the weapon check's searches).
+        carriers.targets = self.swing_targets(hooks.world.as_deref());
         let hero_tick = {
             let mobys = scene.as_ref().map(OwnedScene::scene);
             let view = self.camera.out;
@@ -188,11 +234,17 @@ impl Game {
                 mobys: mobys.as_ref(),
                 hero_moby,
                 water: hooks.world.as_deref().and_then(|w| w.water()),
+                world: Some(&carriers),
             };
             let moby = &mut self.mobys.mobys[self.hero_moby];
-            hero_update(&mut self.hero, moby, &env, anim, &mut self.rng)
+            hero_update_with_sounds(&mut self.hero, moby, &env, anim, &mut self.rng, hero_sounds)
         };
         drop(scene);
+        // The hero's camera shakes (the stomp's landing, …: its stores into 0x167260 / 0x167270 during the update).
+        for r in std::mem::take(&mut self.hero.fx.shakes) { self.camera.request_shake(r); }
+        // HeroSyncMoby 0x229f20: Ratchet's hit slot +0xa4 = 0xff (the message is consumed by this update).
+        if hero_tick != HeroTick::OutOfBounds { self.mobys.mobys[self.hero_moby].hit_slot = 0xff; }
+        self.hero.damage.hit = None;
         if hero_tick == HeroTick::Ran {
             // The write-back's MobyBuildMatrix(Ratchet) (HeroSyncMoby 0x229f20): bounding sphere from his
             // animation fields (+0x50..0x54, the moby's own in the game), matrix, grid re-registration.
@@ -201,11 +253,34 @@ impl Game {
             (a.seq_a, a.seq_b, a.frame_a, a.frame_b, a.t) = (v.seq_a, v.seq_b, v.frame_a, v.frame_b, v.t);
             if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, self.hero_moby); }
         }
+        // The hits the pack states queued in their physics (the stomp's descent, the Thruster long jump's crates).
+        if !self.hero.packs.hits.is_empty() { crate::hero::packs::deliver_hits(&mut self.hero, &mut self.mobys, self.hero_moby, hits); }
         // HeroItemsUpdate 0x231268 (hand slot): create, attach, the swap, the item's update (the wrench's hit).
         if hero_tick == HeroTick::Ran {
             if let Some(data) = self.item_data.as_ref() {
                 let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby };
                 items_update(&mut self.hero, &mut self.item_globals, &mut self.mobys, &*anim, &mut self.rng, &ienv, hits);
+                // The slot loop's item update that needs the hero's context (the Swingshot's hook: SetState, the
+                // collision lines), at the same point of the frame (hero::gadgets).
+                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive {
+                    let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
+                    let mobys = scene.as_ref().map(OwnedScene::scene);
+                    let view = self.camera.out;
+                    let env = Env {
+                        coll,
+                        pad: &self.pad,
+                        cam_yaw: view.yaw(),
+                        cam_rows: view.rows,
+                        mirror: self.options.mirror,
+                        death_z: self.death_z,
+                        mobys: mobys.as_ref(),
+                        hero_moby,
+                        water: hooks.world.as_deref().and_then(|w| w.water()),
+                        world: Some(&carriers),
+                    };
+                    let mut c = crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng };
+                    crate::hero::gadgets::after_items(&mut self.hero, &mut c, data);
+                }
             }
         }
         (hooks.particles)(&self.hero, &self.camera.out, &mut self.rng, self.counter);
@@ -233,5 +308,40 @@ impl Game {
         if let Some(f) = sound { f(&self.mobys, &self.hero, &self.camera.out, &mut self.rng, self.counter); }
         self.counter += 1;
         TickReport { hero: hero_tick, camera, camera_reset: self.camera.resets != resets }
+    }
+}
+
+impl Game {
+    /// The Swingshot targets the hero sees this tick: the target mobys of the moby loop's run list (in its order)
+    /// with their records and cuboids, and the camera as the previous tick's update left it.
+    fn swing_targets(&self, world: Option<&dyn MobySystem>) -> crate::hero::swingshot::Targets {
+        use crate::hero::swingshot::{Targets, PULL_CLASS, SWING_CLASS};
+        let view = self.camera.out;
+        let (cam, yaw, pitch) = (view.pos_f32(), view.yaw().to_f32(), view.euler[1].to_f32());
+        if !self.mobys.mobys.iter().any(|m| m.o_class == PULL_CLASS || m.o_class == SWING_CLASS) { return Targets { camera: cam, cam_yaw: yaw, cam_pitch: pitch, ..Targets::default() }; }
+        let order = world.and_then(|w| w.run_list(&self.mobys, view.pos)).unwrap_or_else(|| {
+            self.mobys.mobys.iter().enumerate().take_while(|(_, m)| m.state != crate::moby_runtime::state::END).map(|(i, _)| i).collect()
+        });
+        let volumes = world.and_then(|w| w.volumes());
+        Targets::collect(&self.mobys, &order, volumes.as_deref(), cam, yaw, pitch)
+    }
+}
+
+/// A hit record for the hero, with what the hero code reads of the attacker (class +0xa6, position +0x10,
+/// mission +0xb0) out of the table.
+fn hero_hit(table: &MobyTable, r: &HitRecord) -> crate::hero::damage::HeroHit {
+    let attacker = r.attacker.and_then(|id| table.mobys.get(id).map(|m| crate::hero::damage::Attacker {
+        id,
+        o_class: m.o_class,
+        pos: [m.position[0], m.position[1], m.position[2]],
+        mission: m.mission,
+    }));
+    crate::hero::damage::HeroHit {
+        attacker,
+        flags: r.flags,
+        b28: r.b28,
+        damage: r.damage.to_f32(),
+        w30: r.w30,
+        dir: [r.dir[0].to_f32(), r.dir[1].to_f32(), r.dir[2].to_f32(), r.dir[3].to_f32()],
     }
 }

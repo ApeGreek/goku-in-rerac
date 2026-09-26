@@ -45,10 +45,11 @@
 //!   the previous tick's camera) and are also counted per (class, index). The bolt counter goes to
 //!   [`Persistent`] after each tick.
 //! * **Sound step** (crate::audio_out): after the camera, before the counter increment, on the game's stream
-//!   (`Game::tick_with_sound`, `audio::class_sounds::sound_step`): Ratchet's animation-trigger class sounds
-//!   (recorded by `class_sounds::TriggerAnim` around his advance), then `sound_update` (the occlusion origin's 3
-//!   draws every tick, the pitch bends of the sound instances' plays) and the frame's 800 samples. Without audio
-//!   (`RC_AUDIO=0`, or no sound data) the tick runs without a sound layer.
+//!   (`Game::tick_with_hero_sounds`, `audio::class_sounds::sound_step`): `sound_update` (the occlusion origin's 3
+//!   draws every tick, the pitch bends of the sound instances' plays) and the frame's 800 samples. Ratchet's own
+//!   sounds play inside the hero update (`class_sounds::HeroClassSounds`: his animation triggers right after his
+//!   advance, his hurt / death voices after the transitions). Without audio (`RC_AUDIO=0`, or no sound data) the
+//!   tick runs without a sound layer.
 //! * **Idle and back items**: the hero gets the back items' classes (pack 607 and Clank 601,
 //!   `Hero::set_back_classes`: created on the first hero update, then advanced and driven by the idle code:
 //!   the back table, Clank's fidgets and blink), the level (`idle.level`, 0x15ed84) and, before every tick,
@@ -62,11 +63,16 @@
 //!   position into crate::moby_attach, which then places the wrench, pack and Clank on the new pose (the
 //!   pack's and Clank's animation from `Hero::back`).
 //!   The camera goes to crate::play_camera.
-//! * **Death**: `HeroTick::OutOfBounds` (x/y outside 2..1022) or the hero reaching the unported death
-//!   states 0x77 (below the level's death height, level settings +0x28) / 0x3d (no health) → respawn at the
-//!   level's uid-0 moby (docs/plan/game_state.md: every load spawns Ratchet there). The game's fade and
-//!   checkpoint sequence is not reversed; the hero block, pad and camera are rebuilt as at load (tick
-//!   counter and RNG continue). `R` does the same on demand (e.g. out of a frozen unported state).
+//! * **Hits and death** (`rc_game::hero::damage`, docs/plan/hero_states.md P2): the tick hands Ratchet's hit
+//!   message to the hero (the moby hit log, `MobySystem::hit_message`); after the tick the damage events go to
+//!   the game state (hits 0x15eea8 / 0x13df88[level], deaths 0x15eeac / 0x13dfd8[level], the killer's mission
+//!   deaths `LevelMissions::hero_death`). **Respawn on the game's death flag** 0x141401 (`Hero::fell_out`, raised
+//!   by the death sequence 0x2319b0 at the end of every death state, or by x/y outside 2..1022), never on
+//!   entering a state: no catch-up tick after it, then the death reload's hero side — the hero init (HP = max
+//!   HP), at the checkpoint record (class 805's `0x29ac10`: position and Euler, camera snapped behind) when one was
+//!   reached, else at the level's uid-0 moby. The level's mobys are not reloaded (the game's `LoadLevelCoreData(0,
+//!   1)` is not reproduced); tick counter and RNG continue. `R` respawns on demand (e.g. out of a frozen
+//!   unported state).
 //!
 //! * **Game state** (both modes, before the app runs): the persistent state and the session of a direct
 //!   boot into this level, from the port of docs/plan/game_state.md (`rc_game::game_state`): new game from
@@ -80,7 +86,9 @@
 //! (crate::input_map::Script); `RC_PLAY_TRACE=1` prints one line per tick (state, position, anim, camera, the
 //! `rand` state, the moby loop's run count, bolts, free slots, dynamic mobys drawn / live, particles, grass on
 //! sequence 1); `RC_DEBUG_HIT=moby@tick,...` delivers a hit (flags 0x10000, damage 1: breaks a crate) to those
-//! mobys before the moby loop of those ticks (debug; the wrench itself now hits through the hero's hit sink).
+//! mobys before the moby loop of those ticks (debug; the wrench itself now hits through the hero's hit sink);
+//! `hero@tick` hits Ratchet (flags 1, damage 1, no attacker: the hit intake's knockback straight back, one HP).
+//! The trace line ends with `| hp <health> inv <0x13f510>`.
 //! * **Hand items and melee** (docs/plan/player_controller.md §12): the tick runs with `Game::item_data` (item
 //!   definitions from the overlay's item table, the gadget classes, Ratchet's joint lists), the hand-swap globals
 //!   synced with `Session::temp_hand` (the quick-select request) and `Persistent` (`equipped[0]`, `last_hand_item`,
@@ -110,8 +118,9 @@ use rc_formats::moby_anim::{self, MobyAnimClass};
 use rc_formats::moby_light::{self as light, V4};
 use rc_game::follow_camera::CameraView;
 use rc_game::hero::anim::RatchetAnim;
+use rc_game::hero::damage::DamageEvent;
 use rc_game::hero::items::{HitSink, ItemClass, ItemData, ItemDef, ItemGlobals, HERO_LISTS};
-use rc_game::audio::class_sounds::{self, ClassSoundSink, TriggerAnim};
+use rc_game::audio::class_sounds::{self, ClassSoundSink, HeroClassSounds};
 use rc_game::hero::{Hero, HeroTick};
 use rc_game::moby_runtime::{Moby, MobyId, MobyTable, Seq0Info};
 use rc_game::moby_update::scheduler::{self, Scheduler};
@@ -129,6 +138,18 @@ const EMITTER_UPDATE: u32 = 0x2bd100;
 /// Level-table address of the ripple manager 751's update, crate::water_render.
 const RIPPLE_UPDATE: u32 = 0x2fd0e8;
 
+/// `RC_GIVE_ITEMS=<id>,...` (debug): the item ids to own from the start (decimal or `0x` hex; ids outside the
+/// item table are ignored).
+fn give_items() -> Option<Vec<usize>> {
+    let v = std::env::var("RC_GIVE_ITEMS").ok()?;
+    let ids: Vec<usize> = v
+        .split(',')
+        .filter_map(|t| { let t = t.trim(); t.strip_prefix("0x").map_or_else(|| t.parse().ok(), |h| usize::from_str_radix(h, 16).ok()) })
+        .filter(|&i| i < rc_formats::save_game::ITEM_COUNT)
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// `RC_PLAY` (default on; `0` = fly camera only).
 pub fn enabled() -> bool { !std::env::var("RC_PLAY").is_ok_and(|v| v.trim() == "0") }
 
@@ -143,6 +164,14 @@ impl Plugin for GameplayPlugin {
                 if std::env::var("RC_GIVE_HYDROPACK").is_ok_and(|v| v.trim() == "1") {
                     gs.global.owned[rc_game::hero::swim::ITEM_HYDRO_PACK] = 1;
                     println!("game state: RC_GIVE_HYDROPACK=1: Hydro-Pack owned");
+                }
+                // RC_GIVE_ITEMS=<id>,<id>,...: own those items (decimal or 0x hex ids, docs/plan/hero_states.md §0.1)
+                // from the start (debug); the last back item among them (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack)
+                // is the saved back item (equipped[3], 0x14166c), so Clank wears it.
+                if let Some(ids) = give_items() {
+                    for &id in &ids { gs.global.owned[id] = 1; }
+                    if let Some(&b) = ids.iter().rev().find(|&&i| matches!(i, 2..=4)) { gs.global.equipped[3] = b as i32; }
+                    println!("game state: RC_GIVE_ITEMS: items {ids:?} owned, back item {}", gs.global.equipped[3]);
                 }
                 let g = &gs.global;
                 println!(
@@ -262,6 +291,10 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn build_matrix(&mut self, table: &mut MobyTable, id: MobyId) { self.world.build_matrix(table, id) }
     fn deliver_hit(&mut self, table: &mut MobyTable, target: MobyId, tmpl: &HitTemplate) { self.world.deliver_hit(table, target, tmpl) }
     fn water(&self) -> Option<&dyn rc_game::hero::swim::WaterQuery> { Some(&self.water) }
+    fn hit_message(&self, table: &MobyTable, target: MobyId) -> Option<rc_game::moby_update::services::HitRecord> { self.world.hit_message(table, target) }
+    fn take_hero_writes(&mut self) -> Option<rc_game::moby_update::services::HeroFields> { self.world.take_hero_writes() }
+    fn run_list(&self, table: &MobyTable, camera: [rc_game::ps2v::Pf; 4]) -> Option<Vec<MobyId>> { self.world.run_list(table, camera) }
+    fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { self.world.volumes() }
 }
 
 /// The hero's hit sink: the moby system's hit log and moby collision (borrowed per call: the moby hook borrows
@@ -280,6 +313,10 @@ impl HitSink for CellHits<'_, '_> {
     fn line(&mut self, table: &mut MobyTable, a: [rc_game::ps2v::Pf; 4], b: [rc_game::ps2v::Pf; 4], flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<Option<MobyId>> {
         let mut s = self.svc.borrow_mut();
         ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.line(table, a, b, flags, ignore, tmpl)
+    }
+    fn deliver(&mut self, table: &mut MobyTable, target: MobyId, tmpl: &HitTemplate) {
+        let mut s = self.svc.borrow_mut();
+        rc_game::moby_update::services::deliver_hit_in(table, &mut s.hits, target, tmpl);
     }
 }
 
@@ -325,6 +362,15 @@ fn load_game_state(root: &std::path::Path, index: u32) -> anyhow::Result<(GameSt
         gs.apply_transition(index as i32);
         gs.apply_level_start(index as i32, &items(index)?, &mut sess);
     }
+    // RC_GIVE_ITEMS (debug): the last hand item among the ids (slot type 0, not the wrench, e.g. the Swingshot 12)
+    // is requested into the hand, as GiveItem's equip does (the session's temp hand item, 0x141408).
+    if let Some(ids) = give_items() {
+        let t = items(index)?;
+        if let Some(&h) = ids.iter().rev().find(|&&i| i != 8 && t.slot_type.get(i) == Some(&0)) {
+            sess.temp_hand = h as i32;
+            println!("game state: RC_GIVE_ITEMS: item {h} requested into the hand");
+        }
+    }
     Ok((gs, sess))
 }
 
@@ -363,7 +409,7 @@ pub struct Play {
     /// Static moby → gameplay instance (the renderer's records, entities and occlusion are per instance).
     moby_to_instance: Vec<usize>,
     /// The level's mission state (0x15fc88, 0x14c050, the deaths 0x14ee90): kept across respawns (the death
-    /// reload keeps the deaths; the port has no killer 0x1415d0, so nothing bumps them yet).
+    /// reload keeps the deaths; the death sequence bumps the killer's mission, `DamageEvent::Died`).
     pub missions: LevelMissions,
     lit: HashMap<MobyId, ([u32; 9], [u8; 3], u32)>,
     /// The loader's ship: (its table id, its gameplay-instance index), drawn by the static path.
@@ -374,14 +420,14 @@ pub struct Play {
     dynamic: DynMobys,
     /// Moby sounds queued so far (drained from `Services::sounds` every tick), per (class, index).
     sounds: HashMap<(i16, i32), u64>,
-    /// `RC_DEBUG_HIT=moby@tick,...`: hits delivered to those mobys at those ticks (the wrench is not ported).
+    /// `RC_DEBUG_HIT=moby@tick,...` (`hero@tick` = Ratchet): hits delivered to those mobys at those ticks.
     debug_hits: Vec<(MobyId, u64)>,
     /// Option 0x15edb5 (mirrored animation), for respawns.
     mirror_anim: bool,
     /// The hand-item data (also given to every respawned `Game`).
     item_data: Option<ItemData>,
-    /// The back items' classes (pack 607, Clank 601), given to every (respawned) hero.
-    back_classes: Option<(MobyAnimClass, MobyAnimClass)>,
+    /// The back items' classes (the packs by back item id, Clank 601), given to every (respawned) hero.
+    back_classes: Option<BackPacks>,
     trace: bool,
     respawn: bool,
     frozen_hint: bool,
@@ -620,7 +666,7 @@ fn setup(
     let ripples = water.as_ref().is_some_and(|w| w.has_ripples());
     let mut classes = class_table(lv, &|oc| external_update_fn(level_index, ripples, oc));
     let ship_ii = spawn.as_ref().and_then(|s| s.ship);
-    let (table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state.as_ref().map(|s| &s.0), level_index) {
+    let (mut table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state.as_ref().map(|s| &s.0), level_index) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("gameplay: moby table not built ({e:#}): no game tick");
@@ -632,6 +678,15 @@ fn setup(
         return;
     };
     if table.hero() != Some(hero_id) { warn!("gameplay: MobyTable::hero() = {:?}, using moby {hero_id} (instance {hero_ii})", table.hero()); }
+    // RC_HERO_AT=x,y,z[,yaw] (debug): Ratchet's moby placed there before the hero init (which ground-snaps it).
+    if let Some(v) = std::env::var("RC_HERO_AT").ok().map(|v| v.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()) {
+        if v.len() >= 3 {
+            let m = &mut table.mobys[hero_id];
+            m.position = [v[0], v[1], v[2], m.position[3]];
+            if let Some(&y) = v.get(3) { m.rotation[2] = y; }
+            println!("gameplay: RC_HERO_AT: Ratchet placed at {:?}, yaw {}", &v[..3], m.rotation[2]);
+        }
+    }
     let spawn_moby = table.mobys[hero_id].clone();
     let opts = state.as_ref().map(|s| s.0.options());
     let options = opts.map_or(GameOptions::default(), |o| o.game_options());
@@ -659,8 +714,11 @@ fn setup(
     let mirror_anim = opts.is_some_and(|o| o.mirror_anim);
     ratchet.mirror = mirror_anim;
     // The back items (pack 607 of back item 2, Clank 601) and the level for the idle code.
-    let back_classes = back_classes(lv);
-    if back_classes.is_none() { eprintln!("gameplay: no class 607 / 601 on this level: no back items (no Clank fidgets)"); }
+    let back_classes = back_classes(lv, item_data.as_ref());
+    match &back_classes {
+        None => eprintln!("gameplay: no pack / Clank (601) classes on this level: no back items (no Clank fidgets)"),
+        Some((packs, _)) => println!("gameplay: back packs (item, class) {:?} and Clank 601", packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>()),
+    }
     hero_level_setup(&mut game.hero, back_classes.as_ref(), level_index);
 
     // The moby loop's services and the load pass (counter 0) on the game's stream.
@@ -669,7 +727,11 @@ fn setup(
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }
     // The volume sections (cuboids, spheres, cylinders, pills, paths, grind paths) for the trigger tests.
     match rc_formats::volumes::parse_volumes(&lv.gameplay) {
-        Ok(v) => svc.set_volumes(v),
+        Ok(v) => {
+            // The grind paths are also the hero's rails and cables (hero::boots).
+            game.grind_paths = std::sync::Arc::new(v.grind_paths.clone());
+            svc.set_volumes(v)
+        }
         Err(e) => eprintln!("gameplay: no trigger volumes ({e}): every volume test is false"),
     }
     match class_joint_lists(lv) {
@@ -801,7 +863,11 @@ fn setup(
         dynamic,
         sounds: HashMap::new(),
         debug_hits: std::env::var("RC_DEBUG_HIT").ok().map(|v| {
-            v.split(',').filter_map(|h| { let (a, b) = h.trim().split_once('@')?; Some((a.parse().ok()?, b.parse().ok()?)) }).collect()
+            v.split(',').filter_map(|h| {
+                let (a, b) = h.trim().split_once('@')?;
+                let id = if a.trim() == "hero" { hero_id } else { a.parse().ok()? };
+                Some((id, b.parse().ok()?))
+            }).collect()
         }).unwrap_or_default(),
         mirror_anim,
         item_data,
@@ -815,17 +881,26 @@ fn setup(
     commands.insert_resource(play);
 }
 
-/// The back items' anim classes on this level: the pack of back item 2 (607) and Clank (601).
-fn back_classes(lv: &crate::level_load::LoadedLevel) -> Option<(MobyAnimClass, MobyAnimClass)> {
+/// The back items' classes: `(back item id, o_class, class)` per pack, and Clank.
+type BackPacks = (Vec<(i32, i16, MobyAnimClass)>, MobyAnimClass);
+
+/// The back items' anim classes on this level: the pack moby of each back item 2 / 3 / 4 (the item definitions'
+/// class +0x10: Heli-Pack 607, Thruster-Pack 608, Hydro-Pack 609; those values without the definitions) that the
+/// level has, and Clank (item 1's 601). None without the pack of item 2 or Clank.
+fn back_classes(lv: &crate::level_load::LoadedLevel, items: Option<&ItemData>) -> Option<BackPacks> {
     let m = &lv.mobys;
     let anim = |o: i32| m.classes.iter().position(|c| c.o_class == o).map(|ci| m.anim[ci].clone());
-    Some((anim(607)?, anim(601)?))
+    let class_of = |id: i32, fallback: i32| items.map(|d| d.def(id).o_class).filter(|&o| o > 0).unwrap_or(fallback);
+    let packs: Vec<(i32, i16, MobyAnimClass)> =
+        [(2, 607), (3, 608), (4, 609)].into_iter().filter_map(|(id, o)| { let o = class_of(id, o); Some((id, o as i16, anim(o)?)) }).collect();
+    if !packs.iter().any(|p| p.0 == 2) { return None; }
+    Some((packs, anim(class_of(1, 601))?))
 }
 
 /// What the hero code needs from the level after `HeroInit` (load and respawn): the back items' classes and
 /// the level index 0x15ed84.
-fn hero_level_setup(hero: &mut Hero, back: Option<&(MobyAnimClass, MobyAnimClass)>, level: u32) {
-    if let Some((pack, clank)) = back { hero.set_back_classes(pack.clone(), clank.clone()); }
+fn hero_level_setup(hero: &mut Hero, back: Option<&BackPacks>, level: u32) {
+    if let Some((packs, clank)) = back { hero.set_back_packs(packs.clone(), clank.clone()); }
     hero.idle.level = level as i32;
 }
 
@@ -898,7 +973,8 @@ fn publish_anim(p: &mut Play, anim: Option<&mut MobyAnim>) {
     a.snapshots[k] = p.ratchet.snapshot.clone();
 }
 
-/// Respawn at the level's uid-0 moby: the hero, pad and camera as at load; tick counter and RNG continue.
+/// Respawn (the death reload's hero side): the hero, pad and camera as at load, at the checkpoint record when one
+/// was reached, else at the level's uid-0 moby; tick counter and RNG continue.
 fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAnimClass, death_z: f32, state: Option<&GameState>, session: Option<&mut SessionState>) {
     let mut table = std::mem::take(&mut p.game.mobys);
     table.mobys[p.hero_id] = p.spawn_moby.clone();
@@ -907,11 +983,22 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
     let mut g = Game::with_rng(coll, table, p.hero_id, options, death_z, rng);
     g.counter = counter;
     g.item_data = p.item_data.clone();
+    g.grind_paths = p.game.grind_paths.clone();
     hero_level_setup(&mut g.hero, p.back_classes.as_ref(), p.level);
     // Hero init 0x226b70: the hero block is cleared, HP = max HP.
     if let (Some(gs), Some(s)) = (state, session) {
         s.hero_init(gs.global.max_hp);
         g.hero.health = s.hp;
+    }
+    // The death reload's placement `0x29adc8`: with a checkpoint record (class 805 → `0x29ac10`) the hero block's
+    // position and Euler angles are the record's (the rest of the hero init stays); the camera snaps behind him.
+    if let Some(cp) = p.svc.save.checkpoint {
+        use rc_game::hero::physics::{euler_rows, from_f32x3};
+        g.hero.pos = from_f32x3(cp.pos);
+        g.hero.rot = from_f32x3(cp.rot);
+        g.hero.rows = euler_rows(g.hero.rot);
+        let cam = rc_game::follow_camera::CamInput { hero: &g.hero, pad: &g.pad, coll, mobys: None, hero_moby: None };
+        g.camera = rc_game::follow_camera::Camera::new(&cam, options.camera);
     }
     p.game = g;
     p.ratchet = RatchetAnim::new(class);
@@ -994,9 +1081,11 @@ fn tick(
         w.external = Some(&mut ext);
         w.missions = missions;
         // RC_DEBUG_HIT: a wrench-like hit (flags 0x10000, damage 1) delivered before the moby loop of tick index
-        // N (counter N + 1: the load pass ran at 0).
+        // N (counter N + 1: the load pass ran at 0); to Ratchet an enemy-contact-like hit (flags 1: the hero's
+        // hit intake takes it; no attacker, so he is pushed straight back).
         for &(id, _) in debug_hits.iter().filter(|h| h.1 + 1 == counter) {
-            w.deliver_hit(id, &HitTemplate { flags: 0x1_0000, damage: rc_game::ps2v::Pf::ONE, ..Default::default() });
+            let flags = if id == hero_id { 1 } else { 0x1_0000 };
+            w.deliver_hit(id, &HitTemplate { flags, damage: rc_game::ps2v::Pf::ONE, ..Default::default() });
         }
         n_active = sched.tick(&mut w);
     };
@@ -1015,28 +1104,41 @@ fn tick(
     let mut hooks = TickHooks { mobys: &mut mobys, particles: &mut parts, world: Some(&mut world) };
     // The hand-swap globals in from the saved game / session (the quick-select ring writes the request).
     p.game.item_globals = item_globals(state.as_deref().map(|s| &s.0), session.as_deref().map(|s| &s.0));
-    // The Hydro-Pack / O2 mask ownership the swim code reads (0x13d4c4 / 0x13d4c6).
+    // The item table 0x13d4c0 (the hero's owned mirror) and the back slot's globals: the saved back item 0x14166c
+    // (equipped[3]), 0x15ed94, the request 0x141414 (the session's temp back item) and Clank hidden 0x141628.
     if let Some(gs) = state.as_deref() {
-        use rc_game::hero::swim::{ITEM_HYDRO_PACK, ITEM_O2_MASK};
-        let owned = &gs.0.global.owned;
-        (p.game.hero.swim.hydro_pack, p.game.hero.swim.o2_mask) = (owned[ITEM_HYDRO_PACK] != 0, owned[ITEM_O2_MASK] != 0);
+        p.game.hero.owned.0 = gs.0.global.owned;
+        p.game.hero.back_slot.slot.saved = gs.0.global.equipped[3];
+        p.game.hero.back_slot.thruster_last = gs.0.global.thruster_last;
+    }
+    if let Some(s) = session.as_deref() {
+        p.game.hero.back_slot.slot.request = s.0.temp_back;
+        p.game.hero.back_slot.clank_hidden = s.0.clank_hidden;
     }
     let mut hits = CellHits { svc: &svc_cell, classes, coll };
-    // The sound step (after the camera, before the counter increment) with Ratchet's trigger sounds.
-    let fired = RefCell::new(Vec::new());
+    // The sound step (after the camera, before the counter increment).
     let mut sound = |table: &MobyTable, hero: &Hero, cam: &CameraView, rng: &mut Rng, counter: u64| {
         let mut audio_ref = audio_cell.borrow_mut();
         let Some(out) = audio_ref.as_deref_mut() else { return };
         let (sys, buf) = out.parts();
-        class_sounds::sound_step(sys, table, hero, hero_id, cam, rng, counter, &mut fired.borrow_mut(), buf);
+        class_sounds::sound_step(sys, table, hero, cam, rng, counter, buf);
         out.push_frame();
     };
     let has_audio = audio_cell.borrow().is_some();
     // idle.counter: 0x15f5cc as the hero update reads it (the counter before this tick's increment).
     p.game.hero.idle.counter = p.game.counter as i32;
-    let mut ctl = p.ratchet.ctl(class);
-    let mut anim_ctl = TriggerAnim { inner: &mut ctl, class, fired: &fired };
-    let report = p.game.tick_with_sound(Some(&input.bytes()), coll, &mut anim_ctl, &mut hooks, &mut hits, if has_audio { Some(&mut sound) } else { None });
+    // Ratchet's own sounds (his animation triggers, his voices) inside the hero update; the listener is the
+    // camera the hero update sees (the previous tick's).
+    let mut hero_sounds = HeroClassSounds {
+        audio: || std::cell::RefMut::filter_map(audio_cell.borrow_mut(), |a| a.as_deref_mut().map(|o| o.system())).ok(),
+        class,
+        listener: class_sounds::listener_of(&p.game.camera.out),
+        hero: hero_id,
+        counter: p.game.counter,
+    };
+    let mut anim_ctl = p.ratchet.ctl(class);
+    let sound = if has_audio { Some(&mut sound as &mut rc_game::tick::SoundHook) } else { None };
+    let report = p.game.tick_with_hero_sounds(Some(&input.bytes()), coll, &mut anim_ctl, &mut hooks, &mut hits, sound, &mut hero_sounds);
     // … and back out.
     let g = p.game.item_globals;
     if let Some(gs) = state.as_mut() {
@@ -1047,6 +1149,14 @@ fn tick(
     }
     if let Some(s) = session.as_mut() {
         if s.0.temp_hand != g.request { s.0.temp_hand = g.request; }
+        let b = p.game.hero.back_slot.slot.request;
+        if s.0.temp_back != b { s.0.temp_back = b; }
+    }
+    if let Some(gs) = state.as_mut() {
+        let (saved, last) = (p.game.hero.back_slot.slot.saved, p.game.hero.back_slot.thruster_last);
+        let gl = &mut gs.0.global;
+        if gl.equipped[3] != saved { gl.equipped[3] = saved; }
+        if gl.thruster_last != last { gl.thruster_last = last; }
     }
 
     // The melee entries' stats records (SetState 0x23cf98: 0x1416c0 = levels[8] 3007, misc 0/1, gadget 17).
@@ -1073,7 +1183,7 @@ fn tick(
         let s = &p.ratchet.state;
         println!(
             "tick {:5}: state {:#04x} pos {:.4?} yaw {:+.4} air {:3} | anim {}:{} -> {}:{} t {:.3} | cam {:.3?} | {:?} | rng {:#010x} \
-             mobys {n_active} bolts {} free {} dyn {}/{} parts {} grass seq1 {} | hand {}:{} {:?} combo {} hit {} fr {:.2} tip {:.3?} | back {} | snd {}",
+             mobys {n_active} bolts {} free {} dyn {}/{} parts {} grass seq1 {} | hand {}:{} {:?} combo {} hit {} fr {:.2} tip {:.3?} | back {} | snd {} | hp {} inv {}",
             p.game.counter - 2, h.state, h.position(), h.yaw().to_f32(), h.air_ticks, s.seq_a, s.frame_a, s.seq_b, s.frame_b, s.t,
             report.camera.pos_f32(), report.hero, p.game.rng.state, p.svc.counters.bolts, p.game.mobys.free_slots,
             p.dynamic.drawn, p.dynamic.live, particles.as_ref().map_or(0, |s| s.sys.pool.count),
@@ -1081,7 +1191,8 @@ fn tick(
             h.items.slot.id, h.items.slot.state, h.items.slot.item.as_ref().map(|m| (m.anim.seq_b, m.anim.frame_b, m.position)),
             h.melee.combo, h.melee.hit, p.ratchet.frame.to_f32(), rc_game::hero::physics::to_f32x3(h.melee.tip),
             h.back.as_ref().map_or("-".to_string(), |b| format!("pack {}:{} clank {}:{}", b.pack.anim.seq_b, b.pack.anim.frame_b, b.clank.anim.seq_b, b.clank.anim.frame_b)),
-            audio_cell.borrow().as_ref().map_or("-".to_string(), |a| { let st = a.stats(); format!("{} plays, class {}/{}", st.plays, st.class_slots, st.class_sounds) })
+            audio_cell.borrow().as_ref().map_or("-".to_string(), |a| { let st = a.stats(); format!("{} plays, class {}/{}", st.plays, st.class_slots, st.class_sounds) }),
+            h.health, h.f510
         );
     }
     // The swim's ripple disturbances (`RippleDisturb` 0x2b82a8 on every patch); splashes, bubbles and swim sounds
@@ -1095,21 +1206,39 @@ fn tick(
             }
         }
     }
-    let died = match report.hero {
-        HeroTick::OutOfBounds => Some("left the world (x/y outside 2..1022)".to_string()),
-        HeroTick::Unimplemented(0x77) => Some(format!("fell below the death height {}", lv.death_z)),
-        HeroTick::Unimplemented(0x3d) => Some("died (state 0x3d)".to_string()),
-        HeroTick::Unimplemented(s) => {
-            if !std::mem::replace(&mut p.frozen_hint, true) { println!("gameplay: hero frozen in unported state {s:#x}; R respawns"); }
-            None
+    // Hits taken and deaths (rc_game::hero::damage): the game state's counters (0x15eea8 / 0x13df88[level],
+    // 0x15eeac / 0x13dfd8[level]) and the killer's mission deaths (0x14ee90, `LevelMissions::hero_death`).
+    for e in std::mem::take(&mut p.game.hero.damage.events) {
+        let gs = state.as_mut().map(|g| &mut g.0);
+        match e {
+            DamageEvent::Hit => {
+                if let Some(gs) = gs {
+                    gs.global.total_hits += 1;
+                    if let Some(l) = gs.levels.get_mut(level_index as usize) { l.hits += 1; }
+                }
+            }
+            DamageEvent::Died { killer_mission, killer_class } => {
+                if let Some(gs) = gs {
+                    gs.global.total_deaths += 1;
+                    if let Some(l) = gs.levels.get_mut(level_index as usize) { l.deaths += 1; }
+                }
+                p.missions.hero_death(killer_mission);
+                println!("gameplay: tick {}: Ratchet died in state {:#x} (killer class {killer_class:?}, mission {killer_mission:?})", p.game.counter, p.game.hero.state);
+            }
         }
-        HeroTick::Ran if p.game.hero.state == 0x6a && p.game.hero.fell_out != 0 => Some("drowned (state 0x6a)".to_string()),
-        HeroTick::Ran => None,
-    };
-    if let Some(why) = died {
-        let at = p.game.hero.position();
+    }
+    if let HeroTick::Unimplemented(s) = report.hero {
+        if !std::mem::replace(&mut p.frozen_hint, true) { println!("gameplay: hero frozen in unported state {s:#x}; R respawns"); }
+    }
+    // The death flag 0x141401 (the death sequence 0x2319b0, or x/y outside 2..1022): the main loop runs no
+    // catch-up tick and does the death reload at the end of the frame — here the hero init at the respawn point
+    // (the checkpoint record, else the level's spawn).
+    if p.game.hero.fell_out != 0 {
+        let (at, st) = (p.game.hero.position(), p.game.hero.state);
+        budget.0 = 0;
         respawn(p, coll, class, lv.death_z, state.as_deref().map(|s| &s.0), session.as_deref_mut().map(|s| &mut s.0));
-        println!("gameplay: tick {}: Ratchet {why} at {at:.2?}; respawned at the uid-0 moby (the game's fade / checkpoint sequence is not ported)", p.game.counter);
+        let from = if p.svc.save.checkpoint.is_some() { "the checkpoint" } else { "the uid-0 moby" };
+        println!("gameplay: tick {}: death flag 0x141401 (state {st:#x} at {at:.2?}); respawned at {from}", p.game.counter);
     }
 
     publish_anim(p, anim.as_deref_mut());

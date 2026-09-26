@@ -251,7 +251,7 @@ mod tests {
     }
 
     fn disc_class() -> Option<(FrameClass, crate::menus::Overlay)> {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels/01");
+        let root = rc_formats::test_data::root().join("levels/01");
         let blob = std::fs::read(root.join("core/moby_class/1138.bin")).ok()?;
         let ov = crate::menus::Overlay::parse(&std::fs::read(root.join("overlay.bin")).ok()?).ok()?;
         let class = rc_formats::moby::parse_moby_class(&blob).ok()?;

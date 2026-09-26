@@ -20,10 +20,11 @@
 //!
 //! **Persistence** (port-only; the "Port Options" page, `rc_game::menus::pause::port`): the start value comes
 //! from the port settings file, then `RC_MSAA` overrides it; a change made on that page is written back
-//! ([`save`]). The file is plain `key = value` text (std only): `~/Library/Application Support/randcre/
-//! settings.toml` on macOS, `$XDG_CONFIG_HOME` (or `~/.config`) `/randcre/settings.toml` elsewhere,
-//! `%APPDATA%\randcre\settings.toml` on Windows; `RC_SETTINGS_FILE=<path>` picks another file and
-//! `RC_SETTINGS_FILE=0` (or empty) disables it. Frame-exact / deterministic runs neither read nor write the
+//! ([`save`]). The file is plain `key = value` text (std only): `~/Library/Application Support/randcrw/
+//! settings.toml` on macOS, `$XDG_CONFIG_HOME` (or `~/.config`) `/randcrw/settings.toml` elsewhere,
+//! `%APPDATA%\randcrw\settings.toml` on Windows. When that file is missing and the pre-rename `randcre` one
+//! exists, the old one is copied over once and kept ([`migrate_legacy`]). `RC_SETTINGS_FILE=<path>` picks another
+//! file and `RC_SETTINGS_FILE=0` (or empty) disables it. Frame-exact / deterministic runs neither read nor write the
 //! default file (their output must be a function of the environment only); an explicit `RC_SETTINGS_FILE`
 //! still applies to them. Unknown keys and comments are kept when the file is rewritten.
 //!
@@ -144,14 +145,34 @@ pub fn settings_path() -> Option<std::path::PathBuf> {
     }
     if crate::determinism::deterministic() { return None; }
     let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let dir = if cfg!(target_os = "macos") {
+    let base = if cfg!(target_os = "macos") {
         var("HOME")?.join("Library/Application Support")
     } else if cfg!(windows) {
         var("APPDATA")?
     } else {
         var("XDG_CONFIG_HOME").or_else(|| var("HOME").map(|h| h.join(".config")))?
     };
-    Some(dir.join("randcre").join("settings.toml"))
+    // Once per process: the first lookup copies a pre-rename file over (later ones find the new file anyway).
+    static MIGRATED: std::sync::Once = std::sync::Once::new();
+    MIGRATED.call_once(|| match migrate_legacy(&base) {
+        Ok(Some((old, new))) => println!("render settings: copied {} to {} (the old file is kept)", old.display(), new.display()),
+        Ok(None) => {}
+        Err(e) => eprintln!("render settings: could not copy the old settings file: {e}"),
+    });
+    Some(settings_file_in(&base))
+}
+
+/// The settings file under a per-OS config base dir (`<base>/randcrw/settings.toml`).
+fn settings_file_in(base: &std::path::Path) -> std::path::PathBuf { base.join("randcrw").join("settings.toml") }
+
+/// The rename to randcrw: when `<base>/randcrw/settings.toml` is missing and `<base>/randcre/settings.toml`
+/// exists, copies it (never moves or deletes the old one). Returns `(old, new)` when it copied.
+pub fn migrate_legacy(base: &std::path::Path) -> std::io::Result<Option<(std::path::PathBuf, std::path::PathBuf)>> {
+    let (old, new) = (base.join("randcre").join("settings.toml"), settings_file_in(base));
+    if new.exists() || !old.is_file() { return Ok(None); }
+    if let Some(dir) = new.parent() { std::fs::create_dir_all(dir)?; }
+    std::fs::copy(&old, &new)?;
+    Ok(Some((old, new)))
 }
 
 /// The value of `key` in `key = value` text (the last one wins; `#` comments, quotes around the value allowed).
@@ -160,7 +181,7 @@ fn read_key<'a>(text: &'a str, key: &str) -> Option<&'a str> {
         .filter_map(|l| l.split_once('='))
         .filter(|(k, _)| k.trim() == key)
         .map(|(_, v)| v.split('#').next().unwrap_or("").trim().trim_matches('"'))
-        .last()
+        .next_back()
 }
 
 /// `text` with `key = value` set (the existing line replaced in place, else appended).
@@ -176,7 +197,7 @@ fn write_key(text: &str, key: &str, value: &str) -> String {
             _ => l.to_string(),
         })
         .collect();
-    if out.is_empty() { out.push("# randcre port settings (Port Options page; RC_MSAA overrides msaa at start)".into()); }
+    if out.is_empty() { out.push("# randcrw port settings (Port Options page; RC_MSAA overrides msaa at start)".into()); }
     if !found { out.push(format!("{key} = {value}")); }
     out.join("\n") + "\n"
 }
@@ -281,6 +302,27 @@ mod tests {
         assert!(!webgpu.contains(Msaa::Sample8) && webgpu.contains(Msaa::Off));
         assert_eq!(SupportedMsaa(vec![1]).clamp(Msaa::Sample4), Msaa::Off);
         assert_eq!(SupportedMsaa::detect(None, None).0, webgpu);
+    }
+
+    #[test]
+    fn legacy_settings_are_copied_once() {
+        let base = std::env::temp_dir().join(format!("randcrw-settings-migration-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (old, new) = (base.join("randcre/settings.toml"), base.join("randcrw/settings.toml"));
+        // Nothing to copy: no files are created.
+        assert!(migrate_legacy(&base).unwrap().is_none());
+        assert!(!new.exists());
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "msaa = 4\n").unwrap();
+        assert_eq!(migrate_legacy(&base).unwrap(), Some((old.clone(), new.clone())));
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "msaa = 4\n");
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "msaa = 4\n", "the old file is kept");
+        // The new file exists now: it is never overwritten from the old one.
+        std::fs::write(&new, "msaa = 8\n").unwrap();
+        assert!(migrate_legacy(&base).unwrap().is_none());
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "msaa = 8\n");
+        assert_eq!(settings_file_in(&base), new);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

@@ -51,6 +51,7 @@ pub struct IsoImage<R = File> {
     raw_sector_size: usize,
     raw_user_offset: usize,
     volume_id: String,
+    volume_sectors: u32,
     entries: Vec<IsoEntry>,
 }
 
@@ -71,12 +72,13 @@ impl<R: Read + Seek> IsoImage<R> {
             (SECTOR_SIZE, 0)
         };
         let sector_count = u32::try_from(file_size / raw_sector_size as u64).map_err(|_| FormatError::Invalid("image too large".into()))?;
-        let mut iso = IsoImage { reader: Mutex::new(reader), sector_count, raw_sector_size, raw_user_offset, volume_id: String::new(), entries: Vec::new() };
+        let mut iso = IsoImage { reader: Mutex::new(reader), sector_count, raw_sector_size, raw_user_offset, volume_id: String::new(), volume_sectors: 0, entries: Vec::new() };
 
         let pvd = iso.read_sectors(PVD_SECTOR, 1)?;
         let b = Buf(&pvd);
         if b.u8(0)? != 1 || &pvd[1..6] != b"CD001" { return bad("no ISO 9660 primary volume descriptor at sector 16"); }
         iso.volume_id = String::from_utf8_lossy(&pvd[40..72]).trim_end_matches(' ').to_string();
+        iso.volume_sectors = b.u32(80)?;
         if b.u16(128)? as usize != SECTOR_SIZE { return bad("unexpected ISO 9660 logical block size"); }
         // The root directory record is embedded at PVD+156.
         let (root_lba, root_size) = (b.u32(156 + 2)?, b.u32(156 + 10)?);
@@ -118,6 +120,8 @@ impl<R: Read + Seek> IsoImage<R> {
     /// 2048 for a plain `.iso`, 2352 for a raw CD dump.
     pub fn raw_sector_size(&self) -> usize { self.raw_sector_size }
     pub fn volume_id(&self) -> &str { &self.volume_id }
+    /// The PVD's volume space size (PVD+80, logical blocks). An image with fewer sectors than this is truncated.
+    pub fn volume_sectors(&self) -> u32 { self.volume_sectors }
     pub fn entries(&self) -> &[IsoEntry] { &self.entries }
 
     /// Case-insensitive lookup by path; the leading `/` and a `;1` suffix are optional.
@@ -244,6 +248,7 @@ pub(crate) mod tests {
 
     fn check(iso: &IsoImage<Cursor<Vec<u8>>>, elf: &[u8]) {
         assert_eq!(iso.volume_id(), "RATCHETANDCLANK");
+        assert_eq!(iso.volume_sectors(), 32);
         let names: Vec<&str> = iso.entries().iter().map(|e| e.path.as_str()).collect();
         assert_eq!(names, ["/DATA", "/DATA/A.BIN", "/SCUS_971.99", "/SYSTEM.CNF"]);
         assert_eq!(iso.read_file(iso.find("/scus_971.99;1").unwrap()).unwrap(), elf);

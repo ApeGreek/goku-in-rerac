@@ -329,7 +329,7 @@ mod tests {
     /// class resolves, and the colours respect the clamp.
     #[test]
     fn lights_every_retail_instance() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted");
+        let root = crate::test_data::root();
         if !root.join("toc.bin").exists() { eprintln!("skipped: no extracted/"); return; }
         let mut total = 0usize;
         for i in 0..19 {

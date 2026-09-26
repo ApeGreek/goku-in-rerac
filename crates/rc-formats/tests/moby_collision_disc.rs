@@ -2,11 +2,10 @@
 //! per-kind counts pinned. Skipped when `extracted/` (the `rc_extract` output) is absent.
 
 use rc_formats::{level, moby_collision};
-use std::path::PathBuf;
 
 #[test]
 fn every_level_moby_collision_blob_parses() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted/levels");
+    let root = rc_formats::test_data::root().join("levels");
     let (mut blobs, mut kinds, mut verts, mut faces, mut posed) = (0usize, [0usize; 5], 0usize, 0usize, 0usize);
     let mut levels = 0;
     for lv in 0..19 {

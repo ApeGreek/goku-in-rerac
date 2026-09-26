@@ -169,6 +169,8 @@ pub trait HitSink {
     /// `CollLine_Fix(a, b, flags, ignore, tmpl)`: `Some(moby)` for a hit (the moby, if one, gets the hit
     /// through `0x26e968`), `None` for no hit.
     fn line(&mut self, table: &mut MobyTable, a: V4, b: V4, flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<Option<MobyId>>;
+    /// A hit record for `target` (`FUN_0026eaa8` / `0x26e968`: unless its current record has a larger damage).
+    fn deliver(&mut self, _table: &mut MobyTable, _target: MobyId, _tmpl: &HitTemplate) {}
 }
 
 /// A sink that hits nothing (tests, no moby system).
@@ -208,6 +210,9 @@ pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable,
     attach_hand(hero, table, anim, env);
     slot_loop(hero, g, table, anim, rng, env, hits);
 }
+
+/// `MobyAnimBlend(item, seq, frame, n)` on a hand item (the item updates of super::gadgets).
+pub(super) fn blend_item(it: &mut HandItem, data: &ItemData, seq: u8, frame: i32, n: i32) { blend(it, data, seq, frame, n) }
 
 fn blend(it: &mut HandItem, data: &ItemData, seq: u8, frame: i32, n: i32) {
     if let Some(c) = data.class(it.o_class) { moby_anim::set_sequence(&mut it.anim, &c.anim, seq, frame, n, &mut it.snapshot); }
@@ -366,11 +371,9 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
         }
         _ => {}
     }
-    // The item moby's update `(*moby+0x74)(moby)`: the wrench's; other hand items' updates (the bomb glove
-    // 0x2d8330, …) are not ported.
-    if hero.items.slot.item.as_ref().is_some_and(|it| it.o_class == 0x47) {
-        super::melee::wrench_update(hero, table, anim, env, hits);
-    }
+    // The item moby's update `(*moby+0x74)(moby)`: the hand item's row of super::gadgets::HAND_ITEMS (the
+    // wrench's here; one that needs the hero's context runs right after the slot loop, gadgets::after_items).
+    super::gadgets::slot_item_update(hero, table, anim, env, hits);
 }
 
 /// `FUN_002305e8(0, frame)`: the slot is emptied (its update would run once more with state 3, which the

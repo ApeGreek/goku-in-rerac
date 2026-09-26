@@ -19,9 +19,15 @@
 //!
 //! Not modelled (no data for them in the port): the 15-unit `coll_sphere_mobys` of 0x3111d8 (it only feeds the
 //! focus-object auto-yaw), the level's camera pass-through volumes (0x20fdb0: treated as absent), camera switches
-//! / blends (a lone type-0 camera), scripted focus and auto-yaw, the shake (its timers are 0 in play) and the
-//! Euler pitch/roll (0x2721f0; only the yaw feeds gameplay — pitch and roll are derived here from the rows with the
-//! same FastArcTan).
+//! / blends (a lone type-0 camera), scripted focus and auto-yaw, and the Euler pitch/roll (0x2721f0; only the yaw
+//! feeds gameplay — pitch and roll are derived here from the rows with the same FastArcTan).
+//!
+//! **Camera shake** ([`Shake`], [`ShakeRequest`]): the two shake records 0x167260 (along the camera's up row) and
+//! 0x167270 (along its forward row) that `CameraUpdate` applies to the published position 0x167240 after the Euler
+//! (`0x20e560`, boot `fun_001ed360`). Any gameplay code requests one by storing an amplitude and a tick count
+//! (the Thruster stomp 0.2 for 40 ticks, the collapsing platform 701 0.4 / 30 and 0.1 / 20, explosions, …): in the
+//! port through [`Camera::request_shake`], fed by the tick from the hero's and the moby loop's requests
+//! (`crate::tick`).
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern, clippy::needless_range_loop)] // FPU compare semantics and op order are spelled out on purpose.
 
 use crate::hero::physics::{
@@ -237,6 +243,57 @@ pub struct Camera {
     /// The crate the blocked camera line hit during the last update (0x312ef8): the moby and the hit
     /// template's direction. The tick delivers it (FUN_0026e968).
     pub hit: Option<(usize, V4)>,
+    /// The shake records 0x167260 (along up) and 0x167270 (along forward), [`ShakeAxis`] order.
+    pub shake: [Shake; 2],
+}
+
+/// Which shake record a request writes: 0x167260 moves the camera along its up row, 0x167270 along its forward row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShakeAxis {
+    Up = 0,
+    Forward = 1,
+}
+
+/// A camera shake request: the two stores every writer makes (`record+0 = amplitude`, `record+8 = ticks`); the
+/// last request of a tick wins, as the stores do.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShakeRequest {
+    pub axis: ShakeAxis,
+    pub amp: f32,
+    pub ticks: i32,
+}
+
+/// One shake record (0x167260 / 0x167270): `+0` amplitude, `+4` the offset applied this tick, `+8` the timer, `+0xc`
+/// the timer's largest value since it last ran out (the envelope's length).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Shake {
+    pub amp: Pf,
+    pub offset: Pf,
+    pub timer: i32,
+    pub max: i32,
+}
+
+impl Shake {
+    /// `0x20e560(record, axis)`: while the timer runs, `max = max(max, timer)`, `FastDecTimer(timer)`, then with
+    /// `f = timer / max` the offset is `amp·cos(NormalizeAngle(2·timer))·f·f` (a ±amp buzz with a period of π ticks
+    /// fading out quadratically), and `pos += setlen(row, offset)`; at 0 the envelope resets (`max = 0`).
+    pub fn step(&mut self, pos: &mut V4, row: V4) {
+        if self.timer == 0 {
+            self.max = 0;
+            return;
+        }
+        if self.max < self.timer { self.max = self.timer; }
+        // FastDecTimer__FRi 0x220e78.
+        self.timer = (self.timer.max(1) - 1).max(0);
+        let f = i2f(self.timer) / i2f(self.max);
+        let t = i2f(self.timer);
+        let a = crate::moby_update::services::normalize_angle(t + t);
+        self.offset = ((self.amp * fast_cos(a)) * f) * f;
+        let d = norm(row, self.offset);
+        pos[0] = pos[0] + d[0];
+        pos[1] = pos[1] + d[1];
+        pos[2] = pos[2] + d[2];
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -614,6 +671,14 @@ impl Camera {
         d.saved_fwd = fwd;
     }
 
+    /// A shake request (the writer's stores into 0x167260 / 0x167270): amplitude and timer; the envelope's length
+    /// (+0xc) is taken by the next update.
+    pub fn request_shake(&mut self, r: ShakeRequest) {
+        let s = &mut self.shake[r.axis as usize];
+        s.amp = Pf::f(r.amp);
+        s.timer = r.ticks;
+    }
+
     /// One `CameraUpdate` (0x20eca8) after the hero update. Returns the published view.
     pub fn update(&mut self, inp: &CamInput) -> CameraView {
         self.hit = None;
@@ -632,6 +697,10 @@ impl Camera {
         let l = self.out.rows[1];
         let roll = fast_arctan(Pf::ZERO + (l[0] * l[0] + l[1] * l[1]).sqrt(), l[2]);
         self.out.euler = [roll, pitch, yaw, Pf::ZERO];
+        // The shakes (0x167260 along up, 0x167270 along forward) move the published position only, after the Euler.
+        let (up, fwd) = (self.out.rows[2], self.out.rows[0]);
+        self.shake[0].step(&mut self.out.pos, up);
+        self.shake[1].step(&mut self.out.pos, fwd);
         if self.opts.mirror { self.out.rows[1] = cross(self.out.rows[2], self.out.rows[0]); }
         self.out
     }
@@ -688,16 +757,35 @@ impl Camera {
     /// The type-0 update 0x314e00.
     fn update_type0(&mut self, inp: &CamInput) {
         self.platform_carry(inp);
-        // 0x3111d8 state tweaks: on foot none fire (the moby query and focus logic need mobys). Under water
-        // (group 0x11) the look height is 0.25 (written each tick; the spring-back pulls it toward 1.5 once) and
-        // the pivot height aims at 0.5 at rate 0.003 (`0x313690`: +0x17c, +0x184, +0x16e = 1).
-        if inp.hero.group == 0x11 {
+        // 0x3111d8 state tweaks (the camera's reset 0x311010 at the end of the update undoes them each tick).
+        // The ledge states (0x1415d4 = 0xd): the auto-yaw behind the hanging hero, yaw rate D+0x1bc = 12°/tick and
+        // the scripted yaw input D+0x1c4 (`0x313af0(0.2094, 0, dir(ledge yaw + π))` → `0x313888`,
+        // `Hero::ledge_camera_yaw`), and the look flag D+0x116 = 1 (`0x313820`). Not modelled: the camera data's
+        // +0x230 = 0x14d exception and the script lock +0x86 (the camera has no script).
+        if let Some((rate, yaw_in)) = inp.hero.ledge_camera_yaw(to_f32x3(self.cam.off), to_f32x3(self.g.up_s)) {
+            let d = &mut self.cam;
+            d.yaw_rate = Pf::f(rate);
+            d.script_yaw = Pf::f(yaw_in);
+            d.look_from_s = 1;
+        }
+        // Under water (group 0x11) the look height is 0.25 (written each tick; the spring-back pulls it toward 1.5
+        // once) and the pivot height aims at 0.5 at rate 0.003 (`0x313690`: +0x17c, +0x184, +0x16e = 1); gliding
+        // (group 5) the same with the pivot at 2.5 (1.5 for Clank, body 1); on the sinking floor (group 0x10) the
+        // look height only.
+        let ph = match inp.hero.group {
+            0x11 => Some(Pf::b(0x3f00_0000)),
+            5 if inp.hero.mode == 1 => Some(Pf::b(0x3fc0_0000)),
+            5 => Some(Pf::b(0x4020_0000)),
+            _ => None,
+        };
+        if let Some(tgt) = ph {
             let d = &mut self.cam;
             d.look_h = Pf::b(0x3e80_0000);
             d.ph_ovr = 1;
-            d.ph_tgt = Pf::b(0x3f00_0000);
+            d.ph_tgt = tgt;
             d.ph_rate = Pf::b(0x3b44_9ba6);
         }
+        if inp.hero.group == 0x10 { self.cam.look_h = Pf::b(0x3e80_0000); }
         self.targets(inp);
         self.leash();
         let (yi, pi) = self.stick_read(inp);

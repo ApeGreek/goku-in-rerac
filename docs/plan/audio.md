@@ -384,10 +384,11 @@ savestate", difference 2):
   per class and index).
 * **Ratchet's animation triggers** (`RatchetAnimAdvance` 0x247d48): if key A equals key B before the advance,
   the first trigger with `16·frame_a₀ + trunc(16·t₀) < time ≤ 16·frame_a₁ + trunc(16·t₁)` plays its class
-  sound with flags 0 (`class_sounds::ratchet_trigger`). The hero code is ported without the sound layer, so
-  `TriggerAnim` wraps his `AnimCtl` and records the fired sounds. They are played at the start of the sound step:
-  the draw count per tick matches the game; the position inside the tick does not (inferred order; the game
-  draws inside the hero update). No Ratchet sequence has a loop sound (header +0x11 = 0xff for all 256).
+  sound with flags 0 (`class_sounds::ratchet_trigger`), at the game's point: `class_sounds::HeroClassSounds` is
+  the hero's `HeroSounds` (`Game::tick_with_hero_sounds` → `hero_update_with_sounds`), called right after his
+  advance, before the back items' draw and his physics (owner: his moby as the last write-back left it; listener:
+  the previous tick's camera). His voices `0x236738` (the hurt / death voices of `hero::damage`) go through the
+  same object (`HeroSounds::voice`). No Ratchet sequence has a loop sound (header +0x11 = 0xff for all 256).
 * **Not routed**: Clank (601) and the back packs (607–609) have 0 class sound defs on every level (header
   +0x0d), so their triggers never play or draw. The hand items' triggers (wrench 71, …) and footsteps
   (0x2a1898) are not routed yet.
@@ -396,7 +397,7 @@ savestate", difference 2):
   not run (menu, catch-up), `run_audio` fills in IOP-only frames: 989snd and the SPU run, with no EE update and
   no draw. `RC_PLAY=0` keeps the standalone path (private stream, listener = main camera). `RC_AUDIO=0` runs
   the tick without a sound layer, so the stream then differs.
-* **Headless** (`rc-trace` `port_sim`): the same sink, trigger wrapper and sound step, with the level's
+* **Headless** (`rc-trace` `port_sim`): the same sink, hero sounds and sound step, with the level's
   sound data from `extracted/` (the 989snd / SPU side rendered too, since its replies free the slots).
   `compare-novalis-spawn --no-audio` gives the old stream for comparison.
 

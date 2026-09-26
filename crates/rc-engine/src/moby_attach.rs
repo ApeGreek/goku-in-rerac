@@ -1,5 +1,6 @@
 //! The items the hero code keeps on Ratchet (docs/formats/moby_rac1.md §0.4 "In the port"): the wrench in
-//! his hand, and on his back Clank (class 601) plus the pack moby of the back slot (class 607).
+//! his hand, and on his back Clank (class 601) plus the pack moby of the back slot (the Heli-Pack 607, the
+//! Thruster-Pack 608 or the Hydro-Pack 609: whichever `Hero::back` holds).
 //!
 //! Which items (level01.elf = the in-game engine; the port loads a level with the boot ELF's initial data
 //! and an empty save):
@@ -39,6 +40,10 @@
 //! this module only draws it, one entity set per hand class (wrench 71, bomb glove 192), shown while the slot holds it.
 //! Without it (`RC_PLAY=0`) the wrench is placed and advanced here as before.
 //!
+//! **The Swingshot** (item 12, class 0xd0 on list 1) is a hand item like the others; its hook (class 0xd1, a moby
+//! of its own in the game, kept with the hand item by `rc_game::hero::swingshot`) is drawn at the hook's position
+//! and rows while the Swingshot is in hand, and the rope between them by [`rope_draw`] (the game's `0x2dba30`).
+//!
 //! Not modelled: Clank's antenna glow moby
 //! (class 1204 on Clank's joint list 6 with a pulsing +0x90 colour).
 //!
@@ -67,6 +72,8 @@ pub fn enabled() -> bool { !std::env::var("RC_ATTACH").is_ok_and(|v| v.trim() ==
 pub enum Slot {
     Hand,
     Back,
+    /// Placed by the game (the Swingshot's hook), not by a host joint.
+    Hook,
 }
 
 /// What an item hangs from: the host's gameplay instance, the hero slot, the host joint list (index into
@@ -137,7 +144,7 @@ impl Plugin for MobyAttachPlugin {
         app.add_systems(PreUpdate, setup)
             // After moby_anim's FixedUpdate tick (Ratchet's advance) within the same fixed step.
             .add_systems(FixedPostUpdate, update)
-            .add_systems(PostUpdate, upload);
+            .add_systems(PostUpdate, (upload, rope_draw));
     }
 }
 
@@ -214,17 +221,32 @@ fn build(
         let ci = m.classes.iter().position(|c| c.o_class == o).ok_or_else(|| anyhow!("class {o} not on this level"))?;
         Ok((m.classes[ci].clone(), m.anim[ci].clone()))
     };
+    // The pack mobys of the back items (2 Heli-Pack 607 is required; 3 Thruster-Pack 608 and 4 Hydro-Pack 609 when
+    // the level has them) and Clank.
     let (pack, pack_anim) = level_class(BACK_PACK_O_CLASS)?;
+    let more_packs: Vec<(&'static str, LevelMobyClass, MobyAnimClass)> =
+        [("Thruster-Pack", 608), ("Hydro-Pack", 609)].into_iter().filter_map(|(n, o)| level_class(o).ok().map(|(c, a)| (n, c, a))).collect();
     let (clank, clank_anim) = level_class(CLANK_O_CLASS)?;
     let host = |slot, list| AttachedTo { host: host_ii, slot, joint_list: list, normalise: true };
     let glove = gadgets.iter().find(|g| g.moby.o_class == BOMB_GLOVE_O_CLASS).ok_or_else(|| anyhow!("no bomb glove (class 192) in the gadget table"))?;
     let glove_anim = MobyAnimClass::new(&glove.moby.class, moby_anim::parse_sequences(&glove.blob, &glove.moby.class).context("bomb glove sequences")?);
-    let specs: Vec<(&'static str, LevelMobyClass, MobyAnimClass, AttachedTo)> = vec![
+    let mut specs: Vec<(&'static str, LevelMobyClass, MobyAnimClass, AttachedTo)> = vec![
         ("wrench", wrench.moby.clone(), wrench_anim, host(Slot::Hand, WRENCH_ATTACH)),
         ("bomb glove", glove.moby.clone(), glove_anim, AttachedTo { host: host_ii, slot: Slot::Hand, joint_list: GLOVE_ATTACH, normalise: false }),
         ("back pack", pack, pack_anim, host(Slot::Back, BACK_ATTACH)),
-        ("Clank", clank, clank_anim, host(Slot::Back, BACK_ATTACH)),
     ];
+    for (n, c, ac) in more_packs { specs.push((n, c, ac, host(Slot::Back, BACK_ATTACH))); }
+    specs.push(("Clank", clank, clank_anim, host(Slot::Back, BACK_ATTACH)));
+    // The Swingshot (item 12: class 0xd0, attach word 1) and its hook (0xd1), when the level's gadget table has them.
+    for (name, o, slot, list) in [("Swingshot", SWINGSHOT_O_CLASS, Slot::Hand, SWINGSHOT_ATTACH), ("Swingshot hook", SWINGSHOT_HOOK_O_CLASS, Slot::Hook, SWINGSHOT_ATTACH)] {
+        // The gadget table, else the level's own classes (the hook is a `CreateMoby(0xd1)` of the level).
+        if let Some(g) = gadgets.iter().find(|g| g.moby.o_class == o) {
+            let Ok(seqs) = moby_anim::parse_sequences(&g.blob, &g.moby.class) else { continue };
+            specs.push((name, g.moby.clone(), MobyAnimClass::new(&g.moby.class, seqs), host(slot, list)));
+        } else if let Ok((c, ac)) = level_class(o) {
+            specs.push((name, c, ac, host(slot, list)));
+        }
+    }
     for s in &specs {
         if !chains.iter().any(|c| c.0 == s.3.joint_list) { return Err(anyhow!("Ratchet's class has no joint list {}", HERO_LISTS[s.3.joint_list])); }
     }
@@ -238,8 +260,8 @@ fn build(
         let mut state = AnimState::spawn(&ac);
         let mut snapshot = None;
         if attach.slot == Slot::Hand { moby_anim::set_sequence(&mut state, &ac, 1, 0, 1, &mut snapshot); }
-        // Without the game tick only the wrench shows (the old viewer behaviour).
-        let visible = name != "bomb glove";
+        // Without the game tick only the wrench, the Heli-Pack and Clank show (the old viewer behaviour).
+        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook");
         items.push(Item {
             name, o_class: class.o_class as i16, visible, shown: None, attach, anim: ac, state, snapshot, scale: class.class.header.scale,
             base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(),
@@ -274,6 +296,10 @@ const GLOVE_ATTACH: usize = 6;
 const BOMB_GLOVE_O_CLASS: i32 = 192;
 const WRENCH_O_CLASS_I16: i16 = gadget::WRENCH_O_CLASS as i16;
 const BACK_ATTACH: usize = 5;
+/// Item 12 (the Swingshot, class 0xd0): attach word 1; its hook moby class 0xd1 (`0x2dcbf0`).
+const SWINGSHOT_ATTACH: usize = 1;
+const SWINGSHOT_O_CLASS: i32 = rc_game::hero::swingshot::SWINGSHOT_CLASS as i32;
+const SWINGSHOT_HOOK_O_CLASS: i32 = rc_game::hero::swingshot::HOOK_CLASS as i32;
 const BACK_PACK_O_CLASS: i32 = 607;
 const CLANK_O_CLASS: i32 = 601;
 
@@ -288,6 +314,7 @@ fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap:
     let ps = moby_anim::evaluate_chains(host_class, host, snap, &chains);
     let ws: Vec<(usize, Rows)> = a.chains.iter().zip(&ps).map(|(c, p)| (c.0, moby_anim::attach_matrix(p, &a.host_rows, a.host_pos, a.host_scale))).collect();
     for item in &mut a.items {
+        if item.attach.slot == Slot::Hook { continue; }
         let Some(&(_, w)) = ws.iter().find(|(l, _)| *l == item.attach.joint_list) else { continue };
         item.position = [w[3][0], w[3][1], w[3][2]];
         let adv = if item.attach.slot == Slot::Back { advance_back } else { advance_hand && item.o_class == WRENCH_O_CLASS_I16 };
@@ -305,12 +332,24 @@ fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap:
 fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level: Res<crate::Level>, play: Option<Res<crate::gameplay::Play>>) {
     let (Some(mut a), Some(anim)) = (attach, anim) else { return };
     let hand = play.as_ref().map(|p| p.game.hero.items.slot.item.clone());
+    // The Swingshot's hook (a moby of its own in the game: advanced every tick, placed by the item's update).
+    let hook = play.as_ref().and_then(|p| p.game.hero.swing.item.hook.filter(|_| p.game.hero.swing.item.alive));
     // The back mobys' animation state and pose snapshot as the hero update left them (item slot 3: pack
-    // 0x1404d0, Clank 0x1404d4).
-    let back = play.as_ref().and_then(|p| p.game.hero.back.as_ref()).map(|b| [(BACK_PACK_O_CLASS, &b.pack), (CLANK_O_CLASS, &b.clank)]);
-    if let Some(back) = &back {
+    // 0x1404d0, Clank 0x1404d4). The pack shown is the one of the slot's item (`Back::pack_o_class`: the Heli-,
+    // Thruster- or Hydro-Pack), none while the slot is empty between a put-away and the next creation; Clank
+    // hidden (0x141628) hides both (mode |= 0x41).
+    let back = play.as_ref().and_then(|p| p.game.hero.back.as_ref().map(|b| (b, p.game.hero.back_slot.clank_hidden != 0)));
+    if let Some((b, hidden)) = back {
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Back) {
-            if let Some((_, m)) = back.iter().find(|(o, _)| *o as i16 == item.o_class) {
+            let m = if item.o_class == CLANK_O_CLASS as i16 {
+                Some(&b.clank)
+            } else if item.o_class == b.pack_o_class && b.state != 0 {
+                Some(&b.pack)
+            } else {
+                None
+            };
+            item.visible = m.is_some() && !hidden;
+            if let Some(m) = m {
                 item.state = m.anim;
                 item.snapshot = m.snapshot.clone();
             }
@@ -329,6 +368,14 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
                     item.position = m.position;
                 }
                 None => item.visible = false,
+            }
+        }
+        for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hook) {
+            item.visible = hook.is_some();
+            if let Some(k) = hook {
+                moby_anim::advance(&mut item.state, &item.anim);
+                item.rows = k.rows.map(|r| r.map(f32::to_bits));
+                item.position = k.pos;
             }
         }
     }
@@ -370,4 +417,122 @@ fn upload(
     }
     if let Some(mut buf) = buffers.get_mut(&a.extra.palette) { buf.data = Some(palette); }
     if let Some(mut buf) = buffers.get_mut(&a.extra.instances) { buf.data = Some(records); }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The Swingshot's rope (`0x2dba30`, registered for the frame by the hand item's update through `0x21afe0`).
+
+/// The rope's entity and mesh (created on the first frame the level has the effect texture).
+#[derive(Default)]
+struct RopeGfx {
+    entity: Option<Entity>,
+    mesh: Option<Handle<Mesh>>,
+    shown: bool,
+}
+
+/// `0x2dba30`'s strip in game coordinates: quads `(v0, e0, v1, e1)` with the UVs (0,0), (1,0), (0,1), (1,1). From
+/// the hook toward the hand's joint 0 in steps of at most 0.2; the first edge is the hook ± 0.05 in z, each next
+/// edge the step's point ± 0.05 across the view (`cross(point − camera, step)`), both displaced along
+/// `cross(dir, dir − 0.1·z)` by `sin(π·s/L) · sin(π·s/wavelength) · cos(phase) · amplitude`.
+pub fn rope_quads(r: &rc_game::hero::swingshot::Rope, camera: [f32; 3]) -> Vec<[[f32; 3]; 4]> {
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let add = |a: [f32; 3], b: [f32; 3]| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let len = |a: [f32; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let set_len = |a: [f32; 3], l: f32| { let n = len(a); if n == 0.0 { [0.0; 3] } else { a.map(|x| x * l / n) } };
+    let hook = r.to;
+    let dir = sub(r.from, hook);
+    let total = len(dir);
+    let mut out = Vec::new();
+    if total.is_nan() || total <= 0.0 { return out; }
+    let bend = cross(dir, [dir[0], dir[1], dir[2] - 0.1]);
+    let (mut v0, mut v1) = ([hook[0], hook[1], hook[2] - 0.05], [hook[0], hook[1], hook[2] + 0.05]);
+    let wave = r.phase.cos();
+    let (mut s, mut cursor) = (0.0f32, hook);
+    let pi = std::f32::consts::PI;
+    while s < total {
+        let step = (total - s).min(0.2);
+        s += step;
+        let env = (s * pi / total).sin();
+        let w = if r.wavelength != 0.0 { (s * pi / r.wavelength).sin() } else { 0.0 };
+        let off = w * env * wave;
+        cursor = add(cursor, set_len(dir, step));
+        let side = set_len(cross(sub(cursor, camera), dir), 0.05);
+        let disp = set_len(bend, off * r.amplitude);
+        let e0 = add(add(cursor, side), disp);
+        let e1 = add(sub(cursor, side), disp);
+        out.push([v0, e0, v1, e1]);
+        (v0, v1) = (e0, e1);
+    }
+    out
+}
+
+fn rope_mesh(quads: &[[[f32; 3]; 4]]) -> Mesh {
+    use bevy::mesh::{Indices, PrimitiveTopology};
+    let mut pos = Vec::with_capacity(quads.len() * 4);
+    let mut uv = Vec::with_capacity(quads.len() * 4);
+    let mut idx = Vec::with_capacity(quads.len() * 6);
+    for (k, q) in quads.iter().enumerate() {
+        let b = (4 * k) as u32;
+        for (v, t) in q.iter().zip([[0.0f32, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]) {
+            pos.push(crate::tfrag_render::game_to_bevy(*v).to_array());
+            uv.push(t);
+        }
+        idx.extend_from_slice(&[b, b + 1, b + 2, b + 1, b + 3, b + 2]);
+    }
+    Mesh::new(PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_indices(Indices::U32(idx))
+}
+
+/// Draws the rope of this tick (none: hidden). Effect texture 0xf (`GetEffectTex(0xf)`, bilinear, repeat), vertex
+/// colour 0x80808080 (the texture as it is), GS alpha 0x80 = 1.0 (the texture's alpha doubled), alpha blended.
+fn rope_draw(
+    mut st: Local<RopeGfx>,
+    play: Option<Res<crate::gameplay::Play>>,
+    level: Res<crate::Level>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    let Some(play) = play else { return };
+    let item = &play.game.hero.swing.item;
+    let rope = item.rope.filter(|_| item.alive);
+    if st.entity.is_none() {
+        if rope.is_none() { return; }
+        let Some(t) = level.0.particles.textures.as_ref().and_then(|t| t.fx_textures.get(0xf)).and_then(|t| t.as_ref()) else { return };
+        use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+        let mut img = Image::new_uninit(Extent3d { width: t.width, height: t.height, depth_or_array_layers: 1 }, TextureDimension::D2, TextureFormat::Rgba8UnormSrgb, bevy::asset::RenderAssetUsages::RENDER_WORLD);
+        img.data = Some(t.rgba.chunks(4).flat_map(|c| [c[0], c[1], c[2], (c[3] as u16 * 2).min(255) as u8]).collect());
+        img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            mag_filter: ImageFilterMode::Linear,
+            min_filter: ImageFilterMode::Linear,
+            ..default()
+        });
+        let image = images.add(img);
+        let mat = mats.add(StandardMaterial { base_color_texture: Some(image), unlit: true, alpha_mode: AlphaMode::Blend, cull_mode: None, double_sided: true, fog_enabled: false, ..default() });
+        let mesh = meshes.add(rope_mesh(&[]));
+        let e = commands
+            .spawn((Name::new("Swingshot rope"), Mesh3d(mesh.clone()), MeshMaterial3d(mat), Transform::IDENTITY, Visibility::Hidden, bevy::camera::visibility::NoFrustumCulling))
+            .id();
+        (st.entity, st.mesh) = (Some(e), Some(mesh));
+    }
+    let (Some(e), Some(h)) = (st.entity, st.mesh.clone()) else { return };
+    match rope {
+        Some(r) => {
+            let cam = play.game.camera.out.pos_f32();
+            if let Some(mut m) = meshes.get_mut(&h) { *m = rope_mesh(&rope_quads(&r, cam)); }
+            if !st.shown { commands.entity(e).insert(Visibility::Inherited); }
+            st.shown = true;
+        }
+        None => {
+            if st.shown { commands.entity(e).insert(Visibility::Hidden); }
+            st.shown = false;
+        }
+    }
 }
