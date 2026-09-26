@@ -10,6 +10,7 @@ the same API. Scripts in `decomp/scripts/` talk to it directly.
 | `ghidra_http.py` | Minimal GET/POST client for the plugin API |
 | `apply_boot_names.py` | Renames boot ELF functions from `decomp/names/boot_functions.csv` (derived from Lombyte's splat config and semantic header) and records the source path as a plate comment |
 | `import_overlays.py` | Ghidra level import: being redesigned as a proper dev tool; see the upcoming dev-workflow reorg. |
+| (plan) | The redesign is written down in `docs/plan/repo_reorg.md` (deferred): `tools/ghidra/scripts/import_levels.py` importing ELFs from `randcrw-extract export --what code`, scripts and names under `tools/ghidra/`, the export under `work/decomp/`. |
 | `export_decomp.py <program>` | Dumps every function's decompiled C to `decomp/export/<program>/` with an `index.tsv`, for grepping without the GUI |
 
 Conventions:
