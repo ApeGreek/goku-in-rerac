@@ -13,6 +13,11 @@
 //!   `RC_DETERMINISTIC=1` and the offscreen target below; `RC_SCREENSHOT_FRAME` wins when both are set. A frame
 //!   reached while pipelines still compile is captured anyway, with a warning naming it. Leave `RC_SCREENSHOT` unset
 //!   (`main.rs` would schedule its wall-clock capture and end the run).
+//! - `RC_DUMP_REALTIME=1` (dev only) keeps `RC_DUMP_FRAMES` in real-time mode (ticks from the wall clock, as in
+//!   play; the PNG saving slows the frames, so updates carry 0..n ticks).
+//! - `RC_DUMP_TICKS=n,m,…` (dev only) in frame-exact mode, update k advances the n-th entry's ticks (cycled) instead of
+//!   one: `1,0` is a 120 Hz display (every other frame has no game tick), `2` a 30 Hz one. `GameTicks` counts ticks,
+//!   not updates.
 //!
 //! [`GameTicks`] is the game's 60 Hz logic tick count since level start: one per update in deterministic
 //! mode; otherwise the catch-up count `floor(60·t_virtual)`, like the game's main loop at 30 fps.
@@ -96,8 +101,11 @@ pub fn dump_frames() -> Option<(u64, u64)> {
 }
 
 pub fn deterministic() -> bool {
-    screenshot_frame().is_some() || dump_frames().is_some() || env("RC_DETERMINISTIC").as_deref() == Some("1")
+    screenshot_frame().is_some() || (dump_frames().is_some() && !dump_realtime()) || env("RC_DETERMINISTIC").as_deref() == Some("1")
 }
+
+/// `RC_DUMP_REALTIME=1` (dev only): `RC_DUMP_FRAMES` without frame-exact mode (wall-clock ticks, as in play).
+pub fn dump_realtime() -> bool { env("RC_DUMP_REALTIME").as_deref() == Some("1") }
 
 /// Pipeline cache state as seen by the render world at the end of its last frame.
 #[derive(Resource, Clone, Default)]
@@ -146,7 +154,13 @@ impl Plugin for DeterminismPlugin {
         app.add_observer(unlink_monitor);
         if det {
             app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ)).insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
-            println!("determinism: frame-exact mode (1 tick of 1/60 s per update)");
+            match tick_pattern() {
+                Some(p) => {
+                    app.add_systems(First, pattern_steps.before(bevy::time::TimeSystems));
+                    println!("determinism: frame-exact mode, RC_DUMP_TICKS {p:?} ticks of 1/60 s per update (cycled)");
+                }
+                None => println!("determinism: frame-exact mode (1 tick of 1/60 s per update)"),
+            }
         }
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.add_systems(
@@ -203,7 +217,30 @@ fn no_indirect_drawing(add: On<Add, Camera3d>, mut commands: Commands) {
 
 fn advance_ticks(det: Res<Deterministic>, time: Res<Time<Virtual>>, mut ticks: ResMut<GameTicks>, mut frame: ResMut<FrameNumber>) {
     frame.0 += 1;
-    ticks.0 = if det.0 { frame.0 } else { (time.elapsed().as_nanos() * TICK_HZ as u128 / 1_000_000_000) as u64 };
+    ticks.0 = if det.0 {
+        match tick_pattern() {
+            Some(p) => ticks.0 + p[((frame.0 - 1) % p.len() as u64) as usize] as u64,
+            None => frame.0,
+        }
+    } else {
+        (time.elapsed().as_nanos() * TICK_HZ as u128 / 1_000_000_000) as u64
+    };
+}
+
+/// `RC_DUMP_TICKS=n,m,…` (dev only; module docs): the game ticks of each update in frame-exact mode, cycled.
+pub fn tick_pattern() -> Option<&'static [u32]> {
+    static P: std::sync::OnceLock<Option<Vec<u32>>> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let v: Vec<u32> = env("RC_DUMP_TICKS")?.split(',').map(|t| t.trim().parse().ok()).collect::<Option<_>>()?;
+        (!v.is_empty() && v.iter().any(|&n| n > 0)).then_some(v)
+    })
+    .as_deref()
+}
+
+/// Frame-exact mode with `RC_DUMP_TICKS`: this update's fixed steps (the time advances by as many ticks).
+fn pattern_steps(frame: Res<FrameNumber>, mut strategy: ResMut<TimeUpdateStrategy>) {
+    let Some(p) = tick_pattern() else { return };
+    *strategy = TimeUpdateStrategy::FixedTimesteps(p[(frame.0 % p.len() as u64) as usize]);
 }
 
 /// Bevy sorts the blended (Transparent3d) phase by the view depth of each entity's origin (plus the

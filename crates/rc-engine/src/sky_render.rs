@@ -22,6 +22,13 @@
 //! far end under the game's reverse-Z mapping, game_camera.rs). The main camera then loads colour and depth
 //! instead of clearing, so it draws over the sky like the rest of the GS chain.
 //!
+//! Output: both cameras share the view's main texture, so after the world pass it holds the whole frame. The main
+//! camera writes it to the target as is (`BlendState::REPLACE`): Bevy would otherwise composite a second camera on
+//! the same target with alpha blending over the first one's earlier output (the sky pass alone), and every world
+//! pixel whose frame alpha is below 1 (e.g. a tie fat vertex whose VU-blended alpha lane truncates 0x80 to 0x7f,
+//! or a translucent draw's `OVER` alpha) would let that stale image through: the see-through, flickering surfaces
+//! of 2026-09-27. The GS frame buffer's alpha is never used for display either.
+//!
 //! Frame clear: the game clears (colour = level background, Z = 0) before the sky only while sky header
 //! +4 is non-zero. The loader sets it to 1, and the per-level dispatch zeroes it every frame on all levels
 //! except 05, 07, 10, 13, 14, 15, so those levels clear every frame and the others only on the first
@@ -39,14 +46,14 @@ use crate::tfrag_render::game_to_bevy;
 use anyhow::{Context, Result};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
-use bevy::camera::{Camera3dDepthLoadOp, ClearColorConfig};
+use bevy::camera::{Camera3dDepthLoadOp, CameraOutputMode, ClearColorConfig};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{MeshVertexBufferLayoutRef, PrimitiveTopology};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension,
+    AsBindGroup, BlendState, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension,
     TextureFormat,
 };
 use bevy::shader::ShaderRef;
@@ -376,7 +383,9 @@ pub(crate) fn sky_image(t: &SkyTexture) -> Image {
     img
 }
 
-/// The world pass continues the GS chain after the sky: no colour clear, depth loaded from the sky pass.
+/// The world pass continues the GS chain after the sky: no colour clear, depth loaded from the sky pass, and the
+/// finished frame (sky + world, one shared main texture) replaces the target instead of being alpha-blended over the
+/// sky camera's output (module doc, "Output").
 fn main_camera_loads(
     sky_cam: Query<(), With<SkyCamera>>,
     mut cams: Query<(&mut Camera, &mut Camera3d), Without<SkyCamera>>,
@@ -384,6 +393,7 @@ fn main_camera_loads(
     if sky_cam.is_empty() { return; }
     for (mut cam, mut c3d) in &mut cams {
         cam.clear_color = ClearColorConfig::None;
+        cam.output_mode = CameraOutputMode::Write { blend_state: Some(BlendState::REPLACE), clear_color: ClearColorConfig::None };
         c3d.depth_load_op = Camera3dDepthLoadOp::Load;
     }
 }
