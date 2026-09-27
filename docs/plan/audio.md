@@ -466,3 +466,17 @@ unchanged. Two idle runs give identical traces, PNGs and WAVs.
   Measured: Oltanis grind, tick 6 `class sound 0 of class 0, flags 0x4 -> slot 0`, effects-only RMS ≈ 1700 from 0.1 s on
   (`scratchpad/hero_polish/grind_sfx.wav`); Aridia ○ at a swing target, tick 61 `class sound 0 of class 208` and tick
   69 `class sound 1 of class 208`.
+
+## In-level cinematics and scene hand-offs (2026-09-27, docs/plan/cutscenes.md)
+
+* The kind-B cutaways (camera trigger 737, gunship 688, bolt crank 280) do not touch the sound: the game stays in
+  mode 0, the mobys' and the hero's sounds go on, the master volumes stay the gameplay ones.
+* Scenes are now started by the classes' requests (the mission NPC's arrival scene 5, its scenes 3 / 4, the talkers'
+  hand-offs); the audio path is the one above. **Check** (engine, frame-exact, arrival scene, 28 s WAV,
+  `RC_AUDIO_TRACE=1`): the trigger on app frame 3 as before; the music voice held from the start to frame 1560,
+  speech on until ≈ frame 1500, music back at frame 1564 with one voice; the WAV matches the previous scene capture
+  (`hero_polish/novalis_scene.wav`) second by second at correlation ≥ 0.99 through the speech (identical for 0–2 s;
+  the small differences are the level's class sounds before the scene); two runs give identical WAVs and PNGs.
+* Movies (mode 1): `StartPssMovie` stops all sounds and the music; `MovieExitToGameplay` restarts the level track
+  (`music_start_track(0x151708, 1, 0x400)`). The port's movie stub returns at once and leaves the audio alone.
+

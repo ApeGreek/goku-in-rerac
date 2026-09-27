@@ -247,6 +247,8 @@ impl Scheduler {
     /// number of mobys in the list. The free-slot pass 0x263300 (`MobyTable::free_slot_pass`) is the tick's
     /// first call and belongs to the caller (`rc_game::tick::Game::tick`).
     pub fn tick(&mut self, w: &mut World) -> usize {
+        // The last frame's draw callbacks (their state and rand parts), before any update: classes::draw_callbacks.
+        classes::draw_callbacks::run_frame(w);
         let (list, targets) = build_active_list(w.table, w.camera, &w.svc.groups);
         self.targets = targets;
         if w.svc.snapshots.len() < w.table.mobys.len() { w.svc.snapshots.resize(w.table.mobys.len(), None); }

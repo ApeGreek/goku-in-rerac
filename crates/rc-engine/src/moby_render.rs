@@ -40,6 +40,12 @@
 //! 0x80: a part whose As can differ from 0x80 is drawn twice with the AREF split (crate::gs_state); textures
 //! repeat (CLAMP_1 = 0 on every Novalis moby ad-gif), bilinear, no mips. The metal pass: crate::moby_lod,
 //! moby_metal.wgsl.
+//!
+//! Blend per moby ([`MobyBlend`], docs/plan/moby_render_notes.md §8): the vertex alpha is `(fade · moby+0x23) >> 7` for
+//! every moby (statics, dynamic slots); a moby whose +0x23 is below 0x80 (the explosion flashes) is drawn alpha-blended
+//! without depth write, one with mode bit 0x200 additive; their entity groups are spawned on first use, and entities
+//! carry the moby's translation (the blended phase's sort key). The point lights in range of a moby become its third
+//! light ([`point_light_merge`], from [`PointLightFrame`]).
 
 use crate::gs_state::{self, AlphaRange, GsPass};
 use crate::level_load::LoadedLevel;
@@ -302,11 +308,202 @@ fn metal_passes(texel: AlphaRange) -> Vec<GsPass> {
         .collect()
 }
 
+/// How a moby is blended, chosen per moby from the game's own data, the way MobyProc (level01 0x26a7a0) decides it
+/// (docs/plan/moby_skinning_lighting.md §9): the moby's alpha byte +0x23 times the distance fade is its vertex
+/// alpha, and its mode bits +0x34 carry the effect flags (0x200 additive, 8 "fading"). The port draws each with a
+/// native render mode:
+/// * [`Self::Plain`]: vertex alpha 0x80: the regular moby draw (opaque, texture cut-outs as before);
+/// * [`Self::Fading`]: the distance fade (or mode bit 8): the existing fade draw, unchanged;
+/// * [`Self::Translucent`]: +0x23 below 0x80 (the explosion flashes 0x70 / 1192 are spawned with 0x20..0x40 and
+///   fade to 0, a fading body piece counts it down): **alpha blend, no depth write, sorted back to front**; in the
+///   game such a moby's pixels fail the Z-writing alpha test (below 0x60), so they blend over the scene without
+///   occluding what is behind;
+/// * [`Self::Additive`]: mode bit 0x200 (the game switches the moby to `Cs·As + Cd`): **additive, no depth write,
+///   sorted**.
+///
+/// Each value is one entity group per (instance, LOD) ([`Self::passes`]). No class is special-cased.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum MobyBlend {
+    /// Vertex alpha 0x80, TEST_1 0x5360b, ALPHA_1 0x44.
+    Plain,
+    /// Vertex alpha ≠ 0x80 (moby+0x23), TEST_1 0x5360b, ALPHA_1 0x44.
+    Translucent,
+    /// TEST_1 0x5308b (distance fade or mode bit 8), ALPHA_1 0x44.
+    Fading,
+    /// Mode bit 0x200: ALPHA_1 0x48, TEST_1 0x5360b.
+    Additive,
+}
+
+impl MobyBlend {
+    /// The group for mode bits `mode` (moby+0x34), MobyProc's `fading` (fade < 0x80) and the vertex alpha.
+    pub fn pick(mode: u16, fading: bool, vertex_alpha: u8) -> MobyBlend {
+        let t6 = (mode & 0x208) | ((fading as u16) << 3);
+        if t6 & 0x200 != 0 {
+            MobyBlend::Additive
+        } else if t6 & 8 != 0 {
+            MobyBlend::Fading
+        } else if vertex_alpha != 0x80 {
+            MobyBlend::Translucent
+        } else {
+            MobyBlend::Plain
+        }
+    }
+
+    /// The draws of a part with texel alpha range `texel` and per-vertex multiplier alphas `mult`.
+    pub fn passes(self, texel: AlphaRange, mult: AlphaRange) -> Vec<GsPass> {
+        match self {
+            MobyBlend::Plain => gs_state::draws(gs_state::AREF_WORLD, texel, mult),
+            MobyBlend::Fading => {
+                let fade = AlphaRange { min: 0, max: ((0x7f * mult.max as u32) >> 7) as u8 };
+                gs_state::draws(moby_lod::AREF_FADE, texel, fade)
+            }
+            MobyBlend::Translucent => vec![GsPass::BlendNoZ],
+            MobyBlend::Additive => vec![GsPass::AdditiveNoZ],
+        }
+    }
+}
+
+/// The buffers every material of one record set shares (moby.wgsl bindings 2..7).
+#[derive(Clone)]
+struct MatProto {
+    fog: crate::game_camera::TfragFog,
+    instances: Handle<ShaderBuffer>,
+    palette: Handle<ShaderBuffer>,
+    normal_table: Handle<ShaderBuffer>,
+    cpu_colors: Handle<ShaderBuffer>,
+    lods: Handle<ShaderBuffer>,
+}
+
+/// Images and materials of one record set, by texture and GS pass; spawns part entities.
+struct MatCache {
+    proto: MatProto,
+    images: HashMap<usize, (Handle<Image>, AlphaRange)>,
+    mats: HashMap<(usize, GsPass), Handle<MobyMaterial>>,
+    /// Distinct (mesh, material) pairs spawned (the stats line's instanced draws).
+    batches: HashSet<(AssetId<Mesh>, AssetId<MobyMaterial>)>,
+}
+
+impl MatCache {
+    fn new(proto: MatProto) -> Self { MatCache { proto, images: HashMap::new(), mats: HashMap::new(), batches: HashSet::new() } }
+
+    /// One entity per (part, GS pass of `blend`), tagged `tag`, at `transform` (only its translation matters: the
+    /// Transparent3d sort key; the shader places the vertices from the record).
+    #[allow(clippy::too_many_arguments)]
+    fn spawn(
+        &mut self,
+        commands: &mut Commands,
+        level: &LoadedLevel,
+        parts: &[Part],
+        blend: MobyBlend,
+        transform: Transform,
+        tag: u32,
+        visibility: Visibility,
+        name: &str,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<MobyMaterial>,
+    ) -> Vec<Entity> {
+        let mut out = Vec::new();
+        for part in parts {
+            let (image, texel) = self.images.entry(part.texture).or_insert_with(|| moby_image(level, part.texture, images)).clone();
+            for pass in blend.passes(texel, part.mult_alpha) {
+                let proto = &self.proto;
+                let mat = self
+                    .mats
+                    .entry((part.texture, pass))
+                    .or_insert_with(|| {
+                        materials.add(MobyMaterial {
+                            texture: image.clone(),
+                            fog: proto.fog,
+                            instances: proto.instances.clone(),
+                            palette: proto.palette.clone(),
+                            normal_table: proto.normal_table.clone(),
+                            cpu_colors: proto.cpu_colors.clone(),
+                            lods: proto.lods.clone(),
+                            pass,
+                        })
+                    })
+                    .clone();
+                self.batches.insert((part.mesh.id(), mat.id()));
+                let e = commands.spawn((
+                    Mesh3d(part.mesh.clone()),
+                    MeshMaterial3d(mat),
+                    transform,
+                    MeshTag(tag),
+                    NoFrustumCulling,
+                    visibility,
+                    Name::new(format!("{name} tex {} {pass:?}", part.texture as isize)),
+                ));
+                out.push(e.id());
+            }
+        }
+        out
+    }
+}
+
+/// Writes the vertex alpha (misc.x) of `MobyLod` record `slot` in `buf`, keeping the other fields; true when it
+/// changed.
+fn set_lod_alpha(buffers: &mut Assets<ShaderBuffer>, buf: &Handle<ShaderBuffer>, slot: usize, alpha: u8) -> bool {
+    let at = slot * moby_lod::LOD_RECORD_SIZE;
+    let want = (alpha as u32).to_le_bytes();
+    if buffers.get(buf).and_then(|b| b.data.as_ref()).and_then(|d| d.get(at..at + 4)).is_none_or(|d| d == want) { return false; }
+    let Some(mut b) = buffers.get_mut(buf) else { return false };
+    if let Some(d) = b.data.as_mut().and_then(|d| d.get_mut(at..at + 4)) { d.copy_from_slice(&want); }
+    true
+}
+
+/// The point-light bank as the game tick left it (`rc_game::point_lights`, written by crate::gameplay after every
+/// tick): what MobyProc merges into the mobys' third light.
+#[derive(Resource, Default, Clone)]
+pub struct PointLightFrame(pub Vec<rc_game::point_lights::PointLight>);
+
+/// MobyProc's point-light merge (0x26aa.., docs/plan/moby_skinning_lighting.md "Point lights"): for every light j
+/// whose distance δ_j from the moby's sphere centre `c` (world units) is below its radius R_j, `a_j = 1 − δ_j/R_j`
+/// and the model-space direction to it `ℓ_j = Rᵀ·(x_j − c)/δ_j` (`rows` = moby+0xc0.., row i = image of model axis i);
+/// the third light is `C_2 = Σ a_j·colour_j`, `L_2 = normalize(Σ a_j·ℓ_j)` (one light: its own ℓ), K_2 = 0 (no
+/// back light). None: no light in range (C_2 = 0).
+pub fn point_light_merge(lights: &[rc_game::point_lights::PointLight], c: [f32; 3], rows: &[[f32; 3]; 3]) -> Option<([f32; 3], [f32; 3])> {
+    let (mut col, mut dir, mut n) = ([0.0f32; 3], [0.0f32; 3], 0);
+    for l in lights {
+        let d = [l.pos[0] - c[0], l.pos[1] - c[1], l.pos[2] - c[2]];
+        let delta = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if delta >= l.radius || delta.is_nan() || delta == 0.0 { continue; }
+        let a = 1.0 - delta / l.radius;
+        let ell: [f32; 3] = std::array::from_fn(|i| (rows[i][0] * d[0] + rows[i][1] * d[1] + rows[i][2] * d[2]) / delta);
+        for k in 0..3 {
+            col[k] += a * l.color[k];
+            dir[k] += a * ell[k];
+        }
+        n += 1;
+    }
+    if n == 0 { return None; }
+    let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+    if len > 0.0 { dir = dir.map(|x| x / len); }
+    Some((dir, col))
+}
+
+/// Writes the merged point light (or none) into a `MobyInst` record: lane z of the three light rows, colour 2 and
+/// −|K_2| = 0. True when the record changed.
+pub fn write_point_light(rec: &mut [u8], merged: Option<([f32; 3], [f32; 3])>) -> bool {
+    let (dir, col) = merged.unwrap_or(([0.0; 3], [0.0; 3]));
+    let mut changed = false;
+    let mut put = |o: usize, v: f32| {
+        if let Some(d) = rec.get_mut(o..o + 4) {
+            let b = v.to_le_bytes();
+            if d != b { d.copy_from_slice(&b); changed = true; }
+        }
+    };
+    for (j, &x) in dir.iter().enumerate() { put(64 + 16 * j + 8, x); }
+    for (k, &x) in col.iter().enumerate() { put(64 + 48 + 32 + 4 * k, x); }
+    put(64 + 96 + 8, 0.0);
+    changed
+}
+
 pub struct MobyRenderPlugin;
 
 impl Plugin for MobyRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((MaterialPlugin::<MobyMaterial>::default(), MaterialPlugin::<MobyMetalMaterial>::default(), moby_anim::MobyAnimPlugin))
+            .init_resource::<PointLightFrame>()
             .add_systems(Startup, spawn_system)
             .add_systems(
                 PostUpdate,
@@ -382,6 +579,7 @@ struct Stats {
 
 /// One mesh of a class: texture key (moby texture table index or [`GREY`]), mesh, range of its vertices'
 /// multiplier alphas.
+#[derive(Clone)]
 struct Part {
     texture: usize,
     mesh: Handle<Mesh>,
@@ -661,9 +859,15 @@ fn spawn_mobys(
     commands.insert_resource(MobyAnim::new(animate, anims, palette.clone(), palette_len));
 
     let fog = crate::game_camera::TfragFog::new(&level.fog);
-    let mut mats: HashMap<(usize, GsPass), Handle<MobyMaterial>> = HashMap::new();
+    let mut cache = MatCache::new(MatProto {
+        fog,
+        instances: inst_buffer.clone(),
+        palette: palette.clone(),
+        normal_table: normal_table.clone(),
+        cpu_colors: cpu_colors.clone(),
+        lods: lods.clone(),
+    });
     let mut metal_mats: HashMap<(i32, GsPass), Handle<MobyMetalMaterial>> = HashMap::new();
-    let mut imgs: HashMap<usize, (Handle<Image>, AlphaRange)> = HashMap::new();
     let mut metal_imgs: HashMap<i32, (Handle<Image>, AlphaRange)> = HashMap::new();
 
     // Sanity bounds: the tfrag bounding spheres (integer units, /1024), padded by 50 units.
@@ -675,7 +879,7 @@ fn spawn_mobys(
     }
     let (lo, hi) = (lo - 50.0, hi + 50.0);
 
-    let mut batches = HashSet::new();
+    let mut metal_batches = 0usize;
     let mut draws: Vec<InstanceDraws> = Vec::with_capacity(m.instances.len());
     for (ii, (inst, p)) in m.instances.iter().zip(&m.placed).enumerate() {
         let Some(p) = p else { st.no_class += 1; draws.push(InstanceDraws::default()); continue };
@@ -698,52 +902,25 @@ fn spawn_mobys(
             }),
             class: p.class,
             class_sphere: class.class.header.bsphere,
+            translation: transform.translation,
             ..default()
         };
-        // Groups: 0 high, 1 high fading, 2 low, 3 low fading.
-        for (g, list) in [(0usize, high), (1, high), (2, low), (3, low)] {
-            if g >= 1 && !lod_on { break; }
-            for part in list.iter() {
-                if g == 0 { st.triangles += part.triangles; if part.texture == GREY { st.grey += part.triangles; } }
-                if g == 2 { st.low_triangles += part.triangles; }
-                let (image, texel_alpha) = imgs.entry(part.texture).or_insert_with(|| moby_image(level, part.texture, images)).clone();
-                let passes = if g % 2 == 0 {
-                    gs_state::draws(gs_state::AREF_WORLD, texel_alpha, part.mult_alpha)
-                } else {
-                    // Vertex alpha (fade·moby+0x23 >> 7 = 0..0x7f) × multiplier >> 7.
-                    let fade = AlphaRange { min: 0, max: ((0x7f * part.mult_alpha.max as u32) >> 7) as u8 };
-                    gs_state::draws(moby_lod::AREF_FADE, texel_alpha, fade)
-                };
-                for pass in passes {
-                    let mat = mats
-                        .entry((part.texture, pass))
-                        .or_insert_with(|| {
-                            materials.add(MobyMaterial {
-                                texture: image.clone(),
-                                fog,
-                                instances: inst_buffer.clone(),
-                                palette: palette.clone(),
-                                normal_table: normal_table.clone(),
-                                cpu_colors: cpu_colors.clone(),
-                                lods: lods.clone(),
-                                pass,
-                            })
-                        })
-                        .clone();
-                    batches.insert((part.mesh.id(), mat.id().untyped()));
-                    let e = commands.spawn((
-                        Mesh3d(part.mesh.clone()),
-                        MeshMaterial3d(mat),
-                        transform,
-                        MeshTag(ii as u32),
-                        NoFrustumCulling,
-                        if g == 0 { Visibility::Inherited } else { Visibility::Hidden },
-                        Name::new(format!("moby {ii} class {} group {g} tex {} {pass:?}", inst.o_class, part.texture as isize)),
-                    ));
-                    d.groups[g].push(e.id());
-                    st.group_entities[g] += 1;
-                    st.entities += 1;
-                }
+        // The eager groups: high and low LOD, each plain and fading (the other MobyBlend groups are spawned when an
+        // instance first needs them, update_moby_occlusion).
+        for (low, list) in [(false, high), (true, low)] {
+            if low && !lod_on { break; }
+            if low { st.low_triangles += list.iter().map(|p| p.triangles).sum::<usize>(); } else {
+                st.triangles += list.iter().map(|p| p.triangles).sum::<usize>();
+                st.grey += list.iter().filter(|p| p.texture == GREY).map(|p| p.triangles).sum::<usize>();
+            }
+            for blend in [MobyBlend::Plain, MobyBlend::Fading] {
+                if blend == MobyBlend::Fading && !lod_on { continue; }
+                let vis = if !low && blend == MobyBlend::Plain { Visibility::Inherited } else { Visibility::Hidden };
+                let name = format!("moby {ii} class {} {} {blend:?}", inst.o_class, if low { "low" } else { "high" });
+                let ents = cache.spawn(commands, level, list, blend, transform, ii as u32, vis, &name, images, materials);
+                st.group_entities[(low as usize) * 2 + (blend == MobyBlend::Fading) as usize] += ents.len();
+                st.entities += ents.len();
+                d.groups.insert(GroupKey { low, blend }, ents);
             }
         }
         for part in metal.iter() {
@@ -764,7 +941,7 @@ fn spawn_mobys(
                         })
                     })
                     .clone();
-                batches.insert((part.mesh.id(), mat.id().untyped()));
+                metal_batches += 1;
                 let e = commands.spawn((
                     Mesh3d(part.mesh.clone()),
                     MeshMaterial3d(mat),
@@ -785,13 +962,20 @@ fn spawn_mobys(
         }
         draws.push(d);
     }
-    let shown = draws.iter().map(|d| d.input.map(|_| Shown { group: 0, metal: false })).collect();
+    let shown = draws.iter().map(|d| d.input.map(|_| Shown { group: GroupKey { low: false, blend: MobyBlend::Plain }, metal: false })).collect();
     let n_inst = m.instances.len();
+    st.batches = cache.batches.len() + metal_batches;
+    st.images = cache.images.len() + metal_imgs.len();
     commands.insert_resource(MobyOcclusion {
         records: rec,
         instances: inst_buffer.clone(),
         driven_hidden: vec![false; n_inst],
         records_dirty: false,
+        look: vec![(0x80, 0); n_inst],
+        moved: vec![false; n_inst],
+        lit_by_point: vec![false; n_inst],
+        class_parts: parts.into_iter().map(|(ci, (high, low, _))| (ci, [high.0, low])).collect(),
+        cache,
         bits: level.occlusion.objects.moby.clone(),
         anim_index,
         draws,
@@ -804,8 +988,6 @@ fn spawn_mobys(
         last_hist: None,
         last_print: f32::MIN,
     });
-    st.batches = batches.len();
-    st.images = imgs.len() + metal_imgs.len();
     st.build = t0.elapsed();
     st
 }
@@ -818,15 +1000,24 @@ struct InstanceDraws {
     class: usize,
     /// Class header 0x30 (packed units): the sphere when a sequence is missing.
     class_sphere: [f32; 4],
-    /// High, high fading, low, low fading.
-    groups: [Vec<Entity>; 4],
+    /// The entity groups spawned so far, by LOD and GS state.
+    groups: BTreeMap<GroupKey, Vec<Entity>>,
     metal: Vec<Entity>,
+    /// The translation the entities carry (the Transparent3d sort key), updated when a driven instance moves.
+    translation: Vec3,
+}
+
+/// One entity group of an instance: LOD and GS state ([`MobyBlend`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct GroupKey {
+    low: bool,
+    blend: MobyBlend,
 }
 
 /// What an instance shows: its entity group and whether the metal pass is on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Shown {
-    group: u8,
+    group: GroupKey,
     metal: bool,
 }
 
@@ -839,6 +1030,15 @@ pub struct MobyOcclusion {
     instances: Handle<ShaderBuffer>,
     /// Per instance: hidden by the moby loop (deleted, or mode & 1): MobyProc skips it.
     driven_hidden: Vec<bool>,
+    /// Per instance: moby+0x23 and moby+0x34 (MobyProc's alpha and GS mode bits), set by [`MobyOcclusion::look`].
+    look: Vec<(u8, u16)>,
+    /// Per instance: the driven position moved since the entities' translation was last written.
+    moved: Vec<bool>,
+    /// Per instance: its record holds a merged point light (cleared when no light reaches it any more).
+    lit_by_point: Vec<bool>,
+    /// Per class: high and low LOD parts (for the groups spawned on first use).
+    class_parts: HashMap<usize, [Vec<Part>; 2]>,
+    cache: MatCache,
     records_dirty: bool,
     bits: Vec<OcclBits>,
     anim_index: Vec<Option<usize>>,
@@ -854,18 +1054,24 @@ pub struct MobyOcclusion {
 }
 
 /// `MobyProc` for every placed instance (module doc): the occlusion test (after the "dead" check, which no
-/// static instance fails in the port), then crate::moby_lod. Changes `Visibility` only when an instance's
-/// pick changes, and rewrites the `MobyLod` buffer when it changes.
+/// static instance fails in the port), then crate::moby_lod, then the GS state ([`MobyBlend`], from moby+0x23 /
+/// +0x34 and the fade). Changes `Visibility` only when an instance's pick changes (spawning a group the first time
+/// it is needed), moves a driven instance's entities with it (the blended phase sorts by their translation), and
+/// rewrites the `MobyLod` buffer when it changes.
 #[allow(clippy::too_many_arguments)]
 pub fn update_moby_occlusion(
+    mut commands: Commands,
     state: Option<ResMut<MobyOcclusion>>,
     occl: Option<ResMut<crate::occlusion::OcclusionFrame>>,
     mut anim: Option<ResMut<MobyAnim>>,
     level: Res<crate::Level>,
     cams: Query<&Transform, (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut vis: Query<&mut Visibility>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<MobyMaterial>>,
+    mut ents_q: Query<(&mut Visibility, &mut Transform), Without<Camera3d>>,
     time: Res<Time<Real>>,
+    point_lights: Res<PointLightFrame>,
 ) {
     let Some(mut state) = state else { return };
     let mask = occl.as_ref().map(|o| o.mask);
@@ -878,9 +1084,11 @@ pub fn update_moby_occlusion(
     let mut lod_bytes = vec![0u8; s.last_lod.len()];
     // hist: occluded, culled (distance, near, frustum), high, high fading, low, low fading, metal.
     let mut hist = [0usize; 9];
-    for (ii, d) in s.draws.iter().enumerate() {
+    for (ii, d) in s.draws.iter_mut().enumerate() {
         let rec = &mut lod_bytes[ii * moby_lod::LOD_RECORD_SIZE..(ii + 1) * moby_lod::LOD_RECORD_SIZE];
-        let Some(inp) = d.input else { moby_lod::write_lod_record(rec, 0x80, 0, 0, &[[0.0; 3]; 3]); continue };
+        let Some(mut inp) = d.input else { moby_lod::write_lod_record(rec, 0x80, 0, 0, &[[0.0; 3]; 3]); continue };
+        let (alpha_byte, mode) = s.look[ii];
+        inp.alpha = alpha_byte;
         let k = s.anim_index[ii];
         let (want, pick, sphere) = if s.driven_hidden[ii] {
             (None, None, None)
@@ -897,7 +1105,7 @@ pub fn update_moby_occlusion(
             let result = if s.lod_on {
                 moby_lod::moby_proc(v, sphere[3], &inp)
             } else {
-                Ok(ProcPick { low_lod: false, alpha: 0x80, fading: false, shine: moby_lod::shine_alpha(moby_lod::sphere_depth(v, sphere[3]), inp.shine_distance) })
+                Ok(ProcPick { low_lod: false, alpha: inp.alpha, fading: false, shine: moby_lod::shine_alpha(moby_lod::sphere_depth(v, sphere[3]), inp.shine_distance) })
             };
             match result {
                 Err(c) => {
@@ -905,16 +1113,17 @@ pub fn update_moby_occlusion(
                     (None, None, None)
                 }
                 Ok(p) => {
-                    let group = (p.low_lod as u8) * 2 + p.fading as u8;
+                    let group = GroupKey { low: p.low_lod, blend: MobyBlend::pick(mode, p.fading, p.alpha) };
                     let hidden = k.zip(anim.as_ref()).is_some_and(|(k, a)| a.hidden[k]);
                     let metal = s.metal_on && p.shine > 0 && !d.metal.is_empty() && !hidden;
-                    hist[4 + group as usize] += 1;
+                    hist[4 + (p.low_lod as usize) * 2 + (group.blend != MobyBlend::Plain) as usize] += 1;
                     if metal { hist[8] += 1; }
                     (Some(Shown { group, metal }), Some(p), Some((sphere, eye, rows)))
                 }
             }
         } else {
-            (Some(Shown { group: 0, metal: false }), None, None)
+            let blend = MobyBlend::pick(mode, false, inp.alpha);
+            (Some(Shown { group: GroupKey { low: false, blend }, metal: false }), None, None)
         };
         let (alpha, flags, shine, e) = match (pick, want) {
             (Some(p), Some(w)) => {
@@ -924,24 +1133,66 @@ pub fn update_moby_occlusion(
                 };
                 (p.alpha, if s.tint && p.low_lod { moby_lod::FLAG_TINT } else { 0 }, if w.metal { p.shine } else { 0 }, e)
             }
+            (None, Some(_)) => (inp.alpha, 0, 0, [[0.0; 3]; 3]),
             _ => (0x80, 0, 0, [[0.0; 3]; 3]),
         };
         moby_lod::write_lod_record(rec, alpha, flags, shine, &e);
+        // The point lights in range of the sphere centre become the third light (none: cleared).
+        if !point_lights.0.is_empty() || s.lit_by_point[ii] {
+            let merged = sphere.and_then(|(sp, _, _)| point_light_merge(&point_lights.0, [sp[0] / crate::game_camera::UNITS, sp[1] / crate::game_camera::UNITS, sp[2] / crate::game_camera::UNITS], &inp.rows));
+            s.lit_by_point[ii] = merged.is_some();
+            let at = ii * RECORD_SIZE;
+            if let Some(r) = s.records.get_mut(at..at + RECORD_SIZE) {
+                if write_point_light(r, merged) { s.records_dirty = true; }
+            }
+        }
 
+        // The group this pick shows, spawned on first use.
+        if let Some(w) = want {
+            if !d.groups.contains_key(&w.group) {
+                let parts = s.class_parts.get(&d.class).map(|p| &p[w.group.low as usize][..]).unwrap_or(&[]);
+                let name = format!("moby {ii} class {} {} {:?}", d.class, if w.group.low { "low" } else { "high" }, w.group.blend);
+                let t = Transform::from_translation(d.translation);
+                let ents = s.cache.spawn(&mut commands, &level.0, parts, w.group.blend, t, ii as u32, Visibility::Hidden, &name, &mut images, &mut materials);
+                d.groups.insert(w.group, ents);
+            }
+        }
         let was = s.shown[ii];
+        let moved = std::mem::take(&mut s.moved[ii]);
+        if moved {
+            if let Some(ents) = want.and_then(|w| d.groups.get(&w.group)) {
+                for &e in ents {
+                    if let Ok((_, mut t)) = ents_q.get_mut(e) { t.translation = d.translation; }
+                }
+            }
+        }
         if want == was { continue; }
         s.shown[ii] = want;
-        let set = |ents: &[Entity], on: bool, vis: &mut Query<&mut Visibility>| {
+        for (g, ents) in d.groups.iter() {
+            let (on, before) = (want.is_some_and(|w| w.group == *g), was.is_some_and(|w| w.group == *g));
+            if on == before { continue; }
             for &e in ents {
-                if let Ok(mut v) = vis.get_mut(e) { *v = if on { Visibility::Inherited } else { Visibility::Hidden }; }
+                // A group spawned this frame is not in the world yet: its commands follow.
+                match ents_q.get_mut(e) {
+                    Ok((mut v, mut t)) => {
+                        *v = if on { Visibility::Inherited } else { Visibility::Hidden };
+                        if on { t.translation = d.translation; }
+                    }
+                    Err(_) => {
+                        if on { commands.entity(e).insert(Visibility::Inherited); }
+                    }
+                }
             }
-        };
-        for (g, ents) in d.groups.iter().enumerate() {
-            let (on, before) = (want.is_some_and(|w| w.group as usize == g), was.is_some_and(|w| w.group as usize == g));
-            if on != before { set(ents, on, &mut vis); }
         }
         let (on, before) = (want.is_some_and(|w| w.metal), was.is_some_and(|w| w.metal));
-        if on != before { set(&d.metal, on, &mut vis); }
+        if on != before {
+            for &e in &d.metal {
+                if let Ok((mut v, mut t)) = ents_q.get_mut(e) {
+                    *v = if on { Visibility::Inherited } else { Visibility::Hidden };
+                    if on { t.translation = d.translation; }
+                }
+            }
+        }
         if want.is_some() != was.is_some() {
             if let (Some(a), Some(k)) = (anim.as_mut(), k) {
                 a.instances[k].visible = want.is_some();
@@ -964,7 +1215,7 @@ pub fn update_moby_occlusion(
         s.last_print = now;
         s.last_hist = Some(hist);
         println!(
-            "moby LODs: occluded {}, culled {} (draw distance {}, near {}, frustum {}), high {} (+{} fading), low {} (+{} fading), metal pass {}",
+            "moby LODs: occluded {}, culled {} (draw distance {}, near {}, frustum {}), high {} (+{} fading/translucent), low {} (+{} fading/translucent), metal pass {}",
             hist[0], hist[1] + hist[2] + hist[3], hist[1], hist[2], hist[3], hist[4], hist[5], hist[6], hist[7], hist[8]
         );
     }
@@ -1059,6 +1310,48 @@ mod tests {
         (pairs, edges, acyclic)
     }
 
+    /// MobyProc's per-moby choice: mode 0x200 wins (additive), then the fade / mode bit 8, then the alpha byte.
+    #[test]
+    fn moby_blend_pick_and_draws() {
+        assert_eq!(MobyBlend::pick(0, false, 0x80), MobyBlend::Plain);
+        assert_eq!(MobyBlend::pick(0, false, 0x30), MobyBlend::Translucent);
+        assert_eq!(MobyBlend::pick(0, true, 0x30), MobyBlend::Fading);
+        assert_eq!(MobyBlend::pick(8, false, 0x80), MobyBlend::Fading);
+        assert_eq!(MobyBlend::pick(0x200, true, 0x80), MobyBlend::Additive);
+        let o = AlphaRange::OPAQUE;
+        assert_eq!(MobyBlend::Plain.passes(o, o), vec![GsPass::Opaque]);
+        assert_eq!(MobyBlend::Translucent.passes(o, o), vec![GsPass::BlendNoZ]);
+        assert_eq!(MobyBlend::Additive.passes(o, o), vec![GsPass::AdditiveNoZ]);
+        assert!(!GsPass::BlendNoZ.state().depth_write && !GsPass::AdditiveNoZ.state().depth_write);
+        assert!(GsPass::AdditiveNoZ.state().additive);
+    }
+
+    /// The point-light merge: out of range → none; one light → its colour × (1 − δ/R) along the model-space
+    /// direction to it; two → the weighted sum, direction renormalised.
+    #[test]
+    fn point_light_merge_weights() {
+        use rc_game::point_lights::PointLight;
+        let id = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let l = PointLight { color: [2.0, 1.0, 0.0], intensity: 0.0, pos: [5.0, 0.0, 0.0], radius: 10.0 };
+        assert_eq!(point_light_merge(&[l], [20.0, 0.0, 0.0], &id), None);
+        let (d, c) = point_light_merge(&[l], [0.0, 0.0, 0.0], &id).unwrap();
+        assert_eq!(d, [1.0, 0.0, 0.0]);
+        assert_eq!(c, [1.0, 0.5, 0.0]);
+        // A moby turned 90° about z (model x = world y): the light at world +x is at model −y.
+        let rot = [[0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
+        let (d, _) = point_light_merge(&[l], [0.0; 3], &rot).unwrap();
+        assert!((d[0]).abs() < 1e-6 && (d[1] + 1.0).abs() < 1e-6, "{d:?}");
+        let l2 = PointLight { pos: [0.0, 5.0, 0.0], ..l };
+        let (d, c) = point_light_merge(&[l, l2], [0.0; 3], &id).unwrap();
+        assert!((d[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6 && (d[1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+        assert_eq!(c, [2.0, 1.0, 0.0]);
+        let mut rec = vec![0u8; RECORD_SIZE];
+        assert!(write_point_light(&mut rec, Some(([1.0, 0.0, 0.0], [1.0, 0.5, 0.0]))));
+        assert_eq!(f32::from_le_bytes(rec[72..76].try_into().unwrap()), 1.0);
+        assert_eq!(f32::from_le_bytes(rec[148..152].try_into().unwrap()), 0.5);
+        assert!(!write_point_light(&mut rec, Some(([1.0, 0.0, 0.0], [1.0, 0.5, 0.0]))));
+    }
+
     /// Measurement for the within-class draw order question (gs_state.rs "Packet order"): how many
     /// coplanar, overlapping triangle pairs of Ratchet (class 0) and class 577 come from different texture
     /// batches. Needs the disc data; skipped without it.
@@ -1118,13 +1411,28 @@ pub struct ExtraMobys {
     pub instances: Handle<ShaderBuffer>,
     pub palette: Handle<ShaderBuffer>,
     normal_table: Handle<ShaderBuffer>,
-    cpu_colors: Handle<ShaderBuffer>,
-    /// `MobyLod` per slot (α 0x80; shine alpha and E written by update_extra_metal).
+    /// `MobyLod` per slot (vertex alpha from [`ExtraMobys::show_slot`], else 0x80; shine alpha and E written by
+    /// update_extra_metal).
     lods: Handle<ShaderBuffer>,
     fog: crate::game_camera::TfragFog,
-    images: HashMap<usize, (Handle<Image>, AlphaRange)>,
-    materials: HashMap<(usize, GsPass), Handle<MobyMaterial>>,
+    cache: MatCache,
     metal_images: HashMap<i32, (Handle<Image>, AlphaRange)>,
+    /// High-LOD parts per class (`o_class`), built on first use.
+    parts: HashMap<i32, Vec<Part>>,
+    /// [`ExtraMobys::show_slot`]: entities per (slot, class, blend), spawned on first use, and what each slot shows.
+    slot_ents: HashMap<(u32, i32, MobyBlend), Vec<Entity>>,
+    slot_shown: HashMap<u32, ((i32, MobyBlend), Vec3)>,
+}
+
+/// What a slot of an extra record set shows ([`ExtraMobys::show_slot`]).
+#[derive(Clone, Copy, Debug)]
+pub struct SlotLook {
+    /// The moby's placement (`extra_model`): its translation is the blended phase's sort key.
+    pub model: Mat4,
+    /// moby+0x23 × the distance fade (the vertex alpha), MobyProc's `fading` and moby+0x34.
+    pub alpha: u8,
+    pub fading: bool,
+    pub mode: u16,
 }
 
 /// A metal entity of an extra instance: where update_extra_metal reads its placement and writes its shine.
@@ -1147,16 +1455,25 @@ impl ExtraMobys {
             None => vec![0; 256 * 8],
         };
         let slots = records.len() / RECORD_SIZE;
-        ExtraMobys {
+        let proto = MatProto {
+            fog: crate::game_camera::TfragFog::new(&level.fog),
             instances: buffers.add(ShaderBuffer::new(&records, RenderAssetUsages::default())),
             palette: buffers.add(ShaderBuffer::new(&palette, RenderAssetUsages::default())),
             normal_table: buffers.add(ShaderBuffer::new(&table_bytes, RenderAssetUsages::RENDER_WORLD)),
             cpu_colors: buffers.add(ShaderBuffer::new(&[0u8; 16], RenderAssetUsages::RENDER_WORLD)),
             lods: buffers.add(ShaderBuffer::new(&moby_lod::default_lod_records(slots), RenderAssetUsages::default())),
-            fog: crate::game_camera::TfragFog::new(&level.fog),
-            images: HashMap::new(),
-            materials: HashMap::new(),
+        };
+        ExtraMobys {
+            instances: proto.instances.clone(),
+            palette: proto.palette.clone(),
+            normal_table: proto.normal_table.clone(),
+            lods: proto.lods.clone(),
+            fog: proto.fog,
+            cache: MatCache::new(proto),
             metal_images: HashMap::new(),
+            parts: HashMap::new(),
+            slot_ents: HashMap::new(),
+            slot_shown: HashMap::new(),
         }
     }
 
@@ -1180,38 +1497,8 @@ impl ExtraMobys {
         images: &mut Assets<Image>,
         materials: &mut Assets<MobyMaterial>,
     ) -> Vec<Entity> {
-        let (parts, _) = build_parts(class, &class.class.high_lod, false, meshes);
-        let mut out = Vec::new();
-        for part in &parts {
-            let (image, texel_alpha) = self.images.entry(part.texture).or_insert_with(|| moby_image(level, part.texture, images)).clone();
-            for pass in gs_state::draws(gs_state::AREF_WORLD, texel_alpha, part.mult_alpha) {
-                let mat = self
-                    .materials
-                    .entry((part.texture, pass))
-                    .or_insert_with(|| {
-                        materials.add(MobyMaterial {
-                            texture: image.clone(),
-                            fog: self.fog,
-                            instances: self.instances.clone(),
-                            palette: self.palette.clone(),
-                            normal_table: self.normal_table.clone(),
-                            cpu_colors: self.cpu_colors.clone(),
-                            lods: self.lods.clone(),
-                            pass,
-                        })
-                    })
-                    .clone();
-                let e = commands.spawn((
-                    Mesh3d(part.mesh.clone()),
-                    MeshMaterial3d(mat),
-                    transform,
-                    MeshTag(slot),
-                    NoFrustumCulling,
-                    Name::new(format!("{name} class {} tex {} {pass:?}", class.o_class, part.texture as isize)),
-                ));
-                out.push(e.id());
-            }
-        }
+        let parts = self.parts.entry(class.o_class).or_insert_with(|| build_parts(class, &class.class.high_lod, false, meshes).0).clone();
+        let mut out = self.cache.spawn(commands, level, &parts, MobyBlend::Plain, transform, slot, Visibility::Inherited, &format!("{name} class {}", class.o_class), images, materials);
         // The shine pass. The caller only lends the regular material store, so the metal materials are added
         // by a queued command.
         if moby_lod::metal_enabled() {
@@ -1247,6 +1534,50 @@ impl ExtraMobys {
             }
         }
         out
+    }
+}
+
+impl ExtraMobys {
+    /// Shows slot `slot` of this record set as `class` (None: nothing) with the blend its [`SlotLook`] asks for
+    /// ([`MobyBlend`]): the entities of that (class, blend) are spawned on first use (high LOD, no metal pass) and
+    /// shown, the slot's other entities hidden; the entities follow the model's translation (the blended phase's
+    /// sort key) and the slot's `MobyLod` vertex alpha is written. The record and palette are the caller's.
+    #[allow(clippy::too_many_arguments)]
+    pub fn show_slot(
+        &mut self,
+        commands: &mut Commands,
+        level: &LoadedLevel,
+        slot: u32,
+        view: Option<(&LevelMobyClass, SlotLook)>,
+        meshes: &mut Assets<Mesh>,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<MobyMaterial>,
+        buffers: &mut Assets<ShaderBuffer>,
+    ) {
+        let want = view.map(|(c, l)| ((c.o_class, MobyBlend::pick(l.mode, l.fading, l.alpha)), l.model.w_axis.truncate()));
+        let was = self.slot_shown.get(&slot).copied();
+        let (want_key, was_key) = (want.map(|w| w.0), was.map(|w| w.0));
+        if want_key != was_key {
+            if let Some(k) = was_key {
+                for &e in self.slot_ents.get(&(slot, k.0, k.1)).into_iter().flatten() { commands.entity(e).insert(Visibility::Hidden); }
+            }
+        }
+        let Some(((oc, blend), at)) = want else { self.slot_shown.remove(&slot); return };
+        let (class, look) = view.unwrap();
+        let t = Transform::from_translation(at);
+        let key = (slot, oc, blend);
+        if let Some(ents) = self.slot_ents.get(&key) {
+            if want_key != was_key || was.is_none_or(|w| w.1 != at) {
+                for &e in ents { commands.entity(e).insert((Visibility::Inherited, t)); }
+            }
+        } else {
+            let parts = self.parts.entry(oc).or_insert_with(|| build_parts(class, &class.class.high_lod, false, meshes).0).clone();
+            let name = format!("dynamic moby slot {slot} class {oc} {blend:?}");
+            let ents = self.cache.spawn(commands, level, &parts, blend, t, slot, Visibility::Inherited, &name, images, materials);
+            self.slot_ents.insert(key, ents);
+        }
+        self.slot_shown.insert(slot, ((oc, blend), at));
+        set_lod_alpha(buffers, &self.lods, slot as usize, look.alpha);
     }
 }
 
@@ -1287,7 +1618,10 @@ fn update_extra_metal(
         let shine = moby_lod::shine_alpha(moby_lod::sphere_depth(v, sphere[3]), inp.shine_distance);
         let e = moby_lod::shine_basis(sphere, eye, &cam, &rows);
         let mut rec = [0u8; moby_lod::LOD_RECORD_SIZE];
-        moby_lod::write_lod_record(&mut rec, 0x80, 0, shine, &e);
+        // The vertex alpha is the slot's own (show_slot); only the shine fields are this system's.
+        let at = x.slot as usize * moby_lod::LOD_RECORD_SIZE;
+        let alpha = buffers.get(&x.lods).and_then(|b| b.data.as_ref()).and_then(|d| d.get(at..at + 4)).map_or(0x80, |d| d[0]);
+        moby_lod::write_lod_record(&mut rec, alpha, 0, shine, &e);
         writes.push((x.lods.clone(), x.slot, rec));
     }
     for (h, slot, rec) in writes {
@@ -1300,6 +1634,12 @@ fn update_extra_metal(
 }
 
 impl MobyOcclusion {
+    /// moby+0x23 (alpha) and moby+0x34 (mode bits) of static instance `ii` this tick: MobyProc's vertex alpha and
+    /// blend mode ([`MobyBlend`]).
+    pub fn look(&mut self, ii: usize, alpha: u8, mode: u16) {
+        if let Some(l) = self.look.get_mut(ii) { *l = (alpha, mode); }
+    }
+
     /// The `MobyAnim` instance of gameplay instance `ii` (None without geometry).
     pub fn anim_index(&self, ii: usize) -> Option<usize> { self.anim_index.get(ii).copied().flatten() }
 }
@@ -1324,6 +1664,11 @@ impl MobyOcclusion {
             inp.position = position;
             inp.rows = rows;
             inp.scale = scale;
+        }
+        let at = game_to_bevy(position);
+        if at != d.translation {
+            d.translation = at;
+            self.moved[ii] = true;
         }
         self.driven_hidden[ii] = hidden;
         let mut rec = Vec::with_capacity(RECORD_SIZE);

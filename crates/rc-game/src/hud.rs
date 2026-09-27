@@ -163,6 +163,9 @@ pub enum Element {
     Bolts,
     /// 0x24f368 / 0x2519c0 / 0x24f3b0, data 0x13d428 + 4·item (ammo), max = item table +6.
     Weapon { item: u16 },
+    /// The context prompt, slot 12: init 0x24c828, update 0x24c878 (the generic ramp 0x24b538), draw 0x24c898
+    /// (Lombyte `HudRaceTimerDraw`), no data (docs/plan/interaction.md §2).
+    Prompt,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -290,6 +293,13 @@ pub struct HudState {
     pub bolt_anim: i16,
     /// 0x15f970 / 0x15f96c: the weapon slot's request handle and item.
     weapon_handle: Option<u32>,
+    /// The context prompt this tick (`PromptTick` 0x278eb8 / `NpcTalkUpdate`: an owner holds a message) and the
+    /// text buffer 0x17e9b0 the draw prints ([`HudState::set_prompt`]).
+    pub prompt_show: bool,
+    pub prompt_text: Vec<u8>,
+    /// The bolt counter kept up (`queue_animation_update(0x12, …)`: flag 0x10) while the vendor is open.
+    pub bolts_pinned: bool,
+    bolts_pin_handle: Option<u32>,
     pub banner: Banner,
     pub help: Help,
     /// △ pressed this tick (pad 0x13cae4 bit 0x10): skips the help box.
@@ -308,6 +318,10 @@ impl HudState {
             health_anim: [0; 4],
             bolt_anim: 0,
             weapon_handle: None,
+            prompt_show: false,
+            prompt_text: Vec::new(),
+            bolts_pinned: false,
+            bolts_pin_handle: None,
             banner: Banner { y: 100, ..Default::default() },
             help: Help::default(),
             triangle: false,
@@ -369,7 +383,28 @@ impl HudState {
                 s.timer = scale_ticks(120) + 30;
                 self.init_value(slot);
             }
+            Element::Prompt => {
+                // 0x24c828: offset 0, timer ScaleTicks(10) + 30, size 32×32.
+                s.offset = (0, 0);
+                s.timer = scale_ticks(10) + 30;
+                self.init_value(slot);
+            }
         }
+    }
+
+    /// `FUN_0024b4b0(handle, n)`: the slot holding `handle`, when its request is applied, keeps its timer at ≥ n;
+    /// false when there is no such slot or it is still pending.
+    pub fn keep_up(&mut self, handle: u32, n: i32) -> bool {
+        // (The port's handles start at 0 like the empty slots' default: only a slot holding an element matches.)
+        let Some(s) = self.slots.iter_mut().find(|s| s.handle == handle && !s.pending && s.element != Element::Empty) else { return false };
+        s.timer = s.timer.max(n);
+        true
+    }
+
+    /// The context prompt of this tick and its text (the engine: `moby_update::interact`).
+    pub fn set_prompt(&mut self, show: bool, text: &[u8]) {
+        self.prompt_show = show;
+        if self.prompt_text != text { self.prompt_text = text.to_vec(); }
     }
 
     /// The element's data word (`*data`).
@@ -379,6 +414,7 @@ impl HudState {
             Element::Health => self.inputs.hp,
             Element::Bolts => self.inputs.bolts,
             Element::Weapon { .. } => self.inputs.weapon.map_or(0, |w| w.1),
+            Element::Prompt => 99999,
         }
     }
 
@@ -413,6 +449,20 @@ impl HudState {
             if inputs.bolts != bolts { self.queue(2, icon::BOLT_SLOT, Element::Bolts, 9_999_999); }
         }
         self.last = Some((inputs.hp, inputs.bolts));
+        // PromptTick 0x278eb8's slot part (and NpcTalkUpdate's): slot 12 requested, or kept up for 10 ticks.
+        if self.prompt_show {
+            let h = self.queue(12, 0, Element::Prompt, 0);
+            self.keep_up(h, scale_ticks(10));
+        }
+        // The vendor's bolt counter (OpenVendorMenu: slot 2 | 0x10; VendorExit: flags 0).
+        match (self.bolts_pinned, self.bolts_pin_handle) {
+            (true, None) => self.bolts_pin_handle = Some(self.queue(0x12, icon::BOLT_SLOT, Element::Bolts, 9_999_999)),
+            (false, Some(h)) => {
+                self.set_flags(h, 0);
+                self.bolts_pin_handle = None;
+            }
+            _ => {}
+        }
         self.help_update();
         self.update_slots();
         self.triangle = false;
@@ -442,6 +492,12 @@ impl HudState {
                 Element::Health => self.update_health(i),
                 Element::Bolts => self.update_bolts(i),
                 Element::Weapon { .. } => self.update_weapon(i),
+                Element::Prompt => {
+                    // 0x24b538 with no data: the ramp only (steps ScaleTicks(8)).
+                    let s = &mut self.slots[i];
+                    let down = s.timer < scale_ticks(5);
+                    Self::ramp(s, scale_ticks(8), scale_ticks(8), down);
+                }
             }
         }
     }
@@ -622,6 +678,7 @@ impl HudState {
                 Element::Health => self.draw_health(i, out),
                 Element::Bolts => self.draw_bolts(i, out),
                 Element::Weapon { .. } => self.draw_weapon(i, out),
+                Element::Prompt => self.draw_prompt(i, out),
             }
         }
         self.draw_banner(out);
@@ -743,6 +800,46 @@ impl HudState {
             self.text_right(x + dx - DIGIT_W * k + 2, y + dy + 2, shadow, sep, out);
             self.text_right(x + dx - DIGIT_W * k, y + dy, colour, sep, out);
             k += 3;
+        }
+    }
+
+    /// 0x24c898 (Lombyte `HudRaceTimerDraw`): the prompt text 0x17e9b0 in a bar frame, centred on x 256, at
+    /// y = 0x15f770 (32) + 18 (NTSC; 10 PAL). Alpha `trunc(128·slide/8)`, text colour `A << 24 | 0x40f040`
+    /// (green), regular font. A byte 0x01 splits it into two lines (frame 54 tall, second line 19 lower). The
+    /// Rilgar / Kalebo III best-time lines under it (levels 5 and 16, within 5 of the race start) are not ported.
+    fn draw_prompt(&self, i: usize, out: &mut Vec<Draw>) {
+        let s = &self.slots[i];
+        let y = 32 + ELEMENT_Y;
+        let f = (s.slide as f32 / scale_ticks(8) as f32).clamp(0.0, 1.0);
+        let a = (f * 128.0) as i32;
+        let colour = (a as u32) << 24 | 0x0040_f040;
+        let text = &self.prompt_text;
+        let (mid, cap) = (self.assets.icon_frame(icon::BAR, 0), self.assets.icon_frame(icon::BAR, 1));
+        let width = |t: &[u8]| self.assets.text_width(Font::Regular, t);
+        let centred = |t: &[u8], y: i32, out: &mut Vec<Draw>| out.push(Draw::Text { font: Font::Regular, x: 0x100 - (width(t) >> 1), y, rgba: colour, text: t.to_vec() });
+        // The scan stops at the first byte ≤ 1 from index 1 on.
+        let mut k = 0;
+        if text.first().is_some_and(|&c| c > 1) {
+            k = 1;
+            while k < 0x80 && text.get(k).is_some_and(|&c| c > 1) { k += 1; }
+        }
+        if text.get(k) == Some(&1) {
+            let (l1, l2) = (&text[..k], &text[k + 1..]);
+            let (w1, w2) = (width(l1), width(l2));
+            let (x1, x2) = (0xe0 - (w1 >> 1), 0xe0 - (w2 >> 1));
+            let (x, w) = if x2 <= x1 { (x2, w2) } else { (x1, w1) };
+            out.push(Self::sprite(mid, x + 0x20, y, w, 0x36, a, Rot::None));
+            out.push(Self::sprite(cap, x, y, 0x20, 0x36, a, Rot::None));
+            out.push(Self::sprite(cap, x + w + 0x20, y, 0x20, 0x36, a, Rot::R180));
+            centred(l1, y + 8, out);
+            centred(l2, y + 0x1b, out);
+        } else {
+            let w = width(text);
+            let x = 0xe0 - (w >> 1);
+            out.push(Self::sprite(cap, x, y, 0x20, 0x20, a, Rot::None));
+            out.push(Self::sprite(mid, 0x100 - (w >> 1), y, w, 0x20, a, Rot::None));
+            out.push(Self::sprite(cap, x + w + 0x20, y, 0x20, 0x20, a, Rot::R180));
+            centred(text, y + 8, out);
         }
     }
 
@@ -1015,6 +1112,32 @@ mod tests {
     }
 
     fn inputs(hp: i32, bolts: i32) -> Inputs { Inputs { hp, max_hp: 4, bolts, weapon: None, lang: 0 } }
+
+    /// The context prompt (slot 12, 0x24c898): requested while an owner holds it, slides in over 8 ticks (alpha
+    /// 16·slide), one or two lines in a bar frame centred on x 256 at y 50, and fades out once no longer requested.
+    #[test]
+    fn prompt_slot_12_shows_while_requested() {
+        let mut h = HudState::new(assets());
+        h.set_prompt(true, b"\x12 Activate");
+        let mut d = Vec::new();
+        for _ in 0..60 { d = h.tick(inputs(4, 0)); }
+        let s = &h.slots[12];
+        assert_eq!((s.element, s.slide), (Element::Prompt, 8));
+        let text: Vec<_> = d.iter().filter_map(|x| if let Draw::Text { y, rgba, text, .. } = x { Some((*y, *rgba, text.clone())) } else { None }).collect();
+        assert_eq!(text, vec![(58, 0x8040_f040, b"\x12 Activate".to_vec())]);
+        let sprites = d.iter().filter(|x| matches!(x, Draw::Sprite { y: 50, h: 32, alpha: 128, .. })).count();
+        assert_eq!(sprites, 3, "caps and middle");
+        // Two lines split at 0x01: frame 54 tall, the second line 19 lower.
+        h.set_prompt(true, b"Buy\x01now");
+        let d = h.tick(inputs(4, 0));
+        let ys: Vec<i32> = d.iter().filter_map(|x| if let Draw::Text { y, .. } = x { Some(*y) } else { None }).collect();
+        assert_eq!(ys, vec![58, 77]);
+        assert!(d.iter().any(|x| matches!(x, Draw::Sprite { h: 0x36, .. })));
+        // No longer requested: the timer (≥ 10) runs out, then alpha and slide ramp down.
+        h.set_prompt(false, b"");
+        for _ in 0..60 { h.tick(inputs(4, 0)); }
+        assert_eq!(h.slots[12].slide, 0);
+    }
 
     #[test]
     fn nothing_on_screen_until_something_changes() {

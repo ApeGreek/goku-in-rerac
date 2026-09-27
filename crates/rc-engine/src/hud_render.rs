@@ -341,6 +341,17 @@ struct HudCompositeNode;
 
 pub struct HudPlugin;
 
+/// What the "use" system feeds the HUD (crate::interact_render, set before [`HudBuild`]): the context prompt of
+/// slot 12 (`PromptTick` / `NpcTalkUpdate` requests and the text buffer 0x17e9b0), and while the vendor is open
+/// its bolt counter (slot 2 | 0x10) and ammo slot (slot 0: the selected ammo entry, `Some(None)` = none).
+#[derive(Resource, Default)]
+pub struct HudFeed {
+    pub prompt: bool,
+    pub prompt_text: Vec<u8>,
+    pub bolts_pinned: bool,
+    pub weapon: Option<Option<(u16, i32, i32)>>,
+}
+
 /// Other 2D layers drawn through this pass (crate::menu_render: the quick-select ring, which is HUD slot 3,
 /// and the mode-3 page menus). Set before [`HudBuild`] each frame.
 #[derive(Resource, Default)]
@@ -368,7 +379,7 @@ pub struct HudBuild;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Hud2dHook>().init_resource::<SceneLayer>();
+        app.init_resource::<Hud2dHook>().init_resource::<SceneLayer>().init_resource::<HudFeed>();
         if std::env::var("RC_HUD").is_ok_and(|v| v.trim() == "0") { return; }
         app.add_plugins((Material2dPlugin::<HudMaterial>::default(), UiMaterialPlugin::<HudComposite>::default()))
             .add_systems(Startup, setup)
@@ -473,6 +484,7 @@ fn tick_and_build(
     scene: Res<SceneLayer>,
     mut meshes: ResMut<Assets<Mesh>>,
     (state, session, held): GameInputs,
+    feed: Res<HudFeed>,
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
@@ -485,7 +497,10 @@ fn tick_and_build(
         }
         if let Some(s) = &session { rt.game.hp = s.0.hp; }
         rt.game.weapon = held.as_ref().and_then(|h| h.0);
+        if let Some(w) = feed.weapon { rt.game.weapon = w; }
     }
+    rt.state.set_prompt(feed.prompt, &feed.prompt_text);
+    rt.state.bolts_pinned = feed.bolts_pinned;
     let target = ticks.0;
     if hook.freeze || scene.hide_hud { rt.ticks_done = target; }
     // Catch up at most a second of ticks per frame.

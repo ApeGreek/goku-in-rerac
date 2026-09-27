@@ -9,10 +9,10 @@
 //! * [`light_spawn`] 0x2f3570 and [`light_update`] 0x2f3748: the explosion light moby (class 0x27f = 639).
 //! * [`rate_slot`] `0x2efbf8`: a small "busy until tick" table that rate-limits the death explosions.
 //!
-//! Particle types without a port (15 streaks, 8 puffs) get their pool record and the spawn's own draws at the game's
-//! point (type 15: a raw `rand()` for its frame byte), and are counted in `FxStats::part_spawns`; the particle system
-//! kills an unported type on its first update. The explosion light allocates a point light (`0x252750`), which the
-//! renderer does not have: the moby runs (its timer, view test and draws) but lights nothing.
+//! The particle spawners the effects call ([`part02`], [`part04`], [`part08`], [`part15`], [`part52`]) fill the game's
+//! records (`crate::particles::type02` …) and make the spawners' own draws at the game's point, and are counted in
+//! `FxStats::part_spawns`. Without a particle system (unit tests) the draws are made as if a record was free. The
+//! explosion light takes one of the eight point-light slots (`WritePointLight_B` 0x252750, [`crate::point_lights`]).
 
 use super::{add, cs, len3, scale, set_len3, sub, V};
 use crate::moby_runtime::{mode, MobyId};
@@ -42,16 +42,44 @@ pub fn part_unported(w: &mut World, ty: u8) -> bool {
     ok
 }
 
-/// `PartType15Spawn(size, pos, vel, c1, c2, life, …)` 0x280bd0: nothing for life 0; with a record, a raw `rand()`.
-fn part15(w: &mut World, life: i32) {
-    if life == 0 { return; }
-    if part_unported(w, 15) { w.rng.rand(); }
+/// A spawner call of type `ty`: `f` fills the record (and makes the spawner's draws) when there is a particle
+/// system; `draws` makes the same draws when there is none. Counted in `FxStats`; false when the pool was full.
+fn spawn_part(w: &mut World, ty: u8, draws: impl FnOnce(&mut crate::rng::Rng), f: impl FnOnce(&mut crate::particles::Particles, &mut crate::rng::Rng) -> Option<usize>) -> bool {
+    *w.svc.fx.part_spawns.entry(ty).or_default() += 1;
+    let Some(p) = w.particles.as_deref_mut() else {
+        draws(w.rng);
+        return true;
+    };
+    let ok = f(p, w.rng).is_some();
+    if !ok { w.svc.fx.part_failed += 1; }
+    ok
 }
 
-/// `PartType08Spawn(…, life)` 0x27f2b0: nothing for life 0; no draws.
-fn part08(w: &mut World, life: i32) {
-    if life == 0 { return; }
-    part_unported(w, 8);
+/// `PartType02Spawn` 0x27dc98 (the trail blob; `crate::particles::type02`): one `randf(0, 255)` with a record.
+pub fn part02(w: &mut World, a: &crate::particles::type02::Spawn) -> bool {
+    spawn_part(w, 2, |r| { r.randf(0.0, 255.0); }, |p, r| crate::particles::type02::spawn(p, r, a))
+}
+
+/// `PartType04Spawn` 0x27e538 (the smoke / fire puff; `crate::particles::type04`): one raw `rand()` with a record.
+pub fn part04(w: &mut World, a: &crate::particles::type04::Spawn) -> bool {
+    spawn_part(w, 4, |r| { r.rand(); }, |p, r| crate::particles::type04::spawn(p, r, a))
+}
+
+/// `PartType08Spawn(size, pos, vel, c1, c2, life)` 0x27f2b0 (the explosion puff): nothing for life 0; no draws.
+pub fn part08(w: &mut World, size: f32, p: V, vel: V, c1: u32, c2: u32, life: i32) -> bool {
+    if life == 0 { return false; }
+    spawn_part(w, 8, |_| {}, |s, _| crate::particles::type08::spawn(s, size, p, vel, c1, c2, life))
+}
+
+/// `PartType15Spawn` 0x280bd0 (the streak): nothing for life 0; one raw `rand()` with a record.
+pub fn part15(w: &mut World, a: &crate::particles::type15::Spawn) -> bool {
+    if a.life == 0 { return false; }
+    spawn_part(w, 15, |r| { r.rand(); }, |p, r| crate::particles::type15::spawn(p, r, a))
+}
+
+/// `PartType52Spawn(s1, s2, pos, c1, c2, life)` 0x287158 (the flat goo drip): one `randi(255)` with a record.
+pub fn part52(w: &mut World, s1: f32, s2: f32, p: V, c1: u32, c2: u32, life: i32) -> bool {
+    spawn_part(w, 52, |r| { r.randi(0xff); }, |s, r| crate::particles::type52::spawn(s, r, s1, s2, p, c1, c2, life))
 }
 
 /// `0x277b50(speed, a, b, out)`: `speed·(cos a·cos b, sin a·cos b, sin b)`.
@@ -151,10 +179,12 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
         let pitch = w.rng.randf(0.2618, 1.3963);
         let ang = w.rng.rand_angle();
         let sp = w.rng.randf(7.0, 10.5);
-        let _v = polar(b.scale * sp * super::DT, ang, pitch);
+        let mut v = polar(b.scale * sp * super::DT, ang, pitch);
+        v[2] += super::DT * 3.0;
         let (t60, t120) = (w.ticks(60), w.ticks(120));
         let life = w.rng.rand_range(t60, t120) - throttle * 10;
-        part15(w, life);
+        let a = crate::particles::type15::Spawn { size: b.scale * 40000.0, pos: p, vel: v, c1: 0x4f00_7fff, c2: 0x1f00_007f, life, split: 1, def: -1, blend: -1 };
+        part15(w, &a);
     }
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     let dist = len3(sub(cam, p));
@@ -184,15 +214,16 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
         w.part11(size, to_pf(speed * 0.5), pv(p), basev, 0x7fff_ffff, 0x00ff_ffff, life2 - throttle * 2, t2 - throttle * 3, 0, 0);
     }
     for _ in 0..b.puffs.max(0) {
-        let _x = w.rng.randf(-1.0, 1.0);
-        let _y = w.rng.randf(-1.0, 1.0);
-        let _z = w.rng.randf(-1.0, 1.0);
-        let _s = w.rng.randf(0.0, 3.0);
-        let _a = w.rng.randi(6);
-        let _c = w.rng.randi(6);
+        let x = w.rng.randf(-1.0, 1.0);
+        let y = w.rng.randf(-1.0, 1.0);
+        let z = w.rng.randf(-1.0, 1.0);
+        let s = w.rng.randf(0.0, 3.0);
+        let vel = set_len3([x, y, z, 0.0], b.scale * s * super::DT);
+        let a = w.rng.randi(6) as usize;
+        let c = w.rng.randi(6) as usize;
         let (t30, t45) = (w.ticks(30), w.ticks(45));
         let life = w.rng.rand_range(t30, t45) - throttle * 5;
-        part08(w, life);
+        part08(w, 200_000.0, p, vel, SPARK_A[a], SPARK_B[c], life);
     }
     if let Some(m) = moby {
         if 0.0 < b.flash {
@@ -217,7 +248,81 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
     }
     if let (Some(m), true) = (moby, b.sound != -1) { w.play_sound(b.sound, 0, m); }
     if b.light != 0.0 && throttle == 0 && in_view(w, 100.0, p, b.light) {
-        w.svc.unported("creature fx: beam explosion light template 0x1b06d0");
+        // The template's three radii are overwritten (the game writes them into 0x1b06d0 itself); param_18 = 0.
+        let l = if b.light <= 0.0 { 15.0 } else { b.light };
+        let mut t = LIGHT_BEAM;
+        t.radius = [l, l, l];
+        light_spawn(w, &t, p);
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// The amoeboids' goo (0x2ef560 drips, 0x2ef770 bursts; gp block 0x1619b0..0x161a3c)
+
+/// `0x2747a0(r, v)`: `v.xyz += (randf(−r, r), randf(−r, r), randf(−r, r))`, in that order.
+fn jitter(w: &mut World, r: f32, v: &mut V) {
+    for c in v.iter_mut().take(3) { *c += w.rng.randf(-r, r); }
+}
+
+/// `0x2ef560`: while the amoeboid was drawn (+0x31), two chances of a flat goo drip (type 52) at a random point within
+/// 0.1 of its feet: 1 in 20 (size `randf(0, 1)`·s → `randf(1, 2)`·s, colours 0x30002028 → 0x2020) and 1 in 5 (size
+/// `randf(0, 3.5)`·s → `randf(3.5, 4.5)`·s, colours 0x20002020 → 0x2030); life `randf(120, 180)` ticks; s = the
+/// amoeboid's size (pvar +0x250). Per drip 6 draws plus the spawner's one.
+pub fn goo_drips(w: &mut World, id: MobyId, size: f32) {
+    if w.m(id).visible == 0 { return; }
+    for (n, lo, hi, c1, c2) in [(20, 1.0f32, 2.0f32, 0x3000_2028u32, 0x0000_2020u32), (5, 3.5, 4.5, 0x2000_2020, 0x0000_2030)] {
+        if w.rng.randi(n - 1) != 0 { continue; }
+        let a = w.rng.rand_angle();
+        let r = w.rng.randf(0.0, 0.1);
+        let s1 = w.rng.randf(0.0, lo) * size;
+        let s2 = w.rng.randf(lo, hi) * size;
+        let life = w.rng.randf(120.0, 180.0) as i32;
+        let (cs, sn) = cs(a);
+        let q = w.m(id).position;
+        let p = [cs * r + q[0], sn * r + q[1], q[2], q[3]];
+        let life = w.ticks(life);
+        part52(w, s1, s2, p, c1, c2, life);
+    }
+}
+
+/// `0x2ef770(moby, dir)`: the goo burst of a hit / death: 20 clumps (from the feet jittered by `0.5·size`, 1 up) of 10
+/// type-2 blobs each (`crate::particles::type02`). A clump flies off at `randf(1, 8)` horizontally in a random direction
+/// and `randf(2, 6)` up (per second; plus `dir`·`randf(0, 0)`), its phase-B velocity falling by 20·dt² per tick of
+/// `ticks(30)`; each blob moves the clump's point by `randf(±0.2)` and its phase-B velocity by `randf(±0.5)·dt` (both
+/// kept for the next blob), sizes `r·0.125` / `r·0.065` (r = `randf(0.5, 1.5)`), colours tweened between
+/// 0x8000eeee / 0x8000ff90 and 0xffee, phases `ticks(10)`, `ticks(30)`, `randf(5, 25)` ticks, texture `def[23]`.
+pub fn goo_burst(w: &mut World, id: MobyId, dir: V, size: f32) {
+    for _ in 0..20 {
+        let mut p = w.m(id).position;
+        jitter(w, 0.5 * size, &mut p);
+        p[2] += 1.0;
+        let a = w.rng.rand_angle();
+        let s1 = w.rng.randf(1.0, 8.0) * super::DT;
+        let s2 = w.rng.randf(2.0, 6.0) * super::DT;
+        let s3 = w.rng.randf(0.0, 0.0);
+        let mut v1 = scale(dir, s3 * super::DT);
+        let (cs_, sn) = cs(a);
+        v1[0] += cs_ * s1;
+        v1[1] += sn * s1;
+        v1[2] += s2;
+        let mut v2 = v1;
+        let t30 = w.ticks(30);
+        v2[2] -= 20.0 * super::DT2 * t30 as f32;
+        for _ in 0..10 {
+            let r = w.rng.randf(0.5, 1.5);
+            v1[3] = r * 0.125;
+            v2[3] = r * 0.065;
+            jitter(w, 0.2, &mut p);
+            jitter(w, 0.5 * super::DT, &mut v2);
+            let f = w.rng.randf(0.0, 1.0);
+            let c1 = crate::particles::tween_color(f.to_bits(), 0x8000_eeee, 0x8000_ff90);
+            let f = w.rng.randf(0.0, 1.0);
+            let c2 = crate::particles::tween_color(f.to_bits(), 0x0000_ffee, 0x0000_ffee);
+            let (ta, tb) = (w.ticks(10), w.ticks(30));
+            let tc = w.svc.timing.scale(to_pf(w.rng.randf(5.0, 25.0))).to_f32() as i32;
+            let a = crate::particles::type02::Spawn { pos: p, v1, v2, c1, c2, t: [ta, tb, tc], def: -1 };
+            part02(w, &a);
+        }
     }
 }
 
@@ -421,6 +526,40 @@ pub const LIGHT_DEATH: LightTemplate = LightTemplate {
     delay: 0,
 };
 
+/// `0x1b06d0`, `SpawnBeamExplosion`'s light (normal colours; 0x1b0720 is the param_18 variant).
+pub const LIGHT_BEAM: LightTemplate = LightTemplate {
+    offset: [0.0, 0.0, 0.3, 0.0],
+    bytes: [0x00, 0x00, 0xff, 0x00, 0x11, 0x0b, 0x00, 0xff, 0x00, 0x11, 0x0d, 0x00, 0x64, 0x00, 0x10, 0x0d],
+    radius: [15.0, 15.0, 15.0],
+    grow: 0.01,
+    shrink: 0.01,
+    life: 60,
+    flags: 0x0008_0000,
+    draw: 0xff,
+    holds: [0, 0, 0],
+    periods: [0, 0, 0],
+    period_r: 0,
+    hold_r: 0,
+    delay: 0,
+};
+
+/// `0x20a930`, the Bomb Glove explosion's light (copied to the stack by `0x2c3300`, spawned at the explosion).
+pub const LIGHT_BOMB: LightTemplate = LightTemplate {
+    offset: [0.0, 0.0, 1.0, 0.0],
+    bytes: [0x00, 0x00, 0xff, 0x00, 0x80, 0x09, 0x00, 0xff, 0x00, 0x80, 0x0c, 0x00, 0x64, 0x00, 0x80, 0x0d],
+    radius: [20.0, 20.0, 20.0],
+    grow: 0.01,
+    shrink: 0.01,
+    life: 70,
+    flags: 0x0008_0000,
+    draw: 0xff,
+    holds: [0, 0, 0],
+    periods: [0, 0, 0],
+    period_r: 0,
+    hold_r: 0,
+    delay: 3,
+};
+
 /// The light moby's pvar offsets (0x2f3748's record).
 mod lp {
     pub const OFFSET: usize = 0x00;
@@ -536,8 +675,10 @@ fn channel(w: &mut World, id: MobyId, flags: &mut u32, v: &mut f32, b: [u8; 5], 
 /// then per tick: the start delay (+0xbc), the life timer (deleted when it runs out), the view test
 /// (`FastBSphereCheck(255, pos, radius)`; out of view the light slot is freed and nothing else runs), the position
 /// (follows the parent, plus the offset: fixed, `randf(0, 1)`-scaled (flag 0x100000) or `randf(±offset)` (0x300000)),
-/// the radius (grow/shrink between its limits, or `randf(min, max)` with flag 0x80000) and the colour channels.
-/// The light itself (`0x252750` / the slot at 0x180740) is not rendered.
+/// the radius (grow/shrink between its limits, or `randf(min, max)` with flag 0x80000) and the colour channels; then
+/// its point-light slot (+0x50, −1 none): taken with `WritePointLight_B` 0x252750 when it has none, else rewritten
+/// (colour, intensity +0x24 / 100, position, radius); freed on the view cull and at the end of its life
+/// ([`crate::point_lights`]).
 pub fn light_update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x80 { return; }
     if w.m(id).state == 0 {
@@ -551,6 +692,7 @@ pub fn light_update(w: &mut World, id: MobyId) {
         }
         let d = super::pu8(w, id, 0x1c);
         w.mm(id).cmd = d;
+        pvar::set_i32(&mut w.mm(id).pvars, lp::SLOT, -1);
         w.mm(id).state = 1;
     }
     let c = w.m(id).cmd;
@@ -559,12 +701,16 @@ pub fn light_update(w: &mut World, id: MobyId) {
         return;
     }
     if super::pi32(w, id, lp::LIFE) != -1 && super::dec_timer_pvar_i32(w, id, lp::LIFE) != 0 {
+        free_slot(w, id);
         w.delete_moby(id);
         return;
     }
     let mut radius = super::pf(w, id, lp::RADIUS);
     let p = super::pos(w, id);
-    if !in_view(w, 255.0, p, radius) { return; }
+    if !in_view(w, 255.0, p, radius) {
+        free_slot(w, id);
+        return;
+    }
     let mut flags = pvar::u32(&w.m(id).pvars, lp::FLAGS);
     let base = super::pv4(w, id, lp::BASE);
     if flags & 0x80_0000 == 0 {
@@ -644,5 +790,28 @@ pub fn light_update(w: &mut World, id: MobyId) {
         super::set_pf(w, id, lp::RGB + 4 * k, v);
     }
     pvar::set_u32(&mut w.mm(id).pvars, lp::FLAGS, flags);
-    let _ = lp::SLOT;
+    // The slot: taken or rewritten with this tick's colour, intensity, position and radius.
+    let l = crate::point_lights::PointLight {
+        color: [0, 1, 2].map(|k| super::pf(w, id, lp::RGB + 4 * k)),
+        intensity: super::pu8(w, id, 0x24) as f32 / 100.0,
+        pos: { let q = super::pos(w, id); [q[0], q[1], q[2]] },
+        radius: super::pf(w, id, lp::RADIUS),
+    };
+    let slot = super::pi32(w, id, lp::SLOT);
+    if slot == -1 {
+        let load = f32::from_bits(w.svc.frame_load[1].0);
+        let got = w.svc.point_lights.alloc(l, load).map_or(-1, |i| i as i32);
+        pvar::set_i32(&mut w.mm(id).pvars, lp::SLOT, got);
+    } else {
+        w.svc.point_lights.set(slot as usize, l);
+    }
+}
+
+/// `FreePointLight` of the light moby's slot (+0x50), which becomes −1.
+fn free_slot(w: &mut World, id: MobyId) {
+    let slot = super::pi32(w, id, lp::SLOT);
+    if slot != -1 {
+        w.svc.point_lights.free(slot as usize);
+        pvar::set_i32(&mut w.mm(id).pvars, lp::SLOT, -1);
+    }
 }

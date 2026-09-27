@@ -46,8 +46,17 @@
 //! vertex shader. The triangles, their order and their vertex values are those of a mesh of the active
 //! sub-blocks.
 //!
-//! Not drawn: class 760 foam/mist (quad geometry and element timers not traced; the scroll formulas are in
-//! `rc_game::water`), 1848 (env overlay), drips (787) and the hero's splashes (no hero in the water yet).
+//! **Fire fields** (class 760, the flames and smoke on the bombed buildings; list 2 = after the particles: `LIST2_BIAS`). The moby system keeps the fields' state
+//! (`rc_game::moby_update::classes::fire_field`: element life cycle, scroll, respawns on the game's stream) and this
+//! tick's registrations (`Services::draw_callbacks`); [`draw_fire_fields`] rebuilds, once per tick, three meshes per
+//! registered field from them, in `FastDrawQuadReal`'s form: the flames (FX P+0x54 + 40, ALPHA 0x48 additive),
+//! the smoke elements (same FX, 0x44) and the six-quad smoke curtain (FX P+0x58 + 40, 0x44, when P+0x42 = 0), all
+//! camera-facing about the moby (`fire_field_bases`), placed in the cuboid, with the per-corner alpha tables, fog on
+//! (PRIM 0x7c), TEST 0x51001 (colour only, Z tested), CLAMP repeat, bilinear. The quad tables are read from the
+//! overlay per level ([`FireFieldTables`]). Additive in linear light (native, like `GsPass::AdditiveNoZ`); As > 1 (the
+//! curtain's A = 0xff) clamps in the 0x44 destination factor.
+//!
+//! Not drawn: 1848 (env overlay), drips (787) and the hero's splashes (no hero in the water yet).
 
 use crate::game_camera::{game_eye, GameFog, GameProjection, TfragFog};
 use crate::gs_state::GsPass;
@@ -95,6 +104,8 @@ pub struct LevelWater {
     pub light_xy: [f32; 2],
     /// Water classes in moby instance order = draw-callback order.
     pub order: Vec<u16>,
+    /// The fire / smoke fields' quad tables (class 760, levels 00 / 01 / 14; see "Fire fields" below).
+    pub fire_fields: Option<FireFieldTables>,
 }
 
 /// Reads the overlay tables, the cuboids and the 751 pvar.
@@ -104,7 +115,8 @@ pub fn load(root: &Path, index: u32, gameplay: &[u8]) -> Result<LevelWater> {
     let ov = wf::Overlay::parse(&ov_bytes).context("parsing the level overlay")?;
     let strips = wf::parse_strip_classes(&ov, index)?;
     let ripples = wf::parse_ripple_tables(&ov, index)?;
-    if strips.is_empty() && ripples.is_none() { return Ok(LevelWater::default()); }
+    let fire_fields = FireFieldTables::parse(&ov, index)?;
+    if strips.is_empty() && ripples.is_none() { return Ok(LevelWater { fire_fields, ..LevelWater::default() }); }
     let cuboids = wf::parse_cuboids(gameplay)?;
     let instances = rc_formats::gameplay::parse_moby_instances(gameplay)?;
     let pvars = rc_formats::gameplay::parse_pvars(gameplay)?;
@@ -122,7 +134,7 @@ pub fn load(root: &Path, index: u32, gameplay: &[u8]) -> Result<LevelWater> {
         let ours = strips.iter().any(|s| s.class == c) || (c == RIPPLE_CLASS && ripples.is_some());
         if ours && !order.contains(&c) { order.push(c); }
     }
-    Ok(LevelWater { strips, ripples, cuboids, zone_cuboids, light_xy, order })
+    Ok(LevelWater { strips, ripples, cuboids, zone_cuboids, light_xy, order, fire_fields })
 }
 
 /// Static uniform of one water draw.
@@ -254,10 +266,15 @@ impl WaterState {
         self.external = true;
     }
 
-    /// One tick of the 751 update with the game camera `cam` (0x167240), drawing from `rng`.
-    pub fn ripple_update(&mut self, cam: [f32; 3], rng: &mut Rng) {
+    /// One tick of the 751 update with the game camera `cam` (0x167240), drawing from `rng` (no particle system:
+    /// the zone-5 waterfall foam's spawner draws are made without records).
+    pub fn ripple_update(&mut self, cam: [f32; 3], rng: &mut Rng) { self.ripple_update_with(cam, rng, 0, None) }
+
+    /// [`ripple_update`](Self::ripple_update) with the tick counter 0x15f5cc and the particle system the zone-5
+    /// waterfall foam (types 57 / 56) spawns into.
+    pub fn ripple_update_with(&mut self, cam: [f32; 3], rng: &mut Rng, counter: u64, parts: Option<&mut rc_game::particles::Particles>) {
         let Some(sim) = self.ripple.as_mut() else { return };
-        let info = sim.tick(cam, &self.cuboids, rng);
+        let info = sim.tick_with(cam, &self.cuboids, rng, counter, parts);
         self.drops += info.drops;
         self.steps += info.stepped as u32;
         self.ripple_ticks += 1;
@@ -283,9 +300,10 @@ impl Plugin for WaterPlugin {
             app.insert_resource(Time::<Fixed>::from_hz(crate::determinism::TICK_HZ));
         }
         app.add_plugins(MaterialPlugin::<WaterMaterial>::default())
-            .add_systems(Startup, setup)
+            .add_plugins(MaterialPlugin::<FireFieldMaterial>::default())
+            .add_systems(Startup, (setup, fire_field_setup))
             .add_systems(FixedUpdate, tick)
-            .add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
+            .add_systems(PostUpdate, (draw, draw_fire_fields).before(bevy::asset::AssetEventSystems));
     }
 }
 
@@ -623,5 +641,373 @@ fn draw_ripples(
     }
     if wrote {
         if let Some(mut b) = buffers.get_mut(&st.ripple_buf) { b.data = Some(st.ripple_bytes.clone()); }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Fire fields (class 760)
+
+/// The 760 draw callback's tables: `(level, quad tables, flame alpha bytes gp−0x4f68, smoke alpha bytes gp−0x4f60)`
+/// (level01 `0x2fe080` reads 0x1fa840..0x1fab40; the level 00 / 14 copies of the callback read the same bytes at
+/// their own addresses; gp = 0x166c00 on every overlay).
+const FIRE_FIELD_TABLES: [(u32, u32, u32, u32); 3] = [(0, 0x1e_11a0, 0x16_19a0, 0x16_19a8), (1, 0x1f_a840, 0x16_1c98, 0x16_1ca0), (14, 0x1e_04d0, 0x16_1d38, 0x16_1d40)];
+
+/// Transparent3d sort bias of the list-2 callbacks (drained after the particles, bias 1e6).
+const LIST2_BIAS: f32 = 2.0e6;
+
+/// The quad tables of the fire / smoke fields (offsets from the level's table base).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FireFieldTables {
+    /// +0x000: the flame quad's corners (x, y, z, 1): y × width, z × height.
+    pub flame: [[f32; 4]; 4],
+    /// +0x040: the flame's (s, t); the element's scroll is subtracted from s.
+    pub flame_st: [[f32; 2]; 4],
+    /// gp−0x4f68: the flame's per-corner alpha factor (0 / 1: the top corners fade out).
+    pub flame_alpha: [u8; 4],
+    /// +0x060: the curtain's 12 points (y × P+0x48, z × P+0x4c).
+    pub curtain: [[f32; 4]; 12],
+    /// +0x120: the smoke element's 12 points (y × width, z × height).
+    pub smoke: [[f32; 4]; 12],
+    /// +0x1e0: six quads of four point indices (GS strip order); the curtain draws all six, a smoke element 2 and 3.
+    pub quads: [[u32; 4]; 6],
+    /// +0x240 / +0x2a0: per point (a, b): the curtain's s = b + the 809 scroll, t = a; a smoke element's s = b +
+    /// its scroll, t = a.
+    pub curtain_ab: [[f32; 2]; 12],
+    pub smoke_ab: [[f32; 2]; 12],
+    /// gp−0x4f60: per point, 0 / 1 (the curtain's alpha is 0xff × this, a smoke element's P+0x5c × this).
+    pub point_alpha: [u8; 12],
+}
+
+impl FireFieldTables {
+    /// The level's tables (None: no fire-field class on this level).
+    pub fn parse(ov: &wf::Overlay, level: u32) -> Result<Option<FireFieldTables>> {
+        let Some(&(_, base, a_flame, a_points)) = FIRE_FIELD_TABLES.iter().find(|t| t.0 == level) else { return Ok(None) };
+        let f = |a: u32| -> Result<f32> { Ok(ov.f32(a)?) };
+        let v4 = |a: u32| -> Result<[f32; 4]> { Ok([f(a)?, f(a + 4)?, f(a + 8)?, f(a + 12)?]) };
+        let v2 = |a: u32| -> Result<[f32; 2]> { Ok([f(a)?, f(a + 4)?]) };
+        let mut t = FireFieldTables {
+            flame: [[0.0; 4]; 4],
+            flame_st: [[0.0; 2]; 4],
+            flame_alpha: [0; 4],
+            curtain: [[0.0; 4]; 12],
+            smoke: [[0.0; 4]; 12],
+            quads: [[0; 4]; 6],
+            curtain_ab: [[0.0; 2]; 12],
+            smoke_ab: [[0.0; 2]; 12],
+            point_alpha: [0; 12],
+        };
+        for k in 0..4 {
+            t.flame[k] = v4(base + 16 * k as u32)?;
+            t.flame_st[k] = v2(base + 0x40 + 8 * k as u32)?;
+        }
+        for k in 0..12 {
+            t.curtain[k] = v4(base + 0x60 + 16 * k as u32)?;
+            t.smoke[k] = v4(base + 0x120 + 16 * k as u32)?;
+            t.curtain_ab[k] = v2(base + 0x240 + 8 * k as u32)?;
+            t.smoke_ab[k] = v2(base + 0x2a0 + 8 * k as u32)?;
+        }
+        for (q, quad) in t.quads.iter_mut().enumerate() {
+            for (k, v) in quad.iter_mut().enumerate() {
+                let i = ov.u32(base + 0x1e0 + 16 * q as u32 + 4 * k as u32)?;
+                if i >= 12 { anyhow::bail!("fire-field quad {q} point {k}: index {i} out of range"); }
+                *v = i;
+            }
+        }
+        t.flame_alpha.copy_from_slice(ov.read(a_flame, 4)?);
+        t.point_alpha.copy_from_slice(ov.read(a_points, 12)?);
+        Ok(Some(t))
+    }
+}
+
+/// Static uniform of one fire-field draw group.
+#[derive(Clone, Copy, Debug, Default, ShaderType)]
+pub struct FireFieldParams {
+    /// x = 1: ALPHA 0x48 (additive `Cs·As + Cd`), 0: ALPHA 0x44 (`(Cs − Cd)·As + Cd`).
+    pub misc: Vec4,
+}
+
+/// One draw group of a fire field (the flames, the smoke elements or the smoke curtain of one registered 760).
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct FireFieldMaterial {
+    #[texture(0)]
+    #[sampler(1)]
+    pub texture: Handle<Image>,
+    #[uniform(2)]
+    pub fog: TfragFog,
+    #[uniform(3)]
+    pub params: FireFieldParams,
+    /// List-2 position (Transparent3d order).
+    pub slot: u32,
+}
+
+impl Material for FireFieldMaterial {
+    fn vertex_shader() -> ShaderRef { FIRE_FIELD_SHADER.into() }
+    fn fragment_shader() -> ShaderRef { FIRE_FIELD_SHADER.into() }
+    fn alpha_mode(&self) -> AlphaMode { AlphaMode::Blend }
+    fn depth_bias(&self) -> f32 { LIST2_BIAS + self.slot as f32 }
+    fn enable_prepass() -> bool { false }
+    fn enable_shadows() -> bool { false }
+
+    fn specialize(
+        _pipeline: &MaterialPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialPipelineKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        descriptor.primitive.cull_mode = None;
+        // TEST_1 0x51001 (ATST NEVER, AFAIL FB_ONLY: colour, never Z; ZTST GEQUAL).
+        GsPass::BlendNoZ.specialize(descriptor);
+        // Both GS equations as one premultiplied blend: the shader outputs (Cs·As, As) for 0x44 and (Cs·As, 0)
+        // for 0x48 (particle_render.rs does the same).
+        if let Some(f) = descriptor.fragment.as_mut() {
+            for t in f.targets.iter_mut().flatten() { t.blend = Some(bevy::render::render_resource::BlendState::PREMULTIPLIED_ALPHA_BLENDING); }
+        }
+        descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+            Mesh::ATTRIBUTE_COLOR.at_shader_location(2),
+        ])?];
+        Ok(())
+    }
+}
+
+const FIRE_FIELD_SHADER: &str = "shaders/fire_field.wgsl";
+
+/// One registered field's three draw groups (entity, mesh, material).
+/// One draw group's entity, mesh, material and FX image.
+type FireFieldGroup = (Entity, Handle<Mesh>, Handle<FireFieldMaterial>, Handle<Image>);
+
+struct FireFieldSlot {
+    /// Per group, made when the group first has quads (Bevy's mesh allocator keeps no slab for an empty mesh, so a
+    /// group's mesh is never empty).
+    groups: [Option<FireFieldGroup>; 3],
+    visible: [bool; 3],
+}
+
+/// The fire-field renderer's state: the tables, the FX images, the per-slot draws.
+#[derive(Resource)]
+pub struct FireFieldDraw {
+    tables: FireFieldTables,
+    /// FX images by FX index, made on first use.
+    fx: Vec<Option<Handle<Image>>>,
+    slots: Vec<FireFieldSlot>,
+    fog: TfragFog,
+    /// The tick counter the last draw used (redrawn once per tick, like the other callbacks).
+    drawn: Option<u64>,
+}
+
+fn fire_field_setup(mut commands: Commands, level: Res<crate::Level>, fog: Option<Res<GameFog>>) {
+    let Some(tables) = level.0.water.fire_fields.clone() else { return };
+    let n = level.0.particles.textures.as_ref().map_or(0, |t| t.fx_textures.len());
+    let fog = fog.map(|f| f.uniform).unwrap_or_else(|| TfragFog::new(&level.0.fog));
+    commands.insert_resource(FireFieldDraw { tables, fx: vec![None; n], slots: Vec::new(), fog, drawn: None });
+}
+
+/// Mesh data of one draw group being built.
+#[derive(Default)]
+struct QuadBuf {
+    pos: Vec<[f32; 3]>,
+    uv: Vec<[f32; 2]>,
+    color: Vec<[f32; 4]>,
+    idx: Vec<u32>,
+}
+
+impl QuadBuf {
+    /// One `FastDrawQuadReal` quad: game-space corners in GS strip order (triangles 0 1 2, 1 2 3), (s, t), GS
+    /// RGBA bytes. A quad whose four alphas are 0 adds nothing under either equation and is skipped.
+    fn quad(&mut self, p: [[f32; 3]; 4], st: [[f32; 2]; 4], rgba: [u32; 4]) {
+        if rgba.iter().all(|c| c >> 24 == 0) { return; }
+        let b = self.pos.len() as u32;
+        for k in 0..4 {
+            self.pos.push(crate::tfrag_render::game_to_bevy(p[k]).to_array());
+            self.uv.push(st[k]);
+            let c = rgba[k];
+            self.color.push([(c & 0xff) as f32, (c >> 8 & 0xff) as f32, (c >> 16 & 0xff) as f32, (c >> 24) as f32].map(|x| x / 128.0));
+        }
+        self.idx.extend([b, b + 1, b + 2, b + 1, b + 2, b + 3]);
+    }
+
+    fn write(self, mesh: &mut Mesh) {
+        // (Called with the asset's guard: `&mut *guard`.)
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.pos);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uv);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.color);
+        mesh.insert_indices(Indices::U32(self.idx));
+    }
+}
+
+fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
+fn scale3(a: [f32; 3], s: f32) -> [f32; 3] { [a[0] * s, a[1] * s, a[2] * s] }
+/// `FastVecCross(out, a, b)` 0x2212d0 (`vopmula` / `vopmsub`): b × a.
+fn cross_ba(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [b[1] * a[2] - b[2] * a[1], b[2] * a[0] - b[0] * a[2], b[0] * a[1] - b[1] * a[0]] }
+/// `FastVecNormalize(1, v, v)` 0x221410 (zero stays zero).
+fn unit3(v: [f32; 3]) -> [f32; 3] {
+    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if l == 0.0 { v } else { scale3(v, 1.0 / l) }
+}
+
+/// The callback's two camera-facing bases (0x2fe080 prologue): rows (F, R, U) with F = unit(camera − moby),
+/// R = unit(ẑ × F), U = F × R; the mirrored one has −F, −R and the same U.
+fn fire_field_bases(cam: [f32; 3], at: [f32; 3]) -> [[[f32; 3]; 3]; 2] {
+    let up = [0.0, 0.0, 1.0];
+    let f = unit3([cam[0] - at[0], cam[1] - at[1], cam[2] - at[2]]);
+    let r = unit3(cross_ba(f, up));
+    let u = cross_ba(r, f);
+    let fm = scale3(f, -1.0);
+    let rm = unit3(cross_ba(fm, up));
+    let um = cross_ba(rm, fm);
+    [[f, r, u], [fm, rm, um]]
+}
+
+/// `fun_001f9d20` with a basis and a translation: `F·x + R·y + U·z + t`.
+fn basis_point(b: &[[f32; 3]; 3], t: [f32; 3], v: [f32; 3]) -> [f32; 3] {
+    add3(add3(add3(scale3(b[0], v[0]), scale3(b[1], v[1])), scale3(b[2], v[2])), t)
+}
+
+/// The three groups of one registered field: flames (0x48), smoke elements (0x44), smoke curtain (0x44, if P+0x42 = 0).
+fn fire_field_groups(t: &FireFieldTables, state: &rc_game::moby_update::classes::fire_field::FireFieldState, pv: &[u8], pos: [f32; 3], cub: &[[f32; 4]; 4], scroll_u: f32, cam: [f32; 3]) -> [QuadBuf; 3] {
+    use rc_game::moby_update::classes::fire_field::{cuboid_point, FireFieldState};
+    use rc_game::moby_update::services::pvar as p;
+    let bases = fire_field_bases(cam, pos);
+    let rgb = p::u32(pv, 0x38) & 0xff_ffff;
+    let smoke_rgb = (pv[0x5f] as u32) << 16 | (pv[0x5e] as u32) << 8 | pv[0x5d] as u32;
+    let smoke_a = pv[0x5c] as u32;
+    let mut out: [QuadBuf; 3] = Default::default();
+    for i in FireFieldState::range(pv) {
+        let Some(e) = state.elems.get(i) else { break };
+        let b = &bases[(e.mirror != 0) as usize];
+        let tr = cuboid_point(cub, e.pos);
+        let corner = |v: [f32; 4]| basis_point(b, tr, [v[0], v[1] * e.width, v[2] * e.height]);
+        if e.kind == 0 {
+            let a = (e.alpha as u32) << 24;
+            let p4 = std::array::from_fn(|k| corner(t.flame[k]));
+            let st = std::array::from_fn(|k| [t.flame_st[k][0] - e.scroll, t.flame_st[k][1]]);
+            let c = std::array::from_fn(|k| a.wrapping_mul(t.flame_alpha[k] as u32) | rgb);
+            out[0].quad(p4, st, c);
+        } else {
+            for q in &t.quads[2..4] {
+                let p4 = q.map(|j| corner(t.smoke[j as usize]));
+                let st = q.map(|j| [t.smoke_ab[j as usize][1] + e.scroll, t.smoke_ab[j as usize][0]]);
+                let c = q.map(|j| (smoke_a << 24).wrapping_mul(t.point_alpha[j as usize] as u32) | smoke_rgb);
+                out[1].quad(p4, st, c);
+            }
+        }
+    }
+    if p::i16(pv, 0x42) == 0 {
+        let tr = [cub[3][0], cub[3][1], cub[3][2] - p::ff(pv, 0x50)];
+        let (wd, ht) = (p::ff(pv, 0x48), p::ff(pv, 0x4c));
+        for q in &t.quads {
+            let p4 = q.map(|j| {
+                let v = t.curtain[j as usize];
+                basis_point(&bases[0], tr, [v[0], v[1] * wd, v[2] * ht])
+            });
+            let st = q.map(|j| [t.curtain_ab[j as usize][1] + scroll_u, t.curtain_ab[j as usize][0]]);
+            let c = q.map(|j| (t.point_alpha[j as usize] as u32).wrapping_mul(0xff00_0000) | smoke_rgb);
+            out[2].quad(p4, st, c);
+        }
+    }
+    out
+}
+
+/// The list-2 draws of this tick: every registered 760 field (flames, smoke elements, curtain) in registration
+/// order, from the moby system's state (crate::gameplay::Play).
+#[allow(clippy::too_many_arguments)]
+fn draw_fire_fields(
+    mut commands: Commands,
+    state: Option<ResMut<FireFieldDraw>>,
+    play: Option<Res<crate::gameplay::Play>>,
+    cams: MainCamera,
+    fog: Option<Res<GameFog>>,
+    level: Res<crate::Level>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<FireFieldMaterial>>,
+    mut vis: Query<&mut Visibility>,
+) {
+    let Some(mut st) = state else { return };
+    let st = &mut *st;
+    let Some(cam_t) = cams.iter().next() else { return };
+    let registered: Vec<(usize, rc_game::moby_runtime::MobyId)> = match play.as_deref() {
+        Some(p) => p.svc.draw_callbacks.list2.iter().filter(|(cb, _)| *cb == rc_game::moby_update::classes::draw_callbacks::Callback::FireField760).map(|&(_, id)| id).enumerate().collect(),
+        None => Vec::new(),
+    };
+    let counter = play.as_deref().map(|p| p.game.counter);
+    let fog = fog.map(|f| f.uniform).unwrap_or_else(|| TfragFog::new(&level.0.fog));
+    let fog_changed = fog != st.fog;
+    st.fog = fog;
+    if fog_changed {
+        for (_, _, mat, _) in st.slots.iter().flat_map(|s| s.groups.iter().flatten()) {
+            if let Some(mut mm) = materials.get_mut(mat) { mm.fog = fog; }
+        }
+    }
+    if counter == st.drawn { return; }
+    st.drawn = counter;
+    let cam = game_eye(cam_t).to_array();
+    let tex = level.0.particles.textures.as_ref();
+    for (k, id) in registered.iter().copied() {
+        let Some(p) = play.as_deref() else { break };
+        let Some(m) = p.game.mobys.mobys.get(id) else { continue };
+        let pv = &m.pvars;
+        if pv.len() < 0x60 { continue; }
+        use rc_game::moby_update::services::pvar as pvr;
+        let Some(cub) = usize::try_from(pvr::i32(pv, 4)).ok().and_then(|c| p.svc.volumes.cuboids.get(c)).map(|s| s.matrix) else { continue };
+        let groups = fire_field_groups(&st.tables, &p.svc.fire_fields, pv, [m.position[0], m.position[1], m.position[2]], &cub, p.svc.fire_fields.scroll_u, cam);
+        let fx_of = |g: usize| pvr::i32(pv, if g == 2 { 0x58 } else { 0x54 }) + 0x28;
+        while st.slots.len() <= k { st.slots.push(FireFieldSlot { groups: [None, None, None], visible: [false; 3] }); }
+        for (g, q) in groups.into_iter().enumerate() {
+            // The FX image of this group (made once per FX index).
+            let fx = usize::try_from(fx_of(g)).ok();
+            let img = fx.and_then(|i| {
+                let t = tex?.fx_textures.get(i)?.as_ref()?;
+                if st.fx.len() <= i { st.fx.resize(i + 1, None); }
+                if st.fx[i].is_none() { st.fx[i] = Some(fx_image(&mut images, t)); }
+                st.fx[i].clone()
+            });
+            let slot_no = k as u32;
+            let slot = &mut st.slots[k];
+            let show = !q.idx.is_empty() && img.is_some();
+            if show {
+                let img = img.expect("checked");
+                match &mut slot.groups[g] {
+                    Some((_, mesh, mat, cur)) => {
+                        if let Some(mut mm) = meshes.get_mut(&*mesh) { q.write(&mut mm); }
+                        if *cur != img {
+                            if let Some(mut mm) = materials.get_mut(&*mat) { mm.texture = img.clone(); }
+                            *cur = img;
+                        }
+                    }
+                    None => {
+                        let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+                        q.write(&mut m);
+                        let mesh = meshes.add(m);
+                        let params = FireFieldParams { misc: Vec4::new((g == 0) as u32 as f32, 0.0, 0.0, 0.0) };
+                        let mat = materials.add(FireFieldMaterial { texture: img.clone(), fog, params, slot: slot_no * 3 + g as u32 });
+                        let e = commands
+                            .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::IDENTITY, NoFrustumCulling, Visibility::Inherited, Name::new(format!("fire field {slot_no} group {g}"))))
+                            .id();
+                        slot.groups[g] = Some((e, mesh, mat, img));
+                        slot.visible[g] = true;
+                        continue;
+                    }
+                }
+            }
+            if show != slot.visible[g] {
+                slot.visible[g] = show;
+                if let Some((e, ..)) = &slot.groups[g] {
+                    if let Ok(mut v) = vis.get_mut(*e) { *v = if show { Visibility::Inherited } else { Visibility::Hidden }; }
+                }
+            }
+        }
+    }
+    // Slots nobody registered this tick draw nothing.
+    for slot in st.slots.iter_mut().skip(registered.len()) {
+        for g in 0..3 {
+            if slot.visible[g] {
+                slot.visible[g] = false;
+                if let Some((e, ..)) = &slot.groups[g] {
+                    if let Ok(mut v) = vis.get_mut(*e) { *v = Visibility::Hidden; }
+                }
+            }
+        }
     }
 }

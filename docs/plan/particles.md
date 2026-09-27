@@ -253,7 +253,8 @@ From the vtbl at 0x20bb00 (12-byte `{o_class, update, …}`) × gameplay instanc
 3. **Class 751 (types 56, 57), med** — Novalis water system (21 patches); only while the camera is inside
    zone 5: mist puffs and flat ripples around (177, 165–176, 39) (a waterfall foot).
 Not at start: bolts (13, type 53 on pickup), crates (500–511, types 11/13 on break), class 700 fires
-(type 16; pvar[0] = 0 until triggered), 704/729/778 (type 22 bursts), 760 (+0x42 = 0 → no particles),
+(type 16; pvar[0] = 0 until triggered), 704/729/778 (type 22 bursts), 760 (the fire / smoke fields, drawn by their
+own draw callback, not particles; +0x42 = 0 → no type-23 particles on Novalis: creatures.md §7),
 hero dust/landing (0x2370b8 → types 34, 35, 45, 46, 47), impact sparks (type 1 via 0x2780b0).
 The lens flare (0x20f480, FX textures 6+) is not a particle.
 
@@ -488,3 +489,106 @@ then; the pool never fills in play).
 white-hot sparks at the feet on the rail cooling to orange and falling (`RC_PART_STATS`: 55 type-25 alive at tick
 60); Aridia (`RC_LEVEL=2 RC_GIVE_ITEMS=12 RC_HERO_AT=71.00,271.08,47.00,1.571`, frame 50): the swing target's glint
 streaking across it (14–17 type-60 alive). Two runs each: identical PNGs, traces and WAVs.
+
+## The Bomb Glove explosion and the effect particles (2026-09-28): types 2, 4, 8, 15, 52, render kind 1
+
+**The call tree** (level01; every call below was read in the disassembly of its caller, `0x2c3300` in full; draws =
+`rand` calls in game order). The explosion is effect **mobys** plus **particles**; the translucent shells are mobys.
+
+* **Flight** (bomb 121 state 1, `0x2c3300`): glow fade; on ticks with `0x15f5cc & 7 == 0` and not in water, the
+  trail: `TRAIL_COUNT` (gp 0x16142c = 1) × `PartType02Spawn` 0x27dc98 — velocity 1 = 0.5·bomb velocity + `rand_vec(0,
+  1·dt)`, velocity 2 = 0 minus 4·dt²·B, sizes `randf(0.25, 0.15)` / `randf(0.15, 0.05)`, colours
+  `FastTweenColor(randf(0,1), 0x804080ff, 0x8040ffff)` / `(…, 0x80104040, 0x80002080)`, phases A = `1 + randf(0,1)`, B =
+  `30·(1 + randf(±0.5))`, C = `10·(1 + randf(±0.5))` ticks, texture `def[25]`, additive (11 draws). Spin, move,
+  gravity 11 u/s² (1.1 in water), `CollLine_Fix` on the path; water entry: `0x2b82a8` ripple, `0x2ff768` splash moby,
+  15 × `PartType35Spawn` 0x2845a8, bubbles `0x2840e0` while sinking (**not ported**).
+* **Explosion** (+0xbc = 1): sphere 0.5 hit (`0x26f8f8`); 10 low fireballs + 4 high + 1 toward the camera
+  (`0x2c4c20` → class 122, `+0xbc` = 0 / 1 / 1); 1..4 smoke rings = **type 11** (`PartType11Spawn` 0x27f8f8,
+  400000 size, 8–10 u/s, colours `0x20a980` / `0x20a998`); flashes = **class 1192 mobys** (`0x309a68`): with the camera
+  farther than 9: size 4 (0x7f,0x7f,0x7f, α 0x20, 15 ticks) and 4 (0x7f,0x20,0, α 0x20, 24); always 4 (0x7f,0x3f,0,
+  α 0x30, 20), 3.5 (0x60,0x10,0, α 0x40, 27), 3 (0x20,0,0, α 0x20, 29); class sound 0; in water only: `0x2840e0` debris,
+  the scorch `PartType64Spawn` 0x288d90 ×100 and `PartType15Spawn` ×20 (+0x68 ≠ 0 and the ground within 1.2 of the
+  water) (**not ported**); camera shake `0.4 − 0.0175·d` for 25 ticks; the explosion light `0x2f3570(0x20a930)` (class
+  639). State 2: the growing damage sphere (0.5 → 2.5 over 15 ticks), then `DeleteMoby`.
+* **Fireball** (class 122, `0x2c4d88`): with +0xbc bit 0 (the 5 high ones), every tick one **type-4** puff
+  (`PartType04Spawn` 0x27e538): `dt`-long random direction, colour `0x161438[randi(4)]` (0x2fffffff white, 0x2f00ffff
+  yellow, 0x2f007fff orange, 0x2f004fff deep orange) fading to 0x4fff over `ticks(45)`, size 50 → 170 (×1000), additive
+  (5 draws). These puffs are the **bright fire trails that arc away from the blast**: the fireballs fly at 3.5–10 u/s
+  with gravity 14.6 u/s² and leave a puff every tick. Then spin, move, fall, shrink over the last quarter of 60..120
+  ticks.
+* **Flash** (class 1192, `FlashUpdate` 0x2c22a8): scale `(T − t)·full/T` (0 → size × class scale over T ticks), all
+  three Euler angles + π·dt a tick, alpha `t·α0/(T/2)` over the second half. Drawn by the moby renderer as a
+  translucent moby (moby+0x23 < 0x80; `moby_render::MobyBlend`, moby_render_notes.md §8). The nested shells of the
+  PCSX2 frames are these flashes: the biggest (size 4, α 0x30, orange) is the faint outer ball, the 3.5 / 3 ones (α 0x40
+  / 0x20, red) grow slower inside it (at 10 ticks: radius 2.0 / 1.3 / 1.0 units); the fire inside is the type-11 rings
+  (additive) and the type-4 puffs. Class 1192 (and 0x70, the crates' / creatures' flash) is **one** 320-triangle
+  sphere with one texture (Novalis moby texture 211; 0x70: 23), class scale 0.0416 and header sphere 24576 packed units,
+  i.e. a radius of about 1 unit per unit of size; mode bits 0 (alpha-mix, not additive); `FlashUpdate` has no texture
+  scroll: the moving fire pattern is the three-axis spin. So the two visible shells are **two flash mobys of the same
+  class**, each with its own size, colour (ambient), alpha and timer; the game draws them in moby-array order (the port:
+  back to front by position, equal positions by entity; the result is the same for these faint shells).
+* **Fireball shards** (class 122): a 16-triangle untextured solid (texture −1: the lit vertex colour, ambient
+  0x7f7f7f), scale 0.0033: the small grey-white shards flying out of the blast in the PCSX2 frames, each high one
+  leaving its type-4 fire trail.
+* **Light** (class 639, `0x2f3748`, template 0x20a930): offset z + 1, radius 20, red/green/blue up by 1.28 a tick to
+  2.55 / 2.55 / 1.0, then down by 0.09 / 0.12 / 0.13 a tick, life 70, a 3-tick delay; the radius is drawn with
+  `randf(20, 20)` every tick (flag 0x80000: 1 draw). It owns a point-light slot (crate `rc_game::point_lights`).
+
+**Types** (`crates/rc-game/src/particles/type{02,04,08,15,52}.rs`, each module doc has the record and the update;
+standard `f32`; spawners in the modules, `creature::fx::part02/04/08/15/52` wrap them for the moby code):
+
+| type | spawner / update | who | draws in the update | kind |
+|---|---|---|---|---|
+| 2 | 0x27dc98 / 0x27de70 | bomb trail, amoeboid goo bursts (`fx::goo_burst` = 0x2ef770) | none | 0 |
+| 4 | 0x27e538 / 0x27e650 | fireball smoke / fire trails | none | 0 |
+| 8 | 0x27f2b0 / 0x27f3a0 | creature explosion puffs (`SpawnBeamExplosion`) | none | 0 |
+| 15 | 0x280bd0 / 0x280d08 | creature explosion streaks (with split: a child streak on odd ticks) | 6 per child + the child's 1 | 0 |
+| 52 | 0x287158 / 0x287288 | amoeboid goo drips (`fx::goo_drips` = 0x2ef560) | none | **1** |
+
+Type 2 keeps its two velocities **packed** in one word each (`0x276380`: 8 bits per axis around 127 on a shared scale
+`clamp(trunc(max|v|·10000/63), 1, 255)·0.0001`; unpacked by `0x2764a8`); the port stores and reads the same words, so
+the blobs move in the game's quantised steps. Types 2 and 15 read the tick counter's parity (`Particles::counter`, set
+by the particle hook). Type 8 animates its texture through 11 frames of `def[8]`.
+
+**Render kind 1** (flat quad, type 52): `particle_render.rs` draws it with the world XY corners of L2 (§7), projected per
+corner, same blend and alpha split as the sprites; the extra cull `z12 − ftoi12(r) < 0x100`. Kinds 2/3 are still not
+drawn (no ported type uses them).
+
+**RNG.** With these spawners and the light's slot, a dry bomb explosion makes exactly the game's draws: `bomb.rs`
+`tests::dry_explosion_rand_stream_matches_the_game_ledger` checks every tick of a flight and explosion against a ledger
+of the per-call draw counts above (11 per trail tick, 80 + 28 + 6 + 10·rings + 3·flashes at the explosion, 5 per high
+fireball update, 1 per light update), with nothing left in `FxStats::unported`. Before this pass the trail, smoke and
+light draws were skipped, so the stream diverged after every explosion. **Still diverging**: a bomb in water (splash,
+bubbles, scorch, types 34/35/64), the creature knockback's burn sparks (`0x271258`) and water splash (`0x2ff768`), the beam explosion's debris burst (`0x2c4c20` from `SpawnBeamExplosion`).
+
+**Checked on screen**: `RC_SCENE=0 RC_GIVE_ITEMS=10 RC_HERO_AT=143.42,125.81,57.0,0 RC_PLAY_SCRIPT='20-21:press CIRCLE'`,
+frames 30–70 (docs/plan/moby_render_notes.md §8 has the before/after).
+
+## In the port (2026-09-27): the waterfall foam (types 56, 57) and what 760 is
+
+**The waterfall foam is particles, 760 is not.** The foam at the foot of Novalis's fall is the ripple manager 751's
+zone-5 spray (world_animation.md §2, `0x2fd750..0x2fd944`): every tick while the camera is in zone 5, one flat foam
+ring (type 57) at (177 ± 0.6, 176 − 11·row/20 ± 0.1, 39), `row` = `0x1fa6a0[counter % 20]`, size 1.0, spin
+`randf(0.4, 0.5)`, drifting +0.02 x a tick; then 20 steps of 0.05 down the fall, each with odds 1/32 of a mist puff
+(type 56) at (178 ± 0.6, 176 − 11·t ± 0.1, 39 − `randf(0, 0.2)`), size `randf(4, 10)`, still. Class 760, which the
+survey called "waterfall foam", is the **fire and smoke** on the bombed buildings: its own draw callback, not the
+particle system (creatures.md §7, `moby_update::classes::fire_field`).
+
+**Types** (level01 code, read in full; standard `f32`):
+* **56** mist puff (`PartType56Spawn` 0x287b00 / update 0x287bd8): sprite, additive, byte9 0x24, texture `def[56][0]`,
+  grey `0x60 + 2·randi(16)` with alpha 0x40, rotation `randi(0x100)` (the spawner's two draws, only with a record).
+  Update: vel ×0.975 (xyz), pos += vel, size + 6300, grey − 4 a tick with alpha 0x60; killed below 1. `particles/type56.rs`.
+* **57** flat foam ring (`PartType57Spawn` 0x287c80 / update 0x287d90): **kind 1** (flat quad in world XY; the renderer
+  draws kind 1), additive, byte9 0x2c, texture `def[57][0]`, alpha `2·randi(16)`, timer 0x80, size `size·210000`,
+  angle `randf(0, 256)` (+0x30, byte8), spin +0x34 (the spawner's two draws). Update: pos += vel, size + 5880, spin
+  ×0.98, angle += spin, timer − 1 (killed at ≤ 0), alpha = t ≤ 64 ? t : 128 − t. `particles/type57.rs`.
+
+**Spawns** (`rc_game::water::RippleSim::tick_with`, the counter and the particle system passed by the 751 external
+update in `rc-engine` gameplay.rs / `tools/trace` port_sim): the caller's draws, then the spawner's; without a particle
+system the spawners' draws are still made (the stream stays right). The old code made only the caller's draws (4 fewer
+per puff, 2 per ring).
+
+**Checked:** unit tests of both types (lifetimes, sizes, alpha shapes); `novalis_world.rs`
+`novalis_waterfall_foam_spawns_rings_and_mist` (600 ticks in zone 5: 127 rings alive, ~400 puffs, deterministic);
+engine `RC_HERO_AT=177,184,41,-1.5708 RC_PLAY_FLY=1 RC_CAM=168,171,44,178,170,39` frame 200: the white foam on the pool at
+the foot of the fall (`RC_PART_STATS`: 56:11–15, 57:120–127 alive).

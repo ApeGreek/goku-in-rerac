@@ -1,10 +1,11 @@
-// Particle sprites (render kind 0) as PartProc + VU1 program 221571 draw them. Rust side, the cull/sort rules
+// Particle sprites (render kinds 0 and 1) as PartProc + VU1 program 221571 draw them. Rust side, the cull/sort rules
 // and every constant: particle_render.rs (docs/plan/particles.md §7).
 //
 // Per vertex: sprite index << 2 | corner, from a persistent quad mesh. Per sprite (storage buffer, rewritten
 // every frame in draw order; quads past `count` are dropped): the particle centre (Bevy world), the corner
 // vectors a and b in 512x416 frame-buffer pixels (x right, y down; corners S+a, S+b, S-b, S-a with ST (0,0),
-// (1,0), (0,1), (1,1)), the vertex RGBA (0x80 = 1.0, alpha already faded) and the texture layer | additive << 16.
+// (1,0), (0,1), (1,1)), the vertex RGBA (0x80 = 1.0, alpha already faded) and the texture layer | additive << 16 |
+// flat << 17 (kind 1: a and b are world offsets in the game's XY plane, projected per corner).
 // The corner keeps the centre's depth: the offset is added in clip space (x / 256, -y / 208 in NDC).
 //
 // Fragment: MODULATE (C = Ct·Cv >> 7, A = At·Av >> 7, At in GS units: the texture stores 0x80 = 1.0),
@@ -72,10 +73,15 @@ fn vertex(v: ParticleVertex) -> ParticleVertexOutput {
     if (k == 1u) { corner = b; st = vec2<f32>(1.0, 0.0); }
     if (k == 2u) { corner = -b; st = vec2<f32>(0.0, 1.0); }
     if (k == 3u) { corner = -a; st = vec2<f32>(1.0, 1.0); }
-    var clip = position_world_to_clip(s.p.xyz);
-    clip.x += corner.x * (1.0 / 256.0) * clip.w;
-    clip.y -= corner.y * (1.0 / 208.0) * clip.w;
-    out.position = clip;
+    if (((s.c.y >> 17u) & 1u) != 0u) {
+        // Kind 1, flat quad: the corner is a world offset in the game's XY plane (game (x, y) = Bevy (x, -z)).
+        out.position = position_world_to_clip(s.p.xyz + vec3<f32>(corner.x, 0.0, -corner.y));
+    } else {
+        var clip = position_world_to_clip(s.p.xyz);
+        clip.x += corner.x * (1.0 / 256.0) * clip.w;
+        clip.y -= corner.y * (1.0 / 208.0) * clip.w;
+        out.position = clip;
+    }
     out.uv = st;
     let c = s.c.x;
     out.color = vec4<u32>(c & 0xffu, (c >> 8u) & 0xffu, (c >> 16u) & 0xffu, c >> 24u);
@@ -98,7 +104,7 @@ fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fragment(in: ParticleVertexOutput) -> @location(0) vec4<f32> {
     let layer = i32(in.tag & 0xffffu);
-    let additive = (in.tag >> 16u) != 0u;
+    let additive = ((in.tag >> 16u) & 1u) != 0u;
     let t = textureSample(tex, tex_sampler, in.uv, layer);
     // Texel in GS units: RGB 0..255, A 0..0x80.
     let ct = round(t.rgb * 255.0);

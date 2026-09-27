@@ -2,13 +2,22 @@
 //! actors drawn as extra mobys, its camera, fade, subtitles, HUD hiding and audio requests applied, and the
 //! Novalis first-arrival trigger. Spec: docs/plan/cutscenes_transitions.md §3, §4.3–4.4 ("In the port").
 //!
-//! * **Trigger** (`FixedUpdate`, before the gameplay tick): the mission NPC 730/790 (`MissionNpcUpdate`
-//!   0x2fad68) runs its state 0 in the load pass (`FUN_002792d0`), so its state-1 branch runs in the first
-//!   gameplay tick: mission byte `levels[level].missions[moby+0xb0]` ≠ 0xff, mode 0 and global flag 0x13d397
-//!   (`GameState::global.flags[15]`) == 0 → `DialogStreamStart(5)`, flag := 1. The port starts the scene on
-//!   the frame after gameplay tick 1 (the tick itself ran whole), sets the flag and the mode (`MenuMode` →
-//!   `Mode::Cutscene`). `RC_SCENE=0` never starts scenes; `RC_SCENE=<k>` starts scene k of the current level
-//!   at the same point regardless of level, mission and flag.
+//! * **Trigger** (`FixedUpdate`, before the gameplay tick): the classes' `DialogStreamStart(k)` calls of the last
+//!   tick (`rc_game::cinematic::EngineRequest::StartScene`, and the talkers' `Handoff::Scene` of
+//!   `rc_game::moby_update::interact`). The mission NPC 730/790 (`rc_game::moby_update::classes::mission_npc`)
+//!   runs its state 0 in the load pass, so its state-1 branch runs in the first gameplay tick: mission byte ≠ 0xff,
+//!   mode 0 and global flag 0x13d397 (`GameState::global.flags[15]`, mirrored into
+//!   `Cinematic::arrival_seen`) clear → `DialogStreamStart(5)`, flag := 1; later its mission starts scenes 3 and 4.
+//!   The port starts the scene on the frame after the tick that asked for it (the tick itself ran whole), sets the
+//!   mode (`MenuMode` → `Mode::Cutscene`). `RC_SCENE` only concerns the arrival scene: `RC_SCENE=0` drops the
+//!   arrival request (the classes go on), `RC_SCENE=<k>` plays scene k of the current level after gameplay tick 1
+//!   instead of it; every other hand-off (talkers, the mission's scenes 3 / 4) always plays. A scene that cannot be
+//!   loaded is reported as ended (skipped) to its talker.
+//! * **Movies** (`EngineRequest::StartMovie`, `Handoff::Movie`: `DialogStreamUpdate(n)` → `StartPssMovie`): the
+//!   decoder is not chosen (decision U10), so [`play_movie`] is a stub that logs the file and returns at once, as
+//!   a skipped movie does (`MovieExitToGameplay` 0x2ad2b8: mode 0, the talker's dialogue refreshed).
+//! * **The other requests** of the moby loop: `SetMissionDone` (the level's mission bytes and the saved game), the
+//!   ship hidden / shown (`FUN_002a2450` / `0x2a2480`), `UnlockPlanet` and the save (logged, not ported).
 //! * **While it runs** the gameplay tick is suspended ([`crate::gameplay::GameTick`] gets a `run_if`): the
 //!   hero stays in his spawn idle (the game puts him in state 100, zero velocity) and is hidden with his
 //!   items (`FUN_002486c0`: hero, hand, back, Clank mode |= 1), the HUD is hidden (draw mask 0x7f,
@@ -32,6 +41,13 @@
 //! * **Audio**: the player's requests become `rc_game::audio::scene` commands (speech VAG from
 //!   `levels/NN/speech/KK_<lang>.bin`), applied by the same frame's audio frame (`crate::audio_out`'s scene
 //!   sound step, which runs after this system while the tick is suspended: EE frame when `world_runs`).
+//! * **End** (`FUN_002ac608`): Ratchet `SetState(0, 1)` (queued on the hero-block channel for the next tick); for a
+//!   talker's scene Ratchet is put in front of it, facing it (`Interact::scene_end_place`, 0x16cd26), and its
+//!   dialogue refreshed (`Interact::scene_ended`).
+//! * **Letterbox** (`DrawScreenFade` 0x21b7d8) and the HUD while `0x15f404` (`creature::Globals::cutscene`: the
+//!   camera trigger, the gunship, the troopers, the bolt crank) is set in gameplay: black bars top and bottom grow by
+//!   one pixel per frame to 24 and shrink the same way after, drawn after the HUD; `HudDraw` draws nothing
+//!   meanwhile.
 //!
 //! Not modelled: the world freeze during the blocking fades (mobys keep their generic advance), particles
 //! (they are stepped from the suspended gameplay tick), the FX driver class 1546 (scene 5's ship trail,
@@ -65,16 +81,13 @@ use rc_formats::texture::{LevelTexture, TextureSource, TextureTable};
 use rc_game::audio::scene::{self as scene_audio, SceneAudioCmd};
 use rc_game::hud::text;
 use rc_game::menus::mode::Mode;
+use rc_game::moby_runtime::MobyId;
 use rc_game::pad::PadState;
 use rc_game::scene_player::{AudioRequest, Frame, SceneCamera, SceneContext, ScenePlayer, SceneTick, REGION};
 use std::sync::Arc;
 
-/// Scene 5 of Novalis: the first-arrival scene the mission NPC starts.
-pub const NOVALIS_ARRIVAL: usize = 5;
 /// Global flag 0x13d397 = `flags[0x13d397 − 0x13d388]`.
 pub const ARRIVAL_FLAG: usize = 0x13d397 - 0x13d388;
-/// The mission NPC classes (`MissionNpcUpdate` 0x2fad68).
-pub const MISSION_NPC_CLASSES: [i16; 2] = [730, 790];
 
 /// `RC_SCENE`: None = the game's triggers, Some(None) = never, Some(Some(k)) = force scene k.
 fn scene_env() -> Option<Option<usize>> {
@@ -151,6 +164,12 @@ struct SceneRuntime {
     /// Actor records / palette of the last frame (uploaded in PostUpdate).
     records: Vec<u8>,
     palette: Vec<u8>,
+    /// Scenes the classes asked for that wait for the running one: (scene, arrival flag, talker).
+    pending: std::collections::VecDeque<(usize, bool, Option<MobyId>)>,
+    /// The talker whose scene runs (`0x179588`).
+    talker: Option<MobyId>,
+    /// `DrawScreenFade`'s bar height 0x15f408 (pixels, 0..=24).
+    letterbox: i32,
 }
 
 pub struct SceneRenderPlugin;
@@ -178,6 +197,9 @@ impl Plugin for SceneRenderPlugin {
                 uploaded: None,
                 records: Vec::new(),
                 palette: Vec::new(),
+                pending: Default::default(),
+                talker: None,
+                letterbox: 0,
             })
             // The gameplay tick is suspended while a scene runs (mode 2 runs CutsceneModeUpdate instead).
             .configure_sets(FixedUpdate, GameTick.run_if(|a: Res<ActiveScene>| !a.running))
@@ -187,7 +209,7 @@ impl Plugin for SceneRenderPlugin {
             .add_systems(PostUpdate, (upload, fade_pass))
             .add_systems(PostUpdate, force_hidden.after(moby_render::update_moby_occlusion).before(VisibilitySystems::VisibilityPropagate));
         match mode {
-            Some(None) => println!("scene: RC_SCENE=0: in-engine scenes disabled"),
+            Some(None) => println!("scene: RC_SCENE=0: the arrival scene is not played (other scenes are)"),
             Some(Some(k)) => println!("scene: RC_SCENE={k}: scene {k} of this level starts after gameplay tick 1"),
             None => {}
         }
@@ -214,25 +236,106 @@ fn load_speech(k: usize, language: usize) -> Option<Arc<[u8]>> {
 /// `0x15f5cc++`) and counts up once per tick.
 fn ticks_since_load(counter: u64) -> u64 { counter.saturating_sub(1) }
 
-/// The Novalis trigger (module docs); returns the scene to start.
-fn trigger(rt: &SceneRuntime, play: Option<&Play>, state: Option<&Persistent>, mode: Mode) -> Option<(usize, bool)> {
+/// `RC_DEBUG_KILL=t` (dev check, not a game option): before gameplay tick index `t` the three mobys the mission NPC
+/// 790 waits for (its links +0x14 / +0x18 / +0x1c) are deleted, to reach its bridge cutaway without a fight.
+fn debug_kills(p: &mut Play) {
+    static KILL: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let Some(t) = *KILL.get_or_init(|| std::env::var("RC_DEBUG_KILL").ok()?.trim().parse().ok()) else { return };
+    if p.game.counter != t + 1 { return; }
+    let Some(npc) = p.game.mobys.mobys.iter().position(|m| m.o_class == 790 && !m.is_deleted()) else { return };
+    let pv = p.game.mobys.mobys[npc].pvars.clone();
+    for o in [0x14usize, 0x18, 0x1c] {
+        let Some(id) = pv.get(o..o + 4).map(|b| i32::from_le_bytes(b.try_into().unwrap())).and_then(|v| usize::try_from(v).ok()) else { continue };
+        if id >= p.game.mobys.mobys.len() || p.game.mobys.mobys[id].is_deleted() { continue; }
+        let c = p.game.counter;
+        p.game.mobys.delete(id, c);
+        println!("scene: RC_DEBUG_KILL: moby {id} (class {}) deleted before tick {t}", p.game.mobys.mobys[id].o_class);
+    }
+}
+
+/// `RC_SCENE=<k>`: scene k after gameplay tick 1 (once).
+fn forced(rt: &SceneRuntime, play: Option<&Play>) -> Option<usize> {
     if rt.triggered { return None; }
     let play = play?;
-    // After gameplay tick 1 (the NPC's state-1 update).
     if ticks_since_load(play.game.counter) < 1 { return None; }
-    match rt.mode {
-        Some(None) => None,
-        Some(Some(k)) => Some((k, false)),
-        None => {
-            let level = crate::level_load::level_index() as usize;
-            if level != 1 || mode != Mode::Gameplay { return None; }
-            let gs = &state?.0;
-            if gs.global.flags[ARRIVAL_FLAG] != 0 { return None; }
-            let npc = play.game.mobys.mobys.iter().find(|m| MISSION_NPC_CLASSES.contains(&m.o_class))?;
-            let done = gs.levels.get(level).and_then(|l| l.missions.get(npc.mission as usize)).is_some_and(|&b| b == 0xff);
-            (!done).then_some((NOVALIS_ARRIVAL, true))
+    rt.mode.flatten()
+}
+
+/// The moby loop's requests of the last tick (module docs): scenes queued in `rt.pending`, the rest applied.
+fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Persistent>) {
+    use rc_game::cinematic::EngineRequest as R;
+    use rc_game::moby_update::interact::Handoff;
+    let level = crate::level_load::level_index() as usize;
+    let mut state = state;
+    // Global flag 0x13d397 as the saved game has it (the NPC sets it with its request; the engine only ever raises it).
+    if state.as_deref().is_some_and(|s| s.0.global.flags[ARRIVAL_FLAG] != 0) { play.svc.cinematic.arrival_seen = true; }
+    let mut scenes: Vec<(usize, bool, Option<MobyId>)> = Vec::new();
+    let mut movies: Vec<(i32, Option<MobyId>)> = Vec::new();
+    for r in std::mem::take(&mut play.svc.cinematic.requests) {
+        match r {
+            R::StartScene { scene, arrival } => scenes.push((scene, arrival, None)),
+            R::StartMovie { movie } => movies.push((movie, None)),
+            R::MissionDone { mission } => {
+                if let Some(b) = play.missions.done.get_mut(mission as usize) { *b = 0xff; }
+                if let Some(b) = state.as_deref_mut().and_then(|s| s.0.levels.get_mut(level)).and_then(|l| l.missions.get_mut(mission as usize)) { *b = 0xff; }
+                println!("scene: SetMissionDone({mission}) on level {level}");
+            }
+            R::UnlockPlanet { planet } => println!("scene: UnlockPlanet({planet}) + ShowPlanetBanner({planet}) (not ported)"),
+            R::Save => println!("scene: memcard_Save (not ported)"),
+            R::ShipHidden(h) => {
+                if let Some(id) = play.ship_moby() {
+                    let m = &mut play.game.mobys.mobys[id];
+                    let was = m.mode & 3 == 3;
+                    if h { m.mode |= 3 } else { m.mode &= !3 }
+                    m.has_collision = !h;
+                    if was != h { println!("scene: the ship {}", if h { "hidden" } else { "shown" }); }
+                }
+            }
         }
     }
+    // The talkers' scene / movie hand-offs (the other hand-offs stay for their owner).
+    let mut keep = Vec::new();
+    for h in std::mem::take(&mut play.svc.interact.handoffs) {
+        match h {
+            Handoff::Scene { scene, npc } => scenes.push((scene.max(0) as usize, false, npc)),
+            Handoff::Movie { movie, npc } => movies.push((movie, npc)),
+            other => keep.push(other),
+        }
+    }
+    play.svc.interact.handoffs = keep;
+    for (movie, npc) in movies {
+        play_movie(movie);
+        // MovieExitToGameplay: the talker's dialogue continues.
+        if npc.is_some() {
+            play.svc.interact.talker = npc;
+            play.svc.interact.scene_ended = true;
+        }
+    }
+    for (scene, arrival, npc) in scenes {
+        // RC_SCENE only replaces the arrival scene; every other hand-off plays.
+        if arrival && rt.mode.is_some() {
+            println!("scene: DialogStreamStart({scene}) (the arrival) dropped: RC_SCENE is set");
+            continue;
+        }
+        if arrival {
+            if let Some(s) = state.as_deref_mut() { s.0.global.flags[ARRIVAL_FLAG] = 1; }
+        }
+        rt.pending.push_back((scene, arrival, npc));
+    }
+}
+
+/// **The movie hook** (`StartPssMovie` 0x2ad0c0 → `MovieModeUpdate` 0x2ad498): in-level movie `n` is `mpegs[2 + n]`
+/// (NTSC; PAL `21 + n`), raw PSS in Tier 0 at `global/mpegs/NNN.bin`. No decoder yet (decision U10, see
+/// docs/plan/cutscenes.md §5): the stub logs the file and returns at once, which is what the game does when the
+/// movie is skipped (Start + L1 L2 R1 R2, or Start alone after the game is beaten / from the replay menu). A
+/// decoder plugs in here: play the video full-screen at 30 fps with its SShd ADPCM audio, honour that skip rule,
+/// then return. Returns whether a movie played.
+pub fn play_movie(n: i32) -> bool {
+    let index = 2 + n;
+    let path = crate::level_load::extracted_root().join(format!("global/mpegs/{index:03}.bin"));
+    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    println!("movie: DialogStreamUpdate({n}) → mpegs[{index}] ({}, {size} bytes): no decoder (U10), skipped", path.display());
+    false
 }
 
 /// Moby part entities that are not hero items (Ratchet's play entities are found by name among them).
@@ -244,7 +347,7 @@ fn scene_frame(
     mut rt: ResMut<SceneRuntime>,
     mut active: ResMut<ActiveScene>,
     mut level: ResMut<crate::Level>,
-    play: Option<Res<Play>>,
+    mut play: Option<ResMut<Play>>,
     mut state: Option<ResMut<Persistent>>,
     mut menu: Option<ResMut<crate::menu_render::MenuMode>>,
     pad: Option<Res<PadFrame>>,
@@ -265,23 +368,51 @@ fn scene_frame(
         for e in &hidden { commands.entity(e).remove::<SceneHidden>().insert(Visibility::Inherited); }
         if let Some(m) = menu.as_mut() { m.state.set(Mode::Gameplay); }
         *active = ActiveScene::default();
-        println!("scene: control returns to gameplay at frame {} (hero idle at his spawn, ground snap: no-op, the tick was suspended)", rt.frames);
+        // FUN_002ac608: SetState(0, 1) (the next tick runs it), the talker's teleport and dialogue refresh.
+        if let Some(p) = play.as_mut() {
+            let counter = p.game.counter;
+            let mut f = rc_game::moby_update::services::HeroFields::of(&p.game.hero);
+            if let Some(npc) = rt.talker.take() {
+                if let Some((pos, yaw)) = p.svc.interact.scene_end_place.take() {
+                    f.clear_motion();
+                    f.pose = Some(rc_game::moby_update::services::HeroPose { pos, yaw, target_yaw: yaw });
+                }
+                p.svc.interact.talker = Some(npc);
+                p.svc.interact.scene_ended = true;
+            }
+            f.call(rc_game::moby_update::services::HeroCall::SetState { id: 0, play: true });
+            p.svc.hero_writes = Some((counter, f));
+        }
+        println!("scene: control returns to gameplay at frame {} (hero SetState(0, 1) on the next tick)", rt.frames);
         return;
     }
+    if let Some(p) = play.as_mut() {
+        debug_kills(p);
+        take_requests(rt, p, state.as_deref_mut());
+    }
     if rt.player.is_none() {
-        let mode = menu.as_ref().map_or(Mode::Gameplay, |m| m.state.mode);
-        let Some((k, natural)) = trigger(rt, play.as_deref(), state.as_deref(), mode) else { return };
+        let is_forced = forced(rt, play.as_deref()).is_some();
+        let (k, natural, talker) = if let Some(k) = forced(rt, play.as_deref()) {
+            (k, false, None)
+        } else if let Some(r) = rt.pending.pop_front() {
+            r
+        } else {
+            return;
+        };
         rt.triggered = true;
+        rt.talker = talker;
         let scene = match load_scene(k) {
             Ok(s) => Arc::new(s),
             Err(e) => {
                 warn!("scene: scene {k} not loaded: {e:#}");
+                // Reported as ended (a skipped scene) so a talker's dialogue goes on.
+                if let (Some(npc), Some(p)) = (rt.talker.take(), play.as_mut()) {
+                    p.svc.interact.talker = Some(npc);
+                    p.svc.interact.scene_ended = true;
+                }
                 return;
             }
         };
-        if natural {
-            if let Some(s) = state.as_mut() { s.0.global.flags[ARRIVAL_FLAG] = 1; }
-        }
         let gs = state.as_deref().map(|s| &s.0.global);
         let ctx = SceneContext {
             game_beaten: gs.is_some_and(|g| g.game_beaten != 0),
@@ -293,7 +424,7 @@ fn scene_frame(
         };
         println!(
             "scene: app frame {}: DialogStreamStart({k}) after gameplay tick {} ({}): {} ticks, {} chunks, actors {:?}, cuts {:?}; subtitles {} (game option 0x15ee40 = {}), language {}",
-            frame.0, play.as_ref().map_or(0, |p| ticks_since_load(p.game.counter)), if natural { "mission NPC 730/790, flag 0x13d397 := 1" } else { "RC_SCENE" },
+            frame.0, play.as_ref().map_or(0, |p| ticks_since_load(p.game.counter)), if natural { "mission NPC 730/790, flag 0x13d397 := 1" } else if is_forced { "RC_SCENE" } else if talker.is_some() { "a talker's hand-off" } else { "a class" },
             scene.end_tick(), scene.chunks.len(), scene.actor_classes(), scene.cut_ticks(), ctx.subtitles, gs.map_or(-1, |g| g.subtitles as i32), ctx.language
         );
         if let Err(e) = spawn_actors(rt, &mut commands, &mut level.0, &scene, &mut meshes, &mut images, &mut materials, &mut buffers) {
@@ -489,13 +620,38 @@ fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, cams: Query<(Enti
     }
 }
 
-/// HUD hidden and the subtitle box (module docs) into the 2D pass.
-fn subtitle_layer(rt: Res<SceneRuntime>, active: Res<ActiveScene>, mut layer: ResMut<SceneLayer>) {
-    layer.hide_hud = active.running;
+/// HUD hidden and the subtitle box (module docs) into the 2D pass; in gameplay, the letterbox of `0x15f404`.
+fn subtitle_layer(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, play: Option<Res<Play>>, mut layer: ResMut<SceneLayer>) {
+    let flag = !active.running && play.as_ref().is_some_and(|p| p.svc.creatures.cutscene);
+    // DrawScreenFade 0x21b7d8 (part of the HUD layer, so never in mode 2): the bars grow while 0x15f404 is set.
+    if !active.running {
+        if flag {
+            if rt.letterbox < LETTERBOX_MAX { rt.letterbox += 1; }
+        } else if rt.letterbox > 0 {
+            rt.letterbox -= 1;
+        }
+    }
+    // HudDraw 0x24fb50 draws no slot while 0x15f404 is set.
+    layer.hide_hud = active.running || flag;
     layer.prims.clear();
+    if !active.running && rt.letterbox > 0 { layer.prims = letterbox_prims(rt.letterbox); }
     let (Some(glyphs), Some(line)) = (rt.glyphs.as_ref(), active.last.as_ref().and_then(|t| t.subtitle.as_ref())) else { return };
     if !active.running { return; }
     layer.prims = subtitle_prims(glyphs, &line.text);
+}
+
+/// `DrawScreenFade`'s largest bar height (0x15f408 < 0x18).
+pub const LETTERBOX_MAX: i32 = 24;
+
+/// The two opaque black bars of `DrawScreenFade`: `h` pixels at the top and the bottom of the frame (one triangle
+/// strip, colour 0x80000000, no blending).
+pub fn letterbox_prims(h: i32) -> Vec<Prim> {
+    const W: i32 = crate::hud_render::W;
+    const H: i32 = crate::hud_render::H;
+    let mut out = Hud2d::default();
+    out.rect(0, h, 0, W, 0x8000_0000);
+    out.rect(H - h, H, 0, W, 0x8000_0000);
+    out.prims
 }
 
 /// `fun_001f4be0`'s box and text for one line.
@@ -531,6 +687,15 @@ fn force_hidden(mut q: Query<&mut Visibility, With<SceneHidden>>) {
 mod tests {
     use super::*;
     use rc_formats::font::{Glyph, GLYPHS};
+
+    /// `DrawScreenFade`: two opaque black bars of `h` pixels, top and bottom, full width.
+    #[test]
+    fn letterbox_bars() {
+        let p = letterbox_prims(LETTERBOX_MAX);
+        let r: Vec<[i32; 4]> = p.iter().map(|q| q.rect()).collect();
+        assert_eq!(r, [[0, 0, crate::hud_render::W, 24], [0, crate::hud_render::H - 24, crate::hud_render::W, 24]]);
+        assert!(p.iter().all(|q| q.rgba == 0x8000_0000 && q.tex == crate::hud_render::Tex::None));
+    }
 
     /// `fun_001f4be0`: one 60-pixel line → box of half width 30 + 10 around x = 256, 9 + 5 above and below
     /// y = 416 − 0x3c, text centred on the same line.

@@ -37,15 +37,25 @@
 //!
 //! Moby +0xbc (`cmd`) is the state: 0 at t = 1, 1 at t = 0, 2 moving.
 //!
-//! Standard `f32`; `dt` is `0x15ed6c`. Not modelled: the voice slot table (a voice counts as alive until this
-//! update releases it; with no sound sink `PlayClassSound` returns −1, so the loop sound is requested every
-//! moving tick). The hero writes of pvar+0xc8 = 0 go through `World::hero_fields_mut` (0xc8 = 1 on every disc
+//! Standard `f32`; `dt` is `0x15ed6c`. The loop voice: while moving, `SoundIsAlive(m, voice)` else
+//! `PlayClassSound(0, 4, m)`; on arriving and while paused `release_voice_slot(voice)` when the slot still plays
+//! this moby's sound, then −1 ([`World::sound_alive`] / [`World::release_sound`], the audio layer's
+//! `SoundSink`; with no sink a voice is alive while ≠ −1, and `PlayClassSound` returns −1, so the loop sound is
+//! requested every moving tick). The hero writes of pvar+0xc8 = 0 go through `World::hero_fields_mut` (0xc8 = 1 on every disc
 //! instance, so none happen in RAC1). Carrying
 //! Ratchet is the hero's side (`HeroPlatformUpdate` 0x249618, triggers.md §5).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{fast_dec_timer_s16, fl, pvar as p, World, DT};
 use crate::moby_update::triggers;
+
+/// The loop voice +0xc4 stopped (`release_voice_slot` when the slot still plays this moby's sound: owner
+/// 0x13e5d8 and active 0x13e5c4 checked first, [`World::release_sound`]) and forgotten (−1).
+fn release_loop(w: &mut World, id: MobyId) {
+    let v = p::i32(&w.m(id).pvars, 0xc4);
+    if v != -1 { w.release_sound(v, id); }
+    p::set_i32(&mut w.mm(id).pvars, 0xc4, -1);
+}
 
 /// The path-platform update address in the level01 class table.
 pub const UPDATE_FN: u32 = 0x2b9eb0;
@@ -188,17 +198,18 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
         pause = true;
     }
     if pause {
-        let pv = &mut w.mm(id).pvars;
-        p::set_ff(pv, 0xa8, 0.0);
-        p::set_i32(pv, 0xc4, -1); // release_voice_slot
+        p::set_ff(&mut w.mm(id).pvars, 0xa8, 0.0);
+        release_loop(w, id);
         return;
     }
     // SoundIsAlive(m, voice) ‖ PlayClassSound(0, 4, m): the loop sound.
-    if p::i32(&w.m(id).pvars, 0xc4) == -1 {
+    let voice = p::i32(&w.m(id).pvars, 0xc4);
+    if !w.sound_alive(voice, id) {
         let v = w.play_sound(0, 4, id);
         p::set_i32(&mut w.mm(id).pvars, 0xc4, v);
     }
     let arrive_ticks = w.ticks(15);
+    let mut arrived = false;
     let m = w.mm(id);
     let full = p::ff(&m.pvars, 0xac);
     let mut step = p::ff(&m.pvars, 0xa8) + full * fl(DT);
@@ -217,7 +228,7 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
         p::set_ff(&mut m.pvars, 0xa4, t);
         p::set_ff(&mut m.pvars, 0xa8, 0.0);
         p::set_i16(&mut m.pvars, 0xba, arrive_ticks as i16);
-        p::set_i32(&mut m.pvars, 0xc4, -1); // release_voice_slot
+        arrived = true;
     }
     let n1 = pts.len() as i32 - 1;
     let i = (n1 as f32 * t) as i32;
@@ -230,6 +241,8 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
         [(b[0] - a[0]) * f + a[0], (b[1] - a[1]) * f + a[1], (b[2] - a[2]) * f + a[2], b[3]]
     };
     p::set_ff(&mut m.pvars, 0xbc, m.position[2] - old[2]);
+    // Arrived at a path end: the loop sound stops.
+    if arrived { release_loop(w, id); }
 }
 
 #[cfg(test)]

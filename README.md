@@ -177,6 +177,8 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 | `RC_GIVE_HYDROPACK` | `1`: own the Hydro-Pack (item 4) from the start (debug; the swim code reads it) |
 | `RC_GIVE_ITEMS` | `id,id,…` (decimal or `0x` hex): own those items from the start (debug); the last back item among them (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack) is the saved back item Clank wears, and the last hand item (e.g. 12, the Swingshot) is requested into the hand |
 | `RC_HERO_AT` | `x,y,z[,yaw]`: place Ratchet there at the level load, before the hero init's ground snap (debug; e.g. on a grind rail with `RC_GIVE_ITEMS=29`) |
+| `RC_GIVE_BOLTS` | `n`: start with n bolts (debug; e.g. to buy at the Gadgetron vendor) |
+| `RC_INTERACT_TRACE` | `1`: log the context prompt's owner changes, the "use" hand-offs (vendor, talkers), vendor purchases and sounds (docs/plan/interaction.md) |
 
 ## Dev workflows
 

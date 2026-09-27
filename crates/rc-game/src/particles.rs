@@ -14,14 +14,16 @@
 //! * **[`Particles::update_parts`]** (`UpdateParts` 0x27c7e8): snapshots `end = hw + 1` at entry and calls
 //!   `table[byte0](rec)` for every record whose byte1 bit 7 is clear, in index order. Records created during
 //!   the pass above the old hw wait a tick; ones created in a hole ahead of the cursor run this tick.
-//! * **Type table** (`RegisterPartTypes` 0x27d4e0 → 0x1b2300, 81 entries): [`Particles::table`]. Ported: type 6
-//!   ([`type06`], class-27 emitters), 11 ([`type11`], TNT sparks), 13 ([`type13`], crate-break dust), 25
+//! * **Type table** (`RegisterPartTypes` 0x27d4e0 → 0x1b2300, 81 entries): [`Particles::table`]. Ported: type 2
+//!   ([`type02`], bomb trail / amoeboid goo), 4 ([`type04`], fireball smoke), 6
+//!   ([`type06`], class-27 emitters), 8 ([`type08`], explosion puffs), 11 ([`type11`], TNT sparks, smoke rings), 13
+//!   ([`type13`], crate-break dust), 15 ([`type15`], explosion streaks), 52 ([`type52`], goo drips, flat), 25
 //!   ([`type25`], grind / cable sparks), 34 ([`type34`], bubbles), 47 ([`type47`], dust / sand puffs), 53 ([`type53`], bolt-pickup and cable
 //!   sparkles) and 60 ([`type60`], glints); a record of any other type kills itself on its first update and is
 //!   counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
 //! * **RNG.** Updates draw from the `&mut Rng` given to [`Particles::update_parts`] (the game's one stream), in
-//!   pool order; only types 11 (its split spawns five children and its phase changes draw one value) and 34 (a
-//!   bubble near the surface draws one value a tick) draw.
+//!   pool order; only types 11 (its split spawns five children and its phase changes draw one value), 15 (a
+//!   splitting streak's child: 6 + 1) and 34 (a bubble near the surface draws one value a tick) draw.
 //!
 //! **Tick placement.** Game-state update 0x2a4080: moby updates (0x2793d8, where the class-27 emitters spawn)
 //! → level callbacks 0x2a1a18 → hero 0x228870 → `UpdateParts` → camera → render. The engine has no gameplay
@@ -37,13 +39,20 @@
 //! keeps its countdown at +0xc8 and its moby at +0x7c), copied from `rc_formats::gameplay::parse_pvars`
 //! (the loader's table walk and fixups) when the level is set up.
 
+pub mod type02;
+pub mod type04;
 pub mod type06;
+pub mod type08;
 pub mod type11;
 pub mod type13;
+pub mod type15;
 pub mod type25;
 pub mod type34;
 pub mod type47;
+pub mod type52;
 pub mod type53;
+pub mod type56;
+pub mod type57;
 pub mod type60;
 
 use crate::ps2v::{self, F};
@@ -75,6 +84,16 @@ pub mod rec {
     pub fn set_i16(r: &mut Record, o: usize, v: i16) { r[o..o + 2].copy_from_slice(&v.to_le_bytes()); }
     /// Position (+0x10, xyz) as `f32`.
     pub fn pos(r: &Record) -> [f32; 3] { [0x10, 0x14, 0x18].map(|o| f32::from_bits(u32(r, o))) }
+    /// An `f32` field (native arithmetic; the value is stored as its bits).
+    #[inline]
+    pub fn ff(r: &Record, o: usize) -> f32 { f32::from_bits(u32(r, o)) }
+    #[inline]
+    pub fn set_ff(r: &mut Record, o: usize, v: f32) { set_u32(r, o, v.to_bits()); }
+    /// Three `f32` at `o` (a vector's xyz).
+    pub fn v3(r: &Record, o: usize) -> [f32; 3] { [ff(r, o), ff(r, o + 4), ff(r, o + 8)] }
+    pub fn set_v3(r: &mut Record, o: usize, v: [f32; 3]) { for (k, x) in v.iter().enumerate() { set_ff(r, o + 4 * k, *x); } }
+    /// Four `f32` at `o`.
+    pub fn set_v4(r: &mut Record, o: usize, v: [f32; 4]) { for (k, x) in v.iter().enumerate() { set_ff(r, o + 4 * k, *x); } }
 }
 
 /// Record byte 1 flags.
@@ -301,21 +320,30 @@ pub struct Particles {
     pub hero: [f32; 3],
     /// 0x167258: the camera yaw as the previous tick's camera update left it (type 34's wobble), set by the hook.
     pub cam_yaw: f32,
+    /// 0x15f5cc: the tick counter as the tick's updates see it (types 2 and 15 act on odd ticks), set by the hook.
+    pub counter: u64,
 }
 
 impl Particles {
     /// Level-init state with the ported update table.
     pub fn new(defs: Option<PartDefs>, owners: Vec<Owner>) -> Self {
         let mut table: [Option<UpdateFn>; PART_TYPES] = [None; PART_TYPES];
+        table[2] = Some(type02::update as UpdateFn);
+        table[4] = Some(type04::update as UpdateFn);
         table[6] = Some(type06::update as UpdateFn);
+        table[8] = Some(type08::update as UpdateFn);
         table[11] = Some(type11::update as UpdateFn);
         table[13] = Some(type13::update as UpdateFn);
+        table[15] = Some(type15::update as UpdateFn);
         table[25] = Some(type25::update as UpdateFn);
         table[34] = Some(type34::update as UpdateFn);
         table[47] = Some(type47::update as UpdateFn);
+        table[52] = Some(type52::update as UpdateFn);
         table[53] = Some(type53::update as UpdateFn);
+        table[56] = Some(type56::update as UpdateFn);
+        table[57] = Some(type57::update as UpdateFn);
         table[60] = Some(type60::update as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0 }
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0 }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -466,11 +494,11 @@ mod tests {
     #[test]
     fn update_parts_kills_unported_types_and_counts_them() {
         let mut s = Particles::new(None, Vec::new());
-        s.create_part(56);
+        s.create_part(58);
         s.create_part(59);
         s.update_parts(&mut Rng::new());
         assert_eq!(s.pool.count, 0);
-        assert_eq!(s.stats.unported_kills[56], 1);
+        assert_eq!(s.stats.unported_kills[58], 1);
         assert_eq!(s.stats.unported_kills[59], 1);
         assert!(s.table[25].is_some() && s.table[47].is_some() && s.table[60].is_some());
     }

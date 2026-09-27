@@ -50,7 +50,9 @@ pub enum Module {
     /// `weapons.rs`: the weapon states (the glove throw 0x23; the weapon stances 0x17 / 0x27 / 0x2e / 0x30 have no
     /// SetState caller in any level; the gadget poses 0x38..0x3a are set by one moby callback).
     Weapons,
-    /// Later: scripted / cutscene control states.
+    /// `crank.rs`: the bolt crank 0x3b (set and driven by the crank class 280).
+    Crank,
+    /// `scripted.rs`: the scripted / cutscene control states (0x72 ported: the cinematics' hold).
     Scripted,
     /// Later: the other bodies (Clank, Giant Clank, Hologuise disguise).
     Bodies,
@@ -137,7 +139,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("gadget pose 1", 0x13, Weapons, false),                     // 0x38
     s("gadget pose 2", 0x13, Weapons, false),                     // 0x39
     s("gadget pose 3", 0x13, Weapons, false),                     // 0x3a
-    s("scripted item use", 9, Scripted, false),                   // 0x3b
+    s("bolt crank (turning a bolt with the wrench)", 9, Crank, true), // 0x3b
     s("burn bounce (surface 1)", 4, Damage, true),                // 0x3c
     s("death", 0x14, Damage, true),                               // 0x3d
     s("level 16 group-0x15 state (unknown)", 0x15, Hoverboard, false), // 0x3e
@@ -192,7 +194,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("Hoverboard 0x6f", -1, Hoverboard, false),                  // 0x6f
     s("Magneboots wrench swing", 6, Boots, true),                // 0x70
     s("Magneboots hop", 1, Boots, true),                        // 0x71
-    s("scripted 0x72", 9, Scripted, false),                       // 0x72
+    s("scripted hold (cinematics)", 9, Scripted, true),           // 0x72
     s("wade", 1, Walk, true),                                     // 0x73
     s("cable slide (spline)", 0x1a, Boots, true),                // 0x74
     s("hurt on the water surface", 7, Damage, true),              // 0x75
@@ -244,7 +246,9 @@ impl Hero {
             Surface => super::surface::entry(self, c, id, play, old_sub),
             Damage => super::damage::entry(self, c, id, play, old_sub),
             Stance => super::stance::entry(self, c, id, play, old_sub),
-            Jump | Melee | Weapons | Scripted | Bodies | Hoverboard | Unused => None,
+            Crank => super::crank::entry(self, c, id, play, old_sub),
+            Scripted => super::scripted::entry(self, c, id, play, old_sub),
+            Jump | Melee | Weapons | Bodies | Hoverboard | Unused => None,
         }
     }
 
@@ -277,7 +281,9 @@ impl Hero {
             Surface => return super::surface::physics(self, env, anim, rng),
             Damage => return super::damage::physics(self, env, anim, rng),
             Stance => return super::stance::physics(self, env, anim, rng),
-            Jump | Weapons | Scripted | Bodies | Hoverboard | Unused => return false,
+            Crank => return super::crank::physics(self),
+            Scripted => return super::scripted::physics(self, env, anim, rng),
+            Jump | Weapons | Bodies | Hoverboard | Unused => return false,
         }
         true
     }
@@ -312,7 +318,9 @@ impl Hero {
             Surface => super::surface::transitions(self, c),
             Damage => super::damage::transitions(self, c),
             Stance => super::stance::transitions(self, c),
-            Jump | Weapons | Scripted | Bodies | Hoverboard | Unused => {}
+            Crank => super::crank::transitions(self, c),
+            Scripted => super::scripted::transitions(self, c),
+            Jump | Weapons | Bodies | Hoverboard | Unused => {}
         }
     }
 }
@@ -340,6 +348,10 @@ mod tests {
         want.extend([0x24, 0x25, 0x26, 0x2c, 0x2d]);
         // Weapons + first person (comet.rs, weapons.rs).
         want.extend([0x15, 0x23]);
+        // The bolt crank (crank.rs).
+        want.push(0x3b);
+        // The scripted hold (scripted.rs, the cinematics).
+        want.push(0x72);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));
@@ -350,7 +362,7 @@ mod tests {
     fn stubs_own_no_ported_state() {
         for (id, s) in STATES.iter().enumerate() {
             if s.ported {
-                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons), "state {id:#x} ported in {:?}", s.module);
+                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons | Crank | Scripted), "state {id:#x} ported in {:?}", s.module);
             }
         }
     }

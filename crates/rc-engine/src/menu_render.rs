@@ -179,14 +179,15 @@ pub struct MenuPlugin;
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<MenuMode>();
+        app.init_resource::<MenuMode>().init_resource::<crate::interact_render::VendorRt>();
         if !crate::gameplay::enabled() { return; }
         app.init_resource::<SnapshotRequest>()
             .add_systems(First, |mut r: ResMut<SnapshotRequest>| r.0 = None)
             .add_systems(PreUpdate, setup)
             .add_systems(FixedUpdate, menu_frame.after(crate::gameplay::GameTick))
             .add_systems(Update, (target_main_camera, build_prims).chain().before(HudBuild))
-            .add_systems(PostUpdate, menu_layer.before(TransformSystems::Propagate));
+            .add_systems(PostUpdate, menu_layer.before(TransformSystems::Propagate))
+            .add_systems(PostUpdate, crate::interact_render::hide_hero.after(crate::moby_render::update_moby_occlusion).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app
             .init_resource::<SnapshotJob>()
@@ -412,6 +413,14 @@ fn aa_choices(s: &SupportedMsaa) -> u32 {
 /// equipped hand item [M: the hand-swap state machine is not ported].
 fn held_item(g: &rc_game::game_state::Global) -> i32 { if g.wrench_held != 0 { 8 } else { g.equipped[0] } }
 
+/// The "use" system's resources (crate::interact_render).
+type InteractParams<'w> = (
+    ResMut<'w, crate::interact_render::VendorRt>,
+    ResMut<'w, crate::hud_render::HudFeed>,
+    Option<ResMut<'w, crate::play_camera::PlayView>>,
+    Option<ResMut<'w, crate::audio_out::AudioOut>>,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn menu_frame(
     rt: Option<ResMut<MenuRt>>,
@@ -423,6 +432,7 @@ fn menu_frame(
     source: Res<crate::game_camera::CameraSource>,
     mut render: Option<ResMut<RenderSettings>>,
     supported: Option<Res<SupportedMsaa>>,
+    (mut vr, mut feed, mut view, mut audio): InteractParams,
 ) {
     let (Some(mut rt), Some(mut play), Some(mut gs), Some(mut sess)) = (rt, play, gs, sess) else { return };
     let rt = &mut *rt;
@@ -440,7 +450,8 @@ fn menu_frame(
     match mode {
         Mode::Gameplay => {
             let inp = MenuInput::from_pad(&play.game.pad, true);
-            let gate = HeroGate { early_exit: sess.hp < 1, held_item: held_item(&gs.global), ..Default::default() };
+            // 0x15f594: a context-prompt owner blocks the ring (the vendor's △ is not also a ring open).
+            let gate = HeroGate { early_exit: sess.hp < 1, held_item: held_item(&gs.global), f594: play.svc.interact.prompt.owner, ..Default::default() };
             if let Some(qs) = rt.qs.as_mut() {
                 let h = qs.hero(&inp, &gate, &mut gs.global, sess);
                 let u = qs.update(&inp, &gate, &mut gs.global, sess, vsync);
@@ -510,7 +521,25 @@ fn menu_frame(
                 }
             }
         }
+        Mode::Vendor => {
+            let input = match &rt.script {
+                Some(s) => s.at(frame),
+                None if *source == crate::game_camera::CameraSource::Play => pad.0,
+                None => rc_game::pad::PadInput::neutral(),
+            };
+            let mirror = gs.options().mirror;
+            play.game.pad.update(Some(&input.bytes()), mirror);
+            let inp = MenuInput::from_pad(&play.game.pad, true);
+            crate::interact_render::vendor_frame(
+                &mut vr, &mut play, gs, sess, &mut mm.state, inp, &rt.assets, frame, view.as_deref_mut(), Some(&mut feed), audio.as_deref_mut(), &mut rt.draws,
+            );
+        }
         _ => {}
+    }
+    // The "use" system after a gameplay tick: the vendor's hand-off, the prompt for the HUD.
+    if mode == Mode::Gameplay && mm.state.mode == Mode::Gameplay {
+        crate::interact_render::feed_idle(&mut feed);
+        crate::interact_render::after_tick(&mut vr, &mut play, gs, &mut mm.state, frame, Some(&mut feed), audio.as_deref_mut());
     }
     mm.state.end_frame();
     mm.loop_frame += 1;
@@ -534,7 +563,8 @@ fn build_prims(
     let snapshot = convert(&rt.draws, &mut h, &mut st, &lh.glyphs);
     hook.prims = h.prims;
     hook.replace_hud = rt.render_mode == Mode::Menu;
-    hook.freeze = rt.render_mode != Mode::Gameplay;
+    // The vendor (mode 5) runs `HudUpdate(1)` every frame: the HUD ticks and draws over its screens.
+    hook.freeze = !matches!(rt.render_mode, Mode::Gameplay | Mode::Vendor);
     let show = snapshot && rt.snapshot_ready;
     for mut v in &mut snap { *v = if show { Visibility::Visible } else { Visibility::Hidden }; }
     if std::mem::take(&mut rt.snapshot_request) {

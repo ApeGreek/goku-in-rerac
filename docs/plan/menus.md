@@ -473,6 +473,12 @@ Help/tutorial boxes: hud_text.md §3.4 (`Help_Update` 0x225bd0). They run inside
 * **Port choices / stubs**: widgets drawn in place, scissored, instead of render target + 1:1 blit; lines as 1-px quads;
   unported pages / streamed images / globe / missions / cheat entry counted in `stub_calls`; post-actions other than resume logged; sounds only returned; the ring draws after the HUD (game: slot 3).
 
+* **Gadgetron vendor (mode 5)**: `crates/rc-game/src/menus/vendor.rs` (list, substates, buy flow, screens as 2D panels) driven by
+  `crates/rc-engine/src/interact_render.rs` from `menu_frame` (`Mode::Vendor`; the HUD ticks and draws over it); opened by the vendor
+  class 11 through the "use" system (docs/plan/interaction.md: the context prompt 0x278f58 / 0x278eb8, which also blocks the ring
+  through 0x15f594). Lombyte misnomers found there: `RaceTimerShow` 0x278eb8 = `PromptTick`, `HudRaceTimerDraw` 0x24c898 = the
+  prompt's slot-12 draw, `OpenShipMenu` 0x279070 = `PromptRelease`, `DrawSpriteHelper_C` 0x2af7e8 = the vendor's buy flow.
+
 ## 8. Unknowns
 
 * Navy rect vs 3D frame order (whether `fun_00200e08` shares the moby chain); widget-texture clear (0x251838) arguments; the other

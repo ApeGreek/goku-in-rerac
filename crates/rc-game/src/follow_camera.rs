@@ -40,6 +40,8 @@ use crate::pad::{fast_arctan, PadState};
 use crate::ps2v::Pf;
 use rc_formats::collision::Collision;
 
+pub mod script;
+
 const K_PI: Pf = Pf::b(0x4049_0fdb);
 const HALF_PI: Pf = Pf::b(0x3fc9_0fdb);
 /// Yaw rates by option 0x15ede4 (0x162228): 1.0°, 1.3°, 1.6° per tick.
@@ -249,6 +251,8 @@ pub struct Camera {
     pub first_person: FirstPerson,
     /// The camera switch blend 0x167370.. ([`CamBlend`]).
     pub blend: CamBlend,
+    /// The script camera (type 5, [`script::ScriptCamera`]): `CameraScript` / `CameraScript2`.
+    pub script: script::ScriptCamera,
 }
 
 /// Which shake record a request writes: 0x167260 moves the camera along its up row, 0x167270 along its forward row.
@@ -692,8 +696,11 @@ impl Camera {
         // UpdateAllCameras 0x20d620: the active camera's own check (the first-person camera's release 0x316c08), the
         // other camera's activation (the first-person check 0x316880; the follow camera takes over from a released
         // one), the switch `0x20d110` with the new type's init, then the active type's update.
-        let prev = self.switch_cameras(inp);
-        if self.first_person.active {
+        // The script camera (type 5) never yields to an activation check; `CameraScript2` releases it (script.rs).
+        let prev = if self.script.active { self.script_frame(inp) } else { self.switch_cameras(inp) };
+        if self.script.active {
+            // Its update ran in script_frame.
+        } else if self.first_person.active {
             self.first_person_update(inp);
         } else {
             self.update_type0(inp);
@@ -1718,6 +1725,7 @@ enum Release {
 impl Camera {
     /// The active camera's rows and position (UpdateCam +0x00.. and +0x30).
     fn active_view(&self) -> ([V4; 3], V4) {
+        if self.script.active { return self.script_view(); }
         if self.first_person.active {
             let mut p = crate::hero::physics::from_f32x3(self.first_person.pos);
             p[3] = Pf::ONE;

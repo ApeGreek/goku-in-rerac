@@ -21,9 +21,10 @@
 //! none / lost), +0x210 home, +0x220 turn velocity, +0x224
 //! range, +0x228 current range, +0x22c alert timer, +0x230 big, +0x234 heading offset, +0x23c speed, +0x240 arena path,
 //! +0x244 waypoint graph, +0x248 alternate-target group (class 623 members; −1 on Novalis), +0x24c target polygon, +0x250
-//! size, +0x254 glow phase, +0x258 fall-out spline (0 on Novalis), +0x25c trigger cuboid, +0x260 gate moby.
-//! Not ported (counted): the suck-cannon capture (state 0xe, `0x305260`), the +0x258 fall-out, the big-head manipulator,
-//! the shadow probe.
+//! size, +0x254 glow phase, +0x258 fall-out ripple patch (0 on Novalis), +0x25c trigger cuboid, +0x260 gate moby.
+//! The fall-out rule (`0x2eec68`): with +0x258 ≠ 0 (a ripple patch index; Rilgar / level 11) an amoeboid below that
+//! patch's height (`creature::Globals::ripple_z`) bursts into goo and is deleted without bolts. Not ported (counted):
+//! the suck-cannon capture (state 0xe, `0x305260`), the big-head manipulator, the shadow probe.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
@@ -438,7 +439,19 @@ fn pre(w: &mut World, id: MobyId) -> bool {
         return true;
     }
     w.mm(id).hit_slot = 0xff;
-    if c::pi32(w, id, FALLOUT) != 0 && st(w, id) != 0 { w.svc.unported("amoeboid 572: fall-out spline +0x258"); }
+    // The fall-out rule (0x2eec68): below the height of ripple patch +0x258 the amoeboid bursts (no bolts).
+    let fall = c::pi32(w, id, FALLOUT);
+    if fall != 0 && st(w, id) != 0 {
+        match w.svc.creatures.ripple_z.get(fall as usize).copied() {
+            Some(z) if c::pos(w, id)[2] < z => {
+                goo_burst(w, id, [0.0; 4]);
+                w.delete_moby(id);
+                return true;
+            }
+            Some(_) => {}
+            None => w.svc.unported("amoeboid 572: fall-out rule without ripple patch heights"),
+        }
+    }
     if c::pi32(w, id, ALERT) != 0 {
         let t = w.ticks(240);
         c::set_pi32(w, id, ALERT_T, t);
@@ -533,41 +546,14 @@ fn split_child(w: &mut World, id: MobyId) -> Option<MobyId> {
     None
 }
 
-/// `0x2ef560`: while drawn (+0x31), goo drips (type 52): 1 in 19 and 1 in 4 per tick, each 5 draws plus the
-/// spawn's `randi(255)`.
+/// `0x2ef560`: while drawn (+0x31), goo drips (type 52): `creature::fx::goo_drips`.
 fn drip(w: &mut World, id: MobyId) {
-    if w.m(id).visible == 0 { return; }
-    for (n, lo, hi) in [(20, 1.0f32, 2.0f32), (5, 3.5, 4.5)] {
-        if w.rng.randi(n - 1) != 0 { continue; }
-        let _a = w.rng.rand_angle();
-        let _r = w.rng.randf(0.0, 0.1);
-        let _s = w.rng.randf(0.0, lo);
-        let _z = w.rng.randf(lo, hi);
-        let _life = w.rng.randf(120.0, 180.0);
-        if fx::part_unported(w, 52) { w.rng.randi(0xff); }
-    }
+    let sz = size(w, id);
+    fx::goo_drips(w, id, sz);
 }
 
-/// `0x2ef770(moby, dir)`: the goo burst of a hit / death: 20 clumps of 10 type-2 blobs (per clump 6 draws, per blob
-/// 10 and the spawn's `randf(0, 255)`).
-fn goo_burst(w: &mut World, id: MobyId, _dir: c::V) {
+/// `0x2ef770(moby, dir)`: the goo burst of a hit / death (type-2 blobs): `creature::fx::goo_burst`.
+fn goo_burst(w: &mut World, id: MobyId, dir: c::V) {
     let sz = size(w, id);
-    let _ = sz;
-    for _ in 0..20 {
-        for _ in 0..3 { w.rng.randf(-0.5 * sz, 0.5 * sz); }
-        let _a = w.rng.rand_angle();
-        let _s1 = w.rng.randf(1.0, 8.0);
-        let _s2 = w.rng.randf(2.0, 6.0);
-        let _s3 = w.rng.randf(0.0, 0.0);
-        let _t = w.ticks(30);
-        for _ in 0..10 {
-            let _w = w.rng.randf(0.5, 1.5);
-            for _ in 0..3 { w.rng.randf(-0.2, 0.2); }
-            for _ in 0..3 { w.rng.randf(-0.5 * c::DT, 0.5 * c::DT); }
-            let _c1 = w.rng.randf(0.0, 1.0);
-            let _c2 = w.rng.randf(0.0, 1.0);
-            let _life = w.rng.randf(5.0, 25.0);
-            if fx::part_unported(w, 2) { w.rng.randf(0.0, 255.0); }
-        }
-    }
+    fx::goo_burst(w, id, dir, sz);
 }

@@ -85,6 +85,14 @@ pub struct ClassSoundSink<'a> {
 
 impl SoundSink for ClassSoundSink<'_> {
     fn play_class_sound(&mut self, ev: &SoundEvent, rng: &mut Rng) -> i32 { self.audio.play_class_sound(ev, self.hero, &self.listener, rng) }
+    /// `SoundIsAlive(moby, slot)`: the slot is in use and still owned by `moby`.
+    fn alive(&self, slot: i32, moby: MobyId) -> bool {
+        usize::try_from(slot).ok().and_then(|i| self.audio.slots.slots.get(i)).is_some_and(|s| s.state != crate::audio::voices::state::FREE && s.owner.is_some_and(|o| o.id == moby as u32))
+    }
+    /// `release_voice_slot(slot)` when the slot still plays `moby`'s sound.
+    fn release(&mut self, slot: i32, moby: MobyId) {
+        if self.alive(slot, moby) { self.audio.slots.release(slot); }
+    }
 }
 
 /// The trigger check at the end of `RatchetAnimAdvance` (0x247d48): when key A and key B were the same

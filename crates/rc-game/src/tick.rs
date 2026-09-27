@@ -109,6 +109,9 @@ pub trait MobySystem {
     /// The camera shake requests the moby loop's class updates made this tick (`World::shake_camera`), in order;
     /// the tick stores them into the camera's shake records right after the moby loop.
     fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { Vec::new() }
+    /// The cinematic camera calls the moby loop made this tick (`CameraScript` / `CameraScript2` …,
+    /// [`crate::cinematic`]), in order; the tick applies them to the camera right after the moby loop.
+    fn take_cinematic(&mut self) -> Vec<crate::cinematic::CinematicCall> { Vec::new() }
     /// The moby loop's run list for the camera at `camera` (the `0x15ffe4` chain the hero's Swingshot target
     /// searches walk: `moby_update::scheduler::build_active_list`); None: every live moby in table order.
     fn run_list(&self, _table: &MobyTable, _camera: crate::hero::physics::V4) -> Option<Vec<MobyId>> { None }
@@ -205,13 +208,21 @@ impl Game {
     ) -> TickReport {
         self.pad.update(pad_data, self.options.mirror);
         self.mobys.free_slot_pass(self.counter);
+        // The globals the moby loop reads outside the moby system: this tick's pad, the last camera update's Euler,
+        // Ratchet's anim fields after his last update (moby_update::services::LoopGlobals).
+        let e = self.camera.out.euler;
+        self.hero.loop_in = crate::moby_update::services::LoopGlobals { pad: self.pad.clone(), cam_euler: [e[0].to_f32(), e[1].to_f32(), e[2].to_f32()], anim: anim.view() };
         (hooks.mobys)(&mut self.mobys, &self.hero, &mut self.rng, &self.camera.out, coll, self.counter);
         // The classes' stores into the hero block (the flow 679's push, the lift's lockouts …) land before the hero
         // update, as in the game (moby_update::services::HeroFields).
-        if let Some(f) = hooks.world.as_deref_mut().and_then(|w| w.take_hero_writes()) { f.apply(&mut self.hero); }
+        let hero_writes = hooks.world.as_deref_mut().and_then(|w| w.take_hero_writes());
+        if let Some(f) = &hero_writes { f.apply(&mut self.hero); }
         // Their camera shakes (stores into 0x167260 / 0x167270; the camera update at the end of the tick applies them).
         for r in hooks.world.as_deref_mut().map(|w| w.take_camera_shakes()).unwrap_or_default() { self.camera.request_shake(r); }
         let hero_moby = Some(self.hero_moby);
+        // Their cinematic camera calls (CameraScript, CameraScript2, HeroTeleport's camera reset: crate::cinematic).
+        let cine = hooks.world.as_deref_mut().map(|w| w.take_cinematic()).unwrap_or_default();
+        crate::cinematic::apply_camera_calls(&mut self.camera, &cine, &CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: None, hero_moby });
         // Ratchet's hit message as the moby loop left it (the hit intake 0x231580 and the hurt entries read it).
         self.hero.damage.hit = hooks.world.as_deref().and_then(|w| w.hit_message(&self.mobys, self.hero_moby)).map(|r| hero_hit(&self.mobys, &r));
         // The hero's queries see the table as the moby loop left it (a snapshot: the hero holds its own moby).
@@ -236,6 +247,9 @@ impl Game {
                 water: hooks.world.as_deref().and_then(|w| w.water()),
                 world: Some(&carriers),
             };
+            // The classes' calls into the hero code (SetState / SetAnim: the bolt crank), with the hero's context.
+            if let Some(f) = &hero_writes { f.run_calls(&mut self.hero, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng }); }
+            crate::cinematic::run_hero_calls(&mut self.hero, &cine, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng });
             let moby = &mut self.mobys.mobys[self.hero_moby];
             hero_update_with_sounds(&mut self.hero, moby, &env, anim, &mut self.rng, hero_sounds)
         };

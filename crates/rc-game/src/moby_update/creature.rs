@@ -13,6 +13,7 @@
 //! | [`attack`] | `0x26eaa8`, `0x26e090` | hits dealt (to Ratchet through his moby's hit message, P2's intake), group alert |
 //! | [`flash`] | `0x272318` / `0x2723f8` | the hit flash on the moby's ambient colour |
 //! | [`fx`] | `0x273f50`, `SpawnBeamExplosion` 0x273310, `BreakFxB` 0x278ad8, `0x2efbf8`, `0x2f3570` | death explosion, explosion effect, break pieces, rate limiter, explosion light |
+//! | [`projectile`] | `CollLine_Fix` / `coll_sphere_mobys` with a template, `PartType04/08/15/16/22/26Spawn` | enemy shots' sweep and hit template; particle records of the unported types |
 //! | [`region`] | `0x26e6c0`, `0x276640`, `ClampToPath` 0x276820, `0x276a48`, `0x276c40`, `LineOfSightTest` 0x276fe8 | arena polygons and waypoint graphs on the level paths |
 //! | [`ground`] | `GroundHeight` 0x26e618 + `CollType` 0x2151d8, `0x2765b0`, `MobyAnimKeyTime` 0x263920 | ground probe with surface id, anim-frame crossing |
 //!
@@ -34,6 +35,7 @@ pub mod flash;
 pub mod fx;
 pub mod ground;
 pub mod knock;
+pub mod projectile;
 pub mod region;
 pub mod target;
 pub mod turn;
@@ -59,6 +61,25 @@ pub struct Globals {
     pub class_spheres: std::collections::HashMap<i16, [f32; 4]>,
     /// Explosion lights created (stats).
     pub lights: u64,
+    /// `0x15f404`: an enemy's scripted sequence is running (set by the gunship 688's fly-by and a trooper's camera
+    /// cuboid, cleared at their end); the gunship's shells then hit mobys and make fewer particles.
+    pub cutscene: bool,
+    /// The scripted sequences' calls into the camera and the hero, in the order the game makes them (the game calls
+    /// `CameraScript` / `SetState` directly): the cutscene system and the hero read and clear this queue.
+    pub scripts: Vec<ScriptRequest>,
+    /// `*(0x1612d0 + i·0x1190 + 8)`: the height of ripple patch `i` of the level's ripple manager (the amoeboid's
+    /// fall-out rule, pvar+0x258). Filled by whoever sets up the level's water; empty: the rule cannot fire (counted).
+    pub ripple_z: Vec<f32>,
+}
+
+/// A call an enemy's scripted sequence makes into the camera and the hero ([`Globals::scripts`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ScriptRequest {
+    /// `SetState(hero_state, 0)` on Ratchet, then `CameraScript(cuboid centre, cuboid Euler, 0, 0, 0)`: the camera
+    /// placed at cuboid `cuboid` (its centre, looking along its Euler angles) for `ticks` ticks, by moby `moby`.
+    Start { moby: MobyId, hero_state: u8, cuboid: i32, centre: [f32; 3], euler: [f32; 3], ticks: i32 },
+    /// `CameraScript2(0)` (the camera back to Ratchet) and `SetState(0, 1)`.
+    End { moby: MobyId },
 }
 
 /// Mode bit 0x20: the pvar block starts with the header pointers (`FUN_002711f8` / `FUN_00275290` test it).

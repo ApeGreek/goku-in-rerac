@@ -27,8 +27,10 @@
 //! **Pass 2 (kind 0, camera-facing sprite).** `Q = size·[0x1607ec]/(c.z + 0.5)`, `[0x1607ec]` = 256 /
 //! (0.63·210000): the half-diagonal in 512×416 frame-buffer pixels. θ = byte8·2π/256, a = (cos θ, 1.0625·sin θ)·Q,
 //! b = (−sin θ, 1.0625·cos θ)·Q; corners S+a (ST 0,0), S+b (1,0), S−b (0,1), S−a (1,1) around the projected
-//! centre S, all at the centre's Z (the vertex shader adds the pixel offsets in clip space). Kinds 1–3 (flat
-//! quad, line, ribbon) are counted and not drawn (no Novalis-start particle uses them).
+//! centre S, all at the centre's Z (the vertex shader adds the pixel offsets in clip space). **Kind 1** (flat quad
+//! in the world XY plane, the amoeboids' goo drips): corners `p + (c, s)`, `p + (−s, c)`, `p + (s, −c)`, `p − (c, s)`
+//! with `(c, s) = (cos θ, sin θ)·size/420000`, each projected (a real 3D quad), same STs; also culled when
+//! `z12 − ftoi12(r) < 0x100`. Kinds 2–3 (line, ribbon) are counted and not drawn (no ported type uses them).
 //!
 //! **GS state.** TEX1 bilinear, no mips, CLAMP; MODULATE (C = Ct·Cv >> 7, A = At·Av >> 7); no fog; TEST_1 =
 //! 0x5380b (A ≥ 0x80 writes Z, else RGB only; ZTST GEQUAL); ALPHA_1 per record: 0x44 `(Cs − Cd)·As + Cd`,
@@ -467,7 +469,7 @@ pub(crate) fn update_parts(sim: &mut ParticleSim, rng: Option<&mut Rng>) {
         let unported: Vec<String> = (0..PART_TYPES).filter(|&t| s.unported_kills[t] > 0).map(|t| format!("{t}:{}", s.unported_kills[t])).collect();
         println!(
             "particles: tick {} alive {} (mean {:.0} over the last 60 ticks, by type [{}]), hw {}, created {}, killed {}, pool full {}, \
-             drawn {} culled {} (last frame), kinds 1-3 skipped {}, unported types killed [{}], collision branch skipped {}, rng state {:#010x}",
+             drawn {} culled {} (last frame), kinds 2-3 skipped {}, unported types killed [{}], collision branch skipped {}, rng state {:#010x}",
             sim.tick, sim.sys.pool.count, sim.alive_sum as f64 / 60.0, live.join(" "), sim.sys.pool.hw, s.created, s.killed,
             s.create_failed, sim.drawn, sim.culled, sim.other_kinds, unported.join(" "), s.unported_collision, state
         );
@@ -502,7 +504,8 @@ fn build_sprites(
     for i in 0..hw {
         let r = &mut sim.sys.pool.recs[i];
         if r[1] & 0x80 != 0 { continue; }
-        if r[1] & 3 != 0 {
+        let kind = r[1] & 3;
+        if kind > 1 {
             other += 1;
             continue;
         }
@@ -513,7 +516,9 @@ fn build_sprites(
         let far12 = (((r[9] >> 4) as i32) << 17).min(global_far12);
         let size = f32::from_bits(rec::u32(r, 0xc));
         let rad = size / 420_000.0;
-        let visible = z12 > near12 && z12 < far12 && c.x.abs() - rad * sec_x <= tx * c.z && c.y.abs() - rad * sec_y <= ty * c.z;
+        let mut visible = z12 > near12 && z12 < far12 && c.x.abs() - rad * sec_x <= tx * c.z && c.y.abs() - rad * sec_y <= ty * c.z;
+        // A flat quad (kind 1) is also culled when its near edge reaches the camera plane.
+        if kind == 1 && z12 - ((rad * 4096.0) as i32) < 0x100 { visible = false; }
         if !visible {
             r[1] &= !FLAG_DRAWN;
             culled += 1;
@@ -535,16 +540,23 @@ fn build_sprites(
     for it in &items {
         let r = &sim.sys.pool.recs[it.index];
         let size = f32::from_bits(rec::u32(r, 0xc));
-        let q = size * SIZE_TO_PIXELS / (it.c.z + 0.5);
+        let flat = r[1] & 3 == 1;
         let theta = r[8] as f32 * (std::f32::consts::TAU / 256.0);
-        let (s, c) = (theta.sin() * q, theta.cos() * q);
-        let a = [c, 1.0625 * s];
-        let b = [-s, 1.0625 * c];
+        let (a, b) = if flat {
+            // Kind 1 (L2): world corners p ± (c, s), p ± (−s, c) in the XY plane, (c, s) = (cos θ, sin θ)·size/420000.
+            let k = size / 420_000.0;
+            let (s, c) = (theta.sin() * k, theta.cos() * k);
+            ([c, s], [-s, c])
+        } else {
+            let q = size * SIZE_TO_PIXELS / (it.c.z + 0.5);
+            let (s, c) = (theta.sin() * q, theta.cos() * q);
+            ([c, 1.0625 * s], [-s, 1.0625 * c])
+        };
         let centre = game_to_bevy(rec::pos(r)).to_array();
         let rgba = (rec::u32(r, 4) & 0x00ff_ffff) | it.alpha.min(0xff) << 24;
         let layer = if (r[2] as u32) < n_layers { r[2] as u32 } else { 0 };
         let additive = r[3] == 0x48;
-        let tag = layer | (additive as u32) << 16;
+        let tag = layer | (additive as u32) << 16 | (flat as u32) << 17;
         // GS strip v0 v1 v2 v3 = S+a, S+b, S−b, S−a (quad_mesh).
         groups[additive as usize].push(centre, a, b, rgba, tag);
     }

@@ -233,6 +233,8 @@ pub struct RippleTickInfo {
     pub drops: u32,
     /// Drips (class 787) the game would spawn this tick (not simulated, see the module docs).
     pub drips: u32,
+    /// Zone-5 mist puffs (type 56) spawned this tick.
+    pub mist: u32,
 }
 
 /// The whole ripple module state.
@@ -256,6 +258,8 @@ pub struct RippleSim {
     pub strip_order: Vec<u16>,
     /// gp−0x4f7c: ticks until the next drip.
     pub drip_timer: i32,
+    /// 0x1fa6a0: the zone-5 foam ring's row per tick (`counter % 20`), 20 bytes.
+    pub mist_rows: Vec<u8>,
     /// What the last [`RippleSim::tick`] did.
     pub last: RippleTickInfo,
 }
@@ -352,6 +356,7 @@ impl RippleSim {
             uv_select: t.uv_select.clone(),
             strip_order: t.strip_order.clone(),
             drip_timer: 0,
+            mist_rows: t.mist_rows.clone(),
             last: RippleTickInfo { zone: -1, ..Default::default() },
         };
         // 751 init overrides (Novalis): patches 13–16 scroll along u only, patch 15 pins its first column.
@@ -500,7 +505,11 @@ impl RippleSim {
 
     /// One tick of the 751 update, state 1 (`0x2fd0e8`), with the camera position 0x167240 and the level
     /// cuboids: zone activation and random drops, the drip / mist bookkeeping, then the clock. Draws from `rng`.
-    pub fn tick(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng) -> RippleTickInfo {
+    pub fn tick(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng) -> RippleTickInfo { self.tick_with(cam, cuboids, rng, 0, None) }
+
+    /// [`tick`](Self::tick) with the tick counter 0x15f5cc (the zone-5 foam row) and the particle system the zone-5
+    /// waterfall foam spawns into (types 57 and 56; None: the spawners' draws are made without records).
+    pub fn tick_with(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng, counter: u64, mut parts: Option<&mut crate::particles::Particles>) -> RippleTickInfo {
         let mut info = RippleTickInfo { zone: -1, ..Default::default() };
         let quarter_range = (0xc080_0000, 0x4080_0000); // randf(−4, 4)
         for z in 0..self.zones.len() {
@@ -540,17 +549,32 @@ impl RippleSim {
             self.drip_timer = rng.rand_range(300, 0x4b0);
             info.drips += 1;
         }
-        // Zone 5: mist and flat ripple particles (random draws only; the particles are not ported here).
+        // Zone 5: the waterfall foam at the foot of the fall (0x2fd750..0x2fd944): one flat foam ring (type 57) on the
+        // row 0x1fa6a0[counter % 20], then up to 20 mist puffs (type 56) down the fall, each with odds 1/32. Standard
+        // f32 for the positions; the row loop's 0.05 steps keep the PS2 sum (the loop count).
         if info.zone == 5 {
-            let _ = rng.randf_bits(0xbf19_999a, 0x3f19_999a);
-            let _ = rng.randf_bits(0xbdcc_cccd, 0x3dcc_cccd);
-            let _ = rng.randf_bits(0x3ecc_cccd, 0x3f00_0000);
+            use crate::particles::{type56, type57};
+            let row = self.mist_rows.get((counter % 20) as usize).copied().unwrap_or(0) as f32 / 20.0;
+            let x = rng.randf(-0.6, 0.6) + 177.0;
+            let y = (row * -11.0 + 176.0) + rng.randf(-0.1, 0.1);
+            let spin = rng.randf(0.4, 0.5);
+            let pos = [x, y, 39.0, 0.0];
+            match parts.as_deref_mut() {
+                Some(p) => { type57::spawn(p, rng, 1.0, spin, pos, [0.02, 0.0, 0.0, 0.0]); }
+                None => { rng.randi(0x10); rng.randf(0.0, 256.0); }
+            }
             let (mut t, dt) = (Pf::ZERO, Pf::b(0x3d4c_cccd));
             while t < ONE {
                 if rng.randi(0x20) == 0 {
-                    for (a, b) in [(0xbf19_999a, 0x3f19_999a), (0xbdcc_cccd, 0x3dcc_cccd), (0xbe4c_cccd, 0), (0x4080_0000, 0x4120_0000)] {
-                        let _ = rng.randf_bits(a, b);
+                    let x = rng.randf(-0.6, 0.6) + 178.0;
+                    let y = (t.to_f32() * -11.0 + 176.0) + rng.randf(-0.1, 0.1);
+                    let z = rng.randf(-0.2, 0.0) + 39.0;
+                    let size = rng.randf(4.0, 10.0);
+                    match parts.as_deref_mut() {
+                        Some(p) => { type56::spawn(p, rng, size, [x, y, z, 0.0], [0.0; 4]); }
+                        None => { rng.randi(0x10); rng.randi(0x100); }
                     }
+                    info.mist += 1;
                 }
                 t += dt;
             }

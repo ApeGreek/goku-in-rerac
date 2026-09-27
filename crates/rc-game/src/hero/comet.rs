@@ -12,11 +12,13 @@
 //!   throw, `HeroPdaGadget` 0x240ed8 item 8 calls it directly, no state change) aimed along the camera (yaw 0x167258,
 //!   pitch −0x167254 + 7°) or at the point the camera's 10-unit line hits; else along Ratchet's facing. The wrench
 //!   moby's state byte +0x20 = 10, the slot detached (0x1403fa = 1), speed 23 u/s (+0x60), deceleration 0 (+0x64),
-//!   its rotation = the camera's (look) or Ratchet's rows, the spin sequence 6 over 5 ticks, the wall-close flag
+//!   its rotation +0x40 = `0x2721f0` of the camera's Euler rows (look: the model x axis along the view, z along the
+//!   view's up) or of Ratchet's moby rows, the spin sequence 6 over 5 ticks, the wall-close flag
 //!   +0x76 (0x13f598 < 1.2 with the wall normal steep, 0x13f5a4 = 0); voice 0x1b in the look stance.
 //! * **The wrench's flight** (`0x2be1c0` with +0x20 = 10 / 11, [`thrown_update`]; run by the slot loop through the
 //!   wrench's row of `HAND_ITEMS`): the swap lock 0x1403fc = 2; the whoosh (Ratchet's class sound 0xe looping in
-//!   hero slot 0x14156c) while out; the spin 24.43 rad/s about z; 0.55 above the ground (`GroundHeight(0.5)`)
+//!   hero slot 0x14156c) while out; the spin 24.43 rad/s about the wrench's own z axis ([`turn_local`], `0x277380`:
+//!   a matrix product in the moby's frame, then back to Euler); 0.55 above the ground (`GroundHeight(0.5)`)
 //!   when lower than 0.8; **out (10)**: carried with 0.7 of the platform displacement 0x13f490, along its
 //!   direction at +0x60, the deceleration growing by 170·dt³ per tick until the speed is 0 → **back (11)**: toward
 //!   the hand point 0x1403c0 (`HeroItemsAttach` keeps it for a detached item), accelerating by 0.9·dt² per tick;
@@ -43,7 +45,7 @@ use super::packs::SoundCmd;
 use super::physics::*;
 use super::Hero;
 use crate::moby_runtime::MobyTable;
-use crate::moby_update::services::HitTemplate;
+use crate::moby_update::services::{self as sv, HitTemplate};
 use crate::ps2v::Pf;
 use rc_formats::moby_anim;
 
@@ -72,7 +74,7 @@ pub struct Flight {
     pub accel: f32,
     /// +0x76: the wall is close ahead at the throw (bounce at once).
     pub wall_close: bool,
-    /// Moby +0x40: Euler rotation (the moby matrix is built from it while detached).
+    /// Moby +0x40: Euler rotation (x, y, z; the moby matrix `Rz·Ry·Rx` is built from it while detached).
     pub euler: [f32; 3],
 }
 
@@ -99,6 +101,27 @@ fn wrap(a: f32) -> f32 {
     if x < -std::f32::consts::PI { x += t; }
     x
 }
+/// `0x2721f0(0x221980(e))` in the game's rows convention: rows of `e`, back to Euler (x, y, z).
+fn rows_to_euler(rows: &[V4; 4]) -> [f32; 3] { to_f32x3(sv::rows_euler(rows)) }
+
+/// The throw's rotation (`0x236da0`): the identity rows through the source rows (`0x1fa328(M, src, M)`: M = src),
+/// row 3 = (0, 0, 0, 1) (`0x1fa298`), back to Euler (`0x2721f0`). The source is the camera's Euler 0x167250
+/// (look stance) or Ratchet's moby rows +0xc0.
+pub fn launch_euler(src: &[V4; 4]) -> [f32; 3] {
+    let z = Pf::ZERO;
+    rows_to_euler(&[src[0], src[1], src[2], [z, z, z, Pf::ONE]])
+}
+
+/// `0x277380(ax, ay, az, moby)`: turn a moby's Euler rotation +0x40 by an Euler step **in its own frame**:
+/// `W = 0x221980(+0x40)`, `S = 0x221980(step)`, `W ← 0x221ce8(W, W, S)` (row i of S through W: R = R·S, the step
+/// applied to the model before the moby's rotation), then `+0x40 = 0x2721f0(W)`. The thrown wrench's spin
+/// `(0, 0, dt·24.43)` is thus about its own z axis, whatever its pitch.
+pub fn turn_local(euler: [f32; 3], step: [f32; 3]) -> [f32; 3] {
+    let w = sv::euler_rows(from_f32x3(euler));
+    let s = sv::euler_rows(from_f32x3(step));
+    rows_to_euler(&sv::mat4_mul(&w, &s))
+}
+
 /// `0x277b50(len, yaw, pitch)`.
 fn polar(len: f32, yaw: f32, pitch: f32) -> [f32; 3] { [yaw.cos() * len * pitch.cos(), yaw.sin() * len * pitch.cos(), pitch.sin() * len] }
 fn approach(target: f32, step: f32, x: &mut f32) {
@@ -180,6 +203,7 @@ pub fn throw_wrench(h: &mut Hero, env: &Env, _from_check: bool) {
     let cam = env.world.and_then(|w| w.camera());
     let (mut yaw, mut pitch) = (0.0f32, 0.0f32);
     let mut cam_euler = [0.0f32; 3];
+    let moby_rows = h.moby_rows;
     if look {
         let (cpos, cyaw, cpitch) = cam.unwrap_or(([0.0; 3], env.cam_yaw.to_f32(), 0.0));
         cam_euler = [0.0, cpitch, cyaw];
@@ -213,13 +237,14 @@ pub fn throw_wrench(h: &mut Hero, env: &Env, _from_check: bool) {
     f.wall_close = h.wall_ahead[0] < 1.2 && f32::from_bits(0x3f29_c91f) < h.wall_ahead[1] && h.f5a4 == 0;
     if look {
         f.dir = polar(1.0, yaw, pitch);
-        // The camera's Euler 0x167250 (roll is 0 on foot).
-        f.euler = cam_euler;
+        // The camera's Euler 0x167250 (roll, pitch — positive looking down —, yaw; roll is 0 on foot) through
+        // its rows: the wrench's model x axis points along the view, its z axis along the view's up.
+        f.euler = launch_euler(&sv::euler_rows(from_f32x3(cam_euler)));
     } else {
-        // 0x248da0(1.0): along the moby's yaw (+0x48).
+        // 0x248da0(1.0): along the moby's yaw (+0x48); the rotation from Ratchet's moby rows +0xc0.
         let y = h.moby_rot[2].to_f32();
         f.dir = [y.cos(), y.sin(), 0.0];
-        f.euler = to_f32x3(h.moby_rot);
+        f.euler = launch_euler(&moby_rows);
     }
     f.accel = 0.0;
     f.speed = DT * 23.0;
@@ -249,8 +274,9 @@ pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     let gravity_mode = hero.gravity_mode;
     let loop_active = anim.loop_state().0;
     let it = hero.items.slot.item.as_mut().unwrap();
-    // The spin: 24.43 rad/s about z (`0x277380(0, 0, dt·24.43)`).
-    it.flight.euler[2] = wrap(it.flight.euler[2] + DT * 24.434_608);
+    // The spin: 24.43 rad/s about the wrench's own z axis (`0x277380(0, 0, dt·24.43)`: a matrix product in the
+    // moby's frame, not an Euler z step; they agree only while the wrench is level).
+    it.flight.euler = turn_local(it.flight.euler, [0.0, 0.0, DT * 24.434_608]);
     let mut pos = it.position;
     if gravity_mode == 0 {
         if let Some(coll) = env.coll {
@@ -519,6 +545,64 @@ mod tests {
         assert!(h.comet.catch_exit, "no catch exit");
         assert_eq!(h.fx.item_voices, vec![SoundCmd::Release { slot: 7 }, SoundCmd::Voice { index: CATCH_VOICE, flags: 0 }]);
         assert_eq!(h.items.slot.detached, 0);
+    }
+
+    /// Right-handed rotation matrices (columns = images of the model axes), as `0x221980` builds them
+    /// (rows = images: X rows 1/2 = (0, c, s) / (0, −s, c), Y0 = (c, 0, −s), Z0 = (c, s, 0)).
+    fn rz(a: f64) -> [[f64; 3]; 3] { let (s, c) = a.sin_cos(); [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]] }
+    fn ry(a: f64) -> [[f64; 3]; 3] { let (s, c) = a.sin_cos(); [[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]] }
+    fn mm(a: [[f64; 3]; 3], b: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+        std::array::from_fn(|i| std::array::from_fn(|k| (0..3).map(|j| a[i][j] * b[j][k]).sum()))
+    }
+    /// Image of model axis `i` (the moby row `i`).
+    fn axis(m: [[f64; 3]; 3], i: usize) -> [f64; 3] { [m[0][i], m[1][i], m[2][i]] }
+    fn rows_of(e: [f32; 3]) -> [[f64; 3]; 3] {
+        let r = sv::euler_rows(from_f32x3(e));
+        std::array::from_fn(|i| std::array::from_fn(|k| r[i][k].to_f32() as f64))
+    }
+
+    /// The first-person throw's orientation and spin at 0°, 30°, 60° and 84° up, against the game's formula:
+    /// launch = `0x2721f0(rows(camera Euler (0, −p, yaw)))` = Rz(yaw)·Ry(−p); each tick `0x277380(0, 0, dt·24.43)`
+    /// multiplies in the moby's frame, so after n ticks R = Rz(yaw)·Ry(−p)·Rz(n·dt·24.43): the model z axis stays
+    /// the view's up and the wrench turns in the plane of the view direction and the view's left.
+    #[test]
+    fn first_person_orientation_and_spin_by_pitch() {
+        let yaw = 0.7f64;
+        let w = (DT * 24.434_608) as f64;
+        for deg in [0.0f64, 30.0, 60.0, 84.0] {
+            let p = deg.to_radians();
+            // The camera's pitch 0x167254 is positive looking down: looking up p is −p.
+            let cam = [0.0, -p as f32, yaw as f32];
+            let mut e = launch_euler(&sv::euler_rows(from_f32x3(cam)));
+            assert!(e[0].abs() < 1e-4 && (e[1] as f64 + p).abs() < 1e-4 && (e[2] as f64 - yaw).abs() < 1e-4, "{deg}°: {e:?}");
+            let up = axis(mm(rz(yaw), ry(-p)), 2);
+            for n in 1..=40 {
+                e = turn_local(e, [0.0, 0.0, DT * 24.434_608]);
+                let want = mm(mm(rz(yaw), ry(-p)), rz(n as f64 * w));
+                let got = rows_of(e);
+                for i in 0..3 {
+                    let (a, b) = (axis(want, i), got[i]);
+                    for k in 0..3 { assert!((a[k] - b[k]).abs() < 2e-3, "{deg}° tick {n} row {i}: {got:?} vs {a:?}"); }
+                }
+                // The spin axis (model z) stays the view's up.
+                for k in 0..3 { assert!((got[2][k] - up[k]).abs() < 2e-3, "{deg}° tick {n}: z {:?} vs up {up:?}", got[2]); }
+            }
+        }
+    }
+
+    /// The Euler-z step the port used before (a spin about the world z axis) matches the game only while the
+    /// wrench is level: at 60° up it tilts the spin axis off the view's up within a few ticks.
+    #[test]
+    fn world_z_step_differs_when_pitched() {
+        let p = 60f64.to_radians();
+        let e0 = [0.0f32, -p as f32, 0.0];
+        let game = turn_local(turn_local(e0, [0.0, 0.0, 0.4]), [0.0, 0.0, 0.4]);
+        let world = [0.0f32, -p as f32, 0.8];
+        let (g, w) = (rows_of(game), rows_of(world));
+        assert!((0..3).any(|k| (g[2][k] - w[2][k]).abs() > 0.1), "{g:?} vs {w:?}");
+        // Level (0°), both agree.
+        let game = turn_local(turn_local([0.0, 0.0, 0.3], [0.0, 0.0, 0.4]), [0.0, 0.0, 0.4]);
+        assert!((game[0].abs() < 1e-5) && (game[1].abs() < 1e-5) && (game[2] - 1.1).abs() < 1e-4, "{game:?}");
     }
 
     /// The look stance after 20 ticks: □ throws (no state change) along the camera with voice 0x1b; before 20 ticks

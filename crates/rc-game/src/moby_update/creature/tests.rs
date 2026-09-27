@@ -267,3 +267,60 @@ fn region_walls_and_waypoints() {
     assert_eq!([via[0], via[1]], [5.0, 9.0]);
     assert_eq!(region::line_of_sight(&w, 0.0, &[1], 2, a, [3.0, 5.0, 0.0, 0.0]), Some([3.0, 5.0, 0.0, 0.0]));
 }
+
+// -------------------------------------------------------------------------------------------------
+// The enemy additions: SpringTurn, the projectile helpers.
+
+#[test]
+fn spring_turn_is_spring_turn2_on_any_angle() {
+    // SpringTurn2 is SpringTurn on the moby's yaw: same velocity, same result, never past the target.
+    let mut sim = Sim::new(577, [30.0, 30.0, 10.0], critter_pvars(), [25.0, 30.0, 10.0]);
+    let (mut v1, mut v2, mut a) = (0.0f32, 0.0f32, 0.4f32);
+    let mut w = World::new(&mut sim.table, &sim.hero, &mut sim.rng, &sim.classes, &mut sim.svc, 0);
+    set_yaw(&mut w, 1, 0.4);
+    for _ in 0..200 {
+        a = turn::spring_turn(a, -2.9, DT2 * 2.0 * PI, DT2 * PI, DT * 2.0 * PI, &mut v1);
+        turn::spring_turn2(&mut w, 1, -2.9, DT2 * 2.0 * PI, DT2 * PI, DT * 2.0 * PI, &mut v2);
+        assert_eq!(a.to_bits(), yaw(&w, 1).to_bits());
+        assert_eq!(v1.to_bits(), v2.to_bits());
+    }
+    assert!(diff_rots(a, -2.9) < 1e-3, "settled at {a}");
+    // The wrap: from 3.0 to −3.0 it turns forwards through π.
+    let mut v = 0.0;
+    let b = turn::spring_turn(3.0, -3.0, 0.02, 0.3, 0.1, &mut v);
+    assert!(v > 0.0 && (b > 3.0 || b < -3.0), "{b} {v}");
+}
+
+#[test]
+fn projectile_parts_draw_like_the_spawners() {
+    let mut sim = Sim::new(577, [30.0, 30.0, 10.0], critter_pvars(), [25.0, 30.0, 10.0]);
+    let mut w = World::new(&mut sim.table, &sim.hero, &mut sim.rng, &sim.classes, &mut sim.svc, 0);
+    let count = |w: &mut World, p: projectile::Part| {
+        let before = *w.rng;
+        projectile::part(w, p);
+        draws(&before, w.rng)
+    };
+    // Types 22 / 26: one raw rand() with a record (no particle system: as with a free record).
+    assert_eq!(count(&mut w, projectile::Part::T22), 1);
+    assert_eq!(count(&mut w, projectile::Part::T26), 1);
+    // Type 16: nothing for life 0; the throttle draws only over the frame loads 0.9 / 0.95 / 1.0.
+    assert_eq!(count(&mut w, projectile::Part::T16 { life: 0 }), 0);
+    assert_eq!(count(&mut w, projectile::Part::T16 { life: 60 }), 1);
+    w.svc.frame_load[0] = Pf::f(0.96);
+    let n = count(&mut w, projectile::Part::T16 { life: 60 });
+    assert!((1..=3).contains(&n), "{n}");
+    assert_eq!(w.svc.fx.part_spawns.get(&22), Some(&1));
+    assert!(projectile::in_world([2.0, 1021.0, 500.0, 0.0]) && !projectile::in_world([1.9, 5.0, 5.0, 0.0]));
+}
+
+#[test]
+fn projectile_sweep_hits_the_floor_and_misses_the_air() {
+    let mut sim = Sim::new(577, [30.0, 30.0, 10.0], critter_pvars(), [25.0, 30.0, 10.0]);
+    let mut w = World::new(&mut sim.table, &sim.hero, &mut sim.rng, &sim.classes, &mut sim.svc, 0);
+    w.coll = Some(&sim.mesh);
+    let t = projectile::template(&w, 1, [0.4, 0.0, 1.0, crate::hero::damage::EXACT_PUSH_W], 0x1_0001, (1, 1), 1.0, 1);
+    assert_eq!((t.flags, t.b18, t.b19, t.h1a, t.attacker), (0x1_0001, 1, 1, 577, Some(1)));
+    let hit = projectile::sweep(&mut w, [120.0, 120.0, 11.0, 0.0], [120.0, 120.0, 9.0, 0.0], 0, 0.5, Some(1), &t).expect("the floor at z 10");
+    assert!((hit[2] - 10.0).abs() < 1e-3, "{hit:?}");
+    assert!(projectile::sweep(&mut w, [120.0, 120.0, 13.0, 0.0], [120.4, 120.0, 12.9, 0.0], 0, 0.5, Some(1), &t).is_none());
+}

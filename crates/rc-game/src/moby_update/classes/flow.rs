@@ -65,7 +65,7 @@ pub fn measure(s: &mut [[u32; 4]]) {
 fn points(s: &[[u32; 4]]) -> Vec<Point> { s.iter().map(|q| q.map(f32::from_bits)).collect() }
 
 /// `Spring(0, k, d, max, &x, &v)` 0x270780 on `f32` (see `hero::physics::spring`).
-fn spring(k: f32, d: f32, max: f32, x: &mut f32, v: &mut f32) {
+pub(crate) fn spring(k: f32, d: f32, max: f32, x: &mut f32, v: &mut f32) {
     let e = -*x;
     let mut nv = *v + (k * e - d * *v);
     if 0.0 < max { nv = nv.clamp(-max, max); }

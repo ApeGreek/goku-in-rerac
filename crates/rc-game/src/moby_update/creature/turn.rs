@@ -1,5 +1,5 @@
-//! Turning towards a heading and the eased approach (level01 `SpringTurn2` 0x26d058, `0x270cc0` with its helpers
-//! `0x270ac0` / `0x2709f8`, `Approach` 0x270728). Angles are radians in [−π, π), wrapped the game's way
+//! Turning towards a heading and the eased approach (level01 `SpringTurn` 0x26cef0, `SpringTurn2` 0x26d058,
+//! `0x270cc0` with its helpers `0x270ac0` / `0x2709f8`, `Approach` 0x270728). Angles are radians in [−π, π), wrapped the game's way
 //! ([`super::add_rot`] / [`super::sub_rot`]).
 
 use super::{add_rot, sub_rot};
@@ -13,12 +13,12 @@ pub fn approach(t: f32, step: f32, x: &mut f32) -> f32 {
     (t - *x).abs()
 }
 
-/// `SpringTurn2(target, acc, damp, max, moby, &vel)` 0x26d058 on the moby's yaw (+0x48): `d = wrap(target − yaw)`,
-/// `x = clamp(d / (π/20), −1, 1)`, `vel += acc·x − damp·vel`, `|vel| ≤ max` when `max ≠ 0`, `|vel| ≤ |d|`, then
-/// `yaw = wrap(yaw + vel)`.
-pub fn spring_turn2(w: &mut World, id: MobyId, target: f32, acc: f32, damp: f32, max: f32, vel: &mut f32) {
-    let yaw = super::yaw(w, id);
-    let d = sub_rot(target, yaw);
+/// `SpringTurn(cur, target, acc, damp, max, &vel)` 0x26cef0 on any angle: `d = wrap(target − cur)`,
+/// `x = clamp(d / (π/20), −1, 1)`, `vel += acc·x − damp·vel`, `|vel| ≤ max` when `max ≠ 0`, `|vel| ≤ |d|`; returns
+/// `wrap(cur + vel)`. (459 tilts its pitch with it, the dropship turns its camera; `classes::flyer` keeps a private
+/// copy of the same function.)
+pub fn spring_turn(cur: f32, target: f32, acc: f32, damp: f32, max: f32, vel: &mut f32) -> f32 {
+    let d = sub_rot(target, cur);
     let x = (d / 0.157_079_64).clamp(-1.0, 1.0);
     *vel += acc * x - damp * *vel;
     if max != 0.0 {
@@ -26,7 +26,14 @@ pub fn spring_turn2(w: &mut World, id: MobyId, target: f32, acc: f32, damp: f32,
     }
     let a = d.abs();
     if a < *vel { *vel = a; } else if *vel < -a { *vel = -a; }
-    super::set_yaw(w, id, add_rot(yaw, *vel));
+    add_rot(cur, *vel)
+}
+
+/// `SpringTurn2(target, acc, damp, max, moby, &vel)` 0x26d058: [`spring_turn`] on the moby's yaw (+0x48).
+pub fn spring_turn2(w: &mut World, id: MobyId, target: f32, acc: f32, damp: f32, max: f32, vel: &mut f32) {
+    let yaw = super::yaw(w, id);
+    let y = spring_turn(yaw, target, acc, damp, max, vel);
+    super::set_yaw(w, id, y);
 }
 
 /// [`spring_turn2`] with the velocity kept in the pvar f32 at `vel_off`.

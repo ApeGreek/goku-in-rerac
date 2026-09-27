@@ -101,7 +101,7 @@ pub fn update(w: &mut World, id: MobyId) {
 }
 
 /// `FUN_0029ac10(point, euler)`: this visit's kills whose mission is done become permanent, and the record.
-fn record(w: &mut World, r: Record) {
+pub(crate) fn record(w: &mut World, r: Record) {
     let level = w.svc.level;
     let kills: Vec<(i16, u8)> = w.svc.save.killed.iter().map(|(&k, &v)| (k, v)).collect();
     for (sid, b) in kills {

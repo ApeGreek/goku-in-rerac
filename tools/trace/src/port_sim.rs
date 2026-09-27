@@ -192,7 +192,7 @@ impl ExternalUpdates for Externals<'_> {
     fn update_fn(&self, o_class: i16) -> Option<u32> {
         match o_class { 27 => Some(EMITTER_UPDATE), 751 if self.ripple_inputs.is_some() => Some(RIPPLE_UPDATE), _ => None }
     }
-    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [Pf; 4], _counter: u64, particles: Option<&mut Particles>) {
+    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [Pf; 4], counter: u64, particles: Option<&mut Particles>) {
         match addr {
             EMITTER_UPDATE => {
                 // The owner's live moby: the Blarg flyers (660) move their emitters every tick.
@@ -207,7 +207,7 @@ impl ExternalUpdates for Externals<'_> {
                     m.update_dist = 0xff;
                     m.position[2] += 0.5;
                 } else if let Some(sim) = self.ripple.as_mut() {
-                    sim.tick([camera[0].to_f32(), camera[1].to_f32(), camera[2].to_f32()], self.cuboids, rng);
+                    sim.tick_with([camera[0].to_f32(), camera[1].to_f32(), camera[2].to_f32()], self.cuboids, rng, counter, particles);
                 }
             }
             _ => {}
@@ -333,6 +333,8 @@ impl<'l> PortSim<'l> {
         svc.joint_lists = lv.joint_lists.clone();
         svc.groups = statics.groups(&lv.gp);
         svc.set_moby_collision(lv.coll_blobs.clone());
+        // The level's volumes (cuboids 0x1600ec …), as the engine sets them: the triggers and the foam fields 760 read them.
+        svc.set_volumes(rc_formats::volumes::parse_volumes(&lv.gp)?);
         svc.build_grid(&mut game.mobys);
         let mut particles = Particles::new(lv.part_defs.clone(), lv.owners.clone());
         particles.pool.level_init();

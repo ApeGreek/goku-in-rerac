@@ -111,7 +111,8 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x19 | ledge hang | 3 | 0x18, shimmy end | 0x1c (✕), 6 (back + ✕ / R1, 0x13f500 = 10 / 40), 0x1a / 0x1b (probe `HeroWallLedgeCheckC` 0x22d838 (L00 0x20c758) at ±90° 0.3) | as 0x18 | 0x21 | ledge.rs (P3) | P |
 | 0x1a / 0x1b | shimmy left / right | 3 | 0x19 + stick | 0x19 (wrap / no probe), 0x1c, 6 | two probes `HeroWallLedgeCheckB`, speed from table 0x1c4130 by frame | 0x24 / 0x25 | ledge.rs (P3) | P |
 | 0x1c | ledge climb / jump up | 4 | ✕ hanging | jump case | jump case: h 2.0, takeoff 10, g 25·dt²; carry follows 0x13f848 | 0x22 | ledge.rs (P3) | P |
-| 0x1d / 0x1f / 0x32 / 0x72 / 0x78 / 0x3b | scripted control (0x1413fc no control; 0x32 frozen; 0x78 vel = 0; 0x3b item use, hand seq 0xb) | 9 | cutscene / moby scripts | set by the scripts | none / ground case | idle / 0xb / 0x44 | (Scripted, later) | – |
+| 0x1d / 0x1f / 0x32 / 0x72 / 0x78 | scripted control (0x1413fc no control; 0x32 frozen; 0x78 vel = 0) | 9 | cutscene / moby scripts | set by the scripts | none / ground case | idle | (Scripted, later) | – |
+| 0x3b | bolt crank (was "item use") | 9 | `SetState(0x3b, 1)` by the bolt crank class 280 (`0x2e0c68`, levels 1 / 4 / 8): □ at the bolt with the wrench | 0 by the crank (□ after 60 ticks, or done); the hit intake | none (frozen 0x1413fd: the crank stores his position, yaw, target yaw and clears 0x13f430..0x13f4bf every tick) | 0x44 latch, 0x3f hold, 0x40 / 0x41 turn; wrench 0xb | crank.rs | P |
 | 0x1e | look stance (mobys) | 0 | four moby classes | 0 | ground case | `0x226f10(1)` | stance.rs (P2) | P |
 | 0x20 | gadget lunge | 6 | fire with a hand item (group < 3, 4, 5) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | melee.rs (later) | E |
 | 0x21 | wrench rebound | 0xa | wrench hit on a flag-2 target | 0 on wrap | speed → 0 by 24·dt², away from 0x13fdb8 | 0x27 + row | melee.rs (later) | – |
@@ -403,6 +404,22 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
 - **Throwing in first person is the game's own**: `HeroPdaGadget` item 8 in states 1 / 0x1e after 20 ticks calls the
   throw directly (camera-aimed, 7° up, or at the camera line's hit; voice 0x1b); the Bomb Glove's update throws on ○
   in 0x1e (its update turns the look stance 1 into 0x1e) aimed along the camera. No Port Options entry was needed.
+- **The thrown wrench's rotation** (verified in the disassembly, 2026-09-27; was inferred). The throw `0x236da0`
+  builds identity rows, multiplies in the source rows (`0x1fa328(M, src, M)`; src = the camera's Euler 0x167250 /
+  0x167254 / 0x167258 through `0x1fa030` in the look stance, else Ratchet's moby rows +0xc0), row 3 = (0,0,0,1)
+  (`0x1fa298`) and stores `0x2721f0(rows)` in the wrench's +0x40: in first person the model x axis points along the
+  view (pitch 0x167254, positive looking down) and its z axis along the view's up. The flight's spin (`0x2be1c0`
+  line `0x277380(0, 0, dt·24.43, wrench)`) is **matrix-based in the moby's own frame**: `W = 0x221980(+0x40)`,
+  `S = 0x221980(0,0,θ)`, `W ← 0x221ce8(W, W, S)` (row i of S through W: R = R·Rz(θ)), `+0x40 = 0x2721f0(W)`; the
+  render rows are `0x221980(+0x40)` = Rz·Ry·Rx (moby_render_notes.md §2). So the wrench always spins about the
+  view's up, flat in the plane of the view and the view's left, at any pitch. `0x277380` has one caller per level
+  (the wrench update). The port had added θ to the Euler z (a spin about the world z axis: the same only while
+  level, a wobbling cone that grows with the pitch); now `comet::turn_local` / `launch_euler`. `0x2721f0` stores
+  its last `FastArcTan` as is (x = atan2(r1.z, r1.y); the `neg.s f1, f0` at 0x2722d8 feeds a dead stack word):
+  `services::rows_euler` returned −x and is fixed (its other users: the bolts' settle quaternion, the creature
+  debris' Euler spin step, the Magneboots frame, all only when their rows carry an x rotation). The ballistic helper
+  `0x26faf0` (`weapons::launch_velocity`, `knock::lob_up`) is the bomb's / knockback's arc, not the wrench's; both
+  ports match its decompilation (`len2(to − from) / t`, `−((from.z − to.z) + g·n²/2) / n`).
 - **Weapons** (`weapons.rs`): the throw gloves' fire case, 0x23, the weapon arm 0x1413f8 (its upper-body animation
   layer is not ported), the holster check, ammo (`0x249530` / `0x249450`, the game state's table mirrored by the
   engine; the HUD's count follows), the Bomb Glove's update `0x2d8330` as its `HAND_ITEMS` row. The bomb (class 121,
@@ -413,15 +430,55 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
   fire case is generic, their rows and projectiles are not ported), the Blaster 0xf / Pyrocitor / other weapons'
   cases, the auto-aim target list 0x1abe80. 0x17 / 0x27 / 0x2e / 0x30 have no SetState caller in any level; 0x38..0x3a
   are set by one moby callback (not weapons).
-- Tests: `comet::tests` (3), `weapons::tests` (4), `anim::tests::loop_exit_jumps_to_the_key`,
+- Tests: `comet::tests` (5: with the first-person orientation and spin at 0° / 30° / 60° / 84° against
+  Rz(yaw)·Ry(−p)·Rz(n·dt·24.43), and the old world-z step differing when pitched),
+  `services::tests::rows_euler_*` (2), `weapons::tests` (4), `anim::tests::loop_exit_jumps_to_the_key`,
   `follow_camera::tests::first_person_*` (2), `classes::bomb::tests`, `tests/hero_weapons_novalis.rs` (the Comet-Strike
   breaks a crate and the wrench returns, a bomb breaks a crate, first person in / aim / out, the first-person throw;
   deterministic). The `novalis_hero_digest` guard is byte-identical up to the look stance at tick 980 of the moves
   script, where the first-person camera now comes up (camera state only; the digest ignores the new idle fields).
 
+### Bolt crank (0x3b)
+**Done (2026-09-27).** Levels 1, 4, 8 (class 280 `BoltCrankUpdate` level01 0x2e0c68, level04 0x2bfd30, level08
+0x2d8270, identical; jump table 0x20ae00, tail 0x2e0bd8). **The crank class drives the state**, as in the game: it
+tests Ratchet in the moby loop and calls `SetState(0x3b, 1)`, then every tick stores his position / yaw / target
+yaw, clears 0x13f430..0x13f4bf and calls `SetAnim`, and lets go with `SetState(0, 1)`. 0x3b itself (`hero/crank.rs`):
+entry = group 9, frozen 0x1413fd (no move pipeline), 0x1413f7 = 1, `SetAnim(ticks(8), 0x44, 2)`, the wrench (class
+0x47) to its sequence 0xb frame 2 over 13 ticks; no physics case, no transition case (the prologue's hit intake
+still ends it). [H: disassembly of 0x2e0c68 and SetState case 0x3b]
+- **Latch** (`crank::latch` + the class): feet within 1.75 (XY) of the bolt, body 0, facing it within 90°, feet
+  0.1..0.5 above its origin, item 8 in hand with its moby, □ within 7 ticks; the crank: > 30 ticks since the last
+  release, the bolt at its top, not done, no targetable moby within 3.25 (XY).
+- **Turning** (`crank::turn`): last tick's stick 0x141070 turned by the camera yaw; its part along his facing is
+  the speed's target (step 5.5·dt², cap 3.7 u/s, ≥ 0, snap to 0 below 5.5·dt²/4); the step along the facing, then
+  `Spring(0, 0.015, 0.3, 7·dt)` (velocity gp−0x5360) back onto the 1.05 ring, height kept; target yaw = the
+  tangent (angle + 90°; − 90° with the mirrored-animation cheat 0x15edb5, which the moby loop cannot see in the port:
+  taken as off), yaw toward it at 360°/s; drop 9.8·dt² per tick onto `GroundHeight(0.5)`. Anims: 0x44 → 0x3f (wrap,
+  blend 7); with no blend running 0x3f → 0x40 moving, 0x40 → 0x41 above 0.6 of the top speed, 0x41 → 0x40 below
+  0.4 (16), 0x40 → 0x3f stopped (14). The bolt follows his angle + 15° at 180°/s and steps ±60° (hexagon).
+  Progress = unsigned angle turned / (turns · 2π).
+- **Release**: □ again after 60 ticks in the state, or done. Let go early, the crank unwinds (1/60 a tick, spinning
+  back) and what it drives follows back; done: death bits, class sound 0, sink 0.5, done on later loads; with a
+  checkpoint cuboid (+0x34) and its mission not done: `SetMissionDone` + the checkpoint record.
+- **Driven objects** read the progress through a pvar moby link (docs/plan/triggers.md §5a): Novalis 665 sliders
+  (door pairs #683 / #684 ← crank #296, #685 / #686 ← #297) and 641 (rotator #672 ← #297); none is a carrier.
+- **Channels** (general, not crank-specific): `services::HeroFields` gained `pose`, `clear_motion` and `calls`
+  (`HeroCall::SetState` / `SetAnim`, run by the tick before the hero update with the hero's context; an entry's RNG
+  draw therefore lands after the moby loop's later draws); `services::LoopGlobals` (`Hero::loop_in`: this tick's pad,
+  the last camera Euler, Ratchet's anim view) is what the moby loop reads of the globals outside it; `SoundSink`
+  gained `alive` / `release` (the slider's loop sound stops). Camera: `crate::cinematic` (`CameraScript(…, 3,
+  ticks(180))` to the camera cuboid +0x20, `CameraScript2(4)`); its mode 3 (a timed swing, parameters `0x316e88(+0x28,
+  +0x2c)`) is still treated as a snap there.
+- **Not ported** (counted): `0x316e88`, the visit-state save `0x29b0a0`, the tail's Novalis global flags 0x13d394 /
+  0x13d395; Eudora's and Batalia's consumers (other classes, e.g. a lift z − 15 · progress on Eudora).
+- Tests: `crank::tests` (7), `classes::bolt_crank::tests` (4), `tests/bolt_crank_novalis.rs` (crank #296: latched at
+  tick 40, done at tick 180 with the doors at their targets, let go and idle the next tick, sunk 0.5; let go early at
+  0.71 it unwinds and the doors close; deterministic; the class on levels 1 / 4 / 8). The `novalis_hero_digest` guard
+  is byte-identical (its runs have no moby loop; `loop_in` is not part of the hashed block).
+
 ### Later (not in this push)
 Weapons (0x20, 0x21, the other gloves and guns: see "Weapons + first person"), scripted
-states (0x1d, 0x1f, 0x32, 0x3b, 0x63, 0x64, 0x72, 0x78; with the cutscene port), other bodies (Clank, Giant Clank,
+states (0x1d, 0x1f, 0x32, 0x63, 0x64, 0x72, 0x78; with the cutscene port), other bodies (Clank, Giant Clank,
 Hologuise), the Hoverboard. Each gets a module when started; the registry already names its rows.
 
 ## 4. Findings to fix inside the packages (not fixed now: the restructure is behaviour-neutral)
@@ -497,3 +554,9 @@ Hologuise), the Hoverboard. Each gets a module when started; the registry alread
   `| back pack … | snd …` suffix from a concurrent gameplay.rs change between the runs; compared without it) and
   identical PNGs.
 - All rc-game tests pass (200 unit + the integration tests), `cargo clippy -p rc-game --tests` clean for the hero files.
+
+**Vendor (2026-09-27, docs/plan/interaction.md).** `OpenVendorMenu` puts Ratchet in state 100 (`SetState(100, 1)`, the
+cutscene-control state, not ported) with 0x1413f5 = 1 (hidden); the port does not change the hero for mode 5: the gameplay tick
+does not run while the vendor is open and crate::interact_render hides his entities. `VendorExit`'s `SetState(0, 1)` is therefore
+a no-op here. The vendor's prompt rule reads the movement group 0x1413dc (0 / 1, or state 3), the state (not 0x1d / 0x32) and
+0x1413f4 (`interact::vendor_rule`). `novalis_hero_digest` unchanged.

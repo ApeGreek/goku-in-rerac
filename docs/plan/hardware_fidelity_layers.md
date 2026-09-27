@@ -53,6 +53,7 @@ reads its distilled facts, `tools/trace/tests/fixtures/novalis_spawn.tsv`).
 | Hero ground slope / pitch / roll angles, `compare-novalis-spawn` §b | 1e-6 rad | atan2/asin residuals on a flat normal (z = 0.9999999): 2.38e-7 vs 1.79e-7 rad; both "flat" to every consumer | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
 | Follow camera position and orientation (0x167240 pos, 0x167250 euler, rows 0x167450..), `compare-novalis-spawn` §c | 3e-4 units position; 6e-5 rad angles / row entries | measured 2.5e-4 u and 5.4e-5 rad: sub-pixel. The port sim now freezes the camera during mode 2 (1 + 783 updates, as the game; trace_results_novalis.md "Open reads resolved" e): unchanged to the last digit, so the update count is not the cause. Tightened from 1e-3 u / 1e-4 rad (2026-09-27). **Still provisional** pending the idle-fidget port (countdown / re-arm 0x241e00): re-check then and tighten or drop | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
 | Crate z (class 500/501/502/505/511 moby +0x18 after the ground snap / stacking), `compare-novalis-spawn` §f | 2 ULP (≈2e-5 at z ≈ 75) | 23 crates differ by 1 ULP (75.51146 vs 75.51147); rotation and stacking equal | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
+| Fire-field (760) element scroll and the 809 curtain scroll `0x161374` after 1072 ticks, the port run from the first savestate's RAM element state (scratch harness; `docs/plan/trace_results_novalis.md` "World props and effects") | 2e-3 (element scroll), 1e-3 (curtain scroll) | an accumulator of ~0.01 steps: last-bit rounding of the PS2 FPU vs IEEE over 1072 adds (measured 1.4e-3 / 3.6e-4); the texture offset error is far below a texel. Timers, positions and respawn counts are exact | 2026-09-27, `novalis_spawn` → `novalis_idle` |
 | Tie vertex palette lit colours (RGBA per palette entry), `compare-tie-shrub-light` (also `compare-novalis-spawn` §g) | ±1 per channel | 96511/96512 entries equal; tie 435 slot 14 r and b −1 (one shared scalar 1 ULP off with two channels on a byte boundary); a 1/255 step is invisible | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
 
 ### Open decisions
@@ -285,6 +286,18 @@ The hero's damage / death / stance states (`rc-game/src/hero/damage.rs`, `stance
 primitives for the shared steps (clamps, approach, gravity) and standard `f32` for the new formulas: the knockback
 vector, 0x77's tumble about the body point (`std` `atan2` for the game's `FastArcTan` in the Euler extraction
 `0x2721f0`); no PS2 effect there was noticeable enough to reproduce.
+The effect mobys and particles (2026-09-28): translucent and additive mobys (moby+0x23 below 0x80, mode bit 0x200)
+are drawn with native blend modes (alpha blend or additive, depth tested, no depth write, sorted; `moby_render.rs`
+`MobyBlend`), not with the GS's per-moby TEST_1 / ALPHA_1 words: the result the game produces (a flash's pixels, all
+below the Z-writing AREF 0x60, blend over the scene without occluding it) is reproduced, not the register split. The
+moby additive mode adds in linear light; the particles' display-byte additive stays the deferred layer (Open decisions),
+unchanged. The new particle types 2, 4, 8, 15, 52 (`rc-game/src/particles/type*.rs`), the point-light bank
+(`rc-game/src/point_lights.rs`) and the moby point-light merge (`moby_render.rs` `point_light_merge`) are standard `f32`.
+Type 2's packed velocities (8 bits per axis, `0x276380`) are the game's storage format, not a hardware effect, and are
+kept (the blobs move in the game's quantised steps). No layer was added.
+The thrown wrench's rotation (`rc-game/src/hero/comet.rs` `turn_local` / `launch_euler`: `0x277380`, the throw
+`0x236da0`) reuses the existing `Pf` rows ↔ Euler helpers (`services::euler_rows` / `mat4_mul` / `rows_euler`) and
+adds no layer; no PS2 effect there is noticeable (the game's round trip through Euler each tick is kept).
 The spline follower (`rc-game/src/spline.rs`: the level00 grind-path library 0x25d7a0 / 0x25d808 / 0x25df68 /
 0x25da70 / 0x25dcd8, used by the hero's boots and the flow class 679) and the boots (`rc-game/src/hero/boots.rs`,
 package P5: the grind, grind jumps, rail switch, grind wrench / hurt, the Magneboots and the cable) run in `f32` with

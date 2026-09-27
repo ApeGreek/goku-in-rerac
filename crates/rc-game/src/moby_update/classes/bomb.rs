@@ -20,12 +20,15 @@
 //! the last quarter of its life (random 60..120 / 60..90 ticks), deleted when it runs out or leaves the positive
 //! octant.
 //!
-//! Native `f32`. **Not ported** (their draws are not made, so the one `rand` stream diverges from the PS2 after an
-//! explosion; counted in `Services::fx.unported`): the flight's trail particles (every 8th tick, `0x27dc98`), the
-//! under-water bubbles and splash (`0x2840e0`, `0x2b82a8`), the fireballs' smoke (`0x27e538`), the scorch / spark
-//! particles near the ground (`0x288d90`, `0x280bd0`), the enemy alert `0x2f3570`, the aim-preview `0x2c2be0`, the
-//! pass-through classes of the hit test (update `0x160770`), the gold-glove colour shifts (`0x270fa8`, `0x270f48`:
-//! identity without the gold glove).
+//! The flight's trail (type-2 blobs every 8th tick, [`trail`]), the high fireballs' smoke (a type-4 puff a tick,
+//! [`smoke`]) and the explosion light (class 0x27f, template 0x20a930) are ported with their draws at the game's point,
+//! so a dry explosion leaves the one `rand` stream where the game leaves it (`tests/explosion_novalis.rs`).
+//!
+//! Native `f32`. **Not ported** (their draws are not made: the stream still diverges after a bomb **in water**;
+//! counted in `Services::fx.unported`): the under-water bubbles and splash (`0x2840e0`, `0x2b82a8`, `0x2ff768`,
+//! `0x2845a8`), the under-water scorch / sparks (`0x288d90`, `0x280bd0`; the game spawns them only when the bomb was in
+//! water, +0x68 ≠ 0), the aim-preview `0x2c2be0`, the pass-through classes of the hit test (update `0x160770`), the
+//! gold-glove colour shifts (`0x270fa8`, `0x270f48`: identity without the gold glove).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{self as sv, pvar as p, HitTemplate, World};
@@ -183,7 +186,7 @@ fn fly(w: &mut World, id: MobyId) {
         let b = ((128.0 - 64.0) * k + 64.0) as i32 as u32;
         m.glow = 0xff00_0000 | (b & 0xff) << 16 | (g & 0xff) << 8 | (r & 0xff);
     }
-    if p::i16(&w.m(id).pvars, pv::WATER) == 0 && w.counter & 7 == 0 { w.svc.unported("bomb trail particles 0x27dc98"); }
+    if p::i16(&w.m(id).pvars, pv::WATER) == 0 && w.counter & 7 == 0 { trail(w, id); }
     let (old, vel, water, life);
     {
         let m = w.mm(id);
@@ -243,6 +246,45 @@ fn fly(w: &mut World, id: MobyId) {
     }
     if w.m(id).cmd != 0 { explode(w, id, drift, normal); }
 }
+
+/// The flight's trail (0x2c35c8..0x2c3788, every 8th tick while not in water): [`TRAIL_COUNT`] type-2 blobs
+/// (`crate::particles::type02`) from the gp block 0x1613f0: velocity 1 = half the bomb's velocity plus `rand_vec(0,
+/// dt)`, velocity 2 = 0 falling by 4·dt² per tick of phase B, sizes `randf(0.25, 0.15)` / `randf(0.15, 0.05)`, colours
+/// tweened at `randf(0, 1)` between 0x804080ff / 0x8040ffff and 0x80104040 / 0x80002080, phases `1 + randf(0, 1)`,
+/// `30·(1 + randf(±0.5))` and `10·(1 + randf(±0.5))` ticks, texture `def[25]`, additive. 10 draws per blob, plus the
+/// spawner's one.
+fn trail(w: &mut World, id: MobyId) {
+    for _ in 0..TRAIL_COUNT {
+        let pos = w.m(id).position;
+        let vel = p::v4f(&w.m(id).pvars, pv::VEL);
+        let rv = w.rng.rand_vec(0.0, TRAIL_SPREAD * dt());
+        let mut v1 = [vel[0] * TRAIL_VEL + rv[0], vel[1] * TRAIL_VEL + rv[1], vel[2] * TRAIL_VEL + rv[2], 0.0];
+        let mut v2 = [0.0f32; 4];
+        v1[3] = w.rng.randf(0.25, 0.15);
+        v2[3] = w.rng.randf(0.15, 0.05);
+        let f = w.rng.randf(0.0, 1.0);
+        let c1 = crate::particles::tween_color(f.to_bits(), 0x8040_80ff, 0x8040_ffff);
+        let f = w.rng.randf(0.0, 1.0);
+        let c2 = crate::particles::tween_color(f.to_bits(), 0x8010_4040, 0x8000_2080);
+        let r = w.rng.randf(0.0, 1.0);
+        let ta = w.svc.timing.scale(Pf::f(r + 1.0)).to_f32() as i32;
+        let r = w.rng.randf(-0.5, 0.5);
+        let tb = w.svc.timing.scale(Pf::f(30.0 * (r + 1.0))).to_f32() as i32;
+        let r = w.rng.randf(-0.5, 0.5);
+        let tc = w.svc.timing.scale(Pf::f(10.0 * (r + 1.0))).to_f32() as i32;
+        v2[2] -= 4.0 * dt2() * tb as f32;
+        let a = crate::particles::type02::Spawn { pos, v1, v2, c1, c2, t: [ta, tb, tc], def: 0x1_0019 };
+        crate::moby_update::creature::fx::part02(w, &a);
+    }
+}
+
+/// The trail's gp block (level01 0x1613f0..0x161430): blobs per spawn tick, velocity scale, spread (× dt).
+const TRAIL_COUNT: usize = 1;
+const TRAIL_VEL: f32 = 0.5;
+const TRAIL_SPREAD: f32 = 1.0;
+
+/// The fireballs' smoke colours (0x161438, `randi(4)`); the end colour is 0x4fff (alpha 0).
+const SMOKE: [u32; 4] = [0x2fff_ffff, 0x2f00_ffff, 0x2f00_7fff, 0x2f00_4fff];
 
 /// The smoke rings' colours (`0x20a980`, `0x20a998`: `randi(6)` each).
 const RING_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
@@ -337,7 +379,8 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
     let amp = if dcam < 20.0 { 0.4 - dcam * 0.0175 } else { f32::from_bits(0x3d4c_ccd0) };
     let t = w.ticks(25);
     w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp, ticks: t });
-    w.svc.unported("bomb alert 0x2f3570");
+    // The explosion light (class 0x27f, template 0x20a930).
+    crate::moby_update::creature::fx::light_spawn(w, &crate::moby_update::creature::fx::LIGHT_BOMB, pos);
     if w.m(id).state != EXPLODING {
         w.delete_moby(id);
         return;
@@ -402,7 +445,7 @@ fn flash(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec: [f32; 4],
 /// `0x2c4d88`: the fireball.
 pub fn fireball_update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x20 { w.mm(id).pvars.resize(0x20, 0); }
-    if w.m(id).cmd & 1 != 0 { w.svc.unported("fireball smoke 0x27e538"); }
+    if w.m(id).cmd & 1 != 0 { smoke(w, id); }
     let m = w.mm(id);
     let v = p::v4f(&m.pvars, 0);
     m.rotation[0] = wrap(m.rotation[0] + p::ff(&m.pvars, 0x10));
@@ -423,6 +466,21 @@ pub fn fireball_update(w: &mut World, id: MobyId) {
     let done = sv::fast_dec_timer_s16(&mut t) != 0;
     p::set_i16(&mut m.pvars, 0x18, t);
     if done { w.delete_moby(id); }
+}
+
+/// The fireball's smoke (0x2c4d88 while +0xbc bit 0 is set, i.e. the high fireballs): every tick one type-4 puff
+/// (`crate::particles::type04`) at the fireball, moving `dt` in a random direction (3 × `randf(−1, 1)`, normalised),
+/// colour [`SMOKE`]`[randi(4)]` fading to 0x4fff over `ticks(45)`, size 50 growing by 120 (×1000), additive. The gold
+/// glove's colour shift (+0xbc > 1, `0x270fa8`) is not ported (counted).
+fn smoke(w: &mut World, id: MobyId) {
+    let x = w.rng.randf(-1.0, 1.0);
+    let y = w.rng.randf(-1.0, 1.0);
+    let z = w.rng.randf(-1.0, 1.0);
+    let v = setlen([x, y, z, 0.0], dt());
+    let k = w.rng.randi(4) as usize;
+    if w.m(id).cmd & 0xfe != 0 { w.svc.unported("fireball smoke: gold colours 0x270fa8"); }
+    let a = crate::particles::type04::Spawn { pos: w.m(id).position, vel: v, c1: SMOKE[k], c2: 0x4fff, life: w.ticks(45), base: 0x32, growth: 0x78, additive: true };
+    crate::moby_update::creature::fx::part04(w, &a);
 }
 
 /// State 2: the growing sphere.
@@ -469,7 +527,7 @@ mod tests {
 
     fn classes() -> ClassTable {
         let mut t = ClassTable::default();
-        for (slot, oc) in [(1u8, BOMB_CLASS), (2, FIREBALL_CLASS), (3, FLASH_CLASS)] {
+        for (slot, oc) in [(1u8, BOMB_CLASS), (2, FIREBALL_CLASS), (3, FLASH_CLASS), (4, crate::moby_update::creature::fx::LIGHT_CLASS)] {
             let info = ClassInfo { slot, update_fn: scheduler::port_update_fn(oc), scale: 1.0, ..Default::default() };
             t.classes.insert(oc, (info, None));
         }
@@ -514,4 +572,104 @@ mod tests {
         assert_eq!(svc.camera_shakes.len(), 1);
         assert!(table.mobys.iter().all(|m| m.o_class != FIREBALL_CLASS || m.state >= 0xfd), "fireballs outlived their timers");
     }
+
+    /// Draws between two stream states.
+    fn draws(from: u32, to: u32) -> usize {
+        let mut r = Rng { state: from };
+        for n in 0..1_000_000 {
+            if r.state == to { return n; }
+            r.rand();
+        }
+        panic!("state not reached");
+    }
+
+    /// The rand stream through a bomb's flight and dry explosion, tick by tick, against a ledger of the draws the
+    /// game's code makes (per call, from the level01 disassembly):
+    /// * flight (0x2c35c8): on ticks with `counter & 7 == 0`, one trail blob: `rand_vec` (3), 2 sizes, 2 colour tweens,
+    ///   3 phase lengths = 10, plus `PartType02Spawn`'s `randf(0, 255)` = **11**;
+    /// * explosion: 10 low fireballs × (spread 4 + `rand_range` + `0x2c4c20`'s 2 spins + 1 shrink) = 80, 4 high × (4 +
+    ///   1 + 2) = 28, the one toward the camera 3 + 1 + 2 = 6, n smoke rings × (5 + `PartType11Spawn`'s 5), 3 per flash
+    ///   (`0x309a68`), the light spawn 0;
+    /// * every update of a high fireball (+0xbc = 1): the smoke (3 `randf` + `randi(4)` + `PartType04Spawn`'s `rand()`)
+    ///   = **5**; low fireballs and flashes 0;
+    /// * every update of the explosion light past its 3-tick delay: `randf(min, max)` for the radius (flag 0x80000) = **1**.
+    ///
+    /// The particle updates run on a stream of their own here (their draws are the type modules' tests: types 2, 4
+    /// draw none, 11 its splits), so every moby-side draw is accounted for. Nothing is left unported on a dry explosion.
+    #[test]
+    fn dry_explosion_rand_stream_matches_the_game_ledger() {
+        let mut h = Moby::init_instance(0, 0, Some(&ClassInfo { scale: 1.0, ..Default::default() }));
+        h.mode |= crate::moby_runtime::mode::NO_UPDATE;
+        let mut table = MobyTable::new(vec![h], 96);
+        let ct = classes();
+        let mut hero = Hero::new();
+        hero.pos = crate::hero::physics::v4(100.0, 100.0, 50.0);
+        let mut rng = Rng::new();
+        rng.srand(crate::rng::LEVEL_SEED);
+        let mut part_rng = Rng::new();
+        let mut svc = Services::new();
+        let mut sched = Scheduler::new();
+        let mut parts = crate::particles::Particles::new(None, Vec::new());
+        let b = table.create(BOMB_CLASS, ct.classes.get(&BOMB_CLASS).map(|c| &c.0), 0).unwrap();
+        init_held(&mut table.mobys[b], &mut rng, [102.0, 100.0, 51.0], 0.0);
+        p::set_v4f(&mut table.mobys[b].pvars, pv::VEL, [0.1, 0.0, 0.02, 0.0]);
+        release(&mut table.mobys[b], [102.0, 100.0, 51.0], None);
+        p::set_i16(&mut table.mobys[b].pvars, pv::LIFE, 20);
+        // The camera 30 units away: 4 rings, 5 flashes.
+        let camera = [Pf::f(130.0), Pf::f(100.0), Pf::f(51.0), Pf::ONE];
+        let (mut trail_ticks, mut boom, mut smoke_updates, mut light_updates) = (0, None, 0, 0);
+        for counter in 1..200u64 {
+            table.free_slot_pass(counter);
+            // Observables before the tick: the high fireballs' and the lights' timers.
+            let timers = |t: &MobyTable| -> Vec<(usize, i16, u8, i32)> {
+                t.mobys.iter().enumerate().filter(|(_, m)| m.state < 0xfd).map(|(i, m)| match m.o_class {
+                    FIREBALL_CLASS => (i, p::i16(&m.pvars, 0x18), m.cmd, 0),
+                    crate::moby_update::creature::fx::LIGHT_CLASS if m.pvars.len() >= 0x80 => (i, 0, 0xff, p::i32(&m.pvars, 0x48)),
+                    _ => (i, 0, 0xfe, 0),
+                }).collect()
+            };
+            let before = timers(&table);
+            let flying = table.mobys[b].state == FLYING;
+            let s0 = rng.state;
+            {
+                let mut w = World::new(&mut table, &hero, &mut rng, &ct, &mut svc, counter);
+                w.camera = camera;
+                w.particles = Some(&mut parts);
+                sched.tick(&mut w);
+            }
+            parts.counter = counter;
+            parts.update_parts(&mut part_rng);
+            let made = draws(s0, rng.state);
+            let mut want = 0;
+            if flying && counter & 7 == 0 && table.mobys[b].state == FLYING { want += 11; trail_ticks += 1; }
+            if flying && table.mobys[b].state != FLYING {
+                // 4 rings (camera ≥ 6 away), 5 flashes (camera > 9 away); the trail blob when this tick was one.
+                want += 80 + 28 + 6 + 4 * (5 + 5) + 5 * 3;
+                if counter & 7 == 0 { want += 11; }
+                boom = Some(counter);
+            }
+            // Updates this tick: a high fireball whose timer moved, a light whose life moved (both existed before).
+            for (i, t0, cmd, life0) in &before {
+                let m = &table.mobys[*i];
+                if *cmd == 1 && m.o_class == FIREBALL_CLASS && (m.state >= 0xfd || p::i16(&m.pvars, 0x18) != *t0) { want += 5; smoke_updates += 1; }
+                if *cmd == 0xff && m.state < 0xfd && p::i32(&m.pvars, 0x48) != *life0 {
+                    want += 1;
+                    light_updates += 1;
+                }
+            }
+            // A light created this tick runs its first update (state 0, its delay) in the same pass: no draw.
+            assert_eq!(made, want, "tick {counter}: {made} draws, the game's code makes {want}");
+        }
+        assert!(trail_ticks >= 2, "trail ticks {trail_ticks}");
+        assert!(boom.is_some(), "never exploded");
+        assert!(smoke_updates >= 5 * 50, "smoke updates {smoke_updates}");
+        assert!(light_updates > 20, "light updates {light_updates}");
+        assert!(svc.fx.unported.is_empty(), "unported on a dry explosion: {:?}", svc.fx.unported);
+        let spawned = &svc.fx.part_spawns;
+        assert_eq!(spawned.get(&2).copied().unwrap_or(0), trail_ticks as u64);
+        assert_eq!(spawned.get(&4).copied().unwrap_or(0), smoke_updates as u64);
+        // The light took a point-light slot and gave it back when it ended.
+        assert!(svc.point_lights.active().next().is_none());
+    }
 }
+

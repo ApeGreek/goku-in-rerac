@@ -18,8 +18,8 @@ dt `0x15ed6c` = 1/60 (1/50 on PAL). `SetTimeBase` 0x276258 (boot `set_time_base`
   by 0x21b1e8 after particles). Four mechanisms: (1) **static strip meshes**
   with 2-layer UV scroll and optional vertex bob (676, 678, 761, 1225); (2) **ripple heightfield patches**
   (751, shared engine module): a wave sim per 16×16-unit patch, lit per vertex, water layer + sphere-map
-  reflection layer, drawn only while the camera is in one of 7 zone cuboids; (3) **waterfall foam/mist
-  quads** (760, scrolled per element and by the 809 global); (4) a **reflective env-map overlay** (1848).
+  reflection layer, drawn only while the camera is in one of 7 zone cuboids; (3) the **fire / smoke field
+  quads** (760, scrolled per element and by the 809 global; earlier read as waterfall foam, §3); (4) a **reflective env-map overlay** (1848).
 - **Fog zones** = gameplay env transitions (section 0x80). Inside a zone, fog colour, near/far and
   intensities are lerped along the cuboid's local X. Bit 0 cross-fades the *hero's* light banks.
 - **Underwater** = flag `0x167494`. It switches to the alternate fog, adds a full-screen tint and lowers
@@ -168,7 +168,16 @@ render buffer, + z. Optionally it returns the normal. Otherwise it falls back to
   (order tables 0x1cad40/0x1cada0/0x1cae00). Pass 1 (ctx 1) sends XYZ, colour and water UV. Pass 2 (ctx 2)
   sends only the env UV. VU1 entry 0xc, or 0xe when it crosses the guard band. No Z write (A = 0).
 
-## 3. Waterfall foam (760) and the 809 scroll, confidence medium
+## 3. Fire / smoke fields (760) and the 809 scroll (formerly "waterfall foam")
+
+**Correction (2026-09-27): 760 is fire and smoke, not waterfall foam** (creatures.md §7, the port:
+`rc_game::moby_update::classes::fire_field`, `rc-engine` water_render.rs "Fire fields"). The four Novalis fields sit on
+the bombed city roofs; their flame quads are orange (+0x38 = 0x204080) and additive with FX 46 (a flame silhouette)
+scrolling upwards, over a grey FX-47 smoke curtain. The waterfall foam is 751's zone-5 particle spray (types 57 / 56,
+particles.md "In the port (2026-09-27): the waterfall foam"). The quad geometry and the element life cycle, "not
+traced" below, are traced there: element tables at 0x1fa840..0x1fab40 (levels 00 / 14: the same bytes at 0x1e11a0 /
+0x1e04d0), per-corner alpha bytes gp−0x4f68 / −0x4f60; timers 0x16137c..0x16138c from 809's init.
+
 
 760 (4 instances: (114.7, 199.8, 51.3), (96.8, 234.8, 58.3), (49.0, 225.0, 57.1), (143.5, 312.4, 44.3); pvar
 802–805: element range s16 [0, 20|40], FX 6+40 = **46 (foam crest)** and 7+40 = **47 (mist)**) registers
@@ -243,7 +252,8 @@ Differences / not done: the game's single `rand` stream is shared by all moby up
 own `srand(1234)` stream until the moby loop is unified. FastBSphereCheck(400) strip culling and the
 guard-band clip codes are not reproduced (GPU clipping; the patch corner test uses the port's frustum).
 Drips (787) and zone-5 mist particles consume their random draws but are not spawned; the hero's splashes
-are not hooked (no hero in water). 760 foam/mist is not drawn (quad geometry and element timers still
+are not hooked (no hero in water). (Since 2026-09-27: 760 is the fire fields, drawn; the zone-5 spray spawns its
+particles.) Formerly: 760 foam/mist is not drawn (quad geometry and element timers still
 untraced; `rc_game::water::foam_*_tick` hold the two scroll rules), 1848 not ported. Other levels' ripple
 modules (05/07/11/12/13) and strip tables: not surveyed; the per-level address tables are Novalis-only.
 
@@ -415,7 +425,7 @@ hook for when the hero moby renders), the zone lookup uses the fly camera (no ca
     normal, grey, reflection UV. Draw the 16 sub-blocks with the mask, two passes (water FX 41/43 with the
     shared animated UV, then env FX 40/42 with the reflection UV). No Z write. Expected: pools that
     ripple under drips and the hero, visible only while the camera is in the zone cuboid.
-  - *760 foam/mist* and *1848 env overlay*: later (760 needs its quad builder traced).
+  - *760 fire fields*: ported (§3); *1848 env overlay*: later.
   - *Fog*: feed the zone-lerped level fog, or the underwater alternate fog, into the existing fog uniforms
     and `SetTfragDists` every frame, so tfrag and tie LOD shift with them. Draw the full-screen tint quad
     after the world when underwater.
@@ -425,7 +435,7 @@ hook for when the hero moby renders), the zone lookup uses the fly camera (no ca
 
 - VU1 57843 entries 0xc/0xe (perspective ST, clip) assumed standard. (`fun_001f9988` = VU0 sqrt and
   strip +0x1c = 1 are pinned, §3.1.)
-- 760 quad geometry and element timers; 1848's mesh identity; moby glow rendering; (the tint pass position is pinned: after the HUD, §6.1)
+- 1848's mesh identity; moby glow rendering; (the tint pass position is pinned: after the HUD, §6.1)
   relative to the HUD.
 - Other levels: which classes use the ripple module (05/07/11/12/13), and lava/goo (level-specific code,
   e.g. `0x21fa98` strip-emitter copies in 09/12/14), not surveyed.

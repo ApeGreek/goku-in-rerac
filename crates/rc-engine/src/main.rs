@@ -31,6 +31,7 @@ mod gameplay;
 mod gs_state;
 mod hud_render;
 mod input_map;
+mod interact_render;
 mod level_load;
 mod menu_render;
 mod moby_anim;

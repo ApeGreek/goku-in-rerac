@@ -558,3 +558,49 @@ particles spawn and follow the flyers (`RC_PART_STATS`: 197 type-6 alive at tick
 records lie along the flight paths), but they are not visible on screen: the texture is part_defs[4] frame 0, the
 darkest smoke frame, drawn additive with vertex colour 0x2c. Whether the game shows these trails brighter is open
 (a PCSX2 screenshot with a flyer close to the camera would decide it).
+
+## World props and effects; the exhaust rate (2026-09-27)
+
+Ported: the fire / smoke fields 760 and 809 (formerly "760 waterfall foam"), the waterfall foam proper (751's zone-5
+particle types 57 / 56), the props 705, 703 / 715, 768 / 769, 1042, 701 and the breakables 704, 709–711, 729, 778 / 779,
+754, 1813 / 1816 (creatures.md §7). `port_sim` now sets the level's volumes (the engine did already), so the cuboid
+users (760, 805, 701) see them.
+
+**The flyers' exhaust rate is exact; the ≈ 31 per tick attribution above was the model's error.** A scratch harness
+(`rc-trace` as a library: the port run to the first savestate's tick, then the RAM state of the ten flyers and their
+emitters copied in, then the 1072 window ticks) gives: flyer positions at the second savestate equal RAM's to ≤ 0.002
+u (all ten), and the type-6 pool equal record for record (370 alive; per owner 38 / 108 / 75 / 149 with the same timer
+ranges 1–38, 42–149, 1–75, 1–149 as RAM). The window's emitter term is **3523 puffs = 28 184 draws = 26.29 per tick**
+(the port's own run, with the scene-period flyer offsets of § "Blarg flyers": 3540, 26.42). The earlier 33 300 (≈ 31)
+came from scaling a visibility replay by 1.11 to fit the pool; every emitter emits exactly one puff per visible tick in
+both. Nothing in `flyer.rs` or `type06.rs` needed changing (the display-byte trail blend is untouched).
+
+**Fire fields vs RAM.** With the first savestate's element arrays (0x1cbc60 … 0x1d6e80) and 0x161374 copied in, the
+port's 1072 ticks reproduce all 136 timer triples of the second savestate and exactly **192 respawns = 1344 draws
+(1.25 per tick)**, the § "Attribution" figure; unchanged elements keep their positions, scrolls agree to ≤ 1.4e-3
+(float accumulation, hardware_fidelity_layers.md "Tolerances"). From the port's own start (the scene period
+registers the fields differently: S) the window has 164 respawns (1.07 per tick).
+
+**rand draws** (`compare-novalis-spawn` on both dumps; window = second − first, 1072 ticks):
+
+| | load pass | first savestate | second | window per tick |
+|---|---|---|---|---|
+| before (tree at the start of this pass) | 1457 | 79 849 | 115 901 | 33.63 |
+| after (this pass + the other agents' concurrent work) | 2419 | 129 624 | 171 419 | 38.99 |
+| game | | 254 936 | 311 008 | 52.31 |
+
+This pass's own share: load pass +962 (136 fire-field elements × 7 = 952, five spinners × 2); window +1148 (fire-field
+respawns; 1344 from the RAM phase). The props, breakables and the zone-5 foam draw nothing in this idle window (no hit,
+the camera outside zone 5, the spinners / lifts / doors / 701 draw only at init or when triggered). The rest of the
++5.4 per tick is the enemies' and hero agents' work (the gunship volleys: bursts of up to 927 draws in a tick).
+
+**Corrected attribution of the game's window** (§ "Attribution"): emitters 28 184 (exact, not ≈ 33 300), sound
+3 216, 751 2 144, fire fields 1 344 (the "760 foam" row), hero idle ≈ 1 200, drip ≈ 170, glints ≈ 150, critters
+≈ 100, the gunship volley 8 000–10 500: ≈ 44 500–47 000 of 56 072. The unexplained remainder is **≈ 9 000–11 500**
+(8–11 per tick), no longer hidden in the emitter range. Candidates for the next read: the type-62 records (56
+persistent, spawner unknown), 1504 (the wandering light's `rand_range` walk), 774's look-around, the volley's split
+cascades and embers.
+
+**Fixture / digest:** `cargo test -p rc-trace --test novalis_spawn` passes (the new updates change no load-time slot
+fact); `novalis_hero_digest` byte-identical (2800 lines, the same file as the other agents' today). The compare's
+moby tallies moved up (state 790 → 880, mode 517 → 629 of 929; 760 × 4 and 809 now "every field equal").

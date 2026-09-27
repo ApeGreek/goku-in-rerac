@@ -357,7 +357,8 @@ pub fn euler_rows(e: V4) -> [V4; 4] { ph::euler_rows(e) }
 
 /// `FUN_002721f0(m, out)`: rotation rows (4) → Euler angles (x, y, z). `z = atan(r0.x, r0.y)`;
 /// `m' = Rz(−z)·m` (0x221980 then 0x221ce8 with m's row 3 replaced by (0,0,0,1)); `y = atan(m'.r0.x, −m'.r0.z)`;
-/// `m'' = Ry(−y)·m'` ([`euler_rows_fpu`] with (0, −y, 0)); `x = −atan(m''.r1.y, m''.r1.z)`.
+/// `m'' = Ry(−y)·m'` ([`euler_rows_fpu`] with (0, −y, 0)); `x = atan(m''.r1.y, m''.r1.z)` (stored as is: the
+/// `neg.s f1, f0` at 0x2722d8 only feeds a dead stack word).
 pub fn rows_euler(m: &[V4; 4]) -> V4 {
     use crate::pad::fast_arctan as atan;
     let z = Pf::ZERO;
@@ -369,7 +370,7 @@ pub fn rows_euler(m: &[V4; 4]) -> V4 {
     let ry = euler_rows_fpu([z, -a_y, z, z]);
     mm = mat4_mul(&ry, &mm);
     let a_x = atan(mm[1][1], mm[1][2]);
-    [-a_x, a_y, a_z, z]
+    [a_x, a_y, a_z, z]
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -512,6 +513,11 @@ pub struct SoundEvent {
 pub trait SoundSink {
     /// Returns the voice slot, or −1 when refused.
     fn play_class_sound(&mut self, ev: &SoundEvent, rng: &mut Rng) -> i32;
+    /// `SoundIsAlive(moby, slot)` 0x27e820: slot `slot` still plays a sound of `moby`. Default: any slot ≠ −1.
+    fn alive(&self, slot: i32, _moby: MobyId) -> bool { slot != -1 }
+    /// `release_voice_slot(slot)` 0x2a1348 when the slot still plays a sound of `moby` (the classes' guard: owner
+    /// and state checked first): a looping sound stops. Default: nothing.
+    fn release(&mut self, _slot: i32, _moby: MobyId) {}
 }
 
 /// One glint (0x16eec0 + i·0x20): the sparkle drawn on idle bolts.
@@ -773,8 +779,21 @@ pub struct Services {
     /// The camera shake requests this tick's class updates made (their stores into 0x167260 / 0x167270), in order;
     /// taken by the tick and applied to the camera before the hero update ([`World::shake_camera`]).
     pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
+    /// The frame's draw-callback lists 0x21afe0 / 0x21b198 ([`crate::moby_update::classes::draw_callbacks`]).
+    pub draw_callbacks: crate::moby_update::classes::draw_callbacks::DrawCallbacks,
+    /// The fire / smoke fields' globals and elements (classes 760 / 809, [`crate::moby_update::classes::fire_field`]).
+    pub fire_fields: crate::moby_update::classes::fire_field::FireFieldState,
     /// The creature layer's globals ([`crate::moby_update::creature::Globals`]: rate limiters, class spheres).
     pub creatures: crate::moby_update::creature::Globals,
+    /// The bolt cranks' globals (gp−0x5360: the spring pulling Ratchet onto the bolt's ring; class 280,
+    /// [`crate::moby_update::classes::bolt_crank`]).
+    pub cranks: crate::moby_update::classes::bolt_crank::Globals,
+    /// The point-light bank 0x180740 (the explosion lights own their slots; the renderer reads it).
+    pub point_lights: crate::point_lights::PointLights,
+    /// The "use" system: the context prompt lease, the NPC talk tables and the hand-offs (`interact`).
+    pub interact: crate::moby_update::interact::Interact,
+    /// The in-level cinematic calls and engine requests of the moby loop ([`crate::cinematic`]).
+    pub cinematic: crate::cinematic::Cinematic,
 }
 
 impl Default for Services {
@@ -810,7 +829,13 @@ impl Services {
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
             hero_writes: None,
             camera_shakes: Vec::new(),
+            draw_callbacks: Default::default(),
+            fire_fields: Default::default(),
             creatures: Default::default(),
+            cranks: Default::default(),
+            point_lights: Default::default(),
+            cinematic: Default::default(),
+            interact: Default::default(),
         }
     }
 
@@ -874,12 +899,16 @@ impl Services {
 /// | `sink_hold` | 0x13f530 (s16, holds the sinking floor 0x31) | flow 679 |
 /// | `flow` | 0x13fd20 yaw, 0x13fd24 pitch, 0x13fd28, 0x13fd2c speed, 0x13fd30 pull | flow 679 |
 /// | `jump_lockout` / `edge_brake` | 0x13f542 / 0x13f544 (s16) | path lift 726 `0x2b9eb0` while ridden with pvar+0xc8 = 0 |
+/// | `pose` | 0x13f3d0 position, 0x13f3e8 yaw, 0x13f4d0 target yaw | bolt crank 280 `0x2e0c68` while it turns him ([`super::classes::bolt_crank`]) |
+/// | `clear_motion` | `FastMemZero16(0x13f430, 0x90)`: velocity .. slope ratio (0x13f430..0x13f4bf) | bolt crank 280 |
+/// | `calls` | the classes' calls into the hero code: `SetState` 0x23cf98, `SetAnim` 0x247a90 ([`HeroCall`]) | bolt crank 280 |
 ///
 /// Other class stores into the block, for the classes that are not ported yet (add a field here when one is):
 /// 613 also 0x13f4e4 (speed), 0x13f528, 0x141608; the camera / focus objects 0x13fda0; talking NPCs 0x13f3d0
-/// (position); the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec (`0x2dbdc0`); `0x300de0` 0x13f510 / 0x1415f8;
-/// the checkpoint record's respawn `0x29adc8` (position / Euler: the engine's respawn); the mode / control bytes
-/// 0x1413f5 / 0x1413fc of the vendor, ship and teleporter code.
+/// (position: `pose`); the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec (`0x2dbdc0`); `0x300de0` 0x13f510 /
+/// 0x1415f8; the checkpoint record's respawn `0x29adc8` (position / Euler: the engine's respawn); the mode / control
+/// bytes 0x1413f5 / 0x1413fc of the vendor, ship and teleporter code. The scripted sequences' `SetState` calls
+/// (gunship 688, trooper cameras, vendors' walk to a point) belong in `calls`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HeroFields {
     pub platform: [f32; 4],
@@ -888,6 +917,33 @@ pub struct HeroFields {
     pub flow: [f32; 5],
     pub jump_lockout: i16,
     pub edge_brake: i16,
+    /// A class's stores of Ratchet's position / yaw / target yaw (None: unchanged).
+    pub pose: Option<HeroPose>,
+    /// 0x13f430..0x13f4bf cleared by a class (the `platform` and `momentum` fields above are cleared with it).
+    pub clear_motion: bool,
+    /// The classes' calls into the hero code this tick, in order ([`HeroFields::call`]).
+    pub calls: [Option<HeroCall>; 4],
+}
+
+/// Ratchet's pose as a class stores it (native `f32`): position 0x13f3d0 (x, y, z; w kept), yaw 0x13f3e8, target
+/// yaw 0x13f4d0.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HeroPose {
+    pub pos: [f32; 3],
+    pub yaw: f32,
+    pub target_yaw: f32,
+}
+
+/// A call a class makes into the hero code during the moby loop. The port runs it right before the hero update
+/// with the hero's context ([`HeroFields::run_calls`]); in the game it runs at the class's point in the loop (the
+/// only difference: an RNG draw of the entry, e.g. idle's head-look timer, lands after the loop's later draws).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HeroCall {
+    /// `SetState(id, play)` 0x23cf98.
+    SetState { id: i32, play: bool },
+    /// `SetAnim(blend, seq, frame)` 0x247a90 (`blend` = `(float)ticks(n)`), as the hero code's own
+    /// ([`Hero::set_anim`]).
+    SetAnim { blend: f32, seq: u8, frame: i32 },
 }
 
 impl HeroFields {
@@ -900,7 +956,24 @@ impl HeroFields {
             flow: h.surf.flow,
             jump_lockout: h.jump_lockout,
             edge_brake: h.edge_brake,
+            pose: None,
+            clear_motion: false,
+            calls: [None; 4],
         }
+    }
+
+    /// Queues a call into the hero code (in order; a fifth call in one tick is dropped: no class makes more
+    /// than one).
+    pub fn call(&mut self, c: HeroCall) {
+        if let Some(s) = self.calls.iter_mut().find(|s| s.is_none()) { *s = Some(c); }
+    }
+
+    /// `FastMemZero16(0x13f430, 0x90)`: velocity, platform delta, displacement, effective velocities, applied
+    /// platform displacement, momentum, their lengths and the slope ratio.
+    pub fn clear_motion(&mut self) {
+        self.platform = [0.0; 4];
+        self.momentum = [0.0; 4];
+        self.clear_motion = true;
     }
 
     /// Stores the fields into `h` (bit for bit: a field no class changed keeps its value).
@@ -911,7 +984,39 @@ impl HeroFields {
         h.surf.flow = self.flow;
         h.jump_lockout = self.jump_lockout;
         h.edge_brake = self.edge_brake;
+        if self.clear_motion {
+            let z = ph::V0;
+            (h.vel, h.disp, h.eff, h.eff_v, h.eff_h, h.plat_applied) = (z, z, z, z, z, z);
+            (h.eff_len, h.eff_len_xy, h.fwd_speed, h.slope_ratio) = (Pf::ZERO, Pf::ZERO, Pf::ZERO, Pf::ZERO);
+        }
+        if let Some(p) = self.pose {
+            h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
+            h.rot[2] = pf(p.yaw);
+            h.target_yaw = pf(p.target_yaw);
+        }
     }
+
+    /// Runs the queued calls on the hero ([`HeroCall`]), in order, with the hero's context of this tick.
+    pub fn run_calls(&self, h: &mut Hero, c: &mut crate::hero::states::Ctx) {
+        for call in self.calls.iter().flatten() {
+            match *call {
+                HeroCall::SetState { id, play } => { h.set_state(c, id, play); }
+                HeroCall::SetAnim { blend, seq, frame } => h.set_anim(c.anim, c.rng, pf(blend), seq, frame),
+            }
+        }
+    }
+}
+
+/// The game's globals outside the moby system that the moby loop's classes read, as the loop sees them: the pad
+/// 0x13c940 after this tick's `UpdatePad`, the camera Euler 0x167250 of the last camera update and Ratchet's
+/// animation fields (+0x50..+0x54 and 0x13fde8 / 0x13fdec) after his last update. The tick fills
+/// [`Hero::loop_in`] with them right before the moby loop (`crate::tick::Game::tick_with_hero_sounds`); a class
+/// reads them through [`World::hero`].
+#[derive(Clone, Debug, Default)]
+pub struct LoopGlobals {
+    pub pad: crate::pad::PadState,
+    pub cam_euler: [f32; 3],
+    pub anim: crate::hero::AnimView,
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1087,6 +1192,19 @@ impl<'a> World<'a> {
     pub fn play_sound(&mut self, index: i32, flags: u32, id: MobyId) -> i32 {
         let c = self.table.mobys[id].o_class;
         self.play_sound_as(index, flags, id, c)
+    }
+
+    /// `SoundIsAlive(moby, slot)` 0x27e820 ([`SoundSink::alive`]; without a sink: any slot ≠ −1).
+    pub fn sound_alive(&self, slot: i32, id: MobyId) -> bool {
+        match self.sound.as_deref() {
+            Some(s) => s.alive(slot, id),
+            None => slot != -1,
+        }
+    }
+
+    /// `release_voice_slot(slot)` guarded by the slot's owner ([`SoundSink::release`]).
+    pub fn release_sound(&mut self, slot: i32, id: MobyId) {
+        if let Some(s) = self.sound.as_deref_mut() { s.release(slot, id); }
     }
 
     /// `CreateMoby(o_class)` 0x263390 with the class as loaded (the game's init defaults, a zeroed 0x80-byte
@@ -1449,6 +1567,7 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     fn hit_message(&self, table: &MobyTable, target: MobyId) -> Option<HitRecord> { self.svc.borrow().hits.current(table, target).copied() }
     fn take_hero_writes(&mut self) -> Option<HeroFields> { self.svc.borrow_mut().take_hero_writes() }
     fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { std::mem::take(&mut self.svc.borrow_mut().camera_shakes) }
+    fn take_cinematic(&mut self) -> Vec<crate::cinematic::CinematicCall> { crate::cinematic::take_calls(&mut self.svc.borrow_mut()) }
     fn run_list(&self, table: &MobyTable, camera: V4) -> Option<Vec<MobyId>> {
         Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
     }
@@ -1480,6 +1599,30 @@ pub fn normalize_angle(a: Pf) -> Pf {
 mod tests {
     use super::*;
     use crate::particles::type11;
+
+    /// `0x2721f0` inverts `0x221980` (R = Rz·Ry·Rx) for |y| < π/2: x, y and z come back with their signs (the
+    /// disassembly stores the last `FastArcTan` as is: `neg.s f1, f0` at 0x2722d8 goes to a dead stack word).
+    #[test]
+    fn rows_euler_inverts_euler_rows() {
+        for e in [[0.3f32, 0.0, 0.0], [-0.7, 0.4, 1.2], [0.2, -1.3, -2.9], [1.1, 1.4, 0.5]] {
+            let v = [Pf::f(e[0]), Pf::f(e[1]), Pf::f(e[2]), Pf::ZERO];
+            let back = rows_euler(&euler_rows(v));
+            for k in 0..3 { assert!((back[k].to_f32() - e[k]).abs() < 1e-4, "{e:?} -> {back:?}"); }
+        }
+    }
+
+    /// The bolts' settle reads a tumbled bolt's rows back as a quaternion (`0x26ee30(0x2721f0(rows))`): it is the
+    /// same rotation (`quat_rows` of it gives the rows back), so the settle starts where the tumble left the bolt.
+    #[test]
+    fn rows_euler_quat_round_trip() {
+        for e in [[0.3f32, 0.0, 0.0], [-0.7, 0.4, 1.2], [0.2, -1.3, -2.9], [1.1, 1.4, 0.5]] {
+            let r = euler_rows([Pf::f(e[0]), Pf::f(e[1]), Pf::f(e[2]), Pf::ZERO]);
+            let q = quat_rows(euler_quat(rows_euler(&r)));
+            for i in 0..3 {
+                for k in 0..3 { assert!((q[i][k].to_f32() - r[i][k].to_f32()).abs() < 1e-3, "{e:?}: {q:?} vs {r:?}"); }
+            }
+        }
+    }
 
     /// `World::part11` is `type11::spawn` (plus the spawn counters): same draws, same record, for each frame load,
     /// with and without a free record, and throttle-only without a particle system.

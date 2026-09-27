@@ -11,6 +11,7 @@
 pub mod mode;
 pub mod pause;
 pub mod quick_select;
+pub mod vendor;
 
 use crate::hud::{Draw, HudAssets, Rot};
 use crate::pad::PadState;
@@ -29,6 +30,8 @@ impl Overlay {
     pub fn parse(bytes: &[u8]) -> rc_formats::buf::Result<Overlay> { Ok(Overlay { sections: parse_overlay_sections(bytes)? }) }
     pub fn from_sections(sections: Vec<OverlaySection>) -> Overlay { Overlay { sections } }
     pub fn bytes(&self, addr: u32, n: usize) -> Option<&[u8]> { read_overlay(&self.sections, addr, n) }
+    /// The loaded sections (code pattern searches).
+    pub fn sections(&self) -> &[OverlaySection] { &self.sections }
     pub fn u8(&self, a: u32) -> Option<u8> { self.bytes(a, 1).map(|b| b[0]) }
     pub fn u16(&self, a: u32) -> Option<u16> { self.bytes(a, 2).map(|b| u16::from_le_bytes([b[0], b[1]])) }
     pub fn i16(&self, a: u32) -> Option<i16> { self.u16(a).map(|v| v as i16) }

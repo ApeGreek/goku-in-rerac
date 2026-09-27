@@ -380,8 +380,8 @@ fn kill(w: &mut World, id: MobyId) {
     w.delete_moby(id);
 }
 
-/// `FlyerPathDriver` (0x2f5168).
-fn driver(w: &mut World, id: MobyId) {
+/// `FlyerPathDriver` (0x2f5168); also the dropship 666 and the gunship 688 fly with it.
+pub fn driver(w: &mut World, id: MobyId) {
     let culled = w.m(id).o_class != NO_VIEW_TEST && culled(w, id);
     let st = w.m(id).state;
     if w.m(id).group >= 0 && st != 0 && st != 3 {

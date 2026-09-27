@@ -184,6 +184,25 @@ The helpers return "inside now"; nothing in the engine remembers the previous an
   block-relative pointer) has bit 0 of the u16 at +0x1e, or its platform block's flags +0x3c bit 0
   (`triggers::record_ledge_flag`, `HeroWorld::moby_ledge_flag`).
 
+## 5a. Crank-driven objects (a third mechanism: a progress link)
+
+The bolt crank 280 (`0x2e0c68`; levels 1, 4, 8) drives what it opens neither by a volume nor as a carrier: each
+driven moby holds the crank's **moby index** in its own pvar s32 +0x00 (a loader moby link, −1 = none), checks that
+moby's class is 280 (`+0xa6 == 0x118`) and reads the crank's pvar f32 +0x00, its **progress** 0..1 (turned angle /
+(turns · 2π)), every tick. The driven moby maps it onto its own motion; the crank knows nothing of its consumers.
+A crank let go before it is done unwinds (1/60 a tick) and the consumers follow back.
+
+| consumer | fn | motion | carrier? |
+|---|---|---|---|
+| 641 rotator (Novalis #672, crank #297) | `0x2f4348` | Euler x = start + wrap((pvar+0x08° − start) · progress); sets the crank's update distance 0xff | no |
+| 665 slider (Novalis door pairs #683 / #684 ← #296, #685 / #686 ← #297) | `0x2f4710` | x, y = start + (pvar+0x0c / +0x10 − start) · progress (only when both targets ≠ 0); loop sound 0 while moving, sound 1 at 0 / 1 | no |
+| Eudora `0x2c6858`, `0x2c6bb8`, `0x2cdda0` (a lift: z − 15 · progress), `0x2e4418` (help) | level04 | not ported | — |
+
+None of them has a platform block, so `HeroPlatformUpdate` never carries Ratchet on them (as in the game); they move
+under the scheduler's `MobyBuildMatrix` and grid re-registration like every moby, so their collision follows. Port:
+`moby_update/classes/bolt_crank.rs` (the crank, 641, 665; `bolt_crank::progress`), the hero side
+`hero/crank.rs` (docs/plan/hero_states.md "Bolt crank").
+
 ## 6. First consumer: path lift 726
 
 `crates/rc-game/src/moby_update/classes/path_platform.rs` (pvar table in its module doc), registered as
@@ -246,3 +265,15 @@ plateau's edge).
   loop sound every moving tick.
 - Every other consumer in §3 (their classes are not ported yet); they call `World::in_cuboid` & co. when they
   are.
+
+## 9. Cinematic consumers (2026-09-27, docs/plan/cutscenes.md)
+
+- **Camera trigger 737** (`classes/camera_trigger.rs`, 0x2fb5b0): cuboid P[8] on Ratchet's feet **or a command**
+  (moby+0xbc = 1 with the hold time in P[11], set by another class) → the cutaway (hero 0x72, script camera at cuboid
+  P[9], letterbox); the "sticky flag" of §4 is that command byte. Novalis: 860 (cuboid 42, and commanded by 790), 863
+  (commanded by 790), 859 / 861 / 862 dormant.
+- **Mission NPC 730 / 790** (`classes/mission_npc.rs`, 0x2fad68): drop-in cuboid +0x10 (42) → commands 860; its end
+  commands 863 and the hinged bridge 746 (+0xbc = 2). Placement cuboids: +0x30 the checkpoint record (55).
+- **Gunship 688**: cuboid +0x170 → its fly-by (the enemies port) → `creature::ScriptRequest` → `rc_game::cinematic`.
+- Tested headless in `crates/rc-game/tests/cutscene_novalis.rs` (trigger ticks, holds of 420 / 180 / 390 ticks).
+

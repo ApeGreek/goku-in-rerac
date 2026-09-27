@@ -168,6 +168,11 @@ impl Plugin for GameplayPlugin {
                 // RC_GIVE_ITEMS=<id>,<id>,...: own those items (decimal or 0x hex ids, docs/plan/hero_states.md §0.1)
                 // from the start (debug); the last back item among them (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack)
                 // is the saved back item (equipped[3], 0x14166c), so Clank wears it.
+                // RC_GIVE_BOLTS=<n>: start with n bolts (debug; e.g. to buy at the vendor).
+                if let Some(n) = std::env::var("RC_GIVE_BOLTS").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
+                    gs.global.bolts = n;
+                    println!("game state: RC_GIVE_BOLTS: {n} bolts");
+                }
                 if let Some(ids) = give_items() {
                     for &id in &ids { gs.global.owned[id] = 1; }
                     if let Some(&b) = ids.iter().rev().find(|&&i| matches!(i, 2..=4)) { gs.global.equipped[3] = b as i32; }
@@ -299,6 +304,8 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn water(&self) -> Option<&dyn rc_game::hero::swim::WaterQuery> { Some(&self.water) }
     fn hit_message(&self, table: &MobyTable, target: MobyId) -> Option<rc_game::moby_update::services::HitRecord> { self.world.hit_message(table, target) }
     fn take_hero_writes(&mut self) -> Option<rc_game::moby_update::services::HeroFields> { self.world.take_hero_writes() }
+    fn take_camera_shakes(&mut self) -> Vec<rc_game::follow_camera::ShakeRequest> { self.world.take_camera_shakes() }
+    fn take_cinematic(&mut self) -> Vec<rc_game::cinematic::CinematicCall> { self.world.take_cinematic() }
     fn run_list(&self, table: &MobyTable, camera: [rc_game::ps2v::Pf; 4]) -> Option<Vec<MobyId>> { self.world.run_list(table, camera) }
     fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { self.world.volumes() }
 }
@@ -448,6 +455,11 @@ pub struct Play {
     ratchet_hidden: bool,
 }
 
+impl Play {
+    /// The loader's ship in the moby table (`0x13e030`; crate::scene_render hides / shows it for the mission NPC).
+    pub fn ship_moby(&self) -> Option<MobyId> { self.ship.map(|s| s.0) }
+}
+
 /// The external updates' level-table address for `o_class` (`ExternalUpdates::update_fn`, also used to build
 /// the class table before the externals exist).
 fn external_update_fn(level: u32, ripples: bool, o_class: i16) -> Option<u32> {
@@ -473,7 +485,7 @@ struct Externals<'a> {
 impl ExternalUpdates for Externals<'_> {
     fn update_fn(&self, o_class: i16) -> Option<u32> { external_update_fn(self.level, self.water.as_ref().is_some_and(|w| w.has_ripples()), o_class) }
 
-    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [rc_game::ps2v::Pf; 4], _counter: u64, particles: Option<&mut Particles>) {
+    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [rc_game::ps2v::Pf; 4], counter: u64, particles: Option<&mut Particles>) {
         match addr {
             EMITTER_UPDATE => {
                 if let (Some(p), Some(&o)) = (particles, self.emitters.get(&id)) { type06::emitter_update_live(p, rng, o, self.view, self.level, &table.mobys[id]); }
@@ -489,7 +501,7 @@ impl ExternalUpdates for Externals<'_> {
                     m.update_dist = 0xff;
                     m.position[2] += 0.5;
                 } else {
-                    w.ripple_update([camera[0].to_f32(), camera[1].to_f32(), camera[2].to_f32()], rng);
+                    w.ripple_update_with([camera[0].to_f32(), camera[1].to_f32(), camera[2].to_f32()], rng, counter, particles);
                 }
             }
             _ => {}
@@ -602,8 +614,6 @@ pub struct DynMobys {
     pal_slots: u32,
     /// o_class → index into `LevelMobys::classes`.
     class_ix: HashMap<i16, usize>,
-    /// Entities per (slot, class index), spawned on first use.
-    ents: HashMap<(usize, usize), Vec<Entity>>,
     /// The class index each slot shows.
     shown: Vec<Option<usize>>,
     records: Vec<u8>,
@@ -628,7 +638,6 @@ impl DynMobys {
             extra,
             pal_slots,
             class_ix: m.classes.iter().enumerate().map(|(i, c)| (c.o_class as i16, i)).collect(),
-            ents: HashMap::new(),
             shown: vec![None; slots],
             records,
             palette,
@@ -755,6 +764,8 @@ fn setup(
     }
     let n_static = game.mobys.first_dynamic;
     svc.groups = statics.groups(&lv.gameplay);
+    // The "use" system: talk tables, text, talk slots, save values (crate::interact_render; before the load pass).
+    crate::interact_render::install(&mut svc, lv, &statics.instance_to_moby, state.as_ref().map(|s| &s.0));
     if let Some(gs) = &state {
         svc.counters.bolts = gs.0.global.bolts;
         // 0x15ee20 (the challenge-gated pads 1135 and gold-weapon offers read it) and 0x13e520.
@@ -940,6 +951,7 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
             _ => None,
         };
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
+        occl.look(ii, m.alpha, m.mode);
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
             a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()));
         }
@@ -1103,10 +1115,13 @@ fn tick(
             let flags = if id == hero_id { 1 } else { 0x1_0000 };
             w.deliver_hit(id, &HitTemplate { flags, damage: rc_game::ps2v::Pf::ONE, ..Default::default() });
         }
+        // PromptTick 0x278eb8 and this tick's pad for the "use" system (moby_update::interact), before the loop.
+        w.svc.interact.begin_tick(hero.loop_in.pad.pressed, hero.state);
         n_active = sched.tick(&mut w);
     };
-    let mut parts = |hero: &Hero, cam: &CameraView, rng: &mut Rng, _: u64| {
+    let mut parts = |hero: &Hero, cam: &CameraView, rng: &mut Rng, counter: u64| {
         if let Some(sim) = parts_cell.borrow_mut().as_deref_mut() {
+            sim.sys.counter = counter;
             // 0x167240 as the previous tick's camera update left it (the type-11 sparks read it), and the game's
             // one rand stream.
             sim.sys.camera = [cam.pos[0].0, cam.pos[1].0, cam.pos[2].0];
@@ -1133,6 +1148,7 @@ fn tick(
     if let Some(gs) = state.as_deref() {
         p.game.hero.weapons.ammo = gs.0.global.ammo;
         p.game.hero.owned.0 = gs.0.global.owned;
+        svc_cell.borrow_mut().interact.sync_game(&gs.0);
         p.game.hero.back_slot.slot.saved = gs.0.global.equipped[3];
         p.game.hero.back_slot.thruster_last = gs.0.global.thruster_last;
     }
@@ -1200,6 +1216,10 @@ fn tick(
     }
     // Moby sounds: queued and counted (no moby-sound entry in rc_game::audio yet).
     for ev in p.svc.sounds.drain(..) { *p.sounds.entry((ev.o_class, ev.index)).or_default() += 1; }
+    // The talk system's saved-game writes (moby_update::interact::GameWrite).
+    if let Some(gs) = state.as_mut() {
+        for w in p.svc.interact.apply_writes(&mut gs.0) { println!("interact: tick {}: game write {w:?}", p.game.counter); }
+    }
     // The bolt counter (0x15ed98, 0x13df38[level]) into the persistent state the HUD and menus read.
     if let Some(gs) = state.as_mut() {
         let c = &p.svc.counters;
@@ -1301,9 +1321,13 @@ fn upload(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
+    mut point_lights: ResMut<moby_render::PointLightFrame>,
 ) {
     let Some(mut p) = play else { return };
     if p.uploaded == Some(p.game.counter) { return; }
+    // The point-light bank after the tick (MobyProc merges it into the mobys' third light, moby_render).
+    let lights: Vec<_> = p.svc.point_lights.active().copied().collect();
+    if point_lights.0 != lights { point_lights.0 = lights.clone(); }
     p.uploaded = Some(p.game.counter);
     let lv = &level.0;
     let class = &lv.mobys.anim[p.class];
@@ -1314,7 +1338,8 @@ fn upload(
     let rows = rows_bits(&hm.rows);
     let lights = lv.mobys.lighting.as_ref().map(|l| light::moby_lights(&rows, &l.bank, p.light_word, p.ambient, 0x80));
     let model = moby_render::extra_model(rows3(&hm.rows), p.scale, [hm.position[0], hm.position[1], hm.position[2]]);
-    let record = moby_render::extra_record(&model, lights.as_ref(), 0);
+    let mut record = moby_render::extra_record(&model, lights.as_ref(), 0);
+    moby_render::write_point_light(&mut record, moby_render::point_light_merge(&point_lights.0, sphere_centre(hm), &rows3(&hm.rows)));
     let t = Transform::from_matrix(model);
     for &e in &p.entities {
         if let Ok(mut tr) = transforms.get_mut(e) { *tr = t; }
@@ -1332,7 +1357,13 @@ fn upload(
         let [fwd, left, up] = crate::game_camera::game_rows(t);
         (crate::game_camera::game_eye(t), crate::moby_lod::camera_rows(fwd, left, up))
     });
-    upload_dynamic(&mut p, lv, cam, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials);
+    upload_dynamic(&mut p, lv, cam, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0);
+}
+
+/// moby+0x00 (the sphere centre, integer units) in game units; the position when the moby has no sphere.
+fn sphere_centre(m: &Moby) -> [f32; 3] {
+    if m.bsphere[3] == 0.0 { return pos3(m); }
+    [m.bsphere[0] / 1024.0, m.bsphere[1] / 1024.0, m.bsphere[2] / 1024.0]
 }
 
 /// The mobys in the dynamic slots (module doc): per slot, drawn when live (state < 0x80), not hidden
@@ -1350,6 +1381,7 @@ fn upload_dynamic(
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     materials: &mut Assets<MobyMaterial>,
+    point_lights: &[rc_game::point_lights::PointLight],
 ) {
     let m = &lv.mobys;
     let table = &p.game.mobys;
@@ -1365,9 +1397,10 @@ fn upload_dynamic(
         if Some(id) == ship { continue; }
         let ci = (mo.state < 0x80).then(|| d.class_ix.get(&mo.o_class).copied()).flatten();
         if ci.is_some() { live += 1; }
-        let ci = ci.filter(|&ci| {
-            if mo.mode & 0x81 != 0 { return false; }
-            let Some((eye, rows)) = cam else { return true };
+        // MobyProc: the culls, then the vertex alpha (fade × +0x23) and the blend (moby_render::MobyBlend).
+        let pick = ci.and_then(|ci| {
+            if mo.mode & 0x81 != 0 { return None; }
+            let Some((eye, rows)) = cam else { return Some((ci, mo.alpha, false)) };
             let c = &m.classes[ci].class.header;
             let inp = crate::moby_lod::ProcInput {
                 position: pos3(mo),
@@ -1376,35 +1409,24 @@ fn upload_dynamic(
                 draw_distance: mo.draw_dist as i32,
                 lod_trans: c.lod_trans,
                 shine_distance: 0,
-                alpha: 0x80,
+                alpha: mo.alpha,
             };
             let sphere = crate::moby_lod::world_sphere(&inp, crate::moby_lod::seq_sphere(&m.anim[ci], &mo.anim, c.bsphere));
             let v = crate::moby_lod::view_centre(sphere, eye, &rows);
-            crate::moby_lod::moby_proc(v, sphere[3], &inp).is_ok()
+            crate::moby_lod::moby_proc(v, sphere[3], &inp).ok().map(|p| (ci, p.alpha, p.fading))
         });
+        let ci = pick.map(|p| p.0);
         d.visible[slot] = ci.is_some() as u8;
-        if d.shown[slot] != ci {
-            if let Some(old) = d.shown[slot] {
-                for &e in d.ents.get(&(slot, old)).into_iter().flatten() { commands.entity(e).insert(Visibility::Hidden); }
-            }
-            if let Some(ci) = ci {
-                match d.ents.get(&(slot, ci)) {
-                    Some(ents) => for &e in ents { commands.entity(e).insert(Visibility::Inherited); },
-                    None => {
-                        let name = format!("dynamic moby slot {id}");
-                        let ents = d.extra.spawn(commands, lv, &m.classes[ci], slot as u32, Transform::IDENTITY, &name, meshes, images, materials);
-                        d.ents.insert((slot, ci), ents);
-                    }
-                }
-            }
-            d.shown[slot] = ci;
-        }
+        d.shown[slot] = ci;
+        let model = moby_render::extra_model(rows3(&mo.rows), mo.scale, pos3(mo));
+        let look = pick.map(|(ci, alpha, fading)| (&m.classes[ci], moby_render::SlotLook { model, alpha, fading, mode: mo.mode }));
+        d.extra.show_slot(commands, lv, slot as u32, look, meshes, images, materials, buffers);
         let Some(ci) = ci else { continue };
         drawn += 1;
         let rows = rows_bits(&mo.rows);
         let lights = m.lighting.as_ref().map(|l| light::moby_lights(&rows, &l.bank, mo.light, [mo.ambient[0], mo.ambient[1], mo.ambient[2]], 0x80));
-        let model = moby_render::extra_model(rows3(&mo.rows), mo.scale, pos3(mo));
-        let rec = moby_render::extra_record(&model, lights.as_ref(), slot as u32 * d.pal_slots);
+        let mut rec = moby_render::extra_record(&model, lights.as_ref(), slot as u32 * d.pal_slots);
+        moby_render::write_point_light(&mut rec, moby_render::point_light_merge(point_lights, sphere_centre(mo), &rows3(&mo.rows)));
         let at = slot * moby_render::EXTRA_RECORD_SIZE;
         if d.records[at..at + rec.len()] != rec[..] {
             d.records[at..at + rec.len()].copy_from_slice(&rec);

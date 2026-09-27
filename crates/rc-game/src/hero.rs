@@ -50,6 +50,8 @@ pub mod surface;
 pub mod swingshot;
 pub mod comet;
 pub mod weapons;
+pub mod crank;
+pub mod scripted;
 
 use crate::ps2v::Pf;
 pub use ledge::{ledge_yaw_input, LedgeBlock};
@@ -419,6 +421,10 @@ pub struct Hero {
     pub weapons: weapons::Weapons,
     /// The Comet-Strike's catch request ([`comet`]).
     pub comet: comet::Comet,
+    /// The globals outside the moby system the moby loop's classes read through the hero (the pad, the camera
+    /// Euler, Ratchet's anim fields), filled by the tick right before the moby loop
+    /// ([`crate::moby_update::services::LoopGlobals`]). Not part of the game's hero block.
+    pub loop_in: crate::moby_update::services::LoopGlobals,
 }
 
 /// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
@@ -484,7 +490,7 @@ impl Hero {
             carry: platform::Carry::default(), surf: surface::Surf::default(),
             owned: Owned::default(), back_slot: idle::BackSlot::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
-            f13f5: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(),
+            f13f5: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
         }
     }
 

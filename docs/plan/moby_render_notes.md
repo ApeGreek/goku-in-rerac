@@ -141,3 +141,52 @@ two disc tests), `moby_render.rs`, `assets/shaders/moby.wgsl`, `assets/shaders/m
 - **Not modelled:** the snapshot sphere (seq A = 0xff: key B's sphere is used), mode 0x200 (additive ALPHA_1 0x48) and mode
   bit 3 (no Novalis instance), the deferred/shadow path (0x400/0x800, `param_4`), the guard-band MSCAL 0x0e/0x0a choice
   (the GPU clips), the moby Z offset 8388096 vs the tfrag 8388112 (16 Z units), draw distance/LOD/fade of extras.
+
+## 8. Translucent and additive mobys, and the point-light merge (2026-09-28)
+
+**Root cause of the opaque explosion.** The game draws every moby with a vertex alpha of `(fade · moby+0x23) >> 7`
+(MobyProc 0x26a7a0, the ambient α lane; §7 / moby_skinning_lighting.md §9) and switches its blend per moby from the
+mode bits (+0x34: 0x200 additive, 8 "fading"). The explosion flashes (class 1192 from the Bomb Glove, `0x309a68`; class
+0x70 from crates and creatures, `FlashSpawn` 0x2c20e0) are spawned with +0x23 = 0x20..0x40 and fade it to 0 in their
+second half (`FlashUpdate` 0x2c22a8); in the game their pixels (As < 0x60) blend over the scene without writing Z. The
+port drew the scheduler-created (dynamic) mobys with a fixed alpha 0x80 and no fade, and the driven statics with 0x80
+too, so a flash rendered as a solid, lava-textured ball hiding the scene and the fire inside it.
+
+**The fix (general, no class special-cased; `moby_render.rs` `MobyBlend`).** Each moby's blend is chosen from its own
+data, with native render modes:
+
+| moby data | port draw |
+|---|---|
+| vertex alpha 0x80, no flags | the regular moby draws (unchanged) |
+| distance fade (or mode bit 8) | the existing fade draws (unchanged) |
+| +0x23 below 0x80 | **alpha blend, depth tested, no depth write, sorted back to front** (`GsPass::BlendNoZ`) |
+| mode bit 0x200 | **additive** (`src·α + dst`), depth tested, no depth write, sorted (`GsPass::AdditiveNoZ`) |
+
+Each (instance, LOD, blend) is one entity group: the high/low plain and fading groups are spawned at load as before;
+a translucent or additive group is spawned the first time an instance needs it (statics: `update_moby_occlusion`;
+dynamic slots and other extras: `ExtraMobys::show_slot`, which gameplay.rs's `upload_dynamic` now calls). The vertex
+alpha goes to the `MobyLod` record of every drawn moby (statics from `MobyOcclusion::look`, fed by `drive_statics`;
+dynamic mobys from MobyProc's fade × +0x23, which they did not get before). The blended phase sorts by the entities'
+translation, so dynamic and driven entities now carry the moby's position (they sat at the origin); ties are broken by
+entity (determinism.rs). Z is tested against the scene, so a translucent shell is cut by the opaque geometry in front
+of it and shows everything behind it.
+
+**Not a GS model.** The game's per-moby TEST/ALPHA words are the reference for *which* result to produce; the port does
+not add register words or a two-draw split for these modes (in the game a translucent moby's pixels above As 0x60
+would write Z; none of the effect mobys reaches that).
+
+**Point-light merge** (MobyProc, moby_skinning_lighting.md §2 "Point lights"; `point_light_merge` / `write_point_light`).
+The explosion light (class 639) owns one of 8 point-light slots (`rc_game::point_lights`, `WritePointLight_B` 0x252750);
+after each tick gameplay.rs publishes the bank (`PointLightFrame`), and every moby whose sphere centre lies within a
+light's radius gets it as its third light (`C_2 = Σ a_j·colour_j`, `a_j = 1 − δ_j/R_j`, `L_2` = the weighted model-space
+direction, K_2 = 0) in its `MobyInst` record: statics in `update_moby_occlusion`, dynamic mobys and Ratchet in
+`upload`. The GPU lighting was already three-light, so nothing else changed. Not done: the attachments (Clank, packs,
+the hand item: crate::moby_attach), and the world (tfrag / tie / shrub relight of the instances in range,
+`LightTfrags` / `LightTies` / `LightShrubs` point-light pass; tfrag_lighting.md): the explosion lights mobys only.
+
+**Checked on screen** (`RC_SCENE=0 RC_GIVE_ITEMS=10 RC_HERO_AT=143.42,125.81,57.0,0 RC_PLAY_SCRIPT='20-21:press CIRCLE'`):
+before, frames 50 and 65 show an opaque orange ball; after, translucent nested shells (the outer size-4 flash, the
+inner 3.5 / 3 ones) with the fire and the world visible through them, the type-4 fire trails arcing off, and the nearby
+mushrooms lit orange by the light. With only the blend fix (before the particle types), frame 40 (before the explosion) was
+byte-identical to the old renderer; two runs of frame 50 give identical PNGs. The flyers' altitude fade (+0x23 between 0 and
+0x80) now also shows as translucent (a few pixels in the flyer-trail view change; the additive trail blend is unchanged).
