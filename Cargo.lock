@@ -4390,6 +4390,7 @@ dependencies = [
  "rc-data",
  "rc-formats",
  "rc-game",
+ "rc-video",
 ]
 
 [[package]]
@@ -4425,6 +4426,13 @@ dependencies = [
  "rc-formats",
  "rc-game",
  "ruzstd",
+]
+
+[[package]]
+name = "rc-video"
+version = "0.1.0"
+dependencies = [
+ "rc-formats",
 ]
 
 [[package]]

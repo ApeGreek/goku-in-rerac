@@ -246,7 +246,7 @@ pub struct HeldWeapon(pub Option<(u16, i32, i32)>);
 struct AmmoTable(Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
 
 /// The hand-item data, the ammo table (uses ammo, max) and the weapon fields of the item definitions.
-type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
+type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, [Vec<u8>; 2]);
 
 /// The level's hand-item data (item definitions from the overlay, the gadget classes, Ratchet's joint lists)
 /// for `rc_game::hero::items`: the definitions at the overlay's item table (L01 0x179f40, found through
@@ -270,6 +270,8 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
     let (ratchet_blob, gadgets) = crate::moby_attach::load_blobs()?;
     let rc = lv.mobys.classes.iter().find(|c| c.o_class == gadget::RATCHET_O_CLASS).context("no class 0")?;
     let hero_chains = HERO_LISTS.iter().map(|&l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(a, _)| a).unwrap_or_default()).collect();
+    // The weapon arm layers' joints (`FUN_00263e08`: the second byte list of Ratchet's joint lists 12 / 13).
+    let arm_joints = rc_game::hero::weapons::ARM_LISTS.map(|l| gadget::joint_list(&ratchet_blob, &rc.class.header, l as usize).map(|(_, b)| b).unwrap_or_default());
     let mut classes = Vec::new();
     for g in &gadgets {
         let c = &g.moby.class;
@@ -278,7 +280,7 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
         classes.push(ItemClass { o_class: g.moby.o_class as i16, anim: rc_formats::moby_anim::MobyAnimClass::new(c, seqs), scale: c.header.scale, chains });
     }
     let ammo = tables.records.iter().map(|r| (r.has_ammo(), u16::from_le_bytes([r.0[0xe], r.0[0xf]]))).collect();
-    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs))
+    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, arm_joints))
 }
 
 /// The level water tables the hero's ground probe reads (`0x26ed38`): the class-751 ripple patches of
@@ -453,6 +455,8 @@ pub struct Play {
     frozen_hint: bool,
     /// Ratchet's entities hidden (his moby's mode bit 1: the first-person view hides him, `HeroSyncMoby`).
     ratchet_hidden: bool,
+    /// The weapon arm layers' joints (Ratchet's joint lists 12 / 13, `rc_game::hero::weapons::ARM_LISTS`).
+    arm_joints: [Vec<u8>; 2],
 }
 
 impl Play {
@@ -718,8 +722,10 @@ fn setup(
     let mut game = Game::new(coll, table, hero_id, options, lv.death_z);
     if let Some(s) = &session { game.hero.health = s.0.hp; }
     // The hand items (wrench, bomb glove, …): created by the hero update from the first tick on.
+    let mut arm_joints: [Vec<u8>; 2] = Default::default();
     let item_data = match item_data(lv) {
-        Ok((d, ammo, weapon_defs)) => {
+        Ok((d, ammo, weapon_defs, arm)) => {
+            arm_joints = arm;
             println!(
                 "gameplay: hand items: {} item definitions, {} gadget classes (wrench 71: {}, bomb glove def {:?})",
                 d.defs.len(), d.classes.len(), d.class(71).is_some(), d.defs.get(10)
@@ -735,6 +741,7 @@ fn setup(
     game.item_data = item_data.clone();
     commands.insert_resource(HeldWeapon::default());
     let mut ratchet = RatchetAnim::new(class);
+    ratchet.arm_joints = arm_joints.clone();
     let mirror_anim = opts.is_some_and(|o| o.mirror_anim);
     ratchet.mirror = mirror_anim;
     // The back items (pack 607 of back item 2, Clank 601) and the level for the idle code.
@@ -889,6 +896,7 @@ fn setup(
         dynamic,
         sounds: HashMap::new(),
         ratchet_hidden: false,
+        arm_joints,
         debug_hits: std::env::var("RC_DEBUG_HIT").ok().map(|v| {
             v.split(',').filter_map(|h| {
                 let (a, b) = h.trim().split_once('@')?;
@@ -1030,6 +1038,7 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
     }
     p.game = g;
     p.ratchet = RatchetAnim::new(class);
+    p.ratchet.arm_joints = p.arm_joints.clone();
     p.ratchet.mirror = p.mirror_anim;
     p.frozen_hint = false;
 }
@@ -1083,6 +1092,11 @@ fn tick(
     // The view of the last rendered frame (0x16d140, `FastBSphereCheck`): the main camera as last drawn.
     let view_cull = cams.iter().next().map(crate::particle_render::bsphere_view);
     let level_index = p.level;
+    // The scene form of the tick (crate::scene_render: mode 2).
+    let scene_frame = p.game.camera_paused;
+    // The item tables the pickups read (rc_game::moby_update::classes::pickup::ItemTables): the price records, the
+    // vendor list 0x15edd0; the owned items and ammo come from Ratchet's mirrors inside the moby hook.
+    let item_base = rc_game::moby_update::classes::pickup::ItemTables::new(&p.svc.interact.tables.shop.records, state.as_deref().map_or([0xff; 12], |s| s.0.global.vendor));
     let parts_cell = RefCell::new(particles.as_deref_mut());
     let svc_cell = RefCell::new(&mut p.svc);
     let (sched, classes_arc, emitters, missions) = (&mut p.sched, &p.classes, &p.emitters, &p.missions);
@@ -1100,7 +1114,9 @@ fn tick(
         let mut audio_ref = audio_cell.borrow_mut();
         let mut sink = audio_ref.as_deref_mut().map(|a| ClassSoundSink { audio: a.system(), listener: class_sounds::listener_of(cam), hero: Some(hero_id) });
         let mut ext = Externals { level: level_index, emitters, view: view_cull.as_ref(), water: water_ref.as_deref_mut() };
+        let inv = item_base.clone().with_hero(hero);
         let mut w = World::new(table, hero, rng, classes, &mut svc, counter);
+        w.inventory = &inv;
         w.sound = sink.as_mut().map(|s| s as &mut dyn rc_game::moby_update::services::SoundSink);
         w.camera = cam.pos;
         w.coll = Some(coll);
@@ -1130,8 +1146,8 @@ fn tick(
             rc_game::hero::fx::create_particles(hero, &mut sim.sys);
             crate::particle_render::update_parts(sim, Some(rng));
         }
-        // FUN_00220928, right after UpdateParts.
-        svc_cell.borrow_mut().glints.update();
+        // FUN_00220928, right after UpdateParts (InLevelFrameUpdate only: not in the mode-2 scene frame).
+        if !scene_frame { svc_cell.borrow_mut().glints.update(); }
     };
     // The moby collision the hero and the camera query (and Ratchet's MobyBuildMatrix, the camera's crate hit).
     let mut world = HeroWorld { world: SharedServices { svc: &svc_cell, classes: classes_arc.clone() }, water: HeroWater(&water_cell) };
@@ -1149,6 +1165,10 @@ fn tick(
         p.game.hero.weapons.ammo = gs.0.global.ammo;
         p.game.hero.owned.0 = gs.0.global.owned;
         svc_cell.borrow_mut().interact.sync_game(&gs.0);
+        // Max health 0x15eda0 (the nanotech orbs heal up to it) and the bolt grabber 0x13d4e2 (item 34: the pickup
+        // volume 12 / 4.5).
+        svc_cell.borrow_mut().counters.max_hp = gs.0.global.max_hp;
+        svc_cell.borrow_mut().bolt_grabber = gs.0.global.owned[34] != 0;
         p.game.hero.back_slot.slot.saved = gs.0.global.equipped[3];
         p.game.hero.back_slot.thruster_last = gs.0.global.thruster_last;
     }
@@ -1206,6 +1226,10 @@ fn tick(
         if gs.0.global.ammo != w.ammo { gs.0.global.ammo = w.ammo; }
         if w.used.iter().any(|&u| u != 0) {
             for (t, u) in gs.0.global.ammo_used.iter_mut().zip(w.used.iter_mut()) { *t += std::mem::take(u); }
+        }
+        // … and picked up (the ammo pickups 0x2db028: 0x13de08).
+        if w.picked.iter().any(|&u| u != 0) {
+            for (t, u) in gs.0.global.ammo_picked_up.iter_mut().zip(w.picked.iter_mut()) { *t += std::mem::take(u); }
         }
     }
     // The melee entries' stats records (SetState 0x23cf98: 0x1416c0 = levels[8] 3007, misc 0/1, gadget 17).
@@ -1332,7 +1356,9 @@ fn upload(
     let lv = &level.0;
     let class = &lv.mobys.anim[p.class];
     let mut palette = crate::moby_anim::identity_palette(p.slots);
-    let f = moby_anim::evaluate_with_snapshot(class, &p.ratchet.state, p.ratchet.snapshot.as_ref());
+    // His pose with the weapon arm's pose layers over it (rc_game::hero::weapons, the moby +0x60 list).
+    let layers = rc_game::hero::anim::pose_layers(&p.game.hero.weapons.layers, &p.arm_joints);
+    let f = moby_anim::evaluate_layered(class, &p.ratchet.state, p.ratchet.snapshot.as_ref(), &layers);
     for (k, b) in f.iter().take(p.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[k] = b; }
     let hm = &p.game.mobys.mobys[p.hero_id];
     let rows = rows_bits(&hm.rows);

@@ -410,13 +410,31 @@ fn animate_shells(
     }
 }
 
-/// The sky camera shares the main camera's transform; the shader removes the translation.
-fn follow_main_camera(
-    main: Query<&Transform, (With<Camera3d>, Without<SkyCamera>)>,
-    mut sky: Query<&mut Transform, With<SkyCamera>>,
-) {
-    let Some(src) = main.iter().next() else { return };
-    for mut t in &mut sky { *t = *src; }
+type MainView<'w, 's> = Query<'w, 's, (&'static Transform, &'static Projection), (With<crate::fly_cam::FlyCam>, Without<SkyCamera>)>;
+type SkyView<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut Projection), (With<SkyCamera>, Without<crate::fly_cam::FlyCam>)>;
+
+/// The sky camera shares the main camera's transform and **projection** (the game draws the sky with the world
+/// camera's own projection, 0x187040 = the rotation-only view times the world projection; the shader removes the
+/// translation). The projection follows every change of tan(hfov/2) 0x16cf70: a scene camera record's (0.414 or 0.554
+/// on Novalis, gameplay 0.63), so the sky turns exactly with the world instead of sliding against it.
+fn follow_main_camera(main: MainView, mut sky: SkyView) {
+    let Some((src, proj)) = main.iter().next() else { return };
+    let tan = |p: &Projection| match p {
+        Projection::Custom(c) => c.get::<game_camera::GameProjection>().map(|g| (g.tan_x, g.tan_y)),
+        _ => None,
+    };
+    let want = tan(proj);
+    for (mut t, mut p) in &mut sky {
+        if *t != *src { *t = *src; }
+        if want.is_some() && tan(&p) != want {
+            if let (Some((x, y)), Projection::Custom(c)) = (want, &mut *p) {
+                if let Some(g) = c.get_mut::<game_camera::GameProjection>() {
+                    g.tan_x = x;
+                    g.tan_y = y;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

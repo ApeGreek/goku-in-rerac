@@ -58,7 +58,7 @@
 //!
 //! **Port Options** (port-only, `rc_game::menus::pause::port`): an extra "Port Options" entry in the Options
 //! list opens a page built from the game's machinery; its anti-aliasing row is synced with
-//! [`RenderSettings::msaa`] around every menu tick (the resource's value is shown; a ✕ writes it back, applied
+//! [`RenderSettings::msaa`] around every menu tick (the shadows row likewise with `shadow_render::ShadowSettings`) (the resource's value is shown; a ✕ writes it back, applied
 //! by `render_settings::apply` and saved to the port settings file). The row offers only the sample counts the
 //! GPU supports ([`SupportedMsaa`]; ✕ skips the rest, e.g. 8x on Apple M-series).
 //!
@@ -433,6 +433,7 @@ fn menu_frame(
     mut render: Option<ResMut<RenderSettings>>,
     supported: Option<Res<SupportedMsaa>>,
     (mut vr, mut feed, mut view, mut audio): InteractParams,
+    mut shadows: Option<ResMut<crate::shadow_render::ShadowSettings>>,
 ) {
     let (Some(mut rt), Some(mut play), Some(mut gs), Some(mut sess)) = (rt, play, gs, sess) else { return };
     let rt = &mut *rt;
@@ -498,7 +499,15 @@ fn menu_frame(
             if let Some(menu) = rt.menu.as_mut() {
                 menu.set_port_choices(Setting::Msaa, supported.as_deref().map_or_else(|| aa_choices(&SupportedMsaa::default()), aa_choices));
                 if let Some(r) = render.as_deref() { menu.set_port_value(Setting::Msaa, aa_index(r.msaa)); }
+                if let Some(s) = shadows.as_deref() { menu.set_port_value(Setting::Shadows, !s.enabled as u8); }
                 let out = menu.tick(&inp, gs, &env);
+                if let (Some(v), Some(s)) = (menu.port_value(Setting::Shadows), shadows.as_mut()) {
+                    if s.enabled != (v == 0) {
+                        s.enabled = v == 0;
+                        println!("menus: frame {frame}: Port Options: shadows {}", if s.enabled { "on" } else { "off" });
+                        s.save();
+                    }
+                }
                 if let (Some(v), Some(r)) = (menu.port_value(Setting::Msaa), render.as_mut()) {
                     let msaa = render_settings::msaa_from_samples(AA_SAMPLES[v as usize % AA_SAMPLES.len()]);
                     if r.msaa != msaa {

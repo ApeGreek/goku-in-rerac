@@ -647,6 +647,53 @@ impl AudioSystem {
         }
         self.stats.max_voices = self.stats.max_voices.max(self.spu.voices.iter().filter(|v| v.active()).count());
     }
+
+    /// `StartPssMovie` 0x2ad0c0 / `MovieModeUpdate` 0x2ad498 (a PSS movie, game mode 1): `sound_StopAllSounds`
+    /// (989snd stops every sound, every sound slot is freed) and `music_Stop` (the music players and streams are
+    /// reset; a pending music-box track becomes the current track). The port reaches that state by rebuilding the
+    /// audio state from the level data, keeping the options, the counters, the IOP random stream and the play log;
+    /// the sound instances' timers restart with it [L: the game keeps the emitters' own pvars]. The level start's
+    /// automatic `music_start_track(0)` is not repeated: [`AudioSystem::movie_exit`] restarts the track.
+    pub fn movie_stop(&mut self) {
+        let track = if self.music.pending_track != -1 { self.music.pending_track as i16 } else { self.music.main.track };
+        let mut fresh = AudioSystem::new(self.data.clone());
+        fresh.sfx_option = self.sfx_option;
+        fresh.music_option = self.music_option;
+        fresh.stats = self.stats;
+        fresh.rng = self.rng;
+        fresh.snd.rng = self.snd.rng;
+        fresh.snd.tick = self.snd.tick;
+        fresh.snd.vm.mono = self.snd.vm.mono;
+        fresh.play_log = self.play_log.take();
+        fresh.started = true;
+        fresh.music.main.track = track;
+        *self = fresh;
+    }
+
+    /// `MovieExitToGameplay` 0x2ad2b8: `music_start_track(0x151708, 1, 0x400)`, the current track from the start.
+    pub fn movie_exit(&mut self) {
+        let track = self.music.main.track;
+        self.music.start_track(track, 1, 0x400, &mut self.stream_cmds);
+    }
+
+    /// The movie sound as the SPU outputs it: 989snd's movie player (`snd_init_movie_sound(…, vol 0x400, pan 0,
+    /// group 5, …)`) plays the left and right channels on two voices; each gets the stream-voice volume law
+    /// (`MakeVolume(127, pan, 127, 0, 127, 0)`, group 5 = the sfx option 0x13e5ac, `>> 1`) with the left voice
+    /// panned hard left and the right one hard right [L: the IOP movie player is not reversed], no envelope, then
+    /// the SPU master volume and the 16-bit clamp as [`Spu::mix`]. `pcm` is 48 kHz stereo; appends to `out`.
+    pub fn mix_movie(&self, pcm: &[[i16; 2]], out: &mut Vec<[i16; 2]>) {
+        let mut vm = self.snd.vm.clone();
+        vm.master[5] = self.sfx_option;
+        vm.duck[5] = 0x10000;
+        let regs = [vm.voice_registers(vm.make_volume(127, 270, 127, 0, 127, 0), 5), vm.voice_registers(vm.make_volume(127, 90, 127, 0, 127, 0), 5)];
+        let level = |reg: u16| (reg << 1) as i16 as i32;
+        let voice = |s: i16, reg: u16| ((s as i32 * level(reg)) >> 15) as i16 as i32;
+        let master = |x: i32, reg: u16| ((x * (reg << 1) as i16 as i32) >> 15).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        out.extend(pcm.iter().map(|&[l, r]| {
+            let (sl, sr) = (voice(l, regs[0][0]) + voice(r, regs[1][0]), voice(l, regs[0][1]) + voice(r, regs[1][1]));
+            [master(sl, self.spu.master[0]), master(sr, self.spu.master[1])]
+        }));
+    }
 }
 
 /// A 16-bit stereo 48 kHz RIFF/WAVE file of `samples`.

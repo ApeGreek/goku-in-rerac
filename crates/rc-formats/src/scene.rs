@@ -119,6 +119,26 @@ const _: () = assert!(SCENE_RECORDS == 15);
 // ---------------------------------------------------------------------------------------------------
 // Chunks
 
+/// The authoring tool's filler after the last structure of some chunks (a whole number of KiB of the same
+/// non-zero bytes, never pointed at by any offset, not read by `FUN_00259288`): its first bytes.
+pub const TRAILING_FILLER: [u8; 8] = [0xe4, 0xd5, 0xd9, 0x36, 0x10, 0x25, 0xaa, 0xbc];
+
+/// The chunks of a global scene lump (TOC `anim_looking_thing_2` space scenes and `things` item scenes, mode 6,
+/// `FUN_00259628` / `FUN_002594e0`): a 0x800-byte table of `{s32 offset, s32 size}` ended by size 0 (at most 70
+/// entries), chunk data at `0x800 + offset`, each a WAD in the chunk format above. The compressed slices, in order.
+pub fn lump_chunks(lump: &[u8]) -> Result<Vec<&[u8]>> {
+    let b = Buf(lump);
+    let mut out = Vec::new();
+    for i in 0..70 {
+        let (off, size) = (b.i32(8 * i)?, b.i32(8 * i + 4)?);
+        if size == 0 { break; }
+        if off < 0 || size < 0 { return invalid(format!("scene lump entry {i}: offset {off} size {size}")); }
+        let at = 0x800 + off as usize;
+        out.push(b.sub(at, size as usize, "scene lump chunk")?.bytes());
+    }
+    Ok(out)
+}
+
 /// The 0x14-byte chunk header before the actor offsets.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
@@ -169,9 +189,10 @@ pub struct SceneActor {
     pub offset: u32,
     /// +0x00: moby class (`CreateMoby`).
     pub class: i32,
-    /// +0x04: 0x19 or 0x10 [unknown].
+    /// +0x04: one value per scene, its chunk count as the authoring tool counted it (the NTSC count, also in most PAL
+    /// copies; e.g. 0x10 for Novalis scene 5); `FUN_00259288` never reads it (checked on every chunk on the disc).
     pub unknown_04: i32,
-    /// +0x08: 0.
+    /// +0x08: this chunk's index in the scene (0, 1, …); not read by the game either.
     pub unknown_08: i32,
     /// +0x0c: position track offset (chunk-relative).
     pub track_offset: i32,
@@ -316,6 +337,16 @@ impl Scene {
         if chunks.iter().any(|c| c.header.end_tick as i32 != end) { return invalid(format!("scene {index}: chunks disagree on the end tick")); }
         if (end + tpc - 1) / tpc != chunks.len() as i32 { return invalid(format!("scene {index}: {} chunks for end tick {end}", chunks.len())); }
         Ok(Scene { index, region, chunks })
+    }
+
+    /// A global scene lump ([`lump_chunks`]), decompressing every chunk; `index` is the lump's TOC index.
+    pub fn from_lump(lump: &[u8], index: usize, region: Region) -> Result<Scene> {
+        let chunks = lump_chunks(lump)?
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| parse_scene_chunk(&crate::wad::decompress(c)?, i, region))
+            .collect::<Result<Vec<_>>>()?;
+        Scene::from_chunks(index, region, chunks)
     }
 
     pub fn end_tick(&self) -> i32 { self.chunks[0].header.end_tick as i32 }

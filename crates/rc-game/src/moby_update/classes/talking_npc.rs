@@ -33,6 +33,14 @@ const PLACE_DISTANCE: f32 = 2.2;
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x50 { return; }
     interact::poll_scene_end(w, id);
+    // Drawn last frame and within 32 units of the camera: the shadow probe, shadow range 0x1a.
+    if w.m(id).visible != 0 {
+        let (p, c) = (w.m(id).position, w.camera.map(|x| f32::from_bits(x.0)));
+        if ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt() < 32.0 {
+            crate::shadows::probe_down(w, id);
+            w.mm(id).b7f = 0x1a;
+        }
+    }
     match w.m(id).state {
         0 => {
             w.mm(id).update_dist = 0xff;

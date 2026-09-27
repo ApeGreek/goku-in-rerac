@@ -88,9 +88,104 @@ pub trait AnimCtl {
     /// lists) in Ratchet's current pose (`fun_00210850` / `fun_002109b8`,
     /// `rc_formats::moby_anim::evaluate_chains`). Empty when there is no class data.
     fn eval_chains(&self, _chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> { Vec::new() }
+    /// [`AnimCtl::eval_chains`] with Ratchet's weapon-arm pose layers blended in (`MobyAnimEvalChain` 0x268ee8 walks
+    /// the moby's +0x60 list): the hand under the arm. Without layer joints the same as `eval_chains`.
+    fn eval_chains_with(&self, chains: &[&[u8]], _layers: &[Option<AnimLayer>; 2]) -> Vec<rc_formats::moby_anim::Rows> { self.eval_chains(chains) }
     /// Ratchet's current local pose as one keyframe (the decode `MobyAnimDecodeLocalPose` 0x269938 does, in
     /// the frame encoding of the pose snapshot, `rc_formats::moby_anim::snapshot`). None without class data.
     fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> { None }
+    /// The rate word of key `frame` of sequence `seq` (`*(seq +0x1c)[frame]`, frame header +0; what a key step of
+    /// an advance continues with). 1 without class data.
+    fn key_rate(&self, _seq: u8, _frame: u8) -> f32 { 1.0 }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Pose layers (the moby +0x60 list): Ratchet's weapon arm.
+
+/// A pose layer node of Ratchet's moby (the six 0x40-byte nodes at 0x18efc0, `FUN_00263e08` links one into the
+/// moby's +0x60 list for class joint list `list`): its own key A / key B of Ratchet's sequences, `t`, speed and
+/// rate, and the weight `+8` with which the evaluator (`rc_formats::moby_anim::evaluate_layered`) blends it over
+/// the joints of that list. The main animation (the legs' run, the walk, the jump) keeps playing underneath.
+///
+/// | off | field |
+/// |---|---|
+/// | +0x00 | joint list (Ratchet's lists 12 / 13: gp−0x7560) |
+/// | +0x05 | flags (1 key step, 2 the sequence wrapped) |
+/// | +0x08 | weight |
+/// | +0x20 / +0x21 / +0x22 / +0x23 | frame A / frame B / seq A / seq B |
+/// | +0x24 / +0x28 / +0x2c | t / speed (1) / rate |
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AnimLayer {
+    pub list: u8,
+    pub flags: u8,
+    pub weight: f32,
+    pub frame_a: u8,
+    pub frame_b: u8,
+    pub seq_a: u8,
+    pub seq_b: u8,
+    pub t: f32,
+    pub speed: f32,
+    pub rate: f32,
+}
+
+/// The evaluator's view of the arm layers (`rc_formats::moby_anim::PoseLayer`) over their joints.
+pub fn pose_layers<'a>(layers: &[Option<AnimLayer>; 2], joints: &'a [Vec<u8>; 2]) -> Vec<rc_formats::moby_anim::PoseLayer<'a>> {
+    layers.iter().zip(joints.iter()).filter(|(_, j)| !j.is_empty()).filter_map(|(l, j)| {
+        let l = l.as_ref()?;
+        Some(rc_formats::moby_anim::PoseLayer { joints: j, seq_a: l.seq_a, frame_a: l.frame_a, seq_b: l.seq_b, frame_b: l.frame_b, t: l.t, weight: l.weight })
+    }).collect()
+}
+
+impl AnimLayer {
+    /// `FUN_00263e08(moby, list)`: a fresh node (weight 0, nothing set).
+    pub fn new(list: u8) -> AnimLayer { AnimLayer { list, ..Default::default() } }
+
+    /// `FUN_002641c0(moby, layer, seq, frame, blend, advance)`: key A = the moby's current key B (seq +0x53, frame
+    /// +0x51), key B = (`seq`, `frame`), t = 0, rate = 1 / `blend`, speed 1; `advance`: one step at once
+    /// ([`AnimLayer::advance`]).
+    pub fn start(&mut self, anim: &dyn AnimCtl, seq: u8, frame: u8, blend: i32, advance: bool) {
+        let v = anim.view();
+        self.seq_a = v.seq_b;
+        self.frame_a = v.frame_b;
+        self.seq_b = seq;
+        self.frame_b = frame;
+        self.rate = 1.0 / blend as f32;
+        self.t = 0.0;
+        self.speed = 1.0;
+        if advance { self.advance(anim); }
+    }
+
+    /// `FUN_00263f70(moby, layer)`: t += speed · rate; each key step (t ≥ 1, with the 0.99..1.01 snap) moves key
+    /// B to key A and on to the next key (frame B at the sequence's end wraps to 0: flag 2), continuing with the
+    /// new key A's rate (flag 1). The key decode that follows (`FUN_00264220` / `FUN_00267770`) is the
+    /// evaluator's.
+    pub fn advance(&mut self, anim: &dyn AnimCtl) {
+        self.flags = 0;
+        if self.speed == 0.0 || self.rate == 0.0 { return; }
+        let mut t = self.t + self.speed * self.rate;
+        if !(0.0 < self.speed) {
+            self.t = t;
+            return;
+        }
+        if 0.99 < t && t < 1.01 { t = 1.0; }
+        let mut guard = 0;
+        while 1.0 <= t && guard < 256 {
+            guard += 1;
+            self.flags |= 1;
+            self.frame_a = self.frame_b;
+            self.seq_a = self.seq_b;
+            self.frame_b = self.frame_b.wrapping_add(1);
+            if self.frame_b >= anim.frame_count(self.seq_b) {
+                self.frame_b = 0;
+                self.flags |= 2;
+            }
+            t = (t - 1.0) / self.rate;
+            let r = anim.key_rate(self.seq_a, self.frame_a);
+            self.rate = r;
+            t *= r;
+        }
+        self.t = t;
+    }
 }
 
 /// A data-free [`AnimCtl`]: records every `set_anim` and fakes the fields the hero reads (the blend lands
@@ -175,12 +270,15 @@ pub struct RatchetAnim {
     /// as infinity): the next advance completes the key step at once and continues with `t = speed · rate` of the
     /// new key. Reproduced as that result (docs/plan/hardware_fidelity_layers.md), not as an infinite rate.
     pub jump: bool,
+    /// The joints of the weapon arm's pose layers (the second byte lists of Ratchet's class joint lists 12 / 13,
+    /// `crate::hero::weapons::ARM_LISTS`), set by the loader; empty: layers are not evaluated.
+    pub arm_joints: [Vec<u8>; 2],
 }
 
 impl RatchetAnim {
     /// Spawned on sequence 0 frame 0 (what `InitMobyInstance` leaves).
     pub fn new(class: &MobyAnimClass) -> RatchetAnim {
-        RatchetAnim { state: AnimState::spawn(class), snapshot: None, rate: Pf::ONE, flags: 0, curve: -1, curve_pos: 0, frame: Pf::ZERO, frame_step: Pf::ZERO, loop_range: None, mirror: false, loop_end: 0, exit: false, jump: false }
+        RatchetAnim { state: AnimState::spawn(class), snapshot: None, rate: Pf::ONE, flags: 0, curve: -1, curve_pos: 0, frame: Pf::ZERO, frame_step: Pf::ZERO, loop_range: None, mirror: false, loop_end: 0, exit: false, jump: false, arm_joints: Default::default() }
     }
 
     /// Bind to Ratchet's class for one tick of hero code.
@@ -369,9 +467,16 @@ impl AnimCtl for RatchetAnimCtl<'_> {
         rc_formats::moby_anim::evaluate_chains(self.class, &self.a.state, self.a.snapshot.as_ref(), chains)
     }
 
+    fn eval_chains_with(&self, chains: &[&[u8]], layers: &[Option<AnimLayer>; 2]) -> Vec<rc_formats::moby_anim::Rows> {
+        let pl = pose_layers(layers, &self.a.arm_joints);
+        rc_formats::moby_anim::evaluate_chains_layered(self.class, &self.a.state, self.a.snapshot.as_ref(), chains, &pl)
+    }
+
     fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> {
         snapshot(self.class, &self.a.state, self.a.snapshot.as_ref())
     }
+
+    fn key_rate(&self, seq: u8, frame: u8) -> f32 { self.class.frame(seq, frame).map_or(1.0, |f| f.header.rate) }
 }
 
 #[cfg(test)]

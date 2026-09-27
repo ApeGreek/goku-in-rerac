@@ -450,10 +450,11 @@ pub fn update(w: &mut World, id: MobyId) {
     end(w, id);
 }
 
-/// `LAB_002f1c30`: the hit flash (`0x2723f8`) and the shadow probe (`0x26f020`, moby +0x84 / +0x88: not modelled).
+/// `LAB_002f1c30`: the hit flash (`0x2723f8`) and the shadow probe (`0x26f020`, moby +0x84 / +0x88).
 fn end(w: &mut World, id: MobyId) {
     if w.m(id).is_deleted() { return; }
     flash::update(w, id, FLASH);
+    crate::shadows::probe_down(w, id);
 }
 
 /// Gravity on the walker's vertical speed (+0x198) onto the ground (states 4 and 0xd).

@@ -654,6 +654,53 @@ pub fn evaluate(class: &MobyAnimClass, s: &AnimState) -> Vec<Rows> { evaluate_wi
 /// [`set_sequence`]): `snap` is then read as key A, exactly like a disc frame (MobyProc DMAs frame A from
 /// the snapshot slot). Without a snapshot such a state evaluates to identity rows.
 pub fn evaluate_with_snapshot(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>) -> Vec<Rows> {
+    evaluate_layered(class, s, snap, &[])
+}
+
+/// A runtime pose layer of the `+0x60` list (§6.4; the 0x40-byte nodes at 0x18efc0 that `FUN_00263e08` links in,
+/// e.g. Ratchet's weapon arm): its own two keys of the moby's class, `t`, the weight `+8`, and the joints it covers
+/// (the second byte list of the class joint list the node was made for, `joint_list(..).1`).
+#[derive(Clone, Copy, Debug)]
+pub struct PoseLayer<'a> {
+    pub joints: &'a [u8],
+    pub seq_a: u8,
+    pub frame_a: u8,
+    pub seq_b: u8,
+    pub frame_b: u8,
+    pub t: f32,
+    pub weight: f32,
+}
+
+/// The layer's own local values for joint `j` (`FUN_00267770`'s decode, §6.2/§6.3 on the layer's keys): the quaternion,
+/// the inherited scale when a key carries one for `j`, and the translation (the rest translation when neither key
+/// has one: the decode starts from the class's rest pose).
+fn layer_local(class: &MobyAnimClass, l: &PoseLayer, j: usize) -> Option<(V4, Option<[f32; 3]>, [f32; 3])> {
+    let rest = *class.rest.get(j)?;
+    let fa = class.frame(l.seq_a, l.frame_a)?;
+    let t = l.t.to_bits();
+    let fb = if t != 0 { class.frame(l.seq_b, l.frame_b) } else { None };
+    let u = ps2::sub(ONE, t);
+    let find_s = |f: &MobyFrame| f.scales.iter().find(|r| r.joint as usize == j && r.inherited()).map(scale_bits);
+    let find_t = |f: &MobyFrame| f.trans.iter().find(|r| r.joint as i8 >= 0 && r.joint as usize == j).map(trans_value);
+    let lerp3 = |a: [f32; 3], b: [f32; 3]| -> [f32; 3] { let v = lerp(bits3w(a, 0), bits3w(b, 0), u, t, 3, [0; 4]); [0, 1, 2].map(|k| f32::from_bits(v[k])) };
+    match fb {
+        None => Some((quat_bits(fa.quat_at(j)), find_s(fa), find_t(fa).unwrap_or(rest))),
+        Some(fb) => {
+            let (qa, qb) = (quat_bits(fa.quat_at(j)), quat_bits(fb.quat_at(j)));
+            let plain = l.seq_a == l.seq_b && l.frame_b as u32 == l.frame_a as u32 + 1;
+            let q = if plain { lerp(qa, qb, u, t, 4, qa) } else { nlerp_flip(qa, qb, u, t) };
+            let sc = match (find_s(fa), find_s(fb)) { (Some(a), Some(b)) => Some(lerp3(a, b)), (a, b) => a.or(b) };
+            let tr = lerp3(find_t(fa).unwrap_or(rest), find_t(fb).unwrap_or(rest));
+            Some((q, sc, tr))
+        }
+    }
+}
+
+/// [`evaluate_with_snapshot`] with the runtime pose layers of the `+0x60` list applied after the interpolation and
+/// before the matrices (§6.4; `MobyAnimEvalChain` 0x268ee8 does the same for chains: [`evaluate_chains_layered`]):
+/// for each joint a layer covers, `q = nlerp_flip(q, q_layer, 1 − w, w)`, the translation lerped by `w` toward the
+/// layer's, and the inherited scale where the layer's keys carry one.
+pub fn evaluate_layered(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, layers: &[PoseLayer]) -> Vec<Rows> {
     let jc = class.joint_count;
     if jc == 0 { return vec![IDENTITY]; }
     let t = s.t.to_bits();
@@ -757,6 +804,8 @@ pub fn evaluate_with_snapshot(class: &MobyAnimClass, s: &AnimState, snap: Option
         }
     }
 
+    apply_layers(class, layers, &mut rec[..jc.min(SPR_RECORDS)]);
+
     // Local matrices and the chain (§6.5), joints in index order.
     for j in 0..jc.min(SPR_RECORDS) {
         let [q, sc, tr, _] = rec[j];
@@ -802,6 +851,25 @@ pub fn evaluate_with_snapshot(class: &MobyAnimClass, s: &AnimState, snap: Option
             f.map(|r| r.map(f32::from_bits))
         })
         .collect()
+}
+
+/// The runtime pose layers (§6.4) on the local records `[q, inherited scale, translation, _]`, in list order.
+fn apply_layers(class: &MobyAnimClass, layers: &[PoseLayer], rec: &mut [[V4; 4]]) {
+    for l in layers {
+        if l.weight <= 0.0 || l.weight.is_nan() { continue; }
+        let (w, uw) = (l.weight.to_bits(), ps2::sub(ONE, l.weight.to_bits()));
+        for &j in l.joints {
+            let j = j as usize;
+            if j >= rec.len() { continue; }
+            let Some((q, sc, tr)) = layer_local(class, l, j) else { continue };
+            rec[j][0] = nlerp_flip(rec[j][0], q, uw, w);
+            if let Some(v) = sc {
+                let cur = if rec[j][1][3] != 0 { rec[j][1] } else { [ONE, ONE, ONE, ONE] };
+                rec[j][1] = lerp(cur, bits3w(v, ONE), uw, w, 3, [0, 0, 0, ONE]);
+            }
+            rec[j][2] = lerp(rec[j][2], bits3w(tr, 0), uw, w, 3, rec[j][2]);
+        }
+    }
 }
 
 /// Quaternion rows as 0x20eb2c builds them (every product is `(q_a + q_a)·q_b`; w lanes 0).
@@ -1131,9 +1199,15 @@ fn rec_flag_word(r: u64) -> u32 { ((r >> 62) as u32).wrapping_sub(1) }
 ///   `P_j`).
 ///
 /// `snap` is key A when `seq_a` is [`SNAPSHOT_SEQ`], as in [`evaluate_with_snapshot`]. Identity rows for
-/// a class without joints, a missing key or an empty chain. The runtime pose layers (+0x60 / +0x64) are
-/// not modelled (null for every moby the port animates).
+/// a class without joints, a missing key or an empty chain. The +0x60 pose layers: [`evaluate_chains_layered`];
+/// the +0x64 modifiers are not modelled (no ported class uses them).
 pub fn evaluate_chains(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, chains: &[&[u8]]) -> Vec<Rows> {
+    evaluate_chains_layered(class, s, snap, chains, &[])
+}
+
+/// [`evaluate_chains`] with the moby's +0x60 pose layers blended in after the interpolation (`MobyAnimEvalChain`
+/// 0x268ee8 walks the list like `MobyProc`), e.g. Ratchet's hand under the weapon arm.
+pub fn evaluate_chains_layered(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, chains: &[&[u8]], layers: &[PoseLayer]) -> Vec<Rows> {
     let fail = || vec![IDENTITY; chains.len()];
     let jc = class.joint_count;
     if jc == 0 || chains.iter().any(|c| c.is_empty()) { return fail(); }
@@ -1254,6 +1328,8 @@ pub fn evaluate_chains(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyF
             }
         }
     }
+
+    apply_layers(class, layers, &mut rec[..jc.min(CHAIN_RECORDS)]);
 
     // The chain over the marked joints below the count (0x2112d4).
     for j in (0..count).filter(|&j| mark[j]) {

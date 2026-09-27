@@ -1,8 +1,16 @@
-//! Crates, classes 500 (crate), 501 (ammo crate), 502 (reinforced), 505 (TNT), 511 (nanotech):
+//! Crates, classes 500 (bolt crate), 501 (nanotech crate), 502 (reinforced), 505 (TNT), 511 (ammo crate):
 //! `CrateUpdate` level01 0x2ea178 with the stacking init `FUN_002eac18`, the stack physics `FUN_002ec388`,
 //! the break effect `CrateBreakFx` 0x2eb918 and the drop `CrateDropBolts` 0x2eb498 → `SetDeathBits` 0x26c250 →
-//! `BoltBurst` 0x275988 → `BoltSpawn` 0x2bcdb8 (bolts) or the ammo pickups (`0x26bff8`, `0x2daf10`).
-//! Spec: `docs/plan/moby_update_catalogue.md` "In the port: crates".
+//! `BoltBurst` 0x275988 → `BoltSpawn` 0x2bcdb8 (bolts) or the ammo pickups (`pickup::ammo_pick` 0x26bff8,
+//! `pickup::pickup_spawn` 0x2daf10). Spec: `docs/plan/moby_update_catalogue.md` "In the port: crates" and
+//! `docs/plan/hero_gameplay.md` §2.
+//!
+//! **What each crate gives** (read from `CrateDropBolts` and the class 806 update; the catalogue's "501 ammo crate /
+//! 511 nanotech crate" names were swapped): 500 / 502 / 505 bolts (`SetDeathBits`: the placed +0xb4 count); **511 the
+//! ammo crate** (init sets pvar+0xc6 = 100): 1 or 2 ammo pickups of pvar+0xcb's item or a re-picked owned one
+//! (`pickup::ammo_update`); **501 the nanotech crate**: no drop of its own (its +0xb4 is cleared before the death
+//! bits); the cluster 806 its init creates (`CrateSpawnIconMoby`) holds 8 nanotech orbs over it, which fly to
+//! Ratchet and heal 1 HP once the crate is gone (`pickup::nanotech_update`).
 //!
 //! Pvar block (0x100 bytes): 0x3e u16 flags (bit 0 = nothing on top), 0x40 vec velocity (0x48 = vz),
 //! 0xa0 / 0xa4 crate above / below (pointers), 0xa8, 0xac u32 flags (1 stacking done, 2 physics off, 4 moved,
@@ -19,7 +27,7 @@
 
 use crate::hero::physics::{self as ph, V4};
 use crate::moby_runtime::{mode, MobyId};
-use crate::moby_update::classes::{bolt, debris};
+use crate::moby_update::classes::{bolt, debris, pickup};
 use crate::moby_update::services::{self as sv, normalize_angle, pvar as p, pv, fv, HitRecord, HitTemplate, World, DT, DT2};
 use crate::pad::fast_arctan as atan;
 use crate::ps2v::Pf;
@@ -159,7 +167,7 @@ fn init(w: &mut World, id: MobyId) {
     if class == 0x1f5 { spawn_icon(w, id); }
 }
 
-/// `CrateSpawnIconMoby` 0x300528: the floating ammo icon (class 806) of an ammo crate.
+/// `CrateSpawnIconMoby` 0x300528: the nanotech cluster (class 806) of a nanotech crate.
 fn spawn_icon(w: &mut World, id: MobyId) {
     if w.m(id).state >= 0x80 { return; }
     let Some(i) = w.create_moby(0x326) else { return };
@@ -702,7 +710,8 @@ const SPARK_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 
 const SPARK_C2: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
 
 /// `CrateDropBolts` 0x2eb498: bolts (`SetDeathBits(m, 0x100, pvar+0xc0)` → `BoltBurst`) unless pvar+0xc6 ≠ 0
-/// (ammo pickups of pvar+0xcb) or class 501 (death bits only when +0xb4 ≠ 0).
+/// (the ammo crate 511: ammo pickups of pvar+0xcb) or class 501 (the nanotech crate: +0xb4 cleared, death bits
+/// only).
 pub fn drop_bolts(w: &mut World, id: MobyId) {
     let (c6, class) = { let m = w.m(id); (p::i16(&m.pvars, 0xc6), m.o_class) };
     let bolt_path = c6 == 0 && class != 0x1f5;
@@ -742,10 +751,10 @@ pub fn drop_bolts(w: &mut World, id: MobyId) {
         11 => 0x17,
         _ => -1,
     };
-    let count = ammo_pick(w, Some(id), &mut ty);
+    let count = pickup::ammo_pick(w, Some(id), &mut ty);
     let pos = pv(w.m(id).position);
     for _ in 0..count {
-        let Some(mm) = pickup_spawn(w, pos, ty, -1, 0) else { break };
+        let Some(mm) = pickup::pickup_spawn(w, pos, ty, -1, 0) else { break };
         let c4 = p::i16(&w.m(id).pvars, 0xc4);
         p::set_i16(&mut w.mm(mm).pvars, 4, c4);
         let ang = Pf(w.rng.rand_angle_bits());
@@ -765,84 +774,6 @@ pub fn drop_bolts(w: &mut World, id: MobyId) {
     }
     if w.m(id).b4 != 0 { w.mm(id).b4 = 0; }
     set_death_bits(w, id, 0x100, -1);
-}
-
-/// `0x26bff8(m, &type)`: keeps `type` unless it is ≤ 0 or the crate's death bit is set; else picks an owned
-/// ammo item (weighted to those below max; nothing owned → 10). Returns the pickup count, `randi(5) ≠ 0 ? 1 : 2`.
-fn ammo_pick(w: &mut World, id: Option<MobyId>, ty: &mut i32) -> i32 {
-    let repick = if *ty > 0 {
-        match id {
-            None => false,
-            Some(i) => { let s = w.m(i).spawn_id; w.svc.save.death.contains(&(w.svc.level, s)) }
-        }
-    } else {
-        true
-    };
-    if repick {
-        let inv = w.inventory;
-        let list = inv.ammo_list();
-        let items: Vec<usize> = list.iter().take_while(|&&e| e != 0xff).map(|&e| (e & 0x3f) as usize).collect();
-        let (mut t1, mut t2, mut t3) = (0, 0, 0);
-        for &i in &items {
-            if !inv.owned(i) { continue; }
-            t3 += 1;
-            let max = inv.max_ammo(i);
-            if max != 0 { t1 += 1; }
-            if inv.ammo(i) < max as i32 { t2 += 1; }
-        }
-        let pick = |w: &mut World, n: i32, weight: &dyn Fn(usize) -> i32| -> i32 {
-            let mut r = w.rng.randi(n);
-            let mut s = 0usize;
-            loop {
-                let e = (list.get(s).copied().unwrap_or(0xff) & 0x3f) as usize;
-                if inv.owned(e) { r -= weight(e); }
-                if r < 0 { break; }
-                s += 1;
-            }
-            (list.get(s).copied().unwrap_or(0) & 0x3f) as i32
-        };
-        *ty = if t2 != 0 {
-            pick(w, t2, &|e| (inv.ammo(e) < inv.max_ammo(e) as i32) as i32)
-        } else if t3 == 0 {
-            10
-        } else {
-            pick(w, t1, &|e| (inv.max_ammo(e) != 0) as i32)
-        };
-    }
-    if w.rng.randi(5) != 0 { 1 } else { 2 }
-}
-
-/// `0x2daf10(pos, type, amount, a3)`: an item pickup moby (class from the item table).
-fn pickup_spawn(w: &mut World, pos: V4, ty: i32, amount: i32, a3: i32) -> Option<MobyId> {
-    let class = w.inventory.pickup_class(ty);
-    if class <= 0 { return None; }
-    let m = w.create_moby(class)?;
-    w.svc.fx.pickups += 1;
-    let amt = if amount != -1 { amount } else { w.inventory.pickup_amount(ty.max(0) as usize) as i32 };
-    let t16 = w.ticks(0x10);
-    let hero_light = w.hero_moby.map(|h| (w.m(h).light, w.m(h).ambient));
-    {
-        let mo = w.mm(m);
-        mo.update_dist = 0xff;
-        mo.draw_dist = 0xff;
-        mo.state = 1;
-        mo.visible = 1;
-        mo.cmd = 0;
-        mo.position = fv(pos);
-        p::set_i32(&mut mo.pvars, 0, amt);
-        p::set_i32(&mut mo.pvars, 8, ty);
-        p::set_f(&mut mo.pvars, 0xc, Pf::from_i32(a3));
-        p::set_i32(&mut mo.pvars, 0x20, t16);
-        let z = sv::pf(mo.position[2]);
-        p::set_f(&mut mo.pvars, 0x28, z);
-    }
-    w.build_matrix(m);
-    if let Some((l, a)) = hero_light {
-        let mo = w.mm(m);
-        mo.light = l;
-        mo.ambient = a;
-    }
-    Some(m)
 }
 
 /// `SetDeathBits(m, fl, path)` 0x26c250: the save bits of the dropper, then `BoltBurst` with `n ± spread`

@@ -36,6 +36,7 @@ Native reproductions of PS2 effects that are noticeable in play. One row each.
 |---|---|---|---|
 | *(e.g. water ripple advances every 9 ticks)* | *(e.g. f32 truncation in the ripple phase accumulator)* | *(e.g. integer tick counter, `rc-game/src/water.rs`)* | *(e.g. PCSX2 trace, doc §)* |
 | The Comet-Strike's catch: when the wrench is nearly back, Ratchet's anim jumps from the throw loop to the catch frames in one tick | `0x247d18` sets the loop exit 0x13fe08; the next key step of Ratchet's advance sets the rate 0x13fde4 to `0x15f708` = `0x7f800000`, which the PS2 FPU treats as the largest finite value (2¹²⁸, no infinity): the advance after it steps onto the key at once, and `(speed·2¹²⁸ − 1)/2¹²⁸` leaves t = speed. IEEE would give ∞ and NaN | the exit's next advance completes one key step and continues with `t = speed · rate` of the new key; no infinite rate is stored (`rc-game/src/hero/anim.rs` `RatchetAnim::jump`, test `anim::tests::loop_exit_jumps_to_the_key`) | disassembly of 0x247d48 (0x247ed0 `lwc1 f23, 0x15f708`) and the ELF data word; not trace-checked |
+| Moby shadows darken the ground by 25 % with a hard edge, and never the casters | `ShadowResolve` 0x29b580: ALPHA_1 0x2000000064 on the frame buffer's display bytes (`Cd − ⌈Cd/4⌉`), gated by DATE on the destination-alpha counter the volumes built by texture feedback (TEX0 = the frame buffer, MODULATE 0x82 / 0x7f) | a native count target (R16Float, +1 / −1 per face, depth-tested against the scene) and one fixed multiply blend `dst·0.53` on the sRGB target (0.75^≈2.2 in linear light); casters drawn after the pass (`rc-engine/src/shadow_render.rs`, `moby_render.rs` `caster_pass`) | the multiply is within ±2 of the GS byte on 244 of 256 display bytes and −3 on 12 dark ones (12..40); test `shadow_render::tests::factor_matches_the_gs_bytes`. Not PCSX2-compared per pixel (docs/plan/shadows.md) |
 | Blarg flyers' (660) per-segment path length, which sets their first-guess step along each spline segment (5 % too fast or too slow otherwise until the arc-length correction) | `FUN_0028bb90` samples the Hermite segment with `t += 0.05` while `t ≤ 1.0`: the PS2's truncating adds reach t = 0.99999946 on the 20th sample and take it; IEEE round-to-nearest reaches 1.0000001 after 19 and drops the last chord | 20 samples at `t = 0.05·k`, k = 1..=20 (`rc-game/src/moby_update/classes/flyer.rs` `arc_lengths`) | `compare-novalis-spawn` §f2: all 10 flyer splines (count, z, per-point arc lengths) within 2.7e-4 of RAM (2026-09-27, `SCUS-97199 (CE4933D0).01.p2s`) |
 
 ### Tolerances
@@ -54,6 +55,8 @@ reads its distilled facts, `tools/trace/tests/fixtures/novalis_spawn.tsv`).
 | Follow camera position and orientation (0x167240 pos, 0x167250 euler, rows 0x167450..), `compare-novalis-spawn` §c | 3e-4 units position; 6e-5 rad angles / row entries | measured 2.5e-4 u and 5.4e-5 rad: sub-pixel. The port sim now freezes the camera during mode 2 (1 + 783 updates, as the game; trace_results_novalis.md "Open reads resolved" e): unchanged to the last digit, so the update count is not the cause. Tightened from 1e-3 u / 1e-4 rad (2026-09-27). **Still provisional** pending the idle-fidget port (countdown / re-arm 0x241e00): re-check then and tighten or drop | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
 | Crate z (class 500/501/502/505/511 moby +0x18 after the ground snap / stacking), `compare-novalis-spawn` §f | 2 ULP (≈2e-5 at z ≈ 75) | 23 crates differ by 1 ULP (75.51146 vs 75.51147); rotation and stacking equal | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
 | Fire-field (760) element scroll and the 809 curtain scroll `0x161374` after 1072 ticks, the port run from the first savestate's RAM element state (scratch harness; `docs/plan/trace_results_novalis.md` "World props and effects") | 2e-3 (element scroll), 1e-3 (curtain scroll) | an accumulator of ~0.01 steps: last-bit rounding of the PS2 FPU vs IEEE over 1072 adds (measured 1.4e-3 / 3.6e-4); the texture offset error is far below a texel. Timers, positions and respawn counts are exact | 2026-09-27, `novalis_spawn` → `novalis_idle` |
+| Ratchet's posed shadow list (0x1acc00: 21 records, points and radii), `crates/rc-game/tests/shadow_volume_novalis.rs` (distilled fixture) | 1e-4 units on points, 1e-6 on radii, for records whose joints are not under the runtime joint-modifier list +0x64 | measured 3.1e-5 units / 1.5e-8: float order of the joint chain and the two matrix products. The 10 records under the modifier list (head look, idle joint records: not ported in the port's pose either) differ by up to 0.18 units and are only reported | 2026-09-27, `novalis_idle` |
+| Shadow directions 0 / 1 (0x1af000 / 0x1af010) and Ratchet's slab (+0x84 / +0x88), same test | 2e-6 (directions), 1e-5 units (slab) | `std` sin / cos / atan2 for the VU0 polynomials and `FastArcTan` | 2026-09-27, `novalis_idle` |
 | Tie vertex palette lit colours (RGBA per palette entry), `compare-tie-shrub-light` (also `compare-novalis-spawn` §g) | ±1 per channel | 96511/96512 entries equal; tie 435 slot 14 r and b −1 (one shared scalar 1 ULP off with two channels on a byte boundary); a 1/255 step is invisible | 2026-09-27, `SCUS-97199 (CE4933D0).01.p2s` Novalis spawn |
 
 ### Open decisions
@@ -226,6 +229,11 @@ ADPCM decode (rounded PCSX2 variant plus the OpenGOAL variant for comparison), `
 `save_game.rs` (memory-card sections, CRC-16 0x8320/0x1f45). A native port could convert these once into modern assets (PNG/KTX2, glTF, OGG). The
 decoders themselves stay.
 
+**Movies (PSS, 2026-09-27).** `pss.rs` (program-stream demux, `SShd` SPU-ADPCM audio through `vag.rs`) and `crates/rc-video` (MPEG-2 video,
+IEEE 1180 float IDCT, BT.601 colour) replace the IPU / sceMpeg / 989snd movie path with standard decoding: not hardware modelling (no IPU
+fixed-point CSC constants, no SPU Gaussian filter on the movie voices, 44.1 kHz streams resampled linearly). Timing is the game's (one
+picture per field pair at the 60 Hz tick rate, audio-clocked; D1's 60 vs 59.94 Hz applies as everywhere). docs/formats/pss.md.
+
 ## D. Timing and resolution conventions
 
 **D1 60 Hz tick and catch-up.** *What:* game logic runs in `FixedUpdate` at exactly 60 Hz (`TICK_HZ = 60.0`, not NTSC's 59.94). Per rendered frame,
@@ -369,6 +377,12 @@ there was noticeable enough to reproduce.
   arrive as `PAN_RESET`/`PAN_DONT_CHANGE`.
 - **Sound remap out-of-range reads.** Def index −1 reads the u16 before the map, and the per-class copy walks
   past its list (`rc-formats/src/sound_bank.rs`; audio.md "In the port").
+- **Moby shadow rules** (`rc-game/src/shadows.rs`, `shadows/volume.rs`; docs/plan/shadows.md): the fourth hero probe
+  repeats the third (0x17c780); the circles step by 6.28/n, not 2π/n; the scene actors' second slab probe only reaches
+  ~14 % of the way down (a horizontal and a 3-D normalisation mixed); a negative capsule segment count pushes that end
+  **out**; the posed list's 8,064-byte budget (0x1acc00..0x1aeb80: a caster starting past it is dropped, the one before
+  may run over); the capsule outline does not test B's disc containing A's (the `asin` gets |x| > 1, the outline
+  twists). Not reproduced: the GS guard-band face drop (hardware).
 - **Shimmy yaw extrapolation.** The ledge shimmy (0x1a / 0x1b physics) turns toward `y1 + (y1 − y2)/2` of the two
   probed wall yaws (`fast_subtract_rotations(y1, y2)·0.5` added to y1, as the instructions order it), not their
   midpoint; on a straight ledge y1 = y2 (`rc-game/src/hero/ledge.rs` `shimmy_physics`).

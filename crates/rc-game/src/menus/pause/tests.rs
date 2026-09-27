@@ -353,8 +353,19 @@ fn port_page_from_the_disc() {
     m.tick(&press(button::CROSS), &mut g, &env);
     m.tick(&press(button::CROSS), &mut g, &env);
     assert_eq!(m.port_value(Setting::Msaa), Some(0), "wraps after 8x");
+    // The shadows row (default on = value 0): Down moves to it, ✕ toggles off and back on; Down stops at the last row.
+    assert_eq!(m.port_value(Setting::Shadows), Some(0));
     let o = m.tick(&press(button::DOWN), &mut g, &env);
-    assert!(o.sounds.is_empty(), "one row: no cursor move");
+    assert_eq!(o.sounds, vec![MenuSound::Cursor]);
+    let o = m.tick(&press(button::DOWN), &mut g, &env);
+    assert!(o.sounds.is_empty(), "last row: no cursor move");
+    m.tick(&press(button::CROSS), &mut g, &env);
+    assert_eq!((m.port_value(Setting::Shadows), m.port_value(Setting::Msaa)), (Some(1), Some(0)));
+    m.tick(&press(button::CROSS), &mut g, &env);
+    assert_eq!(m.port_value(Setting::Shadows), Some(0), "on / off wrap");
+    // Its values are the game's own on / off strings (the Subtitles toggle's).
+    let Data::Toggle(sub_t) = &m.widgets[&0x1b5160].data else { panic!() };
+    assert_eq!((sub_t.entries[0].on, sub_t.entries[0].off), (port::text::ON as u32, port::text::OFF as u32));
     m.tick(&press(button::TRIANGLE), &mut g, &env);
     assert_eq!(m.target, port::OPTIONS);
 }

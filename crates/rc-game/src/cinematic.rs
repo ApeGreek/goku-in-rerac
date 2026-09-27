@@ -71,6 +71,11 @@ pub struct Cinematic {
     /// Every creature-layer request the tick has taken ([`take_calls`]), oldest first, the last [`LOG_LEN`] kept:
     /// the record of the hand-off for reports and tests.
     pub creature_log: std::collections::VecDeque<ScriptRequest>,
+    /// The running mode-2 scene as the moby loop reads it (0x16cd10 / 0x16cd14 / 0x16ce58), published by the engine's
+    /// scene player before each scene tick's moby loop; None outside scenes.
+    pub scene: Option<crate::scene_player::SceneState>,
+    /// 0x162070: the point the cutscene FX driver 1546 last read on the arrival ship (its trail's reference).
+    pub fx_ship_point: [f32; 4],
 }
 
 /// Entries kept in [`Cinematic::creature_log`].

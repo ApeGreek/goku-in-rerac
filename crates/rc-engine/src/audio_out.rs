@@ -205,6 +205,12 @@ impl AudioOut {
     /// The audio system and the frame buffer, borrowed together (the sound step renders into `buf`).
     pub fn parts(&mut self) -> (&mut AudioSystem, &mut Vec<[i16; 2]>) { (&mut self.system, &mut self.buf) }
 
+    /// Frames rendered but not yet taken by the audio device (the output latency the movie clock subtracts).
+    pub fn queued(&self) -> usize { self.ring.0.lock().map(|r| r.frames.len()).unwrap_or(0) }
+
+    /// 800-sample frames output so far (one per 60 Hz tick).
+    pub fn frames_out(&self) -> u64 { self.done }
+
     /// Output the rendered frame [`AudioOut::buf`] (ring and WAV capture) and clear it.
     pub fn push_frame(&mut self) {
         self.done += 1;
@@ -275,9 +281,16 @@ fn scene_sound(
     mut out: ResMut<AudioOut>,
     scene: Option<Res<crate::scene_render::ActiveScene>>,
     play: Option<ResMut<crate::gameplay::Play>>,
+    mut counter_seen: Local<Option<u64>>,
 ) {
     let Some(scene) = scene else { return };
+    let ran = play.as_ref().map(|p| p.game.counter);
+    let tick_ran = ran.is_some() && *counter_seen != ran;
+    *counter_seen = ran;
     if !scene.running { return; }
+    // A world-running scene frame whose gameplay tick ran (its mode-2 form) already made the EE audio frame in the
+    // tick's sound step (crate::scene_render); only the frames without one are made here.
+    if tick_ran && scene.world_runs { return; }
     let (Some(mut play), Some(last)) = (play, scene.last.as_ref()) else { return };
     let game = &mut play.game;
     let mut listener = rc_game::audio::class_sounds::listener_of(&game.camera.out);

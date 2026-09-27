@@ -101,10 +101,14 @@ pub struct Moby {
     pub update_fn: Option<u32>,
     /// +0x78: pvar block (raw bytes; per-class layout).
     pub pvars: Vec<u8>,
-    /// +0x7c: loop-sound byte (0xff), +0x7d (0xff), +0x7f (0x18 with class +0xf).
+    /// +0x7c: loop-sound byte (0xff), +0x7d (0xff), +0x7f (0x18 with class +0xf: the shadow range in units of 1024).
     pub b7c: u8,
     pub b7d: u8,
     pub b7f: u8,
+    /// +0x84 / +0x88: the shadow's ground slab `[lo, hi]` (hi ≤ 0: no shadow), filled each tick by the class's
+    /// slab rule (crate::shadows); 0 from `InitMobyInstance`.
+    pub shadow_lo: f32,
+    pub shadow_hi: f32,
     /// +0x90: glow colour (class +0x40).
     pub glow: u32,
     /// +0x94: collision blob (class +0x10) present.
@@ -150,7 +154,7 @@ impl Moby {
             scale: 0.0, update_dist: 0, visible: 0, draw_dist: 0, mode: 0, occlusion: 0, light: 0, ambient: [0; 4],
             rotation: [0.0; 4],
             anim: AnimState { seq_a: 0, frame_a: 0, seq_b: 0, frame_b: 0, t: 0.0, speed: 0.0, rate: 0.0, flags: 0, trigger_count: 0, skip_advance: false },
-            b71: 0, b72: 0, b73: 0, update_fn: None, pvars: Vec::new(), b7c: 0, b7d: 0, b7f: 0, glow: 0,
+            b71: 0, b72: 0, b73: 0, update_fn: None, pvars: Vec::new(), b7c: 0, b7d: 0, b7f: 0, shadow_lo: 0.0, shadow_hi: 0.0, glow: 0,
             has_collision: false, coll_disable: 0, ba0: [0; 4], hit_slot: 0, o_class: 0, uid_hi: 0, index: 0,
             mission: 0, spawn_flag: 0, spawn_id: 0, b4: 0, b6: 0, parent: None, cmd: 0, bbd: 0, rows: [[0.0; 4]; 4], delete_tick: 0,
         }

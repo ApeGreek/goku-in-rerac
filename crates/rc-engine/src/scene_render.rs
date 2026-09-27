@@ -13,17 +13,24 @@
 //!   arrival request (the classes go on), `RC_SCENE=<k>` plays scene k of the current level after gameplay tick 1
 //!   instead of it; every other hand-off (talkers, the mission's scenes 3 / 4) always plays. A scene that cannot be
 //!   loaded is reported as ended (skipped) to its talker.
-//! * **Movies** (`EngineRequest::StartMovie`, `Handoff::Movie`: `DialogStreamUpdate(n)` → `StartPssMovie`): the
-//!   decoder is not chosen (decision U10), so [`play_movie`] is a stub that logs the file and returns at once, as
-//!   a skipped movie does (`MovieExitToGameplay` 0x2ad2b8: mode 0, the talker's dialogue refreshed).
+//! * **Movies** (`EngineRequest::StartMovie`, `Handoff::Movie`: `DialogStreamUpdate(n)` → `StartPssMovie`):
+//!   [`play_movie`] hands them to crate::movie_render, which plays them natively (decision U10) and at the end
+//!   (`MovieExitToGameplay` 0x2ad2b8) restores mode 0 and refreshes the talker's dialogue.
 //! * **The other requests** of the moby loop: `SetMissionDone` (the level's mission bytes and the saved game), the
 //!   ship hidden / shown (`FUN_002a2450` / `0x2a2480`), `UnlockPlanet` and the save (logged, not ported).
-//! * **While it runs** the gameplay tick is suspended ([`crate::gameplay::GameTick`] gets a `run_if`): the
-//!   hero stays in his spawn idle (the game puts him in state 100, zero velocity) and is hidden with his
-//!   items (`FUN_002486c0`: hero, hand, back, Clank mode |= 1), the HUD is hidden (draw mask 0x7f,
-//!   [`crate::hud_render::SceneLayer`]).
-//! * **Actors**: `CreateMoby(class)` per chunk-0 actor record, drawn through one [`ExtraMobys`] (record +
-//!   palette per actor). The streamed sequence goes into the actor's own copy of its class animation at slot
+//! * **While it runs** the world keeps running as in `CutsceneModeUpdate` 0x2aca80 (docs/plan/cutscenes.md §7): on
+//!   every frame whose scene update runs ([`ActiveScene::world_runs`]: the scene ticks, not the blocking fades and
+//!   waits) the gameplay tick runs in its mode-2 form (`Game::camera_paused`: moby loop, level callbacks, hero,
+//!   particles, sound step, counter; no follow camera, no free-slot pass, no glints) with game mode 2 for the classes
+//!   (`Services::game_mode`), the moby loop's camera 0x167240 / rows = the last scene camera record, and the scene
+//!   (id, tick, actors) published to the classes ([`rc_game::scene_player::SceneState`]: the cutscene FX driver 1546).
+//!   Ratchet `SetState(100, 2)` (not ported: frozen) and hidden with his items (`FUN_002486c0`), the talker 0x179588
+//!   hidden (mode |= 1), classes 74 / 203 hidden (mode |= 0x80), the HUD hidden (draw mask 0x7f,
+//!   [`crate::hud_render::SceneLayer`]); all undone at the end.
+//! * **Actors**: `CreateMoby(class)` per chunk-0 actor record: a table moby (0x16ce58[k], mode |= 6; the port adds
+//!   the hidden bit because it draws them itself), posed and `MobyBuildMatrix`ed every scene tick (the owner of the
+//!   effects classes spawn on them, the shadow casters of crate::shadow_render) and drawn through one [`ExtraMobys`]
+//!   (record + palette per actor; a new scene never uploads the last scene's records / palette). The streamed sequence goes into the actor's own copy of its class animation at slot
 //!   = the class's sequence count (`class+0xc`, then `+0xc++`), re-pointed at every chunk; the pose is
 //!   `MobyAnimEval` of (slot, frame f, slot, f + 1, t). Rows = identity (no rotation track; `CreateMoby`
 //!   leaves the rotation 0), scale = the class scale, lights = Ratchet's light word and ambient (+0x38 copied
@@ -39,8 +46,8 @@
 //!   `DrawUIFrame(y ∓ (height/2 + 5), 0x100 − (width/2 + 10), width/2 + 0x10a, 0x60)`, then the text in
 //!   0x80b0b0b0 (regular font), appended to the 2D pass.
 //! * **Audio**: the player's requests become `rc_game::audio::scene` commands (speech VAG from
-//!   `levels/NN/speech/KK_<lang>.bin`), applied by the same frame's audio frame (`crate::audio_out`'s scene
-//!   sound step, which runs after this system while the tick is suspended: EE frame when `world_runs`).
+//!   `levels/NN/speech/KK_<lang>.bin`), applied by the same frame's audio frame: the mode-2 tick's sound step when
+//!   the world runs, else `crate::audio_out`'s scene sound step (the IOP frame of the blocking fades and waits).
 //! * **End** (`FUN_002ac608`): Ratchet `SetState(0, 1)` (queued on the hero-block channel for the next tick); for a
 //!   talker's scene Ratchet is put in front of it, facing it (`Interact::scene_end_place`, 0x16cd26), and its
 //!   dialogue refreshed (`Interact::scene_ended`).
@@ -49,9 +56,8 @@
 //!   one pixel per frame to 24 and shrink the same way after, drawn after the HUD; `HudDraw` draws nothing
 //!   meanwhile.
 //!
-//! Not modelled: the world freeze during the blocking fades (mobys keep their generic advance), particles
-//! (they are stepped from the suspended gameplay tick), the FX driver class 1546 (scene 5's ship trail,
-//! `0x30c190`: not ported), classes 74/203 mode 0x80.
+//! Not modelled: the hero's state 100 body (frozen instead), the draw callbacks the FX driver registers (the ship's
+//! glow 0x2a70a8), the actors' moby-grid collision, the mirror / FOV cheats, mode-6 space scenes.
 
 use crate::fly_cam::FlyCam;
 use crate::game_camera::{CameraSource, GameProjection, NTSC_Y_RATIO};
@@ -61,7 +67,7 @@ use crate::input_map::PadFrame;
 use crate::moby_attach::AttachedTo;
 use crate::moby_render::{self, ExtraMobys, MobyMaterial};
 use crate::tfrag_render::game_to_bevy;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::core_pipeline::fullscreen_material::{fullscreen_material_system, FullscreenMaterial, FullscreenMaterialPlugin};
 use bevy::ecs::schedule::ScheduleConfigs;
@@ -83,6 +89,7 @@ use rc_game::hud::text;
 use rc_game::menus::mode::Mode;
 use rc_game::moby_runtime::MobyId;
 use rc_game::pad::PadState;
+use rc_game::ps2v::Pf;
 use rc_game::scene_player::{AudioRequest, Frame, SceneCamera, SceneContext, ScenePlayer, SceneTick, REGION};
 use std::sync::Arc;
 
@@ -122,7 +129,15 @@ impl FullscreenMaterial for SceneFade {
 struct SceneHidden;
 
 struct Actor {
-    anim: MobyAnimClass,
+    /// The class animation with the streamed sequence in `slot` (shared with the moby loop's [`SceneState`]).
+    anim: Arc<MobyAnimClass>,
+    o_class: i32,
+    /// The class's joint lists (`FUN_002645a8`).
+    joint_lists: Arc<Vec<Vec<u8>>>,
+    /// The last pose drawn (moby+0x50..0x54, moby+0x10): what the next tick's moby loop sees.
+    pose: Option<(AnimState, [f32; 3])>,
+    /// Its moby in the game's moby table (0x16ce58[k], [`enter_mode2`]).
+    moby: Option<MobyId>,
     /// Extra sequence slot (class+0xc at spawn).
     slot: u8,
     /// The chunk whose sequence the slot points at.
@@ -141,8 +156,14 @@ pub struct ActiveScene {
     /// Black coverage to draw over this frame (0..1).
     pub black: f32,
     pub running: bool,
+    /// This frame runs the world update of `CutsceneModeUpdate` (the moby loop, the hero, the particles, the sound
+    /// step, the counter): the gameplay tick runs in its scene form (`rc_game::tick::Game::camera_paused`).
+    pub world_runs: bool,
     /// The last frame's output (reports / tests).
     pub last: Option<SceneTick>,
+    /// The actors' table mobys (0x16ce58) and their class animation with the streamed sequence: the scene renderer
+    /// draws them (their table mobys carry the port-only hidden bit), crate::shadow_render casts their shadows.
+    pub actors: Vec<(MobyId, Arc<MobyAnimClass>)>,
 }
 
 #[derive(Resource)]
@@ -170,6 +191,8 @@ struct SceneRuntime {
     talker: Option<MobyId>,
     /// `DrawScreenFade`'s bar height 0x15f408 (pixels, 0..=24).
     letterbox: i32,
+    /// The mobys the scene hid (the talker 0x179588: mode |= 1; classes 74 / 203: mode |= 0x80) and the bit.
+    hid: Vec<(MobyId, u16)>,
 }
 
 pub struct SceneRenderPlugin;
@@ -200,9 +223,11 @@ impl Plugin for SceneRenderPlugin {
                 pending: Default::default(),
                 talker: None,
                 letterbox: 0,
+                hid: Vec::new(),
             })
-            // The gameplay tick is suspended while a scene runs (mode 2 runs CutsceneModeUpdate instead).
-            .configure_sets(FixedUpdate, GameTick.run_if(|a: Res<ActiveScene>| !a.running))
+            // While a scene runs the gameplay tick runs only on the frames whose CutsceneModeUpdate updates the world
+            // (not during the blocking fades and waits), in its mode-2 form (enter_mode2).
+            .configure_sets(FixedUpdate, GameTick.run_if(|a: Res<ActiveScene>| !a.running || a.world_runs))
             .add_systems(FixedUpdate, scene_frame.before(GameTick))
             .add_systems(RunFixedMainLoop, apply_camera.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop).after(crate::play_camera::apply))
             .add_systems(Update, subtitle_layer.before(crate::hud_render::HudBuild))
@@ -303,14 +328,8 @@ fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Pers
         }
     }
     play.svc.interact.handoffs = keep;
-    for (movie, npc) in movies {
-        play_movie(movie);
-        // MovieExitToGameplay: the talker's dialogue continues.
-        if npc.is_some() {
-            play.svc.interact.talker = npc;
-            play.svc.interact.scene_ended = true;
-        }
-    }
+    // The talker's dialogue continues when the movie ends (MovieExitToGameplay, crate::movie_render).
+    for (movie, npc) in movies { play_movie(movie, npc); }
     for (scene, arrival, npc) in scenes {
         // RC_SCENE only replaces the arrival scene; every other hand-off plays.
         if arrival && rt.mode.is_some() {
@@ -325,18 +344,10 @@ fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Pers
 }
 
 /// **The movie hook** (`StartPssMovie` 0x2ad0c0 → `MovieModeUpdate` 0x2ad498): in-level movie `n` is `mpegs[2 + n]`
-/// (NTSC; PAL `21 + n`), raw PSS in Tier 0 at `global/mpegs/NNN.bin`. No decoder yet (decision U10, see
-/// docs/plan/cutscenes.md §5): the stub logs the file and returns at once, which is what the game does when the
-/// movie is skipped (Start + L1 L2 R1 R2, or Start alone after the game is beaten / from the replay menu). A
-/// decoder plugs in here: play the video full-screen at 30 fps with its SShd ADPCM audio, honour that skip rule,
-/// then return. Returns whether a movie played.
-pub fn play_movie(n: i32) -> bool {
-    let index = 2 + n;
-    let path = crate::level_load::extracted_root().join(format!("global/mpegs/{index:03}.bin"));
-    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    println!("movie: DialogStreamUpdate({n}) → mpegs[{index}] ({}, {size} bytes): no decoder (U10), skipped", path.display());
-    false
-}
+/// (NTSC; PAL `21 + n`), raw PSS in Tier 0 at `global/mpegs/NNN.bin`, played natively by crate::movie_render
+/// (decision U10; docs/plan/cutscenes.md §5) from this frame on, with the gameplay tick suspended; `npc`'s
+/// dialogue is refreshed when it ends.
+pub fn play_movie(n: i32, npc: Option<MobyId>) { crate::movie_render::request_in_level(n, npc); }
 
 /// Moby part entities that are not hero items (Ratchet's play entities are found by name among them).
 type HeroEntities<'w, 's> = Query<'w, 's, (Entity, &'static Name), (With<MeshMaterial3d<MobyMaterial>>, Without<AttachedTo>)>;
@@ -368,6 +379,9 @@ fn scene_frame(
         for e in &hidden { commands.entity(e).remove::<SceneHidden>().insert(Visibility::Inherited); }
         if let Some(m) = menu.as_mut() { m.state.set(Mode::Gameplay); }
         *active = ActiveScene::default();
+        rt.records.clear();
+        rt.palette.clear();
+        if let Some(p) = play.as_mut() { leave_mode2(rt, p); }
         // FUN_002ac608: SetState(0, 1) (the next tick runs it), the talker's teleport and dialogue refresh.
         if let Some(p) = play.as_mut() {
             let counter = p.game.counter;
@@ -401,6 +415,11 @@ fn scene_frame(
         };
         rt.triggered = true;
         rt.talker = talker;
+        // The last scene's actor records / palette belong to its buffers (other sizes): never upload them into this
+        // scene's (a second scene after the arrival drew its actors from stale, mis-sized buffers).
+        rt.records.clear();
+        rt.palette.clear();
+        rt.uploaded = None;
         let scene = match load_scene(k) {
             Ok(s) => Arc::new(s),
             Err(e) => {
@@ -442,11 +461,15 @@ fn scene_frame(
         }
         for e in &items { commands.entity(e).insert((SceneHidden, Visibility::Hidden)); }
         active.running = true;
+        if let Some(p) = play.as_mut() { enter_mode2(rt, p); }
     }
 
     // One frame of the player.
     if let Some(p) = &pad { rt.pad.update(Some(&p.0.bytes()), false); }
     let Some(mut player) = rt.player.take() else { return };
+    // What this frame's moby loop reads (it runs before the scene advances): the scene id, tick and actors as the
+    // last frame left them, and the scene camera 0x167240 / rows of the last scene tick.
+    if let Some(p) = play.as_mut() { publish_scene(rt, &player, active.camera, p); }
     let out = player.tick(&rt.pad);
     rt.frames += 1;
     post_audio(rt, &player, &out.audio);
@@ -459,6 +482,8 @@ fn scene_frame(
     if !out.actors.is_empty() { pose_actors(rt, &player, &out, &level.0); }
     active.camera = out.camera;
     active.black = out.black;
+    active.world_runs = out.world_runs;
+    active.actors = rt.actors.iter().filter_map(|a| Some((a.moby?, a.anim.clone()))).collect();
     active.last = Some(out);
     rt.player = Some(player);
 }
@@ -514,30 +539,174 @@ fn spawn_actors(
     if let Some(i) = level.mobys.instances.iter().find(|i| i.o_class == 0) { (rt.light_word, rt.ambient) = (i.light_word(), i.ambient_rgb()); }
     let mut specs = Vec::new();
     let mut palette_len = 0u32;
+    let lists = actor_joint_lists(level, &scene.actor_classes());
     for a in &scene.chunks[0].actors {
-        let (class, anim) = match level.mobys.classes.iter().position(|c| c.o_class == a.class) {
-            Some(ci) => (level.mobys.classes[ci].clone(), level.mobys.anim[ci].clone()),
-            None if (530..=533).contains(&a.class) => load_ship_class(level, a.class)?,
-            None => return Err(anyhow!("actor class {} is not on this level", a.class)),
+        let found = match level.mobys.classes.iter().position(|c| c.o_class == a.class) {
+            Some(ci) => Some((level.mobys.classes[ci].clone(), level.mobys.anim[ci].clone())),
+            None if (530..=533).contains(&a.class) => Some(load_ship_class(level, a.class)?),
+            // The game would `CreateMoby` a class that is not loaded (only unplayed scenes have one: the conformance
+            // test lists them); the slot keeps its place and draws nothing.
+            None => {
+                warn!("scene: actor class {} is not on this level: not drawn", a.class);
+                None
+            }
         };
-        let mut anim = anim;
+        let Some((class, mut anim)) = found else {
+            let anim = MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![None] };
+            specs.push((None, a.class, anim, 0, palette_len, 0));
+            continue;
+        };
         let slot = class.class.header.sequence_count;
         if anim.sequences.len() <= slot as usize { anim.sequences.resize(slot as usize + 1, None); }
         let slots = (anim.joint_count as u32).max(ExtraMobys::max_skinned_joint(&class) as u32 + 1).max(1);
-        specs.push((class, anim, slot, palette_len, slots));
+        // The blend of a scene actor: +0x23 = 0x80 and mode = class bits (+0x44) | 6 (`CreateMoby`, `FUN_00259288`);
+        // every scene actor class on the disc has neither 0x200 nor 8, so this is the regular draw
+        // (moby_render::MobyBlend::pick, checked by rc-formats' scene conformance test).
+        let blend = moby_render::MobyBlend::pick(class.class.header.mode_bits as u16 | 6, false, 0x80);
+        if blend != moby_render::MobyBlend::Plain { warn!("scene: actor class {} asks for {blend:?}; drawn plain", class.o_class); }
+        specs.push((Some(class), a.class, anim, slot, palette_len, slots));
         palette_len += slots;
     }
     let n = specs.len();
     let mut extra = ExtraMobys::new(level, vec![0; n.max(1) * moby_render::EXTRA_RECORD_SIZE], crate::moby_anim::identity_palette(palette_len), buffers);
-    for (k, (class, anim, slot, base, slots)) in specs.into_iter().enumerate() {
-        let entities = extra.spawn(commands, level, &class, k as u32, Transform::IDENTITY, &format!("scene actor {k}"), meshes, images, materials);
+    for (k, (class, o_class, anim, slot, base, slots)) in specs.into_iter().enumerate() {
+        let entities = match &class {
+            Some(class) => extra.spawn(commands, level, class, k as u32, Transform::IDENTITY, &format!("scene actor {k}"), meshes, images, materials),
+            None => Vec::new(),
+        };
         for &e in &entities { commands.entity(e).insert(Visibility::Hidden); }
-        println!("scene: actor {k}: class {} ({} joints, streamed sequence in slot {slot}), {} entities", class.o_class, anim.joint_count, entities.len());
-        rt.actors.push(Actor { scale: class.class.header.scale, anim, slot, chunk: None, base, slots, entities });
+        println!("scene: actor {k}: class {o_class} ({} joints, streamed sequence in slot {slot}), {} entities", anim.joint_count, entities.len());
+        let scale = class.as_ref().map_or(1.0, |c| c.class.header.scale);
+        let joint_lists = lists.get(&o_class).cloned().unwrap_or_default();
+        rt.actors.push(Actor { scale, anim: Arc::new(anim), o_class, joint_lists, pose: None, moby: None, slot, chunk: None, base, slots, entities });
     }
     rt.extra = Some(extra);
     rt.palette_len = palette_len;
     Ok(())
+}
+
+/// The joint lists (class header `joints`) of the actor classes that have a blob in the level core, for the actors'
+/// joint points (`FUN_002645a8`, [`rc_game::scene_player::SceneActorState::joint_point`]).
+fn actor_joint_lists(level: &crate::level_load::LoadedLevel, classes: &[i32]) -> std::collections::HashMap<i32, Arc<Vec<Vec<u8>>>> {
+    let mut out = std::collections::HashMap::new();
+    let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+    let (Ok(data), Ok(idx)) = (rc_data::level_core_data(&root, index), crate::disc_source::level_file(&root, index, "core_index.bin")) else { return out };
+    let Ok(core) = rc_formats::level::parse_level_core(&idx, data.len()) else { return out };
+    for &oc in classes {
+        if out.contains_key(&oc) { continue; }
+        let Some(c) = level.mobys.classes.iter().find(|c| c.o_class == oc) else { continue };
+        let name = format!("moby_class/{oc:04}");
+        let Some(blob) = core.blocks.iter().find(|b| b.name == name).and_then(|b| data.get(b.offset..b.offset + b.size)) else { continue };
+        let lists = (0..16).map_while(|l| rc_formats::gadget::joint_list(blob, &c.class.header, l).ok().map(|(a, _)| a)).collect();
+        out.insert(oc, Arc::new(lists));
+    }
+    out
+}
+
+/// `DialogStreamStart`'s state changes for the world that keeps running in mode 2 (docs/plan/cutscenes.md §6): game
+/// mode 2 for the classes (0x15f5c4), the tick in its mode-2 form (no follow camera, no free-slot pass: `CutsceneModeUpdate`
+/// 0x2aca80), Ratchet `SetState(100, 2)` (applied by the next tick), the talker hidden (0x179588 mode |= 1) and every
+/// live moby of class 74 / 203 hidden (mode |= 0x80).
+fn enter_mode2(rt: &mut SceneRuntime, p: &mut Play) {
+    use rc_game::moby_update::services::{HeroCall, HeroFields};
+    use rc_game::scene_player::{SCENE_HIDDEN_BIT, SCENE_HIDDEN_CLASSES};
+    p.svc.game_mode = 2;
+    p.game.camera_paused = true;
+    let counter = p.game.counter;
+    let call = HeroCall::SetState { id: rc_game::scene_player::HERO_SCENE_STATE, play: true };
+    match p.svc.hero_writes.as_mut() {
+        Some((_, f)) => f.call(call),
+        None => {
+            let mut f = HeroFields::of(&p.game.hero);
+            f.call(call);
+            p.svc.hero_writes = Some((counter, f));
+        }
+    }
+    // FUN_00259288's `CreateMoby(class)` per actor record: a dynamic slot of the moby table, +0x32 = 0x1ff, +0x72 = 0xff,
+    // mode |= 6 (bit 2: the moby loop skips it; bit 4: no matrix rebuild), +0x94 = 0, +0x38 = Ratchet's light words. The
+    // port draws the actors itself (the streamed sequence is not in the level's class animation), so the table moby also
+    // carries mode bit 1 (not drawn by the generic moby draw); classes reach it as 0x16ce58[k] (SceneActorState::moby).
+    {
+        use rc_game::moby_update::services::ClassData;
+        for a in rt.actors.iter_mut() {
+            let oc = a.o_class as i16;
+            let info = p.classes.info(oc);
+            a.moby = p.game.mobys.create(oc, info.as_ref(), counter);
+            if let Some(id) = a.moby {
+                let m = &mut p.game.mobys.mobys[id];
+                m.mode |= 6 | 1;
+                m.state = 0;
+            } else {
+                warn!("scene: no free moby slot for actor class {oc}");
+            }
+        }
+    }
+    rt.hid.clear();
+    if let Some(npc) = rt.talker.filter(|&n| n < p.game.mobys.mobys.len()) {
+        let m = &mut p.game.mobys.mobys[npc];
+        if m.mode & 1 == 0 { m.mode |= 1; rt.hid.push((npc, 1)); }
+    }
+    for (id, m) in p.game.mobys.mobys.iter_mut().enumerate() {
+        if m.state < 0x80 && SCENE_HIDDEN_CLASSES.contains(&m.o_class) && m.mode & SCENE_HIDDEN_BIT == 0 {
+            m.mode |= SCENE_HIDDEN_BIT;
+            rt.hid.push((id, SCENE_HIDDEN_BIT));
+        }
+    }
+}
+
+/// `FUN_002ac608`'s side of [`enter_mode2`]: mode 0, the follow camera and the free-slot pass back, the hidden mobys
+/// shown, the scene gone from the moby loop's view.
+fn leave_mode2(rt: &mut SceneRuntime, p: &mut Play) {
+    // A scene a class asked for meanwhile (queued) keeps mode 2: in the game its DialogStreamStart set it; it starts on
+    // the next frame, so no tick in between sees mode 0.
+    p.svc.game_mode = if rt.pending.is_empty() { 0 } else { 2 };
+    p.game.camera_paused = false;
+    p.svc.cinematic.scene = None;
+    // FUN_002ac608: the actors deleted (their class sequence slots freed with them).
+    let counter = p.game.counter;
+    for a in &mut rt.actors {
+        if let Some(id) = a.moby.take() { p.game.mobys.delete(id, counter); }
+    }
+    for (id, bit) in rt.hid.drain(..) {
+        if let Some(m) = p.game.mobys.mobys.get_mut(id) { m.mode &= !bit; }
+    }
+}
+
+/// Before a scene frame: what its moby loop reads (module docs).
+fn publish_scene(rt: &SceneRuntime, player: &ScenePlayer, camera: Option<SceneCamera>, p: &mut Play) {
+    use rc_game::scene_player::{SceneActorState, SceneState};
+    let actors = rt
+        .actors
+        .iter()
+        .map(|a| {
+            let rest = AnimState { seq_a: a.slot, frame_a: 0, seq_b: a.slot, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
+            let (state, position) = a.pose.unwrap_or((rest, [0.0; 3]));
+            SceneActorState { moby: a.moby, o_class: a.o_class as i16, position, scale: a.scale, anim: a.anim.clone(), state, joint_lists: a.joint_lists.clone() }
+        })
+        .collect();
+    // The table mobys carry the actors' position (+0x10) as `CutsceneModeUpdate` writes it (the owner position of the
+    // effects spawned on them).
+    // `CutsceneModeUpdate` on each actor moby: +0x50..0x54, position, +0x71 = 0xff, `MobyBuildMatrix` (the rows and the
+    // bounding sphere from the streamed sequence, rc_game::moby_update::scheduler::rebuild_matrix); drawn (+0x31).
+    for a in &rt.actors {
+        if let (Some(id), Some((st, pos))) = (a.moby, a.pose) {
+            if let Some(m) = p.game.mobys.mobys.get_mut(id) {
+                (m.position[0], m.position[1], m.position[2]) = (pos[0], pos[1], pos[2]);
+                (m.anim.seq_a, m.anim.frame_a, m.anim.seq_b, m.anim.frame_b, m.anim.t) = (st.seq_a, st.frame_a, st.seq_b, st.frame_b, st.t);
+                m.b71 = 0xff;
+                m.visible = 1;
+                rc_game::moby_update::scheduler::rebuild_matrix(m, Some(&a.anim));
+            }
+        }
+    }
+    p.svc.cinematic.scene = Some(SceneState { id: player.scene_id(), tick: player.scene_tick(), actors });
+    // FUN_002ac8d8 writes 0x167240 and the rows 0x167450..; the Euler 0x167250 keeps the last gameplay value.
+    if let Some(c) = camera {
+        let v = |x: [f32; 3]| [Pf::f(x[0]), Pf::f(x[1]), Pf::f(x[2]), Pf::ZERO];
+        let out = &mut p.game.camera.out;
+        out.pos = [Pf::f(c.eye[0]), Pf::f(c.eye[1]), Pf::f(c.eye[2]), out.pos[3]];
+        out.rows = c.rows.map(v);
+    }
 }
 
 /// The actors' records and palettes for this frame's poses.
@@ -550,10 +719,13 @@ fn pose_actors(rt: &mut SceneRuntime, player: &ScenePlayer, out: &SceneTick, lev
     for (a, pose) in rt.actors.iter_mut().zip(&out.actors) {
         if a.chunk != Some(pose.chunk) {
             // FUN_00259288: the slot is re-pointed at this chunk's sequence.
-            a.anim.sequences[a.slot as usize] = Some(scene.chunks[pose.chunk].actors[pose.actor].sequence.clone());
+            if let Some(q) = Arc::make_mut(&mut a.anim).sequences.get_mut(a.slot as usize) {
+                *q = Some(scene.chunks[pose.chunk].actors[pose.actor].sequence.clone());
+            }
             a.chunk = Some(pose.chunk);
         }
         let s = AnimState { seq_a: a.slot, frame_a: pose.frame_a, seq_b: a.slot, frame_b: pose.frame_b, t: pose.t, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
+        a.pose = Some((s, pose.position));
         let f = moby_anim::evaluate(&a.anim, &s);
         let at = a.base as usize * 64;
         for (k, b) in f.iter().take(a.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[at + k] = b; }
@@ -571,8 +743,14 @@ fn upload(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, mut buffers: R
     if rt.uploaded == Some(rt.frames) || rt.records.is_empty() { return; }
     rt.uploaded = Some(rt.frames);
     let Some(extra) = &rt.extra else { return };
-    if let Some(mut b) = buffers.get_mut(&extra.palette) { b.data = Some(rt.palette.clone()); }
-    if let Some(mut b) = buffers.get_mut(&extra.instances) { b.data = Some(rt.records.clone()); }
+    // Only data of this scene's layout: a buffer keeps the size it was created with (its materials are bound to it).
+    let fits = |b: &ShaderBuffer, n: usize| b.data.as_ref().is_some_and(|d| d.len() == n);
+    if buffers.get(&extra.palette).is_some_and(|b| fits(b, rt.palette.len())) {
+        if let Some(mut b) = buffers.get_mut(&extra.palette) { b.data = Some(rt.palette.clone()); }
+    }
+    if buffers.get(&extra.instances).is_some_and(|b| fits(b, rt.records.len())) {
+        if let Some(mut b) = buffers.get_mut(&extra.instances) { b.data = Some(rt.records.clone()); }
+    }
     let shown = active.last.as_ref().is_some_and(|t| !t.actors.is_empty());
     for (k, a) in rt.actors.iter().enumerate() {
         let pos = active.last.as_ref().and_then(|t| t.actors.get(k)).map_or([0.0; 3], |p| p.position);

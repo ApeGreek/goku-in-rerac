@@ -20,6 +20,7 @@
 //! - `RC_MSAA=0|2|4|8` world-camera multisampling at start (default 0 = off, like the GS), crate::render_settings
 //! - `RC_SETTINGS_FILE=<path>` the port-settings file (`0` or empty: none), crate::render_settings;
 //!   `RC_SETTINGS_PAGE=0` no "Port Options" page in the Options menu, crate::menu_render
+//! - `RC_SHADOWS=0|1`, `RC_SHADOW_DEBUG=1`, `RC_SHADOW_TRACE=1` the moby shadows, crate::shadow_render
 
 mod audio_out;
 mod determinism;
@@ -40,11 +41,13 @@ mod moby_light;
 mod moby_lod;
 mod moby_render;
 mod moby_spawn;
+mod movie_render;
 mod occlusion;
 mod particle_render;
 mod play_camera;
 mod render_settings;
 mod scene_render;
+mod shadow_render;
 mod shrub_billboard;
 mod shrub_light;
 mod shrub_render;
@@ -119,6 +122,8 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(moby_render::MobyRenderPlugin)
     .add_plugins(moby_spawn::MobySpawnPlugin)
     .add_plugins(moby_attach::MobyAttachPlugin)
+    // The moby shadows: the game's shadow rules and a native shadow-volume pass (crate::shadow_render).
+    .add_plugins(shadow_render::ShadowPlugin)
     .insert_resource(spawn)
     .add_plugins(tie_render::TieRenderPlugin)
     .add_plugins(shrub_render::ShrubRenderPlugin)
@@ -133,6 +138,8 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(menu_render::MenuPlugin)
     // In-engine scenes (mode 2) and the Novalis arrival (crate::scene_render; RC_SCENE=0 / RC_SCENE=<k>).
     .add_plugins(scene_render::SceneRenderPlugin)
+    // PSS movies (mode 1) played from the original files (crate::movie_render; RC_PLAY_MOVIE=<n>).
+    .add_plugins(movie_render::MovieRenderPlugin)
     // Sound slots, 989snd, music and the software SPU2 mixed per game tick (crate::audio_out; RC_AUDIO=0 off).
     .add_plugins(audio_out::AudioOutPlugin::new(level.audio.take()))
     .insert_resource(fog_state)

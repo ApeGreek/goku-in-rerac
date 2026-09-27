@@ -37,7 +37,8 @@
 //! | `BlendNoZ` | Transparent3d (`Blend`) | GS equation | off | GEQUAL | – |
 //! | `SkyDome` | Transparent3d on the sky camera | GS equation | on | ALWAYS | – |
 //! | `SkyTextured` | Transparent3d on the sky camera | GS equation | off | ALWAYS | – (the 0x3180b test only gates Z, which ZMSK masks) |
-//! | `LateTested { aref }` | Transparent3d (`Blend`) | GS equation | on | GEQUAL | As < AREF (moby metal pass: after every AlphaMask3d draw) |
+//! | `LateTested { aref }` | Transparent3d (`Blend`) | GS equation | on | GEQUAL | As < AREF (moby metal pass: after every AlphaMask3d draw; a shadow caster's cut-out draws) |
+//! | `LateOpaque` | Transparent3d (`Blend`) | none | on | GEQUAL | – (a shadow caster's opaque draws: after the shadow pass, crate::shadow_render) |
 //! | `AdditiveNoZ` | Transparent3d (`Blend`) | native additive `src·α + dst` | off | GEQUAL | – |
 //! | `Hud` | Transparent2d on the HUD camera (crate::hud_render) | GS equation | off | ALWAYS | – |
 //!
@@ -163,6 +164,9 @@ pub enum GsPass {
     LateTested { aref: u8 },
     /// Native additive blend (`src·α + dst`), no Z write (effect mobys flagged additive).
     AdditiveNoZ,
+    /// `Opaque` drawn in Transparent3d: a shadow caster's opaque draws, which the game draws after the shadow pass
+    /// (crate::moby_render `caster_pass`, crate::shadow_render).
+    LateOpaque,
 }
 
 /// Which fragments a draw discards.
@@ -212,6 +216,7 @@ impl GsPass {
             GsPass::Hud => (true, false, Always, D::None),
             GsPass::LateTested { aref } => (true, true, GreaterEqual, D::Below(aref)),
             GsPass::AdditiveNoZ => (true, false, GreaterEqual, D::None),
+            GsPass::LateOpaque => (false, true, GreaterEqual, D::None),
         };
         let additive = matches!(self, GsPass::AdditiveNoZ);
         GsState { blend, additive, depth_write, depth_compare, discard }

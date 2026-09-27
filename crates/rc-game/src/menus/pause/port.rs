@@ -1,5 +1,5 @@
-//! **Port-only** (not in the game): the "Port Options" page, for settings the PS2 never had (anti-aliasing
-//! first). Spec: docs/plan/menus.md "Port-only settings".
+//! **Port-only** (not in the game): the "Port Options" page, for settings the PS2 never had (anti-aliasing, and
+//! switching the moby shadows off). Spec: docs/plan/menus.md "Port-only settings".
 //!
 //! It is built entirely from the game's own machinery so it looks and behaves like the Options sub-pages:
 //! a page record whose frame-moby seqs, filler widgets and "✕ Toggle / △ Exit" hint list are those of a
@@ -57,7 +57,9 @@ pub mod text {
     pub const X2: i32 = -0x111;
     pub const X4: i32 = -0x112;
     pub const X8: i32 = -0x113;
-    /// The game's own "off" (20315, as the Subtitles / HelpDesk values).
+    pub const SHADOWS: i32 = -0x120;
+    /// The game's own "on" / "off" (20314 / 20315, the Subtitles / HelpDesk toggle values).
+    pub const ON: i32 = 20314;
     pub const OFF: i32 = 20315;
 
     pub fn get(id: i32) -> Option<&'static [u8]> {
@@ -68,6 +70,7 @@ pub mod text {
             X2 => b"2x",
             X4 => b"4x",
             X8 => b"8x",
+            SHADOWS => b"Shadows",
             _ => return None,
         })
     }
@@ -78,6 +81,8 @@ pub mod text {
 pub enum Setting {
     /// World-camera multisampling: value 0 off, 1 2x, 2 4x, 3 8x.
     Msaa,
+    /// The moby shadows (docs/plan/shadows.md): value 0 on (the game's look, the default), 1 off.
+    Shadows,
 }
 
 /// One row: the setting, its label and the ids of its values (✕ cycles through them).
@@ -89,7 +94,10 @@ pub struct Entry {
 }
 
 /// The rows, in order.
-pub const ENTRIES: &[Entry] = &[Entry { setting: Setting::Msaa, label: text::ANTI_ALIASING, values: &[text::OFF, text::X2, text::X4, text::X8] }];
+pub const ENTRIES: &[Entry] = &[
+    Entry { setting: Setting::Msaa, label: text::ANTI_ALIASING, values: &[text::OFF, text::X2, text::X4, text::X8] },
+    Entry { setting: Setting::Shadows, label: text::SHADOWS, values: &[text::ON, text::OFF] },
+];
 
 /// The list's run-time state: cursor, each row's value index and each row's selectable values (bit k = value k;
 /// a missing entry = all).

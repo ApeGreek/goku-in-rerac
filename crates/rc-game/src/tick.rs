@@ -68,9 +68,10 @@ pub struct Game {
     pub item_data: Option<ItemData>,
     /// The hand-swap globals outside the hero block (the engine syncs them with the saved game / session).
     pub item_globals: ItemGlobals,
-    /// Skip `CameraUpdate` 0x20eca8 (and its crate hit): the in-engine cutscene frame (game mode 2,
-    /// `CutsceneModeUpdate` 0x2aca80) runs the mobys and the particles but never the follow camera, whose
-    /// springs resume where they were on the first mode-0 tick.
+    /// The tick in its mode-2 form (the in-engine scene frame, `CutsceneModeUpdate` 0x2aca80): the moby loop, the
+    /// hero, the particles, the sound step and the counter run, but never `CameraUpdate` 0x20eca8 (and its crate hit),
+    /// whose springs resume where they were on the first mode-0 tick, nor the free-slot pass `MobyFreeSlotBookkeeping`
+    /// 0x263300 (only `InLevelFrameUpdate` runs it).
     pub camera_paused: bool,
     /// The level's grind paths (gameplay section 0x74) the hero rides (`hero::boots`; empty: no rails).
     pub grind_paths: std::sync::Arc<Vec<rc_formats::volumes::GrindPath>>,
@@ -207,7 +208,7 @@ impl Game {
         hero_sounds: &mut dyn HeroSounds,
     ) -> TickReport {
         self.pad.update(pad_data, self.options.mirror);
-        self.mobys.free_slot_pass(self.counter);
+        if !self.camera_paused { self.mobys.free_slot_pass(self.counter); }
         // The globals the moby loop reads outside the moby system: this tick's pad, the last camera update's Euler,
         // Ratchet's anim fields after his last update (moby_update::services::LoopGlobals).
         let e = self.camera.out.euler;

@@ -478,5 +478,10 @@ unchanged. Two idle runs give identical traces, PNGs and WAVs.
   (`hero_polish/novalis_scene.wav`) second by second at correlation ≥ 0.99 through the speech (identical for 0–2 s;
   the small differences are the level's class sounds before the scene); two runs give identical WAVs and PNGs.
 * Movies (mode 1): `StartPssMovie` stops all sounds and the music; `MovieExitToGameplay` restarts the level track
-  (`music_start_track(0x151708, 1, 0x400)`). The port's movie stub returns at once and leaves the audio alone.
+  (`music_start_track(0x151708, 1, 0x400)`). Ported (2026-09-27, docs/plan/cutscenes.md §5): `AudioSystem::movie_stop`
+  (the audio state rebuilt from the level data: every slot free, every voice and stream stopped, music players reset,
+  a pending box track made current; options, counters, IOP random stream and play log kept; the emitters' timers
+  restart [L]), `AudioSystem::mix_movie` (the movie's two SPU voices: stream law at vol 0x400, hard left / right,
+  group 5 = sfx option, then the SPU master: unity gain at the defaults [L]) and `AudioSystem::movie_exit`; the
+  engine pushes one 800-sample frame of movie audio per movie vsync (silence in the fades).
 

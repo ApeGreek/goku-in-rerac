@@ -24,6 +24,7 @@ pub mod gameplay;
 pub mod moby_light;
 pub mod moby_anim;
 pub mod moby_collision;
+pub mod moby_shadow;
 pub mod moby_spawn;
 pub mod sky;
 pub mod collision;
@@ -38,6 +39,7 @@ pub mod water;
 pub mod save_game;
 pub mod scene;
 pub mod volumes;
+pub mod pss;
 pub mod sha1;
 pub mod test_data;
 

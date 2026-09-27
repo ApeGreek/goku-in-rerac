@@ -21,6 +21,7 @@
 //! * [`fog_zones`]: fog zones, the underwater test and `UpdateFog`'s fog selection (`docs/plan/world_animation.md` §5, §6).
 //! * [`scene_player`]: the in-engine scene (cutscene) player, game mode 2 (`docs/plan/cutscenes_transitions.md` §3).
 //! * [`spline`]: the spline follower (paths and grind paths: step, advance, nearest point) the rail riders use.
+//! * [`shadows`]: the moby shadows' directions, slab probes and shadow volumes (`docs/plan/shadows.md`).
 //! * [`game_state`]: the saved game state, new game, level-start rules, transitions, saves and options (`docs/plan/game_state.md`).
 
 pub mod collision_query;
@@ -42,5 +43,7 @@ pub mod audio;
 pub mod game_state;
 pub mod menus;
 pub mod scene_player;
+pub mod movie_player;
 pub mod cinematic;
 pub mod spline;
+pub mod shadows;

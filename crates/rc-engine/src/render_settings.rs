@@ -203,13 +203,23 @@ fn write_key(text: &str, key: &str, value: &str) -> String {
 }
 
 /// Writes the settings into the port settings file (a no-op when it is disabled); errors are reported, not fatal.
-pub fn save(s: &RenderSettings) {
+pub fn save(s: &RenderSettings) { save_key("msaa", &s.msaa.samples().to_string()); }
+
+/// The value of `key` in the port settings file (None: no file, or no such key).
+pub fn load_key(key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(settings_path()?).ok()?;
+    read_key(&text, key).map(str::to_string)
+}
+
+/// Writes `key = value` into the port settings file (other lines kept; a no-op when the file is disabled); errors
+/// are reported, not fatal.
+pub fn save_key(key: &str, value: &str) {
     let Some(path) = settings_path() else { return };
     let old = std::fs::read_to_string(&path).unwrap_or_default();
-    let new = write_key(&old, "msaa", &s.msaa.samples().to_string());
+    let new = write_key(&old, key, value);
     let res = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&path, new));
     match res {
-        Ok(()) => println!("render settings: saved MSAA {} to {}", s.msaa.samples(), path.display()),
+        Ok(()) => println!("render settings: saved {key} = {value} to {}", path.display()),
         Err(e) => eprintln!("render settings: could not write {}: {e}", path.display()),
     }
 }

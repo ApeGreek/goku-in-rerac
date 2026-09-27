@@ -19,7 +19,7 @@
 //!   ([`type06`], class-27 emitters), 8 ([`type08`], explosion puffs), 11 ([`type11`], TNT sparks, smoke rings), 13
 //!   ([`type13`], crate-break dust), 15 ([`type15`], explosion streaks), 52 ([`type52`], goo drips, flat), 25
 //!   ([`type25`], grind / cable sparks), 34 ([`type34`], bubbles), 47 ([`type47`], dust / sand puffs), 53 ([`type53`], bolt-pickup and cable
-//!   sparkles) and 60 ([`type60`], glints); a record of any other type kills itself on its first update and is
+//!   sparkles), 59 ([`type59`], hero sparkles), 60 ([`type60`], glints) and 62 ([`type62`], the nanotech orbs and their trails); a record of any other type kills itself on its first update and is
 //!   counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
 //! * **RNG.** Updates draw from the `&mut Rng` given to [`Particles::update_parts`] (the game's one stream), in
 //!   pool order; only types 11 (its split spawns five children and its phase changes draw one value), 15 (a
@@ -46,6 +46,7 @@ pub mod type08;
 pub mod type11;
 pub mod type13;
 pub mod type15;
+pub mod type23;
 pub mod type25;
 pub mod type34;
 pub mod type47;
@@ -53,7 +54,9 @@ pub mod type52;
 pub mod type53;
 pub mod type56;
 pub mod type57;
+pub mod type59;
 pub mod type60;
+pub mod type62;
 
 use crate::ps2v::{self, F};
 use crate::rng::Rng;
@@ -322,6 +325,9 @@ pub struct Particles {
     pub cam_yaw: f32,
     /// 0x15f5cc: the tick counter as the tick's updates see it (types 2 and 15 act on odd ticks), set by the hook.
     pub counter: u64,
+    /// Moby positions for the records attached to a moby (type 62 kind 2 keeps the moby pointer at +0x24 and
+    /// follows it), by moby index, written by the owning class during the moby loop.
+    pub anchors: std::collections::HashMap<usize, [f32; 3]>,
 }
 
 impl Particles {
@@ -335,6 +341,7 @@ impl Particles {
         table[11] = Some(type11::update as UpdateFn);
         table[13] = Some(type13::update as UpdateFn);
         table[15] = Some(type15::update as UpdateFn);
+        table[23] = Some(type23::update as UpdateFn);
         table[25] = Some(type25::update as UpdateFn);
         table[34] = Some(type34::update as UpdateFn);
         table[47] = Some(type47::update as UpdateFn);
@@ -342,8 +349,10 @@ impl Particles {
         table[53] = Some(type53::update as UpdateFn);
         table[56] = Some(type56::update as UpdateFn);
         table[57] = Some(type57::update as UpdateFn);
+        table[59] = Some(type59::update as UpdateFn);
         table[60] = Some(type60::update as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0 }
+        table[62] = Some(type62::update as UpdateFn);
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default() }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -495,11 +504,11 @@ mod tests {
     fn update_parts_kills_unported_types_and_counts_them() {
         let mut s = Particles::new(None, Vec::new());
         s.create_part(58);
-        s.create_part(59);
+        s.create_part(61);
         s.update_parts(&mut Rng::new());
         assert_eq!(s.pool.count, 0);
         assert_eq!(s.stats.unported_kills[58], 1);
-        assert_eq!(s.stats.unported_kills[59], 1);
+        assert_eq!(s.stats.unported_kills[61], 1);
         assert!(s.table[25].is_some() && s.table[47].is_some() && s.table[60].is_some());
     }
 

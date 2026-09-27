@@ -421,7 +421,7 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
   `0x26faf0` (`weapons::launch_velocity`, `knock::lob_up`) is the bomb's / knockback's arc, not the wrench's; both
   ports match its decompilation (`len2(to − from) / t`, `−((from.z − to.z) + g·n²/2) / n`).
 - **Weapons** (`weapons.rs`): the throw gloves' fire case, 0x23, the weapon arm 0x1413f8 (its upper-body animation
-  layer is not ported), the holster check, ammo (`0x249530` / `0x249450`, the game state's table mirrored by the
+  layer: ported 2026-09-28, hero_gameplay.md §2.4), the holster check, ammo (`0x249530` / `0x249450`, the game state's table mirrored by the
   engine; the HUD's count follows), the Bomb Glove's update `0x2d8330` as its `HAND_ITEMS` row. The bomb (class 121,
   `moby_update/classes/bomb.rs`: flight, contact explosion, water, the growing 2.5 sphere hitting through the moby
   hit path, fireballs 122, flashes 1192, type-11 rings, sound, camera shake) and its creation from the hero through

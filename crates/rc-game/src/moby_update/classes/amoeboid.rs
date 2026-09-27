@@ -122,10 +122,13 @@ pub fn update(w: &mut World, id: MobyId) {
         w.mm(id).mode |= 1;
         return;
     }
-    // (0x278720: the big-head manipulator; 0x26f020: the shadow probe near the camera; +0x7f = 0x16.)
+    // (0x278720: the big-head manipulator.) Drawn and within 28 units of the camera: the shadow probe 0x26f020, +0x7f = 0x16.
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
-        if c::dist3(c::pos(w, id), cam) < 28.0 { w.mm(id).b7f = 0x16; }
+        if c::dist3(c::pos(w, id), cam) < 28.0 {
+            crate::shadows::probe_down(w, id);
+            w.mm(id).b7f = 0x16;
+        }
     }
     if pre(w, id) { return; }
     let s = size(w, id);

@@ -524,7 +524,7 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     let wp = moby_anim::evaluate_chains(&class.anim, &it.anim, it.snapshot.as_ref(), &[wchain.as_slice()]);
     let tip = list_point(&wp[0], &it.rows, it.position, it.scale);
     let Some(hchain) = env.data.hero_chains.first().filter(|c| !c.is_empty()) else { return };
-    let Some(hp) = anim.eval_chains(&[hchain.as_slice()]).into_iter().next() else { return };
+    let Some(hp) = anim.eval_chains_with(&[hchain.as_slice()], &hero.weapons.layers).into_iter().next() else { return };
     let r = &table.mobys[env.hero_moby];
     let rrows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| r.rows[i].map(f32::to_bits));
     let hand = list_point(&hp, &rrows, [r.position[0], r.position[1], r.position[2]], r.scale);

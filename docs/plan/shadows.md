@@ -1,6 +1,8 @@
-# Shadows: what the original draws, and the native plan
+# Shadows: what the original draws, and the native port
 
-Research only (2026-09-27). Addresses are **level01.elf** unless marked "boot"; gp = 0x166c00. Decompiled C is in
+**Status: built (2026-09-27), packages S1–S5; see "As built" at the end.** The research below was checked against
+the disassembly and PCSX2 RAM while building; corrections are marked *(corrected)*. First written as research
+(2026-09-27). Addresses are **level01.elf** unless marked "boot"; gp = 0x166c00. Decompiled C is in
 `work/decomp/level01.elf/`. Tags: **[H]** read in code or data and cross-checked, **[M]** read in code but the decompile hides a detail (VU0 broadcast
 fields, shift signedness), **[L]** inferred. Names in *italics* are suggested names for unnamed functions. They are not applied in Ghidra, which was
 used read-only.
@@ -40,7 +42,8 @@ one general system, not one per object. Bevy's built-in shadow maps would look c
   - `type 1` **capsule** (tapered), 0x30 bytes: `+4 u16 joint A`, `+6 u16 joint B`, `+8 s32 segments A`, `+0xc s32 segments B`,
     `+0x10 vec4 A`, `+0x20 vec4 B` (w = radius at each end).
     - A segment count of **0** gives a flat end (two points).
-    - A **negative** count −k moves that end towards the other one by k·16/4096 and makes it flat.
+    - A **negative** count −k moves that end **away from** the other one by k·16/4096 of the segment and makes it
+      flat *(corrected: 0x29bb98 is `A += (A − B)·(k·16/4096)`; checked in RAM)*.
 
   All-levels check (scratch script over `extracted/cache/v1/wad/levels/*/core_data.lump`): 154 class entries in 19 levels, 79 distinct classes.
   1,713 records: 1,668 capsules (0x30) and 45 spheres (0x20). Every block ends exactly at its `last` record, and every joint is below the class
@@ -100,18 +103,20 @@ one general system, not one per object. Bevy's built-in shadow maps would look c
   |---|---|---|
   | *ShadowSetGround* `FUN_0026eff8` | `PathEnemyUpdate` 0x2e6bf0 | `[z − 0.2, z + 0.2]` around a given z |
   | *ShadowProbeDown* `FUN_0026f020` | `AmoeboidUpdate`, `GroundCritterUpdate`, `TalkingNpcUpdate` | `CollLine_Fix` from pos.z + 0.5 to max(pos.z − 16, 0.5), flags 0x22; hit → `[hit − 0.2, hit + 0.2]`, miss → 0 |
-  | *ShadowProbeAlongDir* `FUN_0026f0e0` | cutscene / scene actors (0x2a4080 loop over 0x16ce58, `CutsceneModeUpdate`, `VendorModeUpdate`) | two probes along direction 0, from the two sides of the bounding sphere (±0.75·r); `lo = min − 0.25`, `hi = min(max + 0.25, lo + 4)` |
-  | *UpdateHeroShadow* `FUN_0022a260` | Ratchet | four probes along his direction from `pos + (±0.7, ±0.5, 0.4)·r` (table 0x17c780; the 4th entry repeats the 3rd, a data quirk), each reaching 0.5 below the seed height. The seed is the first of ground z 0x13f628, water level 0x13f640 or liquid level 0x13f644 that is ≥ 1. `lo = min − 0.12`, `hi = min(max + 0.24, lo + 3)` |
+  | *ShadowProbeAlongDir* `FUN_0026f0e0` | cutscene / scene actors (0x2a4080 loop over 0x16ce58, `CutsceneModeUpdate`, `VendorModeUpdate`) | *(corrected)* d = direction 0 scaled to a horizontal length of 1 (0x221460). Probe 1: **vertical**, 8 units down from `c − d.xy·0.75r`; a miss = no shadow. Probe 2: from `c + (d.xy·0.75r, r/2)` along d rescaled to a 3-D length of `(z − hit₁)/(−d.z)`, so it only reaches ~14 % of the way down (a game quirk: two normalisations mixed). `lo = min − 0.25`, `hi = min(max + 0.25, lo + 4)` |
+  | *UpdateHeroShadow* `FUN_0022a260` | Ratchet | four probes along his direction from the bounding-sphere centre `c + (cos φ·0.7, sin φ·(±0.5), 0.4)·r` (table 0x17c780: (0.7, −0.5), (0.7, 0.5), (−0.7, −0.5), (−0.7, −0.5); the 4th repeats the 3rd, a data quirk), each reaching 0.5 below the seed height. The seed is the first of ground z 0x13f628 (≥ 1), water level 0x13f640 (≥ 1) or liquid level 0x13f644 (> 1); none: `lo = hi = 0`. *(corrected)* min and max start **at the seed**: `lo = min(seed, hits) − 0.12`, `hi = min(max(seed, hits) + 0.24, lo + 3)` |
 
   **[H]** (the probe arithmetic). The ±0.7/±0.5 offsets use `cos φ·x` and `sin φ·y` rather than a rotation, as written. **[H]**
-- **Size by distance** (the `size` word): full size up to a view depth of 16 units, then linear down to 0 at **24** units (+0x7f = 0x18). The
-  proxy is **scaled towards the moby origin**; it does not fade in alpha. **[M]** (see §7 for depths beyond 24).
+- **Size by distance** (the `size` word): `min(((+0x7f << 10) − ftoi0(d − r')) >> 1, 0x1000)`, d = view depth of the shadow sphere
+  (×1024), r' its radius: full size up to 16 units, then linear down towards 0 at **24** units (+0x7f = 0x18; amoeboids 0x16, the
+  talking NPC 0x1a). The proxy is **scaled towards the joint frames and the moby origin**; it does not fade in alpha. **[H]** (§7.1:
+  resolved.)
 
 ### 3.3 Geometry (the proxy volume)
 
 1. *BuildShadowList* `fun_00227740` 0x29b948 (boot 0x227740) walks the list at 0x1aca80. For each moby it poses the joints with
    `moby_coll_xform_cached` (boot 0x20fa90; level01 0x267fc0, docs/plan/collision_queries.md). Each record point is transformed as
-   `P = pos + R·((J·p)·s·size/1024)`, with R the rotation rows +0xc0..+0xe0 and s the scale +0x2c.
+   `P = pos + R·((J·p)·s/1024·size/4096)`, with R the rotation rows +0xc0..+0xe0 and s the scale +0x2c *(corrected: size is 4.12, 0x1000 = 1)*.
 
    Output goes to **0x1acc00..0x1aeb80** (8,064 bytes): per moby a header `{prim count, guard, lo, hi, dir}` followed by the posed prims. The
    loop stops when the cursor passes the end, so only about 7 Ratchet-sized or about 25 amoeboid-sized casters fit. **[H]** (That the radius
@@ -311,13 +316,17 @@ At most 3 at once (the concurrency cap). Ownership lists exclude files other run
 
 ## 7. Risks and open points
 
-1. **Size beyond 24 units.** The decompile shows `(byte·0x400 − depth) >> 1` as unsigned. If the shift really is logical, a negative value
-   clamps to 0x1000 (full size) instead of vanishing. Check the instruction (`sra` vs `srl`) near the +0x7f read in MobyProc, or in the S3 RAM
-   dump. **[M]**
-2. **Radius path.** The radius comes through the joint and row transforms in the w lane, then ×s·size/1024. The decompile hides the broadcast
-   fields; S3's RAM dump settles it. **[M]**
-3. **Joint matrices.** The shadow uses the 0x267fc0 posed matrices (absolute joint frames), not the skinning palette. The port's evaluator was
-   only cross-checked for translations (docs/plan/collision_queries.md); offsets with rotation need the full matrix. **[M]**
+1. **Size beyond 24 units. Resolved.** The shift is logical (`srl` at 0x26b838), but it cannot see a negative value: the shadow sphere's cull
+   just before it (0x26b7a0..0x26b7e0) drops the caster when `(+0x7f << 10) − d < 0` (the moby draw-distance test with +0x7f as the
+   distance), and the size uses `d − r'`, so the difference is ≥ r'/2 > 0. Beyond 24 units the shadow is **culled**; at the cull it is about
+   r'/8 units across, then vanishes. **[H]**
+2. **Radius path. Resolved.** The joint and row transforms write xyz only (`vmaddw.xyz`), the scale `vmulx.xyzw` all four lanes: radius =
+   `w·moby+0x2c·(1/1024)·size/4096`. RAM (Novalis idle savestate, Ratchet's 21 records): the port's radii equal the game's to 1.5e-8. **[H]**
+3. **Joint matrices. Resolved.** `x·J0 + y·J1 + z·J2 + J3` with the full posed joint frames (`vmulax.xyz`… with rows 0..3 of each 0x40-byte
+   record). The port's `moby_anim::evaluate_chains` (the joints' frames in model space) matches the game's list to **3.1e-5 units** on the 11
+   records whose joints are not under the moby's runtime joint-modifier list (+0x64: the idle joint records and the head / torso
+   manipulators, which neither the port's evaluator nor its drawn pose applies); the 10 records under it (head, ears, arms) differ by up to
+   0.18 units, exactly as the port's drawn Ratchet differs from the game's. Test: `crates/rc-game/tests/shadow_volume_novalis.rs`. **[H]**
 4. **Face orientation.** The game classifies faces by the sign of the screen area with GS y-down; Bevy uses `front_facing`. With exact ±1 counting
    the sign only has to be consistent, so either convention works, but a wrong global sign gives inverted shadows. Test with the debug view.
 5. **Blended world fragments.** The port draws the RGB-only halves of world alpha tests and billboard pass 2 in Transparent3d, after the resolve.
@@ -367,3 +376,53 @@ At most 3 at once (the concurrency cap). Ownership lists exclude files other run
 | 0x1bc310 (4 × 3 qw), 0x1bc3d0 / 0x1bc440 (7 qw) | – | TEST_1 variants; alpha-only FRAME + frame-buffer TEX0 (NTSC / PAL) |
 | 0x160420 / 0x160424 | – | face colours, alpha 0x7f / 0x82 |
 | 0x17c780 (4 × vec4) | – | hero probe offsets |
+
+## As built (2026-09-27)
+
+Every decision took the recommended option (the user's "go for it"): native screen-space volumes from the game's data
+and rules, a fixed multiply blend, casters drawn after the pass, the game's quirks kept (budget, repeated hero probe,
+6.28 circles), the guard-band drop dropped, no enhancements, a Port Options switch (on by default).
+
+| Package | Where | What |
+|---|---|---|
+| S1 loader | `crates/rc-formats/src/moby_shadow.rs`, `tests/moby_shadow_disc.rs` | `ShadowBlock::of_class` / `parse_level`; all 19 levels: 154 entries, 79 classes, 1,668 capsules, 45 spheres, ≤ 21 records, counts {−10, 0, 4..16}, joints < joint count; the test was seen failing on a broken record size |
+| S2 game side | `crates/rc-game/src/shadows.rs`; one call line each in `moby_update/classes/{critter,amoeboid,talking_npc,path_enemy}.rs`; moby +0x84 / +0x88 in `moby_runtime.rs` | `update_shadow_dir`, `light_dir` (`fun_0020d510`), `update_hero_shadow`, `set_ground`, `probe_down`, `probe_along_dir` (ready, not wired: see below) |
+| S3 volumes | `crates/rc-game/src/shadows/volume.rs`, `tests/shadow_volume_novalis.rs` + `tests/fixtures/shadow_ratchet_novalis_idle.tsv` (numbers only) | posing, `ShadowSetDir`, sphere / capsule outlines, slab prisms, size by distance, budget |
+| S4 GPU pass | `crates/rc-engine/src/shadow_render.rs`, `assets/shaders/shadow_{volume,resolve}.wgsl`, `main.rs` (plugin line) | per tick (after `GameTick`): Ratchet's shadow and direction 0; per frame (`Last`): MobyProc's shadow deferral, cull, size, budget and the volumes; render world: `Core3d` system between `main_opaque_pass_3d` and `main_transparent_pass_3d` |
+| S5 casters | `crates/rc-engine/src/moby_render.rs` (`caster_pass`, `CASTER_BAND`), `gs_state.rs` (`GsPass::LateOpaque`) | a class with a shadow block has its Z-writing draws at the start of Transparent3d (after the shadow pass), its metal next; everything else unchanged |
+| Setting | `crates/rc-game/src/menus/pause/port.rs` (row "Shadows", the game's own On / Off strings 20314 / 20315), `menu_render.rs`, `render_settings.rs` (`load_key` / `save_key`) | on by default; `shadows = on/off` in the port settings file; `RC_SHADOWS=0/1` overrides at start |
+
+**The pass in native terms.** The prisms (Bevy axes) are drawn into an `R16Float` target (cleared to 0, the view's
+size and sample count) with the scene depth attached read only, `GreaterEqual` (reverse Z), no culling, additive
+blending: +1 for a front face, −1 for a back one. A visible surface inside a volume ends with count 1 (z-pass). A
+full-screen triangle then multiplies the colour target by 0.53 (blend Zero / Src) where the count is > 0.5; with MSAA
+both targets are multisampled and the resolve runs per sample. The depth format has no stencil, hence the count
+target. `RC_SHADOW_DEBUG=1` shows the count (red inside, blue negative: none seen).
+
+**Checked.** Unit tests (directions, the hero gate / pitch / probes, the slab rules, posing, outlines, closed and
+outward prisms, size, budget, the 0.53 factor against all 256 GS bytes); RAM (Novalis idle savestate, distilled):
+the posed list to 3.1e-5 units off the modifier list, radii to 1.5e-8, directions 0 / 1 to 2e-6, the slab exact.
+Engine (Novalis, `RC_SCENE=0`): Ratchet's shadow falls to his left-behind, away from the key light, hard-edged, his
+feet not darkened; in a jump it slides under him (pitch 0.97 → 1.5 in 11 ticks) and shows the spread limbs; critters,
+amoeboids and troopers cast almost straight down; the size shrinks between 16 and 24 units (0x9ae at 20, 0x3b7 at
+23); at a ledge the shadow is cut where the ground leaves the slab; once airborne past the probes' reach he has no
+seed and no shadow; RC_SHADOWS=0 and `shadows = off` give identical images, and on / off differ only inside the
+shadow; two runs give identical PNGs; MSAA 4× works. Frame rate with / without shadows within noise (≈127 fps both,
+`RC_NOVSYNC=1`, dev build); the frame's CPU collection ≈ 70 µs.
+
+**Scenes.** The game keeps shadows on in scenes: its scene loop calls *ShadowProbeAlongDir* on every actor with
++0x7f ≠ 0 (direction 0). In the port the hero moby is hidden during a scene (and in the vendor), so his gameplay
+shadow is off, as in the game; the scene actors themselves (extra mobys of `scene_render.rs`) cast **no shadow yet**:
+wiring `probe_along_dir` needs their records (position, sphere, pose) from `scene_render.rs`.
+
+**Not done / known differences.**
+* Scene actors' shadows (above).
+* Casters are chosen by class (a shadow block) for the late draw; the game defers by the run-time mode bits
+  0xc00 (e.g. Ratchet without 0x400 on the water surface is drawn early there). Only visible where another caster's
+  shadow would fall on such a moby.
+* Risk 5 stays: the RGB-only halves of world alpha tests and billboard pass 2 are drawn after the resolve (not darkened).
+* The joint-modifier list (+0x60 / +0x64: head look, idle joint records) is not in the port's pose, so head, ears and
+  arms of Ratchet's shadow differ from the game's by up to 0.18 units, exactly as his drawn model does.
+* `HeroEnvLighting` 0x26be04 (Ratchet's light cross-fade in covered zones; it also turns direction 0 / 1 with his
+  light word) is not ported: decision 6's separate package.
+* Pixel comparison against a PCSX2 screenshot (S6) not done.

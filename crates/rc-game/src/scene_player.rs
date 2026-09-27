@@ -44,8 +44,10 @@
 //! it), the NPC dialog continues, and `FUN_0027a460(ticks(30))`: music resumes 30 ticks later.
 //!
 //! Not modelled here (engine / other ports): the mirror cheat's left-row cross product and the 0x15edb0
-//! FOV cheat scale, mode 6 space scenes (same chunks, ship-local transform), class 74/203 mode bit 0x80,
-//! the FX driver 1546 (reads the scene id and tick: [`ScenePlayer::scene_tick`]).
+//! FOV cheat scale, mode 6 space scenes (same chunks, ship-local transform). The world update of the scene frame
+//! (the moby loop, the hero, the particles), the actor mobys, classes 74 / 203 (mode bit 0x80, [`SCENE_HIDDEN_CLASSES`])
+//! and the state the classes read ([`SceneState`], e.g. the FX driver 1546) are the engine's (`rc-engine`
+//! `scene_render`).
 
 use crate::pad::{button, PadState};
 use crate::ps2v::Pf;
@@ -462,6 +464,74 @@ impl ScenePlayer {
 
 /// Scene k's region for this build (the port runs NTSC).
 pub const REGION: Region = Region::Ntsc;
+
+// ---------------------------------------------------------------------------------------------------
+// What the rest of the game sees of a running scene
+
+/// Moby classes that are hidden (mode |= 0x80) for the length of every scene and shown again at its end
+/// (`DialogStreamStart` 0x2ac330 / `FUN_002ac608`: every live moby of class 74 or 203 whose mode lacks 0x80).
+pub const SCENE_HIDDEN_CLASSES: [i16; 2] = [74, 203];
+/// The mode bit those classes get (MobyProc skips `mode & 0x81`).
+pub const SCENE_HIDDEN_BIT: u16 = 0x80;
+
+/// The running scene as the moby loop reads it during mode 2: 0x16cd10 (the scene id), 0x16cd14 (the scene tick)
+/// and the actor slots 0x16ce58[k] (`CreateMoby` actors of chunk 0's records). The scene's `CutsceneModeUpdate`
+/// runs the moby loop **before** it advances the tick and re-poses the actors, so a class sees the previous tick's
+/// values; the engine publishes them in that order. Classes read it through
+/// `Services::cinematic.scene` (the cutscene FX driver 1546, `classes::cutscene_fx`).
+#[derive(Clone, Debug)]
+pub struct SceneState {
+    /// 0x16cd10.
+    pub id: usize,
+    /// 0x16cd14.
+    pub tick: i32,
+    /// 0x16ce58[k], in actor-record order.
+    pub actors: Vec<SceneActorState>,
+}
+
+/// One actor moby of the running scene: its class, its position (moby+0x10), its animation fields and the class
+/// animation with the streamed sequence in its extra slot (`class+0x48 + slot·4`), so a joint point of the actor
+/// (`FUN_002645a8`) evaluates exactly the pose the renderer draws.
+#[derive(Clone)]
+pub struct SceneActorState {
+    /// The actor's moby in the moby table (`CreateMoby` in `FUN_00259288`: a dynamic slot, mode |= 6 so the moby loop
+    /// never runs it), the value of 0x16ce58[k]: what a class hands to the general effect code as the owner (e.g.
+    /// `SpawnBeamExplosion`'s moby, which its flash shells need). None: the table was full.
+    pub moby: Option<crate::moby_runtime::MobyId>,
+    pub o_class: i16,
+    /// moby+0x10.
+    pub position: [f32; 3],
+    /// moby+0x2c (the class scale).
+    pub scale: f32,
+    /// The class animation with the streamed sequence in slot `state.seq_a`.
+    pub anim: Arc<rc_formats::moby_anim::MobyAnimClass>,
+    /// moby+0x50..0x54 (key frames f / f + 1 of the streamed slot, blend t).
+    pub state: rc_formats::moby_anim::AnimState,
+    /// The class's joint lists (class header `joints`: the first byte list of each), for `FUN_002645a8`.
+    pub joint_lists: Arc<Vec<Vec<u8>>>,
+}
+
+impl std::fmt::Debug for SceneActorState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SceneActorState").field("moby", &self.moby).field("o_class", &self.o_class).field("position", &self.position).field("state", &self.state).finish()
+    }
+}
+
+impl SceneActorState {
+    /// `FUN_002645a8(actor, list, out)`: the world point of the last joint of joint list `list` in the actor's pose
+    /// (as `World::joint_point`): `q = P.r3 · (scale / 1024)`, rows = identity (`CreateMoby` leaves the rotation 0
+    /// and nothing turns a scene actor: orientation is in its root joint), `out = q + position`. Without the list
+    /// the point is the actor's origin. Native `f32`.
+    pub fn joint_point(&self, list: usize) -> [f32; 4] {
+        let chain = self.joint_lists.get(list).filter(|c| !c.is_empty());
+        let t = match chain {
+            Some(chain) => rc_formats::moby_anim::evaluate_chain(&self.anim, &self.state, None, chain)[3],
+            None => [0.0, 0.0, 0.0, 1.0],
+        };
+        let k = self.scale * (1.0 / 1024.0);
+        [t[0] * k + self.position[0], t[1] * k + self.position[1], t[2] * k + self.position[2], t[3]]
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -116,10 +116,10 @@ Summary sources: my own reading for the top classes; the rest from read-only sub
 | 1456–1465 | 10 | 0x2e1ac0 | bf70eee5/2 | item-linked props | DeleteMoby once pvar item is owned. **Ported** (same section) | — |
 | 459 | 25 | 0x2e6bf0 | f540458c/1 | path enemy | follows spline pvar+0x164; HP pvar+0x20; hit mask 0x210000 → knockback states; can grab the hero (hero state 0x1f). **Hidden** (0x41) at init if > 0.5 above ground | 0 idle, 4, 5, 8, 10, 11 (hit) |
 | 500 | 199 | 0x2ea178 | 1cc860fc/19 | crate | hit mask 0x1830000 → `FUN_002eb918` (break FX) + `FUN_002eb498` (bolt drop), hide | none |
-| 501 | 12 | 0x2ea178 | 1cc860fc/19 | ammo crate | as 500; init spawns icon moby 806 (`FUN_00300528`) | none |
+| 501 | 12 | 0x2ea178 | 1cc860fc/19 | nanotech crate (was "ammo crate": corrected, hero_gameplay.md §1.1) | as 500, no drop of its own; init spawns the nanotech cluster 806 (`FUN_00300528`) whose orbs heal 1 HP | none |
 | 502 | 4 | 0x2ea178 | 1cc860fc/19 | reinforced crate | as 500; breaks only on damage flag 0x20000 | none |
 | 505 | 1 | 0x2ea178 | 1cc860fc/19 | TNT crate | hit → state 5: 3 s blink/beep (sound 1) → explode | none |
-| 511 | 24 | 0x2ea178 | 1cc860fc/19 | nanotech crate | as 500 (+0xc6 = 100) | none |
+| 511 | 24 | 0x2ea178 | 1cc860fc/19 | ammo crate (was "nanotech crate": corrected) | as 500 (+0xc6 = 100): ammo pickups (0x2db028) | none |
 | 572 | 5 | 0x2edca0 | c1be19d3/3 | Amoeboid large (inferred) | HP 3; wanders toward pvar target, LOS test `FUN_00276fe8`; death: sound 4, seq 5 | **1 walk at start**; 0, 2, 3, 5 |
 | 865 / 866 | 10 / 20 | 0x2edca0 | c1be19d3/3 | Amoeboid medium / small | same fn, scale 0.7 / 0.49, HP 1. **Hidden, speed 0, z −20** (state 0xc) until a parent splits | 1, 0, 2, 3, 5 |
 | 577 | 68 | 0x2efc60 | 98445d80/1 | ground critter (suckable) | hit mask 0x330000; wander/turn/charge states 1–0x11; random mirror (0x8000); death state 99 | **4 at init if pvar+0x20a ≠ 0 (18 of 68)**; else 0 and state 0xe (z+6) |
@@ -176,7 +176,7 @@ Summary sources: my own reading for the top classes; the rest from read-only sub
 - ship 530/531 (the table fn is replaced, §5)
 - the 0x2c5218 group (149, 348–364), the 0x2db028 group (204, 213–226, 1006, 1438–1449) and the
   0x30cd18 group (1736–1817), which look like FX/debris
-- 607 (Clank pack, §5), 806 (ammo-crate icon), 1143 (vendor hologram), 1816/1817 (shards)
+- 607 (Clank pack, §5), 806 (nanotech cluster of crate 501: `classes/pickup.rs`), 1143 (vendor hologram), 1816/1817 (shards)
 
 ## 4. Top classes
 
@@ -624,6 +624,7 @@ Code: `crates/rc-game/src/moby_update.rs` (module root and unit tests), `moby_up
     then `BoltSpawn`'s 5.
   - A dropper with a path (pvar+0xc0 ≥ 0) aims the landing at the path (quadratic fall time, `ClampToPath`
     0x276820).
+  - (Correction 2026-09-28, hero_gameplay.md: 511 is the **ammo** crate, 501 the **nanotech** crate.)
   - pvar+0xc6 ≠ 0 (511) selects ammo pickups instead: type pvar+0xcb. Re-pick among owned items via
     `0x26bff8`; count `randi(5) ≠ 0 ? 1 : 2`; each pickup draws `rand_angle` and `randf` ×2.
   - Class 501 only sets the death bits.

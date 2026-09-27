@@ -616,6 +616,9 @@ pub struct GameCounters {
     pub spawner_bolts: HashMap<(u32, u8), i16>,
     /// HUD bolt-counter refreshes requested (`queue_animation_update(2, 0x754e, …)`).
     pub hud_bolt_refresh: u32,
+    /// `0x15eda0`: max health (4; 5 / 8 with the nanotech upgrades), synced from the game state by the engine;
+    /// the nanotech orbs heal up to it.
+    pub max_hp: i32,
 }
 
 /// The mission tables the death-bit and pickup writes consult: `0x15fc88[mission]` and
@@ -700,6 +703,25 @@ pub trait Inventory {
             25 => 1449,
             _ => 0,
         }
+    }
+    /// The pickup banner text of item `ty` (`ShowBannerf` in 0x2db028): the item record's `+0x36` for one, else
+    /// `+0x34` (`0x179f40 + ty·0x4c`, level01 .data); 0 for items without a pickup.
+    fn pickup_text(&self, ty: usize, one: bool) -> i32 {
+        let base = match ty {
+            10 => 21429,
+            11 => 21431,
+            13 => 21433,
+            15 => 21435,
+            16 => 21437,
+            17 => 21439,
+            19 => 21441,
+            20 => 21443,
+            23 => 21445,
+            24 => 21447,
+            25 => 21449,
+            _ => return 0,
+        };
+        if one { base + 1 } else { base }
     }
 }
 /// An empty inventory.
@@ -794,6 +816,11 @@ pub struct Services {
     pub interact: crate::moby_update::interact::Interact,
     /// The in-level cinematic calls and engine requests of the moby loop ([`crate::cinematic`]).
     pub cinematic: crate::cinematic::Cinematic,
+    /// The pickups' globals (ammo pickup sound, the nanotech master and its orbit table;
+    /// [`crate::moby_update::classes::pickup`]).
+    pub pickups: crate::moby_update::classes::pickup::Globals,
+    /// The last pickup banner request (`ShowBannerf`), for the HUD.
+    pub pickups_banner: crate::moby_update::classes::pickup::Banner,
 }
 
 impl Default for Services {
@@ -836,6 +863,8 @@ impl Services {
             point_lights: Default::default(),
             cinematic: Default::default(),
             interact: Default::default(),
+            pickups: Default::default(),
+            pickups_banner: Default::default(),
         }
     }
 
@@ -902,11 +931,13 @@ impl Services {
 /// | `pose` | 0x13f3d0 position, 0x13f3e8 yaw, 0x13f4d0 target yaw | bolt crank 280 `0x2e0c68` while it turns him ([`super::classes::bolt_crank`]) |
 /// | `clear_motion` | `FastMemZero16(0x13f430, 0x90)`: velocity .. slope ratio (0x13f430..0x13f4bf) | bolt crank 280 |
 /// | `calls` | the classes' calls into the hero code: `SetState` 0x23cf98, `SetAnim` 0x247a90 ([`HeroCall`]) | bolt crank 280 |
+/// | `health` | 0x1415f8 | nanotech cluster 806 `0x300de0` ([`super::classes::pickup`]) |
+/// | `ammo` / `ammo_picked` | 0x13d428 / 0x13de08 (game state, Ratchet's mirror) | ammo pickups `0x2db028` (`AddAmmo` 0x2494d8) |
 ///
 /// Other class stores into the block, for the classes that are not ported yet (add a field here when one is):
 /// 613 also 0x13f4e4 (speed), 0x13f528, 0x141608; the camera / focus objects 0x13fda0; talking NPCs 0x13f3d0
-/// (position: `pose`); the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec (`0x2dbdc0`); `0x300de0` 0x13f510 /
-/// 0x1415f8; the checkpoint record's respawn `0x29adc8` (position / Euler: the engine's respawn); the mode / control
+/// (position: `pose`); the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec (`0x2dbdc0`); `0x300de0` 0x13f510 (cheat 6
+/// only); the checkpoint record's respawn `0x29adc8` (position / Euler: the engine's respawn); the mode / control
 /// bytes 0x1413f5 / 0x1413fc of the vendor, ship and teleporter code. The scripted sequences' `SetState` calls
 /// (gunship 688, trooper cameras, vendors' walk to a point) belong in `calls`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -923,6 +954,13 @@ pub struct HeroFields {
     pub clear_motion: bool,
     /// The classes' calls into the hero code this tick, in order ([`HeroFields::call`]).
     pub calls: [Option<HeroCall>; 4],
+    /// 0x1415f8: health (the nanotech orbs `0x300de0` heal it).
+    pub health: i32,
+    /// 0x13d428: ammo by item (the game state's table, mirrored in [`crate::hero::weapons::Weapons::ammo`]; the ammo
+    /// pickups' `AddAmmo` 0x2494d8).
+    pub ammo: [i32; rc_formats::save_game::ITEM_COUNT],
+    /// 0x13de08: ammo picked up (stat) added this tick, by item.
+    pub ammo_picked: [i32; rc_formats::save_game::ITEM_COUNT],
 }
 
 /// Ratchet's pose as a class stores it (native `f32`): position 0x13f3d0 (x, y, z; w kept), yaw 0x13f3e8, target
@@ -959,6 +997,9 @@ impl HeroFields {
             pose: None,
             clear_motion: false,
             calls: [None; 4],
+            health: h.health,
+            ammo: h.weapons.ammo,
+            ammo_picked: [0; rc_formats::save_game::ITEM_COUNT],
         }
     }
 
@@ -989,6 +1030,9 @@ impl HeroFields {
             (h.vel, h.disp, h.eff, h.eff_v, h.eff_h, h.plat_applied) = (z, z, z, z, z, z);
             (h.eff_len, h.eff_len_xy, h.fwd_speed, h.slope_ratio) = (Pf::ZERO, Pf::ZERO, Pf::ZERO, Pf::ZERO);
         }
+        h.health = self.health;
+        h.weapons.ammo = self.ammo;
+        for (t, n) in h.weapons.picked.iter_mut().zip(self.ammo_picked.iter()) { *t += n; }
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
             h.rot[2] = pf(p.yaw);

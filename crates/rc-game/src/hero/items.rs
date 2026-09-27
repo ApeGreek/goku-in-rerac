@@ -238,7 +238,7 @@ impl HeroItems {
 pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: &dyn AnimCtl, rng: &mut Rng, env: &ItemEnv, hits: &mut dyn HitSink) {
     super::melee::jump_attack_shockwave(hero, table, env, hits);
     // 0x22f068 (the weapon arm's upkeep) runs in HeroItemsUpdate before the slots.
-    super::weapons::arm_upkeep(hero);
+    super::weapons::arm_upkeep(hero, anim);
     apply_pending_blend(hero, env.data);
     create_hand(hero, g, env);
     attach_hand(hero, table, anim, env);
@@ -361,7 +361,7 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
     let def = env.data.def(id);
     let list = (def.attach.max(0) as usize).min(HERO_LISTS.len() - 1);
     let Some(chain) = env.data.hero_chains.get(list).filter(|c| !c.is_empty()) else { return };
-    let Some(p) = anim.eval_chains(&[chain.as_slice()]).into_iter().next() else { return };
+    let Some(p) = anim.eval_chains_with(&[chain.as_slice()], &hero.weapons.layers).into_iter().next() else { return };
     let r = &table.mobys[env.hero_moby];
     let host_rows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| r.rows[i].map(f32::to_bits));
     let w = moby_anim::attach_matrix(&p, &host_rows, [r.position[0], r.position[1], r.position[2]], r.scale);

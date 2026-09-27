@@ -29,6 +29,8 @@
 //! | 760 (fire / smoke fields on the bombed buildings), 809 (their smoke scroll; levels 0, 1, 14) | 0x2fdbc0 `ParticleFieldUpdate`, 0x2ba658 | [`fire_field`] (draw callbacks: [`draw_callbacks`]) |
 //! | 705 (spinners), 703 / 715 (elevators), 768 / 769 (sliding doors), 1042 (shootables), 701 (collapsing platforms; level 1) | 0x2f9bf0, 0x2f95c0, 0x2fed68, 0x307c48, 0x2f9080 | [`props`] |
 //! | 704 (rocks), 709–711 (shell walls), 729 (big wall), 778 (pipe) and its spray 779, 754 (pots), 1813 (boxes), 1816 (their remains; level 1) | 0x2f9810, 0x2f9d80, 0x2fa800, 0x2ff860, 0x2ffb28, 0x2fd9a0, 0x30d0f0, 0x30d200 | [`breakables`] |
+//! | 1546 (cutscene FX driver; levels with scene effects) | 0x30c190 `CutsceneFxUpdate` | [`cutscene_fx`] |
+//! | 204, 213, 214, 222, 223, 225, 226, 1006, 1438, 1447, 1449 (ammo pickups), 806 (nanotech cluster; every level) | 0x2db028, 0x300de0 | [`pickup`] |
 //! | 737 (camera triggers; levels 1, 2, 3, 7, 10, 13), 730 / 790 (mission NPCs), 746 (hinged bridge; level 1) | 0x2fb5b0, 0x2fad68, 0x2fb8a8 | [`camera_trigger`], [`mission_npc`], [`hinged_bridge`] |
 
 pub mod amoeboid;
@@ -40,6 +42,7 @@ pub mod camera_trigger;
 pub mod checkpoint;
 pub mod crate_;
 pub mod critter;
+pub mod cutscene_fx;
 pub mod debris;
 pub mod draw_callbacks;
 pub mod dropship;
@@ -54,6 +57,7 @@ pub mod item_offer;
 pub mod mission_npc;
 pub mod path_enemy;
 pub mod path_platform;
+pub mod pickup;
 pub mod props;
 pub mod swing_target;
 pub mod talking_npc;
@@ -115,10 +119,13 @@ pub enum ClassUpdate {
     CameraTrigger,
     MissionNpc,
     HingedBridge,
+    CutsceneFx,
+    AmmoPickup,
+    Nanotech,
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 49] = [
+    pub const ALL: [ClassUpdate; 52] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -168,6 +175,9 @@ impl ClassUpdate {
         ClassUpdate::CameraTrigger,
         ClassUpdate::MissionNpc,
         ClassUpdate::HingedBridge,
+        ClassUpdate::CutsceneFx,
+        ClassUpdate::AmmoPickup,
+        ClassUpdate::Nanotech,
     ];
 
     /// The level01 class-table address of this update.
@@ -222,6 +232,9 @@ impl ClassUpdate {
             ClassUpdate::CameraTrigger => camera_trigger::UPDATE_FN,
             ClassUpdate::MissionNpc => mission_npc::UPDATE_FN,
             ClassUpdate::HingedBridge => hinged_bridge::UPDATE_FN,
+            ClassUpdate::CutsceneFx => cutscene_fx::UPDATE_FN,
+            ClassUpdate::AmmoPickup => pickup::AMMO_UPDATE_FN,
+            ClassUpdate::Nanotech => pickup::NANOTECH_UPDATE_FN,
         }
     }
 
@@ -279,6 +292,9 @@ impl ClassUpdate {
             ClassUpdate::CameraTrigger => &camera_trigger::CLASSES,
             ClassUpdate::MissionNpc => &mission_npc::CLASSES,
             ClassUpdate::HingedBridge => &hinged_bridge::CLASSES,
+            ClassUpdate::CutsceneFx => &cutscene_fx::CLASSES,
+            ClassUpdate::AmmoPickup => &pickup::AMMO_CLASSES,
+            ClassUpdate::Nanotech => &pickup::NANOTECH_CLASSES,
         }
     }
 }
@@ -338,6 +354,9 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::CameraTrigger => camera_trigger::update(w, id),
         ClassUpdate::MissionNpc => mission_npc::update(w, id),
         ClassUpdate::HingedBridge => hinged_bridge::update(w, id),
+        ClassUpdate::CutsceneFx => cutscene_fx::update(w, id),
+        ClassUpdate::AmmoPickup => pickup::ammo_update(w, id),
+        ClassUpdate::Nanotech => pickup::nanotech_update(w, id),
     }
 }
 

@@ -224,7 +224,7 @@ Sizes are from `extracted/`. "Loader" is the current Rust status.
 | `credits_images_ntsc` / `_pal` (raw RGBA) | ToC 0x16a8 / 0x1748 | 16 / 18 MB | none | no | Raw; Tier 2 PNG |
 | `post_credits_helpdesk_girl_seq` | ToC 0x1610 | 92 KB | none | decompress | `.dec` |
 | Unknown lumps `stuff2` (0x820), `anim_looking_thing_2` (0x12e8), `wad_14e0` (0x14e8), `things` (0x1530), `wad_things` (0x17e8) | ToC | 30 / 5 / 4 / 2 / 12 MB | none (cutscenes doc: 0x12e8/0x1530/transition are space scenes) | decompress where WAD | Archive; typed later |
-| FMVs `mpegs[88]` (PSS: MPEG-2 512×416 30 fps + SShd ADPCM stereo 48 kHz) | ToC 0x17f8 | 2,801 MiB (PAL-only 1,333) | none (decoder deferred) | demux (lossless); decode or transcode: U10 | Demuxed `.m2v` + ADPCM, or transcode |
+| FMVs `mpegs[88]` (PSS: MPEG-2 512×416 30 fps + SShd ADPCM stereo 48 kHz) | ToC 0x17f8 | 2,801 MiB (PAL-only 1,333) | played natively at runtime (U10 decided: `rc-video`) | none: the raw PSS is what the engine reads | – |
 | PS2 logo (sectors 0–11) | — | 24 KB | none | no | Not needed |
 
 **Coverage.** Nobody has checked whether sectors exist that the ToC and the filesystem do not reference. P1.2
@@ -324,8 +324,8 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
   smaller than PCM. Mods add PCM samples as a second sample kind; they are not re-encoded to ADPCM.
 - **ELF/overlays:** keep them as images read by VA. Lifting each consumed table into typed Tier 1 data is a later,
   per-system job. It helps data mods (mods.md).
-- **FMV:** demuxing PSS into the MPEG-2 elementary stream plus the SShd ADPCM is lossless and cheap. The decoder is
-  a separate decision (U10).
+- **FMV:** decided (U10, 2026-09-27): no Tier 1 form. The engine demuxes the raw PSS itself at play time
+  (`rc_formats::pss`) and decodes it natively (`rc-video`); nothing is converted at extraction.
 
 ### 5.4 Tier 1 as built (v1, P1.5, 2026-09-26)
 - **Code.** `crates/rc-data` (no Bevy, no external crates; depends on `rc-formats` only) holds the cache format and
@@ -622,7 +622,7 @@ workspace **path** crates are fine. Each package reports load times, file counts
 | P1.5 | **Done (2026-09-26; §5.4)** with `stamp.toml`, lumps with an XXH64 trailer, and the lazy build in every build type; measured 01/05/16 and capture identity as in §5.4. Original scope: **Tier 1 v1 cache.** `rc-extract prepare` writes decompressed WADs + `stamp.toml`. `rc-data` serves `level_core_data(NN)`, `level_gameplay(NN)`, `hud_bank` as `Arc<[u8]>`, decompressed once per process and built lazily if the cache is missing or stale. Engine call sites switch from `wad::decompress(read(…))` to these helpers | `rc-extract/src/prepare.rs`, `rc-data` (cache module), engine: `level_load`, `fog_state`, `menu_render`, `gameplay`, `moby_attach`, `moby_spawn`, `tfrag_light`, `hud_render` (the decompress lines only; dispatch only when no other agent owns these files) | Load time before/after on 01, 05, 16; goldens unchanged; deterministic capture identical; stale stamp triggers a rebuild | P1.2, P1.4 |
 | P1.6 | **Done (Stage 1b)** with `rc_formats::test_data::root()` instead of `rc_data::test_root()`. Original scope: **Test and tool migration.** `rc-trace` roots and the `rc-game` test paths use `rc_data::test_root()` | `tools/trace/src/{lib.rs, novalis_spawn.rs, tfrag_light_cmp.rs, tie_shrub_cmp.rs, port_sim.rs}`, the listed `rc-game` test modules (path lines only) | `cargo test --workspace` green; tests still skip without data | P1.3 (parallel with P1.4/P1.5) |
 | P1.7 | **Built (§5.5).** **Tier 2 exports v1.** Textures and menu images → PNG (in-house stored-deflate PNG writer or the approved `png` crate); VAG → WAV via the existing decoder; text → JSON; tfrag/tie/shrub LOD0 → glTF (hand-written JSON + bin). `rc-extract export` | `rc-extract/src/export/**` | PNG count = texture count per level; WAV sample count = decoder output; glTF structure test | P1.2 (can move after Stage 2) |
-| P1.8 | **FMV demux** (lossless) into Tier 1; doc of the decoder options for U10 | `rc-extract/src/pss.rs`, `docs/plan/cutscenes_transitions.md` §5 append | Demuxed stream sizes add up to the PSS payload; SShd header fields as documented | P1.2 |
+| P1.8 | ~~**FMV demux** (lossless) into Tier 1; doc of the decoder options for U10~~ **Dropped** (U10 decided 2026-09-27: the engine demuxes at play time, `rc_formats::pss`) | `rc-extract/src/pss.rs`, `docs/plan/cutscenes_transitions.md` §5 append | Demuxed stream sizes add up to the PSS payload; SShd header fields as documented | P1.2 |
 
 Stage 1 is done when a fresh machine with only the ISO can run `rc-extract extract` then `cargo dev`, and after
 deleting the ISO everything the engine currently plays still works. The C++ `tools/extract` was the dump oracle until
@@ -659,7 +659,7 @@ tab → P3.3 importers (PNG → texture with an RGBA renderer path, WAV → PCM 
 | U7 | Committed size + SHA-1 table (hashes only): **accepted** (`crates/rc-extract/data/scus_971_99.tsv`). |
 | U8 | Per-OS data folders named `randcrw`, user-movable: **accepted** (contract "Folders"). |
 | U9 | Engine loses ISO reading: **accepted** (later package, P1.4). |
-| U10 | Movies archived losslessly as on disc; decoder later: **accepted**. |
+| U10 | Movies archived losslessly as on disc: **accepted**. Decoder **decided 2026-09-27**: played natively from the original files at runtime (`rc-video` MPEG-2 decoder + `rc_formats::pss` + the VAG ADPCM decoder); no conversion at extraction, no ffmpeg in the product (decisions.md; docs/formats/pss.md). |
 | U11 | **`.iso` only for now** (no `.bin`, CHD, CSO). |
 | U12 | Manual updates: **accepted**. Official downloads stay off until the repo is public; a Development source uses local builds. |
 | U13 | Signing later: **accepted**. |

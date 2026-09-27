@@ -331,6 +331,8 @@ struct HudRuntime {
     draws: Vec<Draw>,
     hud2d: Hud2d,
     game: Inputs,
+    /// The last pickup banner shown (`rc_game::moby_update::classes::pickup::Banner::seq`).
+    banner_seq: u32,
 }
 
 #[derive(Component)]
@@ -463,6 +465,7 @@ fn setup(
         hud2d: Hud2d { frame_sizes, ..default() },
         // Until the first frame reads the game state (Persistent / Session / HeldWeapon): 4/4, no bolts, no slot.
         game: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: lh.lang },
+        banner_seq: 0,
     });
 }
 
@@ -485,9 +488,15 @@ fn tick_and_build(
     mut meshes: ResMut<Assets<Mesh>>,
     (state, session, held): GameInputs,
     feed: Res<HudFeed>,
+    play: Option<Res<crate::gameplay::Play>>,
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
+    // The pickups' banner (`ShowBannerf` in the ammo pickup 0x2db028: "+n" of the item's ammo text).
+    if let Some(b) = play.as_ref().map(|p| p.svc.pickups_banner).filter(|b| b.seq != rt.banner_seq) {
+        rt.banner_seq = b.seq;
+        rt.state.show_bannerf(b.text, b.arg);
+    }
     // The game's values (bolts 0x15ed98, max HP 0x15eda0, HP 0x1415f8, the held item's ammo slot), unless the
     // RC_HUD_DEMO values drive it.
     if !rt.env.demo {

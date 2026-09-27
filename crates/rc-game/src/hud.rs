@@ -439,6 +439,17 @@ impl HudState {
         self.banner.countdown = ticks.unwrap_or_else(|| scale_ticks(180));
     }
 
+    /// `ShowBannerf(id, n, −1)` 0x278a50: the level message `id` with its `%d` replaced by `n` (`sprintf` into
+    /// 0x179598), 180 ticks (the ammo pickups' "+n" banner).
+    pub fn show_bannerf(&mut self, id: i32, n: i32) {
+        let t = strings::lookup(&self.assets.messages, id).to_vec();
+        let text = match t.windows(2).position(|w| w == b"%d") {
+            Some(i) => [&t[..i], n.to_string().as_bytes(), &t[i + 2..]].concat(),
+            None => t,
+        };
+        self.show_banner(&text, None);
+    }
+
     /// One game tick: the callers that arm elements, `Help_Update`, the slot loop; then the frame's draws.
     pub fn tick(&mut self, inputs: Inputs) -> Vec<Draw> {
         self.inputs = inputs;

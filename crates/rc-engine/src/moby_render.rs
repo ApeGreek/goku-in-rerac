@@ -229,6 +229,24 @@ pub struct MobyMaterial {
     pub pass: GsPass,
 }
 
+/// Transparent3d sort bands (`Material::depth_bias`, added to the view depth, which grows towards the camera): a
+/// shadow caster's own draws ([`caster_pass`]) come first in the phase (right after the shadow pass, as the game
+/// draws its deferred mobys), then the casters' metal passes; every other blended draw keeps its view-depth order
+/// after them. The bands are further apart than any view depth (the far plane is 728 units).
+pub const CASTER_BAND: f32 = -30000.0;
+pub const CASTER_METAL_BAND: f32 = -20000.0;
+
+/// A shadow caster's draw (docs/plan/shadows.md §6.3: a class with a shadow block is deferred by `MobyProc` and
+/// drawn after the shadow pass, so it is never darkened): its Z-writing draws move from Opaque3d / AlphaMask3d to
+/// the start of Transparent3d ([`CASTER_BAND`]); its colour-only half and blended modes stay as they are.
+pub fn caster_pass(p: GsPass) -> GsPass {
+    match p {
+        GsPass::Opaque => GsPass::LateOpaque,
+        GsPass::OpaqueTested { aref } => GsPass::LateTested { aref },
+        p => p,
+    }
+}
+
 impl From<&MobyMaterial> for GsPass {
     fn from(m: &MobyMaterial) -> Self { m.pass }
 }
@@ -237,6 +255,8 @@ impl Material for MobyMaterial {
     fn vertex_shader() -> ShaderRef { SHADER_PATH.into() }
     fn fragment_shader() -> ShaderRef { SHADER_PATH.into() }
     fn alpha_mode(&self) -> AlphaMode { self.pass.alpha_mode() }
+    /// A caster's late draws first in Transparent3d ([`CASTER_BAND`]); `LateTested` is only a caster's here.
+    fn depth_bias(&self) -> f32 { if matches!(self.pass, GsPass::LateOpaque | GsPass::LateTested { .. }) { CASTER_BAND } else { 0.0 } }
     /// No culling: the GS draws both faces and the index stream's winding is inconsistent.
     fn specialize(
         _pipeline: &MaterialPipeline,
@@ -275,6 +295,8 @@ pub struct MobyMetalMaterial {
     #[storage(6, read_only, visibility(vertex))]
     pub lods: Handle<ShaderBuffer>,
     pub pass: GsPass,
+    /// The metal of a shadow caster: after the caster's own late draws ([`CASTER_METAL_BAND`]).
+    pub caster: bool,
 }
 
 impl From<&MobyMetalMaterial> for GsPass {
@@ -285,6 +307,7 @@ impl Material for MobyMetalMaterial {
     fn vertex_shader() -> ShaderRef { METAL_SHADER_PATH.into() }
     fn fragment_shader() -> ShaderRef { METAL_SHADER_PATH.into() }
     fn alpha_mode(&self) -> AlphaMode { self.pass.alpha_mode() }
+    fn depth_bias(&self) -> f32 { if self.caster { CASTER_METAL_BAND } else { 0.0 } }
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -405,7 +428,7 @@ impl MatCache {
         let mut out = Vec::new();
         for part in parts {
             let (image, texel) = self.images.entry(part.texture).or_insert_with(|| moby_image(level, part.texture, images)).clone();
-            for pass in blend.passes(texel, part.mult_alpha) {
+            for pass in blend.passes(texel, part.mult_alpha).into_iter().map(|p| if part.caster { caster_pass(p) } else { p }) {
                 let proto = &self.proto;
                 let mat = self
                     .mats
@@ -586,6 +609,8 @@ struct Part {
     /// The vertex alpha Af is ambient alpha (the `MobyLod` alpha) × multiplier alpha >> 7.
     mult_alpha: AlphaRange,
     triangles: usize,
+    /// The class casts a shadow (class byte 0x0f ≠ 0): drawn after the shadow pass ([`caster_pass`]).
+    caster: bool,
 }
 
 /// A metal mesh: its texture (−2 chrome / −3 glass) and triangle count.
@@ -593,6 +618,7 @@ struct MetalPart {
     kind: i32,
     mesh: Handle<Mesh>,
     triangles: usize,
+    caster: bool,
 }
 
 /// Texture key of a regular triangle: the moby texture table index, [`GREY`] for −1, None for an unused class
@@ -657,7 +683,7 @@ fn build_parts(class: &LevelMobyClass, lod: &[MobySubmesh], identity: bool, mesh
                 .with_inserted_attribute(ATTRIBUTE_MOBY_SKIN, VertexAttributeValues::Uint32x4(b.skin))
                 .with_inserted_attribute(ATTRIBUTE_MOBY_VID, VertexAttributeValues::Uint32(b.vid))
                 .with_inserted_indices(Indices::U32(b.idx));
-            Part { texture, mesh: meshes.add(mesh), mult_alpha: b.alpha.unwrap_or(AlphaRange::OPAQUE), triangles: b.tris }
+            Part { texture, mesh: meshes.add(mesh), mult_alpha: b.alpha.unwrap_or(AlphaRange::OPAQUE), triangles: b.tris, caster: class.class.header.shadow != 0 }
         })
         .collect();
     (parts, max_joint)
@@ -700,7 +726,7 @@ fn build_metal_parts(class: &LevelMobyClass, meshes: &mut Assets<Mesh>) -> (Vec<
                 .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, b.pos)
                 .with_inserted_attribute(ATTRIBUTE_MOBY_SKIN, VertexAttributeValues::Uint32x4(b.skin))
                 .with_inserted_indices(Indices::U32(b.idx));
-            MetalPart { kind, mesh: meshes.add(mesh), triangles: b.tris }
+            MetalPart { kind, mesh: meshes.add(mesh), triangles: b.tris, caster: class.class.header.shadow != 0 }
         })
         .collect();
     (parts, max_joint)
@@ -867,7 +893,7 @@ fn spawn_mobys(
         cpu_colors: cpu_colors.clone(),
         lods: lods.clone(),
     });
-    let mut metal_mats: HashMap<(i32, GsPass), Handle<MobyMetalMaterial>> = HashMap::new();
+    let mut metal_mats: HashMap<(i32, GsPass, bool), Handle<MobyMetalMaterial>> = HashMap::new();
     let mut metal_imgs: HashMap<i32, (Handle<Image>, AlphaRange)> = HashMap::new();
 
     // Sanity bounds: the tfrag bounding spheres (integer units, /1024), padded by 50 units.
@@ -928,7 +954,7 @@ fn spawn_mobys(
             let (image, texel_alpha) = metal_imgs.entry(part.kind).or_insert_with(|| metal_image(level, part.kind, images)).clone();
             for pass in metal_passes(texel_alpha) {
                 let mat = metal_mats
-                    .entry((part.kind, pass))
+                    .entry((part.kind, pass, part.caster))
                     .or_insert_with(|| {
                         metal_materials.add(MobyMetalMaterial {
                             texture: image.clone(),
@@ -938,6 +964,7 @@ fn spawn_mobys(
                             normal_table: normal_table.clone(),
                             lods: lods.clone(),
                             pass,
+                            caster: part.caster,
                         })
                     })
                     .clone();
@@ -1514,6 +1541,7 @@ impl ExtraMobys {
                         normal_table: self.normal_table.clone(),
                         lods: self.lods.clone(),
                         pass,
+                        caster: part.caster,
                     };
                     let e = commands
                         .spawn((

@@ -11,11 +11,19 @@
 //!   `SetAnim(9, 0x2c, 7)`; physics [`physics`]: aim at the stick (`0x2351d0(11, 50°, −1)`) or turn to the aim at
 //!   15 rad/s, `SpeedStep(30, 35)·dt²`, gravity 54 (25 in the air, with the steep-wall stop); transitions
 //!   [`transitions`]: ✕ within 11 ticks after key time 19 jumps (crouched: the crouch jumps), idle from 21).
-//! * **The weapon arm** (0x1413f8, `0x22ee08`): out for the moving throw; its timer 0x13f50c counts in the post-move
-//!   (`super::physics`); the arm layer (Ratchet's upper-body sequence `def +0x28` / `+0x2c` crouched, `0x2641c0`)
-//!   is not ported (the port has no animation layers: the arm pose is not shown, the throw's timing is kept: the
-//!   arm stays out for the layer sequence's length, `0x22f068`); the holster check `0x2405f8` ([`holster_check`]:
-//!   stopped within 6 ticks of the draw → put away, `0x140064 = 2`, state 0x23).
+//! * **The weapon arm** (0x1413f8, `0x22ee08`, [`draw_weapon`]): out for the moving throw; its timer 0x13f50c counts
+//!   in the post-move (`super::physics`). The arm is a **pose layer** on Ratchet's moby ([`super::anim::AnimLayer`],
+//!   `FUN_00263e08` on his joint list 12 (gp−0x7560; a second one on list 13 when 0x1413fb = 2), kept in 0x140058 /
+//!   0x14005c: [`Weapons::layers`]): it plays the item's upper-body sequence (`def +0x28`, `+0x2c` crouched) from
+//!   Ratchet's current key over `ticks(10)` (item +0x18 ≠ 0) or `ticks(11)` at full weight (`FUN_002641c0`), while
+//!   the main animation (the run, the walk, the jump) keeps playing on the other joints. Upkeep `0x22f068`
+//!   ([`arm_upkeep`]): re-blend over 8 ticks when the item's layer sequence changed (crouching), advance
+//!   (`FUN_00263f70`), weight → 1 by 0.2 a tick; when the layer sequence wraps with 0x1413fa clear the arm is down
+//!   (0x1413f8 = 0) and the layer fades (0x140064 = 1: speed 0, weight → 0 by 0.07 a tick; 0.25 after a holster,
+//!   0x140064 = 2) and is freed at 0. The renderer blends it over those joints
+//!   (`rc_formats::moby_anim::evaluate_layered`). The holster check `0x2405f8` ([`holster_check`]: stopped within 6
+//!   ticks of the draw → put away, `0x140064 = 2`, state 0x23). The Comet-Strike (0x15) is a full-body state: the
+//!   wrench's code never calls `0x22ee08`, so it has no layer.
 //! * **The Bomb Glove's update** (class 192, `0x2d8330`, [`glove_update`]: the row's `ItemUpdate::Slot`): 3 ticks
 //!   of warm-up; the launch point in the glove (joint list 0 + (0, −0.09, −0.02) in its frame); the look stance 1
 //!   becomes 0x1e (`SetState(0x1e, 1)`, made right after the slot loop: [`after_items`]); when the 20-tick fire timer
@@ -33,10 +41,12 @@
 //!
 //! Not ported: the auto-aim target search over the targetable list 0x1abe80 (mode 0x20 records: no ported class has
 //! one; the melee aim-assist `0x22e238` likewise), the gold glove (0x13e52a: 0), the throw stats record 0x1416d0
-//! (counted in [`Weapons::throws`]), the arm's upper-body animation layer, the other gloves' own item updates (their
-//! rows are not in `HAND_ITEMS`: only the Bomb Glove's is ported).
+//! (counted in [`Weapons::throws`]), the other gloves' own item updates (their rows are not in `HAND_ITEMS`: only the
+//! Bomb Glove's is ported), the persistent-arm weapons' rules (item +0x30 ≠ 0: `0x22eca0` re-creating the layer,
+//! `0x242858`, the idle's standing weapon pose; no ported item has one), `0x22efd8`'s standing `SetAnim(−2, idle)`
+//! when no layer is out (unreachable for the throw gloves: they only draw the arm while moving), 0x141618.
 
-use super::anim::AnimCtl;
+use super::anim::{AnimCtl, AnimLayer};
 use super::items::{HitSink, ItemEnv};
 use super::packs::SoundCmd;
 use super::physics::*;
@@ -82,9 +92,17 @@ pub struct Weapons {
     pub uses_ammo: [bool; N],
     /// 0x13dea0 + 4·id: ammo used (stat), added up here and added to the game state by the engine.
     pub used: [i32; N],
+    /// 0x13de08 + 4·id: ammo picked up (stat; the ammo pickups `0x2db028`), added to the game state by the engine.
+    pub picked: [i32; N],
     pub glove: Glove,
-    /// The weapon arm's ticks left (the layer sequence's length; see the module doc).
-    pub arm: i32,
+    /// 0x140058 / 0x14005c: the weapon arm's pose layers (joint lists 12 / 13).
+    pub layers: [Option<AnimLayer>; 2],
+    /// 0x140064: the arm layers' phase (0 in / playing, 1 fading out, 2 fading fast after a holster).
+    pub layer_fade: u8,
+    /// 0x1415e4: the weapon sequence last set (the layer's, or the standing full-body one).
+    pub layer_seq: i32,
+    /// 0x1415e8: the item whose arm is out.
+    pub arm_item: i32,
     /// A SetState the item update asked for (`SetState(0x1e, 1)` of the glove update), made right after the slot
     /// loop by [`after_items`].
     pub deferred: Option<i32>,
@@ -97,7 +115,7 @@ pub struct Weapons {
 
 impl Default for Weapons {
     fn default() -> Self {
-        Weapons { ammo: [0; N], uses_ammo: [false; N], used: [0; N], glove: Glove::default(), arm: 0, deferred: None, throws: 0, defs: Vec::new() }
+        Weapons { ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 2], layer_fade: 0, layer_seq: 0, arm_item: 0, deferred: None, throws: 0, defs: Vec::new() }
     }
 }
 
@@ -154,45 +172,87 @@ pub fn fire(h: &mut Hero, c: &mut Ctx) {
     }
 }
 
+/// gp−0x7560: Ratchet's joint lists of the two arm layers.
+pub const ARM_LISTS: [u8; 2] = [12, 13];
+
 /// `0x22ee08`: the weapon out (0x1413f8 = 1, 0x1413fa = def +0x30, 0x1415e8 = the item): standing (group 0 and
-/// no 0x141618) `SetAnim(10 or 11, def +0x24, 0)`; else the arm layer with `def +0x28` (`+0x2c` crouched), not
-/// animated here: its length keeps the arm out ([`Weapons::arm`]).
+/// no 0x141618) `SetAnim(10 or 11, def +0x24, 0)`; else the arm layer(s) with `def +0x28` (`+0x2c` crouched) over the
+/// same blend at full weight (see the module doc).
 pub fn draw_weapon(h: &mut Hero, c: &mut Ctx) {
     let id = h.items.slot.id;
     if !(1 < id + 1) { return; }
     let def = h.weapons_def(id);
     h.f13f8 = 1;
     h.f13fa = def.w30 as u8;
+    h.weapons.arm_item = id;
     let blend = if def.w18 != 0 { ticks(10) } else { ticks(11) };
     if h.group == 0 {
+        h.weapons.layer_seq = def.anims[0];
         if def.anims[0] >= 0 { h.set_anim(c.anim, c.rng, Pf::from_i32(blend), def.anims[0] as u8, 0); }
-        h.weapons.arm = 0;
-    } else {
-        let seq = if h.group == 0xc { def.anims[2] } else { def.anims[1] };
-        if seq != -1 {
-            let n = c.anim.frame_count(seq.max(0) as u8) as i32;
-            h.weapons.arm = blend + if n > 0 { n } else { ticks(30) };
-        }
+        return;
+    }
+    let seq = if h.group == 0xc { def.anims[2] } else { def.anims[1] };
+    if seq == -1 { return; }
+    for (i, &list) in ARM_LISTS.iter().enumerate() {
+        let mut l = AnimLayer::new(list);
+        h.weapons.layer_fade = 0;
+        h.weapons.layer_seq = seq;
+        l.weight = 1.0;
+        l.start(&*c.anim, seq.max(0) as u8, 0, blend, true);
+        h.weapons.layers[i] = Some(l);
+        if i == 0 && h.items.f13fb != 2 { return; }
     }
 }
 
-/// `0x22efd8`: the weapon put away (0x1413fa = 0, 0x1413f8 = 0).
+/// `0x22efd8`: the weapon put away (0x1413fa = 0, 0x1413f8 = 0); an arm layer out fades (0x140064 = 1).
 pub fn put_away(h: &mut Hero) {
     if h.f13f8 == 0 { return; }
-    h.weapons.arm = 0;
+    if h.weapons.layers[0].is_some() { h.weapons.layer_fade = 1; }
     h.f13fa = 0;
     h.f13f8 = 0;
 }
 
-/// `0x22f068`'s upkeep of the arm (from the hero's item update): out of ammo with 0x1413fa set → put away; the
-/// layer's end (the arm's ticks, with 0x1413fa clear) → the arm down.
-pub fn arm_upkeep(h: &mut Hero) {
+/// `0x22f068`'s upkeep of the arm (from the hero's item update): out of ammo with 0x1413fa set → put away; each
+/// arm layer re-blends to the item's layer sequence when it changed, advances, and fades in (0.2 a tick); its
+/// sequence's wrap (with 0x1413fa clear) takes the arm down and starts the fade (0.07 a tick, 0.25 after a
+/// holster); a layer faded to 0 is freed.
+pub fn arm_upkeep(h: &mut Hero, anim: &dyn AnimCtl) {
     if h.f13f8 != 0 && h.f13fa != 0 && h.weapons.has_ammo(h.items.slot.id) == 0 { put_away(h); }
-    if h.f13f8 != 0 && h.weapons.arm > 0 {
-        h.weapons.arm -= 1;
-        if h.weapons.arm == 0 && h.f13fa == 0 { h.f13f8 = 0; }
+    for i in 0..2 {
+        let Some(mut l) = h.weapons.layers[i] else { continue };
+        let id = h.items.slot.id;
+        if id == h.weapons.arm_item {
+            let def = h.weapons_def(id);
+            let seq = if h.group == 0xc { def.anims[2] } else { def.anims[1] };
+            if seq != -1 && l.seq_b as i32 != seq {
+                h.weapons.layer_seq = seq;
+                l.start(anim, seq.max(0) as u8, 0, ticks(8), true);
+            }
+        }
+        l.advance(anim);
+        if h.weapons.layer_fade == 0 {
+            approach_f(&mut l.weight, 1.0, 0.2);
+            if l.flags & 2 != 0 && h.f13fa == 0 {
+                h.weapons.layer_fade = 1;
+                l.speed = 0.0;
+                h.f13f8 = 0;
+                h.weapons.layers[i] = Some(l);
+                return;
+            }
+        } else {
+            let step = if h.weapons.layer_fade == 2 { 0.25 } else { 0.07 };
+            approach_f(&mut l.weight, 0.0, step);
+            if l.weight == 0.0 {
+                h.weapons.layers[i] = None;
+                return;
+            }
+        }
+        h.weapons.layers[i] = Some(l);
     }
 }
+
+/// `0x270728(target, step, &x)` on native floats.
+fn approach_f(x: &mut f32, target: f32, step: f32) { *x += (target - *x).clamp(-step, step); }
 
 /// The holster check `0x2405f8`: stopped (idle, walk, stop) within 6 ticks of the draw with the stick below 0.7 and
 /// no 0x1413fb: put away, `0x140064 = 2`, the throw state 0x23.
@@ -201,6 +261,7 @@ pub(super) fn holster_check(h: &mut Hero, c: &mut Ctx) -> bool {
     if !(h.f50c < ticks(6) && h.stick_mag < Pf::b(0x3f33_3333)) { return false; }
     if h.items.f13fb != 0 { return false; }
     put_away(h);
+    h.weapons.layer_fade = 2;
     h.set_state(c, THROW, true);
     true
 }
