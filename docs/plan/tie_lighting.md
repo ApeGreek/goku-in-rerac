@@ -62,7 +62,8 @@ per-instance weights (at full detail the renderer uses c0). [verified; fat weigh
 
 Level load for all instances, then every frame for the visible list. The pass restarts from the ambient
 table every time, so without point lights the per-frame result equals the load-time one; the port lights
-once at load (Novalis: 1508 instances in ~6 ms). [verified from code]
+once at load (Novalis: 1508 instances in ~6 ms) and adds the point lights in the vertex shader
+(docs/plan/tfrag_lighting.md §9, "Point lights on world geometry"). [verified from code]
 
 ## 6. Draw rules used by the renderer (TieProc, boot 0x235be8)
 

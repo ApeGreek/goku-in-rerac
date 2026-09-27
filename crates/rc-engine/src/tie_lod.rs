@@ -179,18 +179,39 @@ pub struct TieLodState {
     shown: Vec<bool>,
     /// `RC_TIE_CPU_CULL` (default on).
     cpu_cull: bool,
+    /// What follows the per-instance words in the buffer: one `vec4<u32>` per instance whose x is its point-light
+    /// nibble list, then the point-light bank (16 `vec4`; crate::world_lights; tie.wgsl reads both).
+    tail: Vec<u8>,
 }
 
 impl TieLodState {
     pub fn new(inputs: Vec<TieLodInput>, occl: Vec<OcclBits>, fog: LevelFog, buffers: &mut Assets<ShaderBuffer>) -> Self {
         assert_eq!(inputs.len(), occl.len(), "one occlusion word per tie instance");
         let init: Vec<u32> = inputs.iter().flat_map(|_| [LOD_CULLED, 0, 0, 0]).collect();
+        // After the instance words: every nibble list empty (0xffff), an empty bank (crate::world_lights).
+        let mut tail = vec![0u8; inputs.len() * 16 + crate::world_lights::BANK_BYTES];
+        for i in 0..inputs.len() { tail[i * 16..i * 16 + 4].copy_from_slice(&0xffffu32.to_le_bytes()); }
+        let mut data = u32_bytes(&init);
+        data.extend_from_slice(&tail);
         // MAIN_WORLD too: rewritten every frame at the same size (see tfrag_lod).
-        let buffer = buffers.add(ShaderBuffer::new(&u32_bytes(&init), RenderAssetUsages::default()));
+        let buffer = buffers.add(ShaderBuffer::new(&data, RenderAssetUsages::default()));
         let force_lod0 = std::env::var("RC_TIE_LOD").is_ok_and(|v| v.trim() == "0");
         let cpu_cull = !std::env::var("RC_TIE_CPU_CULL").is_ok_and(|v| v.trim() == "0");
         let n = inputs.len();
-        TieLodState { buffer, inputs, occl, fog, force_lod0, last_hist: [usize::MAX; 6], entities: vec![Vec::new(); n], shown: vec![true; n], cpu_cull }
+        TieLodState { buffer, inputs, occl, fog, force_lod0, last_hist: [usize::MAX; 6], entities: vec![Vec::new(); n], shown: vec![true; n], cpu_cull, tail }
+    }
+
+    /// crate::world_lights: the ties' nibble lists and the bank bytes, into the buffer after the instance words.
+    pub fn set_point_lights(&mut self, lists: &[u16], bank: &[u8], buffers: &mut Assets<ShaderBuffer>) {
+        let n = self.inputs.len();
+        for (i, &l) in lists.iter().take(n).enumerate() { self.tail[i * 16..i * 16 + 4].copy_from_slice(&(l as u32).to_le_bytes()); }
+        self.tail[n * 16..n * 16 + bank.len()].copy_from_slice(bank);
+        if let Some(mut buf) = buffers.get_mut(&self.buffer) {
+            if let Some(d) = buf.data.as_mut() {
+                let at = d.len() - self.tail.len();
+                d[at..].copy_from_slice(&self.tail);
+            }
+        }
     }
 
     /// Instance `ii`'s part entities (spawned visible).
@@ -257,7 +278,9 @@ pub fn update_tie_lods(
         o.ties = crate::occlusion::CullCounts { occluded: hist[0], culled: hist[1], drawn: hist[2..].iter().sum() };
     }
     if let Some(mut buf) = buffers.get_mut(&state.buffer) {
-        buf.data = Some(u32_bytes(&words));
+        let mut d = u32_bytes(&words);
+        d.extend_from_slice(&state.tail);
+        buf.data = Some(d);
     }
     if hist != state.last_hist && time.elapsed_secs() - *last_print >= 1.0 {
         *last_print = time.elapsed_secs();

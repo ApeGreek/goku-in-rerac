@@ -37,6 +37,8 @@ Native reproductions of PS2 effects that are noticeable in play. One row each.
 | *(e.g. water ripple advances every 9 ticks)* | *(e.g. f32 truncation in the ripple phase accumulator)* | *(e.g. integer tick counter, `rc-game/src/water.rs`)* | *(e.g. PCSX2 trace, doc §)* |
 | The Comet-Strike's catch: when the wrench is nearly back, Ratchet's anim jumps from the throw loop to the catch frames in one tick | `0x247d18` sets the loop exit 0x13fe08; the next key step of Ratchet's advance sets the rate 0x13fde4 to `0x15f708` = `0x7f800000`, which the PS2 FPU treats as the largest finite value (2¹²⁸, no infinity): the advance after it steps onto the key at once, and `(speed·2¹²⁸ − 1)/2¹²⁸` leaves t = speed. IEEE would give ∞ and NaN | the exit's next advance completes one key step and continues with `t = speed · rate` of the new key; no infinite rate is stored (`rc-game/src/hero/anim.rs` `RatchetAnim::jump`, test `anim::tests::loop_exit_jumps_to_the_key`) | disassembly of 0x247d48 (0x247ed0 `lwc1 f23, 0x15f708`) and the ELF data word; not trace-checked |
 | Moby shadows darken the ground by 25 % with a hard edge, and never the casters | `ShadowResolve` 0x29b580: ALPHA_1 0x2000000064 on the frame buffer's display bytes (`Cd − ⌈Cd/4⌉`), gated by DATE on the destination-alpha counter the volumes built by texture feedback (TEX0 = the frame buffer, MODULATE 0x82 / 0x7f) | a native count target (R16Float, +1 / −1 per face, depth-tested against the scene) and one fixed multiply blend `dst·0.53` on the sRGB target (0.75^≈2.2 in linear light); casters drawn after the pass (`rc-engine/src/shadow_render.rs`, `moby_render.rs` `caster_pass`) | the multiply is within ±2 of the GS byte on 244 of 256 display bytes and −3 on 12 dark ones (12..40); test `shadow_render::tests::factor_matches_the_gs_bytes`. Not PCSX2-compared per pixel (docs/plan/shadows.md) |
+| Explosion light on tfrags, ties and shrubs steps in whole colour bytes and saturates (255 tfrags, 243 ties / shrubs) | `LightTfrags` / `LightTies` / `LightShrubs` add each light on the float grid `65536 + c/128` (truncating VU0 FMAC), i.e. `floor(128·colour·d)` per light, then clamp | IEEE f32 in the world vertex shaders with the game's operation order, `floor(128·colour·d)` per light and the same clamps; the PS2 last-bit rounding is not modelled (`assets/shaders/world_lights.wgsl`, `rc-engine/src/world_lights.rs`; tfrag_lighting.md §9) | same formulas as the bit-exact CPU passes (`tfrag_light::light_tfrag`, `tie_light::light_regs`, `shrub_light::light_regs`, with points); expected ≤ 1 byte from them; not PCSX2-compared |
+| Additive and translucent effects glow like the PS2's: dim additive puffs stack into saturated white-hot cores (the arrival crash's orb trail, the Bomb Glove's fire, the fire fields), translucent shells tint dark ground less | The GS blends on the frame buffer's display-encoded bytes: ALPHA 0x48 `Cd + (Cs·As >> 7)` and 0x44 `Cd + ((Cs − Cd)·As >> 7)`, clamped to 0..255 per draw, with MODULATE `Ct·Cv >> 7` letting vertex colours above 0x80 brighten up to 2× | a render-target choice, one mechanism for every effect entity (`DisplayEffect`: the particles, the effect mobys `MobyBlend::Translucent` / `Additive`, the draw-callback effects of `fx_draw.rs` incl. the fire fields and the nanotech glow): after Bevy's transparent pass their `Transparent3d` items are drawn into an `Rgba8Unorm` copy of the frame that holds the display bytes themselves, with ordinary hardware blending (`One, OneMinusSrcAlpha` on the premultiplied GS terms), depth-tested against the scene, then converted back (exact per byte both ways); the world keeps linear-light blending (`rc-engine/src/display_blend.rs`, `assets/shaders/display_blend.wgsl`, `effect_blit.wgsl`) | stacking and order as the GS (hardware rounding of `Cs·As/128` instead of truncation: ±1 level; As > 0x80 clamps in the 0x44 destination factor; effects drawn after all translucent world draws). Screenshots vs PCSX2 (2026-09-27, particles.md "Display-space blending"): crash orb trail, Bomb Glove explosion, nanotech crate; flyer trails unchanged. Cost within the frame-rate noise (≈118 fps before and after at the flyer view) |
 | Blarg flyers' (660) per-segment path length, which sets their first-guess step along each spline segment (5 % too fast or too slow otherwise until the arc-length correction) | `FUN_0028bb90` samples the Hermite segment with `t += 0.05` while `t ≤ 1.0`: the PS2's truncating adds reach t = 0.99999946 on the 20th sample and take it; IEEE round-to-nearest reaches 1.0000001 after 19 and drops the last chord | 20 samples at `t = 0.05·k`, k = 1..=20 (`rc-game/src/moby_update/classes/flyer.rs` `arc_lengths`) | `compare-novalis-spawn` §f2: all 10 flyer splines (count, z, per-point arc lengths) within 2.7e-4 of RAM (2026-09-27, `SCUS-97199 (CE4933D0).01.p2s`) |
 
 ### Tolerances
@@ -65,7 +67,7 @@ Layers whose fate the user has deferred. One row each.
 
 | Layer (where) | Status | Options |
 |---|---|---|
-| Additive particles blended in display bytes (flyer trails, sparkles, TNT sparks; `particle_render.rs` + `particle.wgsl`) | Deferred by the user 2026-09-28 | Keep as a layer, or replace with a calibrated native brighten in the native pass |
+| Additive particles blended in display bytes (flyer trails, sparkles, TNT sparks; `particle_render.rs` + `particle.wgsl`) | **Decided 2026-09-27: display-space blending for additive/glow effects** (user: "Let's go with the PS2-style blending glow on effects") | Implemented generally for every effect (particles, effect mobys, draw-callback effects) as one mechanism, recorded under "Result-level reproductions" (`rc-engine/src/display_blend.rs`) |
 
 ## Summary
 
@@ -298,11 +300,16 @@ The effect mobys and particles (2026-09-28): translucent and additive mobys (mob
 are drawn with native blend modes (alpha blend or additive, depth tested, no depth write, sorted; `moby_render.rs`
 `MobyBlend`), not with the GS's per-moby TEST_1 / ALPHA_1 words: the result the game produces (a flash's pixels, all
 below the Z-writing AREF 0x60, blend over the scene without occluding it) is reproduced, not the register split. The
-moby additive mode adds in linear light; the particles' display-byte additive stays the deferred layer (Open decisions),
-unchanged. The new particle types 2, 4, 8, 15, 52 (`rc-game/src/particles/type*.rs`), the point-light bank
+moby additive mode added in linear light and only the particles' additive group blended in display bytes (the then
+deferred layer). Since 2026-09-27 every effect (both groups of particles, the translucent and additive effect mobys,
+the draw-callback effects) blends in display bytes through one mechanism (`display_blend.rs`; "Result-level
+reproductions"), and the particles size and cull with the view's real field of view (scenes narrow it). The new particle types 2, 4, 8, 15, 52 (`rc-game/src/particles/type*.rs`), the point-light bank
 (`rc-game/src/point_lights.rs`) and the moby point-light merge (`moby_render.rs` `point_light_merge`) are standard `f32`.
 Type 2's packed velocities (8 bits per axis, `0x276380`) are the game's storage format, not a hardware effect, and are
 kept (the blobs move in the game's quantised steps). No layer was added.
+The effect particles of 2026-09-27 (types 16, 19 / 55, 22, 26, 35, 45 / 66, 46, 64), the splash class 775, the
+nanotech glow and the renderer's lines / ribbons (kinds 2 / 3) are standard `f32` too (type 22's VU0 colour tween is
+done in floats; the overlay tables are read through the functions' relocations); no layer was added.
 The thrown wrench's rotation (`rc-game/src/hero/comet.rs` `turn_local` / `launch_euler`: `0x277380`, the throw
 `0x236da0`) reuses the existing `Pf` rows ↔ Euler helpers (`services::euler_rows` / `mat4_mul` / `rows_euler`) and
 adds no layer; no PS2 effect there is noticeable (the game's round trip through Euler each tick is kept).
@@ -353,6 +360,12 @@ steps (it lives inside the `Pf` follow camera: `fast_cos`, `FastNormalizeAngle`,
 there was noticeable enough to reproduce.
 
 ## Reproduced game quirks (game-logic fidelity, not hardware)
+
+- **Point-light list capacity.** `CreatePointLight` 0x252a28 lists at most 0x200 instances per light, ties first,
+  then tfrags, then shrubs, and attaches with the radius at that moment plus 8 (re-attached only after moving 8
+  units): the arrival crash's radius-60 lights fill the list with 512 ties, so the grass hill (tfrags) and the shrubs
+  next to the explosion stay unlit, as in the original (`rc-game/src/point_lights.rs` `WorldLightLists`,
+  tfrag_lighting.md §9).
 
 - **Post-scale list re-append bug** (the "dropped-joint scale rule"). the walk keeps A records only up to the first
   joint also in B, then the B records after it, so the dropped joints get no post-scale (`rc-formats/src/moby_anim.rs` `post_scale_list`;

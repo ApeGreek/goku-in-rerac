@@ -21,6 +21,12 @@
     mesh_functions,
     view_transformations::{position_world_to_clip, position_world_to_view},
 }
+#ifdef DISPLAY_BLEND_MIX
+#import randcrw::display_blend::gs_mix
+#endif
+#ifdef DISPLAY_BLEND_ADD
+#import randcrw::display_blend::gs_add
+#endif
 
 struct MobyFog {
     // rgb = FOGCOL (display-encoded 0..1), w = 1 when fog is enabled.
@@ -170,5 +176,13 @@ fn fragment(in: MobyVertexOutput) -> @location(0) vec4<f32> {
 #ifdef GS_ATEST_FAIL
     if (a_s >= f32(#{GS_AREF})) { discard; }
 #endif
+    // Effect mobys (gs_state `EffectMix` / `AdditiveNoZ`): the GS blend on the frame's display bytes
+    // (crate::display_blend).
+#ifdef DISPLAY_BLEND_MIX
+    return gs_mix(round(rgb * 255.0), a_s);
+#else ifdef DISPLAY_BLEND_ADD
+    return gs_add(round(rgb * 255.0), a_s);
+#else
     return vec4<f32>(srgb_to_linear(rgb), a_s / 128.0);
+#endif
 }

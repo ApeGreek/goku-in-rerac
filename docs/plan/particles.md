@@ -353,9 +353,10 @@ pixels, the 1.0625 y factor and 256-step rotation, corners added in clip space a
 bilinear, clamp, no fog. TEST_1 0x5380b as two draws per blend group; ALPHA 0x44/0x48 as one premultiplied blend
 (`One, OneMinusSrcAlpha`, alpha As or 0). The additive group draws B (A < 0x80, no Z) before A (Z write) so that a
 particle's opaque core does not hide the soft edges of those behind it (in the GS order a B pixel is only rejected
-by A pixels drawn earlier); the normal group draws A then B. Deviations: linear-light blending on the sRGB target,
-As > 0x80 clamps in the 0x44 destination factor, 0x44 and 0x48 particles are not interleaved, no underwater far,
-kinds 1–3 counted and not drawn, textures uploaded once (no paging).
+by A pixels drawn earlier); the normal group draws A then B. Deviations: linear-light blending on the sRGB target (since
+2026-09-27 display bytes, see "Display-space blending" below), As > 0x80 clamps in the 0x44 destination factor, 0x44 and
+0x48 particles are not interleaved, no underwater far, kinds 1–3 counted and not drawn (kind 1 since 2026-09-28, kinds 2
+/ 3 since 2026-09-27), textures uploaded once (no paging).
 
 **Checked on screen** (Novalis, `RC_CAM=141,160,61,150.5,170,57.5`, frames 120 and 300): the pair of emitters over
 the crater (149, 171.8, 56.8)/(149.5, 166.5, 56.8) show as two soft, glowing white steam puffs about 1 unit across;
@@ -442,7 +443,7 @@ puff per tick at the flyer's speed (1.25 u apart at 1.235 u/tick, flyer 622 / em
 light-grey streak. The port added `lin(Cs)·As` in linear light on the sRGB target: lin(31/255) = 0.014, +0.02 linear
 over a sky at display 0.6 ≈ +0.02 display: a tenth of the GS's step.
 
-**Fix (renderer only; `particle_render.rs` module doc "Additive in display bytes", `particle.wgsl`).** Additive
+**Fix (renderer only; superseded 2026-09-27 by the general mechanism of "Display-space blending" below).** Additive
 (0x48) fragments read the scene under them from Bevy's screen-space transmission snapshot
 (`view_transmission_texture`: a hidden, fragment-less "opaque, reads transmission" trigger item puts one item in
 Transmissive3d, whose pass copies the frame after the sky/opaque/alpha-mask passes) and output
@@ -551,8 +552,8 @@ the blobs move in the game's quantised steps. Types 2 and 15 read the tick count
 by the particle hook). Type 8 animates its texture through 11 frames of `def[8]`.
 
 **Render kind 1** (flat quad, type 52): `particle_render.rs` draws it with the world XY corners of L2 (§7), projected per
-corner, same blend and alpha split as the sprites; the extra cull `z12 − ftoi12(r) < 0x100`. Kinds 2/3 are still not
-drawn (no ported type uses them).
+corner, same blend and alpha split as the sprites; the extra cull `z12 − ftoi12(r) < 0x100`. Kinds 2/3 were not
+drawn then (drawn since 2026-09-27, see "Display-space blending").
 
 **RNG.** With these spawners and the light's slot, a dry bomb explosion makes exactly the game's draws: `bomb.rs`
 `tests::dry_explosion_rand_stream_matches_the_game_ledger` checks every tick of a flight and explosion against a ledger
@@ -592,3 +593,74 @@ per puff, 2 per ring).
 `novalis_waterfall_foam_spawns_rings_and_mist` (600 ticks in zone 5: 127 rings alive, ~400 puffs, deterministic);
 engine `RC_HERO_AT=177,184,41,-1.5708 RC_PLAY_FLY=1 RC_CAM=168,171,44,178,170,39` frame 200: the white foam on the pool at
 the foot of the fall (`RC_PART_STATS`: 56:11–15, 57:120–127 alive).
+
+## Display-space blending, the effect particles and the draw callbacks (2026-09-27)
+
+User decision 2026-09-27: "Let's go with the PS2-style blending glow on effects" (hardware_fidelity_layers.md, Open
+decisions → decided; the layer is a row of "Result-level reproductions").
+
+**Why the effects were dim (root causes).**
+1. *Linear-light blending of stacked effects.* The GS adds `Cs·As >> 7` to display bytes and clamps each draw at 255.
+   The arrival crash's orb trail (type 23, `FUN_00278810`) puts, per trail point, two orange glow puffs (texture 0: grey
+   0x50 at a GS alpha ≤ 0x29, so +25 display levels each at alpha 0x6e) and three white cores (vertex colour 0xff: Cs =
+   2·Ct, +58 each) on top of each other; the GS sums them to white. The earlier fix blended each additive sprite
+   against one snapshot of the frame, so overlapping sprites added *linear* increments: eight +25 layers on grass (30)
+   gave 139 instead of 255 (and the orange hue washed out to grey-green). Measured on the crash frame: the orbs rose
+   +74 / +53 / +32 over the grass (30, 41, 16); PCSX2 shows them saturated (255, 255, ~215).
+2. *The particles ignored the view's field of view.* `0x1607ec` (the sprite size in pixels) and the cull's tan_x are
+   recomputed by `UpdateViewContext` 0x219580 from 0x16cf70 whenever the FOV changes; the port used the default 0.63.
+   The scenes narrow the FOV, so every scene particle was drawn smaller than the game's (less overlap, dimmer). Now
+   `particle_render::view_tans` reads the camera's `GameProjection` (sizes, frustum cull, the emitters'
+   `FastBSphereCheck` view, and the star cull `sky_stars.rs`).
+3. *Vertex colours above 0x80* were **not** clamped anywhere in the chain (checked: `particle.wgsl` MODULATE is
+   `min(⌊Ct·Cv/128⌋, 255)`, `moby.wgsl` `min(t·c, 1)` with c = byte/128, the callback shader likewise), so the
+   handoff's candidate (b) was not a cause.
+
+**The mechanism (`rc-engine/src/display_blend.rs`).** Every effect entity carries `DisplayEffect` and its pipeline
+targets `Rgba8Unorm` (`display_blend::specialize`): the particle draws, the translucent / additive effect mobys
+(`GsPass::EffectMix` / `AdditiveNoZ`, `moby.wgsl` `DISPLAY_BLEND_*`), the draw-callback primitives (`fx_draw.rs`
+`FxPrimMaterial`, `fx_prim.wgsl`, which the fire fields now share). In the render world, before Bevy's transparent pass
+their `Transparent3d` items are taken out of the view's phase (`split_effects`); after it, `effect_pass` converts the
+frame into an `Rgba8Unorm` target holding the display bytes (`effect_blit.wgsl` `to_display`; MSAA: a multisampled copy
+resolved into it), draws the items there in their sorted order with ordinary hardware blending (`One, OneMinusSrcAlpha`
+on the premultiplied GS terms of `display_blend.wgsl` `gs_add` / `gs_mix`) against the view's depth buffer, and
+converts back (`to_linear`); the items are then put back into Bevy's retained phase. Both conversions round-trip every
+byte. Order: all effects after all world translucent draws (effect mobys by depth, list-1 callbacks band 9e5,
+particles 1e6, list-2 callbacks 2e6 / 3e6). **Cost**: nothing without effect items; with them two full-frame blits and
+the MSAA resolve of the effect target. Free-running (`RC_NOVSYNC=1`, 2048×1664, MSAA 4): flyer view 118 fps before and
+after; nanotech close-up 91 fps after vs 76–87 before (the "after" build also carries the concurrent world-light work),
+i.e. below the noise of these runs.
+
+**The nanotech glow (`0x301c00`, `fx_draw.rs` `nanotech_prims`).** Registered by the cluster (`pickup.rs`, list 1)
+every tick it is in view; drawn from overlay tables found through the function's relocations (the same code on all 19
+levels: ordinals of its `lui/addiu`, gp and absolute references, `NanotechTables::parse`): a camera-facing hemisphere of
+radius 0.3 (290 vertices, three strips, FX 21 × 0x50804040, ALPHA 0x44: the dark translucent ball), a 32-quad halo
+ring 0.3..0.44 (FX 11 radial glow, colour 0x802020 with alpha `bob/0.06·64 + 128`: the pulsing blue-violet glow), and on
+the crate the glass's sphere-mapped sheen (4 quads, 0x107f7f7f). The dotted rings are the orbs' type-62 trails (life 40
+when the game camera is within 10 units, 5 otherwise).
+
+**New particle types** (`crates/rc-game/src/particles/`, standard `f32`, the game's draws at its points; module docs have
+the records): 16 (smoke; spawner throttle draws in `type16::throttled`), 19 / 55 (ribbons, kind 3), 22 (rising puffs;
+the VU0 update read from the disassembly), 26 (glow riding a moby), 35 (drops), 45 / 66 (flat rings), 46 (water rings),
+64 (bursting scorch). Types 26 / 55 follow mobys through `Particles::joint_anchors`, which the moby loop fills after its
+pass (`World::refresh_particle_anchors`). Callers wired with their real arguments: the fires 700 (16), the breakables
+704 / 729 / 778 / 779 (22), the gunship's shells and embers (26, 22), the path enemies' shots and jet exhaust (26, 22),
+the fire fields' smoke (23, level 00), the cutscene driver's scene-1 rings / drops (46, 35) and the splash class 775
+(`classes/splash.rs`, `FUN_002ff768` / update `0x2ff810`), the infobot's thrusters `0x278450` (23, from its root joint:
+`SceneActorState::joint_matrix`). **Not wired**: the bomb's water entry and underwater burst (`0x2bfe40`: types 34 / 35 /
+64 / 16 there), the Comet-Strike's hit ribbons (`0x2bdd20`, type 19) and `0x2c72c8`, the joint ribbon's caller
+`0x2e8dd8` (type 55).
+
+**Renderer kinds 2 / 3**: see "In the port (2026-09-27)" § Pass 1 / `particle_render.rs` module doc; checked with a
+temporary test spawn (a line and type-19 streaks over the nanotech crate), then removed; no ported caller spawns them yet.
+
+**The ship glass (`0x2a70a8`)**: registered by the cutscene driver (list 1, `Callback::ShipGlass` with the ship's
+joint-0 matrix); **not drawn**: with the port's joint-0 pose of the arrival ship 530 its tables (gp arrays per class
+530..533) put a glass bowl under the hull, which the PCSX2 frames do not show (the frame the game uses is not settled).
+
+**Checked** (engine, frame-exact, scratch `effects/shots/`): `cmp_trail.png` (the crash frame 132: before / after /
+PCSX2 crop), `cmp_nanotech.png` (before / after / `images/37.webp`), `cmp_flyer.png`, `cmp_bomb.png` (frames 40 / 50 / 65
+before and after, PCSX2 frames 20–23); scene 1 at frames 490 / 500 (the Plumber's splash, rings and drops; stats: types
+35 and 46 alive, no unported kills), scene 4 at 900. Two runs of the crash frame and of the bomb frame 50 give identical
+PNGs. `cargo test --workspace` green (the bomb rand ledger and `novalis_hero_digest` included).
+

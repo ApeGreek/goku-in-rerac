@@ -44,7 +44,7 @@
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
 use crate::moby_update::classes::debris::flash_spawn;
-use crate::moby_update::creature::projectile::{self, Part};
+use crate::moby_update::creature::projectile;
 use crate::moby_update::creature::{self as c, damage, flash, fx, ground, knock, target, turn, walker};
 use crate::moby_update::services::{pf as to_pf, pv, World};
 use crate::ps2v::Pf;
@@ -697,20 +697,25 @@ fn land(w: &mut World, id: MobyId, t: c::V) {
 /// `0x2e6518(moby, old)`: three jet-exhaust particles (type 22) from joint list 1, per particle
 /// `randf(1, −1)·0.2·dt` ×2 and `randf(0.8, 1.2)·−7·dt` (rotated into the body, plus this tick's move), `randi(6)` ×2
 /// colours, `randf(105000, 157500)` size, `ticks(rand_range(5, 15))` life.
+/// The exhaust colours (level01 .data 0x20af50 / 0x20af68).
+const EXHAUST_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
+const EXHAUST_C2: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
+
 fn jet_exhaust(w: &mut World, id: MobyId, old: c::V) {
     for _ in 0..3 {
         let x = w.rng.randf(1.0, -1.0) * c::DT * 0.2;
         let y = w.rng.randf(1.0, -1.0) * c::DT * 0.2;
         let z = w.rng.randf(0.8, 1.2) * c::DT * -7.0;
-        let _j = w.joint_point(id, 1);
+        let j = w.joint_point(id, 1);
         let r = w.m(id).rows;
-        let _v = c::add(std::array::from_fn(|k| if k == 3 { 0.0 } else { r[0][k] * x + r[1][k] * y + r[2][k] * z }), c::sub(c::pos(w, id), old));
-        let _a = w.rng.randi(6);
-        let _b = w.rng.randi(6);
-        let _size = w.rng.randf(f32::from_bits(0x47cd_1400), f32::from_bits(0x4819_cf00));
+        let v = c::add(std::array::from_fn(|k| if k == 3 { 0.0 } else { r[0][k] * x + r[1][k] * y + r[2][k] * z }), c::sub(c::pos(w, id), old));
+        let a = w.rng.randi(6);
+        let b = w.rng.randi(6);
+        let size = w.rng.randf(f32::from_bits(0x47cd_1400), f32::from_bits(0x4819_cf00));
         let n = w.rng.rand_range(5, 15);
-        let _life = w.ticks(n);
-        projectile::part(w, Part::T22);
+        let life = w.ticks(n);
+        let (c1, c2) = (EXHAUST_C1[a as usize], EXHAUST_C2[b as usize]);
+        projectile::part22(w, &crate::particles::type22::Spawn { size, pos: j, vel: v, c1, c2, life });
     }
 }
 
@@ -808,8 +813,8 @@ pub fn spawn_shot(w: &mut World, shooter: MobyId, p: c::V, v: c::V, life: i32) -
     c::set_pv4(w, m, 0, v);
     c::set_pi32(w, m, 0x10, shooter as i32);
     c::set_pi32(w, m, 0x14, life);
-    projectile::part(w, Part::T26);
-    projectile::part(w, Part::T26);
+    projectile::part26(w, 210000.0, m, 0x2f00_007f, life);
+    projectile::part26(w, 115500.0, m, 0x4f00_4f7f, life);
     w.build_matrix(m);
     Some(m)
 }

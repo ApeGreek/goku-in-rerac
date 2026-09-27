@@ -371,7 +371,7 @@ mod tests {
         // Consecutive points turn right-handed about d by 6.28/6.
         let (v0, v1) = (sub(ring[0], [1.0, 2.0, 3.0]), sub(ring[1], [1.0, 2.0, 3.0]));
         assert!(dot(cross(v0, v1), f.dir) > 0.0);
-        assert!(((dot(v0, v1) / 0.25).acos() - 6.28 / 6.0).abs() < 1e-4);
+        assert!(((dot(v0, v1) / 0.25).acos() - TWO_PI / 6.0).abs() < 1e-4);
     }
 
     fn capsule(a: [f32; 4], b: [f32; 4], seg: [i32; 2]) -> PosedPrim { PosedPrim { capsule: true, segments: seg, a, b } }
@@ -422,7 +422,7 @@ mod tests {
             for k in 0..3 { *edges.entry((key(t[k]), key(t[(k + 1) % 3]))).or_insert(0) += 1; }
         }
         for (&(a, b), &n) in &edges { assert_eq!(edges.get(&(b, a)), Some(&n), "edge {a:?}→{b:?}"); }
-        let hex = 6.0 * 0.5 * 0.25 * (6.28f32 / 6.0).sin();
+        let hex = 6.0 * 0.5 * 0.25 * (TWO_PI / 6.0).sin();
         // The cross-section perpendicular to d has the hexagon's area; the horizontal slab section is area/|d.z|.
         let want = hex / f.dir[2].abs() * 0.4;
         assert!((signed_volume(&tris) - want).abs() < 5e-4, "{} vs {want}", signed_volume(&tris));

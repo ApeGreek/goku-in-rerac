@@ -295,19 +295,25 @@ fn spring_turn_is_spring_turn2_on_any_angle() {
 fn projectile_parts_draw_like_the_spawners() {
     let mut sim = Sim::new(577, [30.0, 30.0, 10.0], critter_pvars(), [25.0, 30.0, 10.0]);
     let mut w = World::new(&mut sim.table, &sim.hero, &mut sim.rng, &sim.classes, &mut sim.svc, 0);
-    let count = |w: &mut World, p: projectile::Part| {
-        let before = *w.rng;
-        projectile::part(w, p);
-        draws(&before, w.rng)
-    };
     // Types 22 / 26: one raw rand() with a record (no particle system: as with a free record).
-    assert_eq!(count(&mut w, projectile::Part::T22), 1);
-    assert_eq!(count(&mut w, projectile::Part::T26), 1);
+    let before = *w.rng;
+    projectile::part22(&mut w, &crate::particles::type22::Spawn { size: 1.0, pos: [5.0; 4], vel: [0.0; 4], c1: 0, c2: 0, life: 10 });
+    assert_eq!(draws(&before, w.rng), 1);
+    let before = *w.rng;
+    projectile::part26(&mut w, 1.0, 0, 0x8080_8080, 10);
+    assert_eq!(draws(&before, w.rng), 1);
     // Type 16: nothing for life 0; the throttle draws only over the frame loads 0.9 / 0.95 / 1.0.
-    assert_eq!(count(&mut w, projectile::Part::T16 { life: 0 }), 0);
-    assert_eq!(count(&mut w, projectile::Part::T16 { life: 60 }), 1);
+    let t16 = |life| crate::particles::type16::Spawn { size: 1.0, pos: [5.0; 4], vel: [0.0; 4], c1: 0, c2: 0, life, kind: 0 };
+    let before = *w.rng;
+    projectile::part16(&mut w, &t16(0));
+    assert_eq!(draws(&before, w.rng), 0);
+    let before = *w.rng;
+    projectile::part16(&mut w, &t16(60));
+    assert_eq!(draws(&before, w.rng), 1);
     w.svc.frame_load[0] = Pf::f(0.96);
-    let n = count(&mut w, projectile::Part::T16 { life: 60 });
+    let before = *w.rng;
+    projectile::part16(&mut w, &t16(60));
+    let n = draws(&before, w.rng);
     assert!((1..=3).contains(&n), "{n}");
     assert_eq!(w.svc.fx.part_spawns.get(&22), Some(&1));
     assert!(projectile::in_world([2.0, 1021.0, 500.0, 0.0]) && !projectile::in_world([1.9, 5.0, 5.0, 0.0]));

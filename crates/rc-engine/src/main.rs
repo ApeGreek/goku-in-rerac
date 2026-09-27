@@ -24,8 +24,10 @@
 
 mod audio_out;
 mod determinism;
+mod display_blend;
 mod disc_source;
 mod fly_cam;
+mod fx_draw;
 mod fog_state;
 mod game_camera;
 mod gameplay;
@@ -61,6 +63,7 @@ mod tie_light;
 mod tie_lod;
 mod tie_render;
 mod water_render;
+mod world_lights;
 
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::prelude::*;
@@ -127,9 +130,13 @@ fn main() -> anyhow::Result<()> {
     .insert_resource(spawn)
     .add_plugins(tie_render::TieRenderPlugin)
     .add_plugins(shrub_render::ShrubRenderPlugin)
+    // Point lights on tfrags, ties and shrubs (the game's Light* point passes; crate::world_lights).
+    .add_plugins(world_lights::WorldLightsPlugin)
     .add_plugins(sky_render::SkyRenderPlugin)
+    .add_plugins(display_blend::DisplayBlendPlugin)
     .add_plugins(particle_render::ParticlePlugin)
     .add_plugins(water_render::WaterPlugin)
+    .add_plugins(fx_draw::FxDrawPlugin)
     .add_plugins(sky_stars::SkyStarsPlugin)
     .add_plugins(fog_state::FogStatePlugin)
     .add_plugins(hud_render::HudPlugin)

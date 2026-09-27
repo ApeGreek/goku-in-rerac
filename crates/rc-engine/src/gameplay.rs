@@ -1090,7 +1090,8 @@ fn tick(
         None => PadInput::neutral(),
     };
     // The view of the last rendered frame (0x16d140, `FastBSphereCheck`): the main camera as last drawn.
-    let view_cull = cams.iter().next().map(crate::particle_render::bsphere_view);
+    let tans = particles.as_deref().map_or_else(|| crate::particle_render::view_tans(None), |s| s.view_tan);
+    let view_cull = cams.iter().next().map(|t| crate::particle_render::bsphere_view(t, tans));
     let level_index = p.level;
     // The scene form of the tick (crate::scene_render: mode 2).
     let scene_frame = p.game.camera_paused;
@@ -1142,6 +1143,8 @@ fn tick(
             // one rand stream.
             sim.sys.camera = [cam.pos[0].0, cam.pos[1].0, cam.pos[2].0];
             sim.sys.cam_yaw = cam.yaw().to_f32();
+            // 0x13f640, the water level (type 35's drops land on it).
+            sim.sys.water_z = hero.water_level.to_f32();
             // The particles the hero update spawned (sparks, sand, …: rc_game::hero::fx), in its order.
             rc_game::hero::fx::create_particles(hero, &mut sim.sys);
             crate::particle_render::update_parts(sim, Some(rng));

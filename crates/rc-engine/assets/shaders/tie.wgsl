@@ -15,11 +15,17 @@
 // 0x4b000000 + byte. Dinky vertices: the slot colour as is (`lq vf11, 838(vi09)`).
 // Texture: same GS rules as tfrag.wgsl (MODULATE, raw display-encoded bytes, As = At * Af >> 7, mip level
 // round(log2(z / 32) + K) clamped to 0..MXL).
+// Point lights (`LightTies`' third light, crate::world_lights): when the instance's nibble list names any, each slot
+// colour the vertex reads (c0, and c1 / c2 of a fat vertex, before the VU blend) gets the merged light on its class
+// normal added, clamped at 243. With an empty list (0xffff) nothing changes. The class normals ride in the
+// instance record, the lists (one vec4 per instance, x) and the bank (16 vec4, f32 bits) after the per-frame LOD
+// words (no bindings of their own: a changed material layout reorders draws and changes lightless frames).
 
 #import bevy_pbr::{
     mesh_functions,
     view_transformations::{position_world_to_clip, position_world_to_view},
 }
+#import randcrw::world_lights::{WorldLight, NO_LIGHTS, InstanceLight, instance_light, instance_lit_packed}
 
 struct TieFog {
     color: vec4<f32>,
@@ -38,6 +44,8 @@ struct TieInst {
     // x = bounding radius (world units).
     misc: vec4<f32>,
     colors: array<u32, 64>,
+    // The class normals (s16: x | y << 16, z) the point lights use.
+    normals: array<vec2<u32>, 64>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
@@ -47,6 +55,25 @@ struct TieInst {
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> insts: array<TieInst>;
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var<storage, read> lods: array<vec4<u32>>;
+
+// `lods` = n instance words, n (nibble list, -, -, -), then the bank.
+fn tie_count() -> u32 { return (arrayLength(&lods) - 16u) / 2u; }
+
+fn bank() -> array<WorldLight, 8> {
+    let b = 2u * tie_count();
+    var ls: array<WorldLight, 8>;
+    for (var k = 0u; k < 8u; k += 1u) {
+        ls[k] = WorldLight(bitcast<vec4<f32>>(lods[b + 2u * k]), bitcast<vec4<f32>>(lods[b + 2u * k + 1u]));
+    }
+    return ls;
+}
+
+// Slot `j`'s colour with the instance's merged point light.
+fn lit_slot(rgba: u32, j: u32, il: InstanceLight, tag: u32) -> u32 {
+    let p = insts[tag].normals[j];
+    let n = vec3<f32>(f32(bitcast<i32>(p.x << 16u) >> 16u), f32(bitcast<i32>(p.x) >> 16u), f32(bitcast<i32>(p.y << 16u) >> 16u)) / 32768.0;
+    return instance_lit_packed(rgba, il, n, insts[tag].model, 243.0);
+}
 
 struct TieVertex {
     @builtin(instance_index) instance_index: u32,
@@ -141,11 +168,21 @@ fn vertex(v: TieVertex) -> TieVertexOutput {
     let world = ((*inst).model * vec4<f32>(v.position + k * v.delta, 1.0)).xyz;
     out.position = position_world_to_clip(world);
     out.uv = v.uv;
-    let c0 = (*inst).colors[v.info & 63u];
+    var c0 = (*inst).colors[v.info & 63u];
+    let list = lods[tie_count() + tag].x & 0xffffu;
+    var il = InstanceLight(vec3<f32>(0.0), vec3<f32>(0.0), 0.0, false);
+    if (list != NO_LIGHTS) {
+        il = instance_light(list, bank(), (*inst).centre.xyz);
+        if (il.hit) { c0 = lit_slot(c0, v.info & 63u, il, tag); }
+    }
     var rgba = c0;
     if (((v.morph >> 12u) & 1u) != 0u) {
-        let c1 = (*inst).colors[v.morph & 63u];
-        let c2 = (*inst).colors[(v.morph >> 6u) & 63u];
+        var c1 = (*inst).colors[v.morph & 63u];
+        var c2 = (*inst).colors[(v.morph >> 6u) & 63u];
+        if (il.hit) {
+            c1 = lit_slot(c1, v.morph & 63u, il, tag);
+            c2 = lit_slot(c2, (v.morph >> 6u) & 63u, il, tag);
+        }
         rgba = 0u;
         for (var i = 0u; i < 32u; i += 8u) {
             let lane = vu_fat_lane((c0 >> i) & 0xffu, (c1 >> i) & 0xffu, (c2 >> i) & 0xffu, lod.z, lod.w);

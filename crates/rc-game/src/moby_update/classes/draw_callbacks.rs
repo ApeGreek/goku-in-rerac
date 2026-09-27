@@ -24,6 +24,11 @@ use crate::moby_update::services::World;
 pub enum Callback {
     /// The fire / smoke field 760 (level01 `0x2fe080`, list 2): [`super::fire_field`].
     FireField760,
+    /// The nanotech cluster 806's glow (level01 `0x301c00`, list 1; draw only): [`super::pickup::nanotech_glow`].
+    NanotechGlow,
+    /// The ships' canopy glass (level01 `0x2a70a8`, the boot's `0x2327a0`; draw only, apart from its cross-fade timer):
+    /// registered by the cutscene FX driver on list 1 with the ship's joint-0 matrix ([`DrawCallbacks::matrices`]).
+    ShipGlass,
 }
 
 /// The two lists (registration order).
@@ -33,12 +38,23 @@ pub struct DrawCallbacks {
     pub list1: Vec<(Callback, MobyId)>,
     /// `0x21b198` (after the particles).
     pub list2: Vec<(Callback, MobyId)>,
+    /// For the draw-only callbacks that draw in a joint's frame (the ship glass: `0x264508(m, 0, M)`): the matrix
+    /// (rows x, y, z, point) of the registering moby this tick, taken where the port has the pose (a scene actor's).
+    pub matrices: std::collections::HashMap<MobyId, [[f32; 4]; 4]>,
 }
 
 impl DrawCallbacks {
     /// `RegisterDrawCallback` 0x21afe0 (64 entries; the game drops registrations past the end).
     pub fn register(&mut self, cb: Callback, id: MobyId) {
         if self.list1.len() < LIST_LEN { self.list1.push((cb, id)); }
+    }
+
+    /// [`Self::register`] with the moby's joint-0 matrix for the draw.
+    pub fn register_with_matrix(&mut self, cb: Callback, id: MobyId, m: [[f32; 4]; 4]) {
+        if self.list1.len() < LIST_LEN {
+            self.list1.push((cb, id));
+            self.matrices.insert(id, m);
+        }
     }
 
     /// `RegisterDrawCallback2` 0x21b198 (64 entries).
@@ -58,6 +74,8 @@ pub fn run_frame(w: &mut World) {
         if w.table.mobys.get(id).is_none_or(|m| m.state >= 0x80) { continue; }
         match cb {
             Callback::FireField760 => super::fire_field::draw_callback(w, id),
+            // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
+            Callback::NanotechGlow | Callback::ShipGlass => {}
         }
     }
 }

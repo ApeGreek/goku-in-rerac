@@ -15,7 +15,9 @@
 //! from one storage buffer: the class→Bevy-world matrix (`game_to_bevy` applied after the game's
 //! column-major instance matrix, `[3][3]` = 1; it can hold scale, shear and mirroring, so the shader
 //! uses it instead of the entity transform), the bounding-sphere centre and radius, the draw distance,
-//! and the 64 lit colours. The entity `Transform` is only for Bevy's frustum culling
+//! and the 64 lit colours (the baked `LightTies` result; the shader adds the point lights of the instance's
+//! nibble list, crate::world_lights, from the class normals the record also carries; the lists and the bank follow
+//! the per-frame LOD words, crate::tie_lod). The entity `Transform` is only for Bevy's frustum culling
 //! (`Transform::from_matrix`; instances it cannot represent exactly, i.e. sheared ones, get
 //! `NoFrustumCulling`).
 //!
@@ -305,12 +307,20 @@ fn build_parts(c: &LevelTieClass, meshes: &mut Assets<Mesh>, untextured: &mut us
 fn axes() -> Mat4 { Mat4::from_mat3(Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y)) }
 
 /// The static storage record (`TieInst` in tie.wgsl): model (16 f32), centre xyz + draw distance, misc
-/// (x = bounding radius), then the 64 colours as packed RGBA8. (Culling, LOD and fog come from the
-/// per-frame `tie_lod` buffer; centre / distance / radius stay for inspection.)
-fn write_record(out: &mut Vec<u8>, model: &Mat4, centre: Vec3, dist: f32, radius: f32, colors: &[[u8; 4]; SLOTS]) {
+/// (x = bounding radius), then the 64 colours as packed RGBA8, then the class's 64 normals `LightTies` lights with,
+/// packed as the raw s16 (x | y << 16, z), for the point lights (crate::world_lights; the centre is their origin).
+/// (Culling, LOD and fog come from the per-frame `tie_lod` buffer.) The normals travel in the record, not in a
+/// buffer of their own: a new binding changes the material layout, which reorders draws and so the pixels of
+/// frames without any light.
+fn write_record(out: &mut Vec<u8>, model: &Mat4, centre: Vec3, dist: f32, radius: f32, colors: &[[u8; 4]; SLOTS], normals: &[[i16; 4]]) {
     for v in model.to_cols_array() { out.extend_from_slice(&v.to_le_bytes()); }
     for v in [centre.x, centre.y, centre.z, dist, radius, 0.0, 0.0, 0.0] { out.extend_from_slice(&v.to_le_bytes()); }
     for c in colors { out.extend_from_slice(c); }
+    for j in 0..SLOTS {
+        let n = normals.get(j).copied().unwrap_or([0; 4]);
+        out.extend_from_slice(&(n[0] as u16 as u32 | (n[1] as u16 as u32) << 16).to_le_bytes());
+        out.extend_from_slice(&(n[2] as u16 as u32).to_le_bytes());
+    }
 }
 
 fn spawn_system(
@@ -363,7 +373,7 @@ fn spawn_ties(
 
     // Per-instance storage records (index = instance index = MeshTag).
     let a = axes();
-    let mut bytes = Vec::with_capacity(ties.instances.len() * 352);
+    let mut bytes = Vec::with_capacity(ties.instances.len() * 864);
     let mut models = Vec::with_capacity(ties.instances.len());
     let mut lod_inputs = Vec::with_capacity(ties.instances.len());
     for (ii, inst) in ties.instances.iter().enumerate() {
@@ -380,7 +390,8 @@ fn spawn_ties(
         let dist = (inst.draw_distance as f32).min(DRAW_DISTANCE_CAP);
         let lod_dist = if ties.class_of[ii].is_some() { dist } else { 0.0 };
         lod_inputs.push(crate::tie_lod::TieLodInput { sphere, dist: lod_dist, dists });
-        write_record(&mut bytes, &model, centre, dist, radius, &ties.colors[ii]);
+        let normals = ties.class_of[ii].map_or(&[][..], |ci| &ties.classes[ci].class.normals[..]);
+        write_record(&mut bytes, &model, centre, dist, radius, &ties.colors[ii], normals);
         models.push(model);
     }
     let inst_buffer = buffers.add(ShaderBuffer::new(&bytes, RenderAssetUsages::RENDER_WORLD));

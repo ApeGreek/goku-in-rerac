@@ -6,9 +6,8 @@
 //!
 //! Every one bursts through two engine pieces that exist in the port: the burning rock bits 696–698
 //! (`SpawnDebrisMoby` 0x2f8530 = `gunship::spawn_ember`, their update `0x2f8718`) and type-22 smoke puffs
-//! (`PartType22Spawn` 0x281f30: the record and its draw, `projectile::part`; type 22 itself is not simulated yet,
-//! so the puffs are not drawn: explosion pass). The positions and velocities of the puffs are computed with their
-//! draws (they would feed type 22's spawner).
+//! (`PartType22Spawn` 0x281f30, `crate::particles::type22`: rising grey puffs; [`puff`] makes the record and its
+//! draw, or only the draw without a particle system).
 //!
 //! * **704**: a hit with flags 0x10000 and damage > 0 (the wrench): class sound 0 (flags 0x10), 200 puffs (size
 //!   `randf(0.5, 1)·210000`, life `ticks(rand_range(30, 90))`, colours 0x5f787878 / 0x181818) in a box 2 × 0.6 × 2
@@ -34,7 +33,7 @@
 use crate::moby_runtime::MobyId;
 use crate::moby_update::classes::crate_::set_death_bits;
 use crate::moby_update::classes::gunship::spawn_ember;
-use crate::moby_update::creature::projectile::{self, Part};
+use crate::moby_update::creature::projectile;
 use crate::moby_update::services::{pvar as p, World};
 use crate::ps2v::Pf;
 
@@ -95,8 +94,11 @@ fn mark_dead(w: &mut World, id: MobyId) {
     w.svc.save.death_level.insert(s);
 }
 
-/// One smoke puff of a burst: a pool record and the spawner's draw.
-fn puff(w: &mut World) { projectile::part(w, Part::T22); }
+/// `PartType22Spawn(size, pos, vel, c1, c2, life)`: the type-22 record (one `rand()` with it), or without a particle
+/// system the draw alone.
+fn puff(w: &mut World, size: f32, pos: V, vel: V, c1: u32, c2: u32, life: i32) {
+    projectile::part22(w, &crate::particles::type22::Spawn { size, pos, vel, c1, c2, life });
+}
 
 /// A burst of `n` rock bits: per bit the throw direction `randf(−1, 1)`×3, the offset (`randf(±ox)`, `randf(±oy)`
 /// along the yaw, `randf(z0, z1)` up), the speed `randf(1, 5)·dt`, the class `randi(3)`, the scale `randf(s0, s1)`,
@@ -126,12 +128,12 @@ fn puffs(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, zt: f32, speed: 
         let a = w.rng.randf(-ox, ox);
         let b = w.rng.randf(-oy, oy);
         let c = w.rng.randf(0.0, zt);
-        let _at = along_yaw(w, id, a, b, c);
-        let _v = to_len(d, w.rng.randf(speed.0, speed.1) * DT);
-        let _size = w.rng.randf(size.0, size.1) * 210000.0;
+        let at = along_yaw(w, id, a, b, c);
+        let v = to_len(d, w.rng.randf(speed.0, speed.1) * DT);
+        let size = w.rng.randf(size.0, size.1) * 210000.0;
         let l = w.rng.rand_range(life.0, life.1);
-        let _life = w.ticks(l);
-        puff(w);
+        let life = w.ticks(l);
+        puff(w, size, at, v, 0x5f78_7878, 0x18_1818, life);
     }
 }
 
@@ -195,17 +197,19 @@ pub fn pipe_update(w: &mut World, id: MobyId) {
     w.rng.randi(hi - lo + 1); // the count of an empty delay loop
     w.play_sound(0, 0, id);
     for _ in 0..150 {
+        let q = pos(w, id);
+        let at = [q[0] - 0.2, q[1], q[2] + 1.2, q[3]];
         let a0 = w.rng.rand_angle();
         let s0 = w.rng.randf(1.5, 3.0);
-        let _vx = a0.cos() * s0 * DT;
+        let vx = a0.cos() * s0 * DT;
         let a1 = w.rng.rand_angle();
         let s1 = w.rng.randf(1.5, 3.0);
-        let _vy = a1.sin() * s1 * DT;
-        let _vz = w.rng.randf(0.0, 3.0) * DT;
-        let _size = w.rng.randf(125000.0, 175000.0);
+        let vy = a1.sin() * s1 * DT;
+        let vz = w.rng.randf(0.0, 3.0) * DT;
+        let size = w.rng.randf(125000.0, 175000.0);
         let l = w.rng.rand_range(0x2d, 0x3c);
-        let _life = w.ticks(l);
-        puff(w);
+        let life = w.ticks(l);
+        puff(w, size, at, [vx, vy, vz, 0.0], 0x207f_7f7f, 0x27_2727, life);
     }
     // FUN_002ffa90: the spray 779 in its place.
     if let Some(s) = w.create_moby(779) {
@@ -237,12 +241,17 @@ pub fn spray_update(w: &mut World, id: MobyId) {
         p::set_i32(&mut w.mm(id).pvars, 0, s);
     }
     for _ in 0..2 {
-        let _out = w.rng.randf(0.8, 1.2) * DT * 3.0;
-        let _up = w.rng.randf(0.8, 1.2) * (DT + DT);
-        let _size = w.rng.randf(125000.0, 175000.0);
+        let out = w.rng.randf(0.8, 1.2) * DT * 3.0;
+        let up = w.rng.randf(0.8, 1.2) * (DT + DT);
+        // (out, 0, up) turned by the moby's rows; the nozzle (−0.2, 0, 1.2) from its position (not turned).
+        let r = w.m(id).rows;
+        let v: V = std::array::from_fn(|k| if k == 3 { 0.0 } else { r[0][k] * out + r[2][k] * up });
+        let q = pos(w, id);
+        let at = [q[0] - 0.2, q[1], q[2] + 1.2, q[3]];
+        let size = w.rng.randf(125000.0, 175000.0);
         let l = w.rng.rand_range(0x2d, 0x3c);
-        let _life = w.ticks(l);
-        puff(w);
+        let life = w.ticks(l);
+        puff(w, size, at, v, 0x207f_7f7f, 0x27_2727, life);
     }
 }
 

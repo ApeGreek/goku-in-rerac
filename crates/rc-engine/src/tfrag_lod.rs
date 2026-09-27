@@ -145,14 +145,35 @@ pub struct TfragLodState {
     block: TfragBlockHeader,
     force_lod0: bool,
     last_hist: [usize; 8],
+    /// What follows the draw modes in the buffer: one u32 per tfrag with its point-light nibble list, then the
+    /// point-light bank (crate::world_lights; tfrag.wgsl reads both).
+    tail: Vec<u8>,
 }
 
 impl TfragLodState {
+    /// crate::world_lights: the tfrags' nibble lists and the bank bytes, into the buffer after the modes.
+    pub fn set_point_lights(&mut self, lists: &[u16], bank: &[u8], buffers: &mut Assets<ShaderBuffer>) {
+        let n = self.tfrags.len().max(1);
+        for (i, &l) in lists.iter().take(n).enumerate() { self.tail[i * 4..i * 4 + 4].copy_from_slice(&(l as u32).to_le_bytes()); }
+        self.tail[n * 4..n * 4 + bank.len()].copy_from_slice(bank);
+        if let Some(mut buf) = buffers.get_mut(&self.modes) {
+            if let Some(d) = buf.data.as_mut() {
+                let at = d.len() - self.tail.len();
+                d[at..].copy_from_slice(&self.tail);
+            }
+        }
+    }
+
     pub fn new(level: &LoadedLevel, buffers: &mut Assets<ShaderBuffer>) -> Self {
         let n = level.tfrags.len().max(1);
         // MAIN_WORLD too: the system rewrites it every frame (same size, so Bevy writes the GPU buffer in place
         // and the material bind groups stay valid).
-        let modes = buffers.add(ShaderBuffer::new(&vec![0u8; n * 4], RenderAssetUsages::default()));
+        // After the n modes: n empty nibble lists (0xffff) and an empty point-light bank (crate::world_lights).
+        let mut tail = vec![0u8; n * 4 + crate::world_lights::BANK_BYTES];
+        for i in 0..n { tail[i * 4..i * 4 + 4].copy_from_slice(&0xffffu32.to_le_bytes()); }
+        let mut init = vec![0u8; n * 4];
+        init.extend_from_slice(&tail);
+        let modes = buffers.add(ShaderBuffer::new(&init, RenderAssetUsages::default()));
         let tfrags = level
             .tfrags
             .iter()
@@ -172,6 +193,7 @@ impl TfragLodState {
             block: level.tfrag_lod.block,
             force_lod0: std::env::var("RC_LOD").is_ok_and(|v| v.trim() == "0"),
             last_hist: [0; 8],
+            tail,
         }
     }
 }
@@ -275,7 +297,10 @@ fn update_tfrag_modes(
         })
         .collect();
     if let Some(mut buf) = buffers.get_mut(&state.modes) {
-        buf.data = Some(bytemuck_u32(&modes));
+        let mut d = bytemuck_u32(&modes);
+        if d.is_empty() { d.resize(4, 0); }
+        d.extend_from_slice(&state.tail);
+        buf.data = Some(d);
     }
     if let Some(mut o) = occl {
         o.tfrags = crate::occlusion::CullCounts { occluded, culled: hist[0] - occluded, drawn: modes.len() - hist[0] };

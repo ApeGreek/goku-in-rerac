@@ -12,8 +12,11 @@
 //! * `vinfos`: one entry per (tfrag, vertex-info entry): UV, position, tier, and the collapse links
 //!   (parent-1 entry = `parent_indices` / `unk_indices_2`, parent-2 position = `parent / 2`).
 //!
-//! No lighting pass here (lighting: tfrag_light.rs; fog and projection: game_camera.rs): each vertex gets its
-//! position slot's RGBA, modulated with its texture exactly as the GS does with TFX = MODULATE. Texture
+//! No directional lighting here (lighting: tfrag_light.rs; fog and projection: game_camera.rs): each vertex gets its
+//! position slot's RGBA, modulated with its texture exactly as the GS does with TFX = MODULATE. The point lights of
+//! `LightTfrags` are added to a slot's RGBA in the vertex shader when the tfrag's nibble list names any
+//! (crate::world_lights): the slot's normal is packed in its `pad` word, the lists and the bank follow the draw
+//! modes in the `modes` buffer (crate::tfrag_lod). Texture
 //! sampling uses the full mip chain and the GS mip rule (LOD = log2(1/Q) + K, nearest level, bilinear).
 
 use crate::gs_state::{self, AlphaRange, GsPass};
@@ -198,7 +201,8 @@ fn tier_code(t: TfragMorphTier) -> u32 { match t { TfragMorphTier::Lod01 => TIER
 /// Builds the static storage buffers `slots` (32 bytes per position) and `vinfos` (24 bytes per vertex-info entry)
 /// over all tfrags, and returns them with each tfrag's first slot / vertex-info index.
 ///
-/// `Slot { pos: vec3<f32>, color: u32, p1: u32, p2: u32, tier: u32, pad: u32 }`: a position written by a
+/// `Slot { pos: vec3<f32>, color: u32, p1: u32, p2: u32, tier: u32, normal: u32 }` (`normal` = the `LightTfrags`
+/// record's azimuth | elevation << 8 | 1 << 16, 0 when the position has no record; for the point lights): a position written by a
 /// morphing primary entry (VU1 L17/L18/L25/L26 store the morphed value into the primary's own slot) gets that
 /// entry's tier and parent positions. On the disc every primary owns a distinct position of its own tier
 /// (a permutation of the tier's positions in 6 LOD-01 cases).
@@ -212,6 +216,7 @@ fn build_storage(level: &LoadedLevel) -> (Vec<u8>, Vec<u8>, Vec<u32>, Vec<u32>, 
     for t in &level.tfrags {
         slot_base.push(ns);
         vinfo_base.push(nv);
+        let lit = (t.header.vert_count as usize).min(t.lights.len());
         let mut owner = vec![(TIER_NONE, 0u32, 0u32); t.positions.len()];
         for v in 0..t.vertex_info.len() {
             if let Some(l) = t.lod_link(v).filter(|l| l.morphs) {
@@ -228,7 +233,12 @@ fn build_storage(level: &LoadedLevel) -> (Vec<u8>, Vec<u8>, Vec<u32>, Vec<u32>, 
             // GS MODULATE: Cv = Ct * Cf >> 7, so 0x80 = 1.0; the shader divides by 128.
             let c = t.rgba.get(p).map(|c| [c.r, c.g, c.b, c.a]).unwrap_or_else(|| { missing_rgba += 1; [0x80; 4] });
             let (tier, p1, p2) = owner[p];
-            slots.f(b.x).f(b.y).f(b.z).u(u32::from_le_bytes(c)).u(p1).u(p2).u(tier).u(0);
+            // `LightTfrags` pairs light record i with position i (tfrag_lighting.md §4).
+            let normal = if p < lit {
+                let l = rc_formats::tfrag_light::VertexLight::from_record(&t.lights[p]);
+                l.azimuth as u32 | (l.elevation as u32) << 8 | 1 << 16
+            } else { 0 };
+            slots.f(b.x).f(b.y).f(b.z).u(u32::from_le_bytes(c)).u(p1).u(p2).u(tier).u(normal);
         }
         for (v, e) in t.vertex_info.iter().enumerate() {
             // GS ST with Q = 1: S and T are normalised texture coordinates. The VU emits (s_float - 2048,

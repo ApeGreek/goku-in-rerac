@@ -31,6 +31,7 @@
 //! | 704 (rocks), 709–711 (shell walls), 729 (big wall), 778 (pipe) and its spray 779, 754 (pots), 1813 (boxes), 1816 (their remains; level 1) | 0x2f9810, 0x2f9d80, 0x2fa800, 0x2ff860, 0x2ffb28, 0x2fd9a0, 0x30d0f0, 0x30d200 | [`breakables`] |
 //! | 1546 (cutscene FX driver; levels with scene effects) | 0x30c190 `CutsceneFxUpdate` | [`cutscene_fx`] |
 //! | 204, 213, 214, 222, 223, 225, 226, 1006, 1438, 1447, 1449 (ammo pickups), 806 (nanotech cluster; every level) | 0x2db028, 0x300de0 | [`pickup`] |
+//! | 775 (water splash; spawned by `0x2ff768`) | 0x2ff810 | [`splash`] |
 //! | 737 (camera triggers; levels 1, 2, 3, 7, 10, 13), 730 / 790 (mission NPCs), 746 (hinged bridge; level 1) | 0x2fb5b0, 0x2fad68, 0x2fb8a8 | [`camera_trigger`], [`mission_npc`], [`hinged_bridge`] |
 
 pub mod amoeboid;
@@ -59,6 +60,7 @@ pub mod path_enemy;
 pub mod path_platform;
 pub mod pickup;
 pub mod props;
+pub mod splash;
 pub mod swing_target;
 pub mod talking_npc;
 pub mod teleporter;
@@ -122,10 +124,11 @@ pub enum ClassUpdate {
     CutsceneFx,
     AmmoPickup,
     Nanotech,
+    Splash,
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 52] = [
+    pub const ALL: [ClassUpdate; 53] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -178,6 +181,7 @@ impl ClassUpdate {
         ClassUpdate::CutsceneFx,
         ClassUpdate::AmmoPickup,
         ClassUpdate::Nanotech,
+        ClassUpdate::Splash,
     ];
 
     /// The level01 class-table address of this update.
@@ -235,6 +239,7 @@ impl ClassUpdate {
             ClassUpdate::CutsceneFx => cutscene_fx::UPDATE_FN,
             ClassUpdate::AmmoPickup => pickup::AMMO_UPDATE_FN,
             ClassUpdate::Nanotech => pickup::NANOTECH_UPDATE_FN,
+            ClassUpdate::Splash => splash::UPDATE_FN,
         }
     }
 
@@ -295,6 +300,7 @@ impl ClassUpdate {
             ClassUpdate::CutsceneFx => &cutscene_fx::CLASSES,
             ClassUpdate::AmmoPickup => &pickup::AMMO_CLASSES,
             ClassUpdate::Nanotech => &pickup::NANOTECH_CLASSES,
+            ClassUpdate::Splash => &splash::CLASSES,
         }
     }
 }
@@ -357,6 +363,7 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::CutsceneFx => cutscene_fx::update(w, id),
         ClassUpdate::AmmoPickup => pickup::ammo_update(w, id),
         ClassUpdate::Nanotech => pickup::nanotech_update(w, id),
+        ClassUpdate::Splash => splash::update(w, id),
     }
 }
 

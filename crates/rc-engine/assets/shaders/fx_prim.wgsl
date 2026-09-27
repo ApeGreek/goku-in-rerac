@@ -1,34 +1,34 @@
-// Fire / smoke fields, class 760 (docs/plan/world_animation.md §3; Rust side: water_render.rs "Fire fields").
-//
-// `FastDrawQuadReal` quads built on the CPU every tick: position (Bevy space), ST, GS vertex RGBA bytes / 128.
-// GS: PRIM 0x7c (Gouraud, TME, FGE, ABE), TEX0 MODULATE with TCC (C = Ct·Cv >> 7, A = At·Av >> 7), then fog, then
-// ALPHA 0x48 (Cs·As + Cd, params.misc.x = 1) or 0x44 ((Cs − Cd)·As + Cd). Both are one premultiplied blend
-// (One, OneMinusSrcAlpha): the output is (Cs·As, 0) or (Cs·As, As). The texture holds the raw GS bytes (texel
-// alpha 0..0x80).
+// GS primitives the game draws straight from a draw callback (crate::fx_draw): `FastDrawQuadReal` quads and
+// `DrawEnvOverlayMesh` strips, built on the CPU every tick (the fire / smoke fields 760, the nanotech glow 806, …).
+// Per vertex: position (Bevy space), ST, GS vertex RGBA bytes / 128. GS: PRIM 0x7c (Gouraud, TME, FGE, ABE), TEX0
+// MODULATE with TCC (C = Ct·Cv >> 7, A = At·Av >> 7), then fog, then ALPHA 0x48 (Cs·As + Cd, params.misc.x = 1) or
+// 0x44 ((Cs − Cd)·As + Cd), on the frame's display bytes like the GS (crate::display_blend `gs_add` / `gs_mix`;
+// blend One, OneMinusSrcAlpha). The texture holds the raw GS bytes (texel alpha 0..0x80).
 
 #import bevy_pbr::view_transformations::{position_world_to_clip, position_world_to_view}
+#import randcrw::display_blend::{gs_add, gs_mix}
 
-struct FireFog {
+struct FxFog {
     color: vec4<f32>,
     params: vec4<f32>,
 }
 
-struct FireParams {
+struct FxParams {
     misc: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var tex_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: FireFog;
-@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> params: FireParams;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: FxFog;
+@group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> params: FxParams;
 
-struct FireVertex {
+struct FxVertex {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
 }
 
-struct FireVertexOutput {
+struct FxVertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     // RGBA bytes / 128 and GS F / 255, screen-space linear like the GS.
@@ -37,8 +37,8 @@ struct FireVertexOutput {
 }
 
 @vertex
-fn vertex(v: FireVertex) -> FireVertexOutput {
-    var out: FireVertexOutput;
+fn vertex(v: FxVertex) -> FxVertexOutput {
+    var out: FxVertexOutput;
     out.position = position_world_to_clip(v.position);
     out.uv = v.uv;
     out.color = v.color;
@@ -48,26 +48,19 @@ fn vertex(v: FireVertex) -> FireVertexOutput {
     return out;
 }
 
-fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
-    let lo = c / 12.92;
-    let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(hi, lo, c <= vec3<f32>(0.04045));
-}
-
 @fragment
-fn fragment(in: FireVertexOutput) -> @location(0) vec4<f32> {
+fn fragment(in: FxVertexOutput) -> @location(0) vec4<f32> {
     let t = textureSample(tex, tex_sampler, in.uv);
     let ct = round(t * 255.0);
     // MODULATE on the bytes: floor(Ct·Cv / 128) (colour clamped to 255), A likewise.
     var rgb = min(floor(ct.rgb * in.color.rgb + vec3<f32>(1e-3)), vec3<f32>(255.0)) / 255.0;
-    let a = min(floor(ct.a * in.color.a + 1e-3), 255.0) / 128.0;
+    let a = min(floor(ct.a * in.color.a + 1e-3), 255.0);
     if (fog.color.w > 0.5) {
         rgb = mix(fog.color.rgb, rgb, in.fog);
     }
-    let lin = srgb_to_linear(rgb);
+    let cs = round(rgb * 255.0);
     if (params.misc.x > 0.5) {
-        return vec4<f32>(lin * a, 0.0);
+        return gs_add(cs, a);
     }
-    let s = min(a, 1.0);
-    return vec4<f32>(lin * s, s);
+    return gs_mix(cs, a);
 }

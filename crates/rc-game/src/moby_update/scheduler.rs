@@ -238,6 +238,8 @@ impl Scheduler {
         }
         if w.svc.snapshots.len() < w.table.mobys.len() { w.svc.snapshots.resize(w.table.mobys.len(), None); }
         for &id in &list { run_moby(w, id); }
+        // The points the moby-riding particles (types 26 / 55) follow in the UpdateParts that comes next.
+        w.refresh_particle_anchors();
         let n = list.len();
         self.last_list = list;
         n
@@ -253,6 +255,8 @@ impl Scheduler {
         self.targets = targets;
         if w.svc.snapshots.len() < w.table.mobys.len() { w.svc.snapshots.resize(w.table.mobys.len(), None); }
         for &id in &list { run_moby(w, id); }
+        // The points the moby-riding particles (types 26 / 55) follow in the UpdateParts that comes next.
+        w.refresh_particle_anchors();
         let n = list.len();
         self.last_list = list;
         n

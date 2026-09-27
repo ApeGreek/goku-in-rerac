@@ -128,7 +128,7 @@ impl Plugin for ShadowPlugin {
             .add_systems(Startup, setup)
             .add_systems(Update, tag_camera)
             .add_systems(Last, collect);
-        if crate::gameplay::enabled() { app.add_systems(FixedUpdate, shadow_tick.after(crate::gameplay::GameTick)); }
+        if crate::gameplay::enabled() { app.add_systems(FixedUpdate, shadow_tick.after(crate::gameplay::GameTick).after(crate::scene_render::actor_mobys)); }
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app
             .init_resource::<ShadowGpu>()
@@ -168,11 +168,15 @@ fn tag_camera(mut commands: Commands, cams: Query<Entity, Untagged>) {
     for e in &cams { commands.entity(e).insert(ShadowCamera); }
 }
 
-/// After each game tick: Ratchet's shadow (gate, pitch, direction 1, slab) and direction 0.
+/// After each game tick: Ratchet's shadow (gate, pitch, direction 1, slab) and direction 0. While a scene runs, every
+/// frame of it (the game's scene update, also during its blocking waits): the actors' slabs, on the pose they are
+/// drawn with this frame (crate::scene_render::actor_mobys wrote it into their table mobys just before).
 pub fn shadow_tick(play: Option<ResMut<Play>>, level: Res<crate::Level>, game: Option<ResMut<ShadowGame>>, active: Option<Res<crate::scene_render::ActiveScene>>) {
     let (Some(mut play), Some(mut sg)) = (play, game) else { return };
     let counter = play.game.counter;
-    if sg.counter == Some(counter) { return; }
+    let ticked = sg.counter != Some(counter);
+    let actors = active.as_ref().filter(|s| s.running).map_or(&[][..], |s| &s.actors[..]);
+    if !ticked && actors.is_empty() { return; }
     sg.counter = Some(counter);
     let Some(coll) = level.0.collision.as_ref() else { return };
     let sg = &mut *sg;
@@ -180,25 +184,27 @@ pub fn shadow_tick(play: Option<ResMut<Play>>, level: Res<crate::Level>, game: O
     let hero_id = p.game.hero_moby;
     let Some(hero_moby) = p.game.mobys.mobys.get(hero_id) else { return };
     let light = shadows::light_dir(&sg.dir_a, hero_moby.light);
-    let h = &p.game.hero;
-    let hin = HeroShadowIn {
-        group: h.group,
-        state: h.state,
-        air_ticks: h.air_ticks,
-        ground_z: h.ground_z.to_f32(),
-        water_z: h.water_level.to_f32(),
-        liquid_z: h.surf.liquid,
-    };
     let scene = p.svc.hero_scene(&p.game.mobys, p.classes.clone(), None);
     let sc = scene.scene();
     let line = |a: [f32; 3], b: [f32; 3]| coll_line_m(coll, Some(&sc), a, b, QueryFlags(shadows::PROBE_FLAGS), None).map(|o| o.point[2]);
-    shadows::update_hero_shadow(&mut p.game.mobys.mobys[hero_id], &mut sg.pitch, &mut sg.dirs, &hin, light, line);
-    // The scene actors (`CutsceneModeUpdate`: +0x7f ≠ 0 → ShadowProbeAlongDir 0x26f0e0 with direction 0), before the
-    // direction update at the end of the frame (crate::scene_render poses them).
-    for (id, _) in active.iter().flat_map(|s| s.actors.iter()) {
+    if ticked {
+        let h = &p.game.hero;
+        let hin = HeroShadowIn {
+            group: h.group,
+            state: h.state,
+            air_ticks: h.air_ticks,
+            ground_z: h.ground_z.to_f32(),
+            water_z: h.water_level.to_f32(),
+            liquid_z: h.surf.liquid,
+        };
+        shadows::update_hero_shadow(&mut p.game.mobys.mobys[hero_id], &mut sg.pitch, &mut sg.dirs, &hin, light, line);
+    }
+    // The scene actors (`CutsceneModeUpdate`, right after each actor's `MobyBuildMatrix`: +0x7f ≠ 0 →
+    // ShadowProbeAlongDir 0x26f0e0 with direction 0), before the direction update at the end of the frame.
+    for (id, _) in actors {
         if let Some(m) = p.game.mobys.mobys.get_mut(*id).filter(|m| m.b7f != 0) { shadows::probe_along_dir(m, sg.dirs.of(0), line); }
     }
-    shadows::update_shadow_dir(&mut sg.dirs, light);
+    if ticked { shadows::update_shadow_dir(&mut sg.dirs, light); }
 }
 
 /// A caster that passed `MobyProc`'s shadow tests this frame.

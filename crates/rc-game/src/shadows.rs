@@ -10,7 +10,7 @@
 //! | *UpdateHeroShadow* 0x22a260 | [`update_hero_shadow`] | `HeroUpdateAlt` 0x228000, 0x228870 | the engine after each tick |
 //! | *ShadowSetGround* 0x26eff8 | [`set_ground`] | `PathEnemyUpdate` | `moby_update::classes::path_enemy` |
 //! | *ShadowProbeDown* 0x26f020 | [`probe_down`] | `AmoeboidUpdate`, `GroundCritterUpdate`, `TalkingNpcUpdate` | the three class updates |
-//! | *ShadowProbeAlongDir* 0x26f0e0 | [`probe_along_dir`] | the scene actors (0x2a4080, `CutsceneModeUpdate`, `VendorModeUpdate`) | not wired (the port's scene actors are not table mobys) |
+//! | *ShadowProbeAlongDir* 0x26f0e0 | [`probe_along_dir`] | the scene actors (0x2a4080, `CutsceneModeUpdate`, `VendorModeUpdate`) | the engine every scene frame, on the drawn pose (crate `rc-engine` `shadow_render`) |
 //!
 //! The slab `[lo, hi]` (+0x84, +0x88) is the height band the volume is clipped to; `hi ≤ 0` = no shadow.
 //! `CollLine_Fix` with flags 0x22 (skip moby primitives, exclude surface 0 = water) is the probe of every rule.

@@ -53,23 +53,23 @@
 //! the smoke elements (same FX, 0x44) and the six-quad smoke curtain (FX P+0x58 + 40, 0x44, when P+0x42 = 0), all
 //! camera-facing about the moby (`fire_field_bases`), placed in the cuboid, with the per-corner alpha tables, fog on
 //! (PRIM 0x7c), TEST 0x51001 (colour only, Z tested), CLAMP repeat, bilinear. The quad tables are read from the
-//! overlay per level ([`FireFieldTables`]). Additive in linear light (native, like `GsPass::AdditiveNoZ`); As > 1 (the
-//! curtain's A = 0xff) clamps in the 0x44 destination factor.
+//! overlay per level ([`FireFieldTables`]). Both equations blend on the frame's display bytes like every effect
+//! (crate::display_blend; the shared draw-callback material crate::fx_draw::FxPrimMaterial, `fx_prim.wgsl`), As > 0x80 included (the curtain's A = 0xff).
 //!
 //! Not drawn: 1848 (env overlay), drips (787) and the hero's splashes (no hero in the water yet).
 
 use crate::game_camera::{game_eye, GameFog, GameProjection, TfragFog};
+use crate::fx_draw::{FxPrimMaterial, FxPrimParams, PrimBuf};
 use crate::gs_state::GsPass;
 use anyhow::{Context, Result};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::camera::CameraProjection;
-use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexAttributeValues, VertexFormat};
 use bevy::pbr::{MaterialPipeline, MaterialPipelineKey};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, Extent3d, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError, TextureDimension, TextureFormat,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
@@ -106,6 +106,8 @@ pub struct LevelWater {
     pub order: Vec<u16>,
     /// The fire / smoke fields' quad tables (class 760, levels 00 / 01 / 14; see "Fire fields" below).
     pub fire_fields: Option<FireFieldTables>,
+    /// The other draw callbacks' tables (crate::fx_draw: the nanotech glow).
+    pub fx: crate::fx_draw::LevelFx,
 }
 
 /// Reads the overlay tables, the cuboids and the 751 pvar.
@@ -116,7 +118,8 @@ pub fn load(root: &Path, index: u32, gameplay: &[u8]) -> Result<LevelWater> {
     let strips = wf::parse_strip_classes(&ov, index)?;
     let ripples = wf::parse_ripple_tables(&ov, index)?;
     let fire_fields = FireFieldTables::parse(&ov, index)?;
-    if strips.is_empty() && ripples.is_none() { return Ok(LevelWater { fire_fields, ..LevelWater::default() }); }
+    let fx = crate::fx_draw::LevelFx::parse(&ov, index);
+    if strips.is_empty() && ripples.is_none() { return Ok(LevelWater { fire_fields, fx, ..LevelWater::default() }); }
     let cuboids = wf::parse_cuboids(gameplay)?;
     let instances = rc_formats::gameplay::parse_moby_instances(gameplay)?;
     let pvars = rc_formats::gameplay::parse_pvars(gameplay)?;
@@ -134,7 +137,7 @@ pub fn load(root: &Path, index: u32, gameplay: &[u8]) -> Result<LevelWater> {
         let ours = strips.iter().any(|s| s.class == c) || (c == RIPPLE_CLASS && ripples.is_some());
         if ours && !order.contains(&c) { order.push(c); }
     }
-    Ok(LevelWater { strips, ripples, cuboids, zone_cuboids, light_xy, order, fire_fields })
+    Ok(LevelWater { strips, ripples, cuboids, zone_cuboids, light_xy, order, fire_fields, fx })
 }
 
 /// Static uniform of one water draw.
@@ -300,7 +303,6 @@ impl Plugin for WaterPlugin {
             app.insert_resource(Time::<Fixed>::from_hz(crate::determinism::TICK_HZ));
         }
         app.add_plugins(MaterialPlugin::<WaterMaterial>::default())
-            .add_plugins(MaterialPlugin::<FireFieldMaterial>::default())
             .add_systems(Startup, (setup, fire_field_setup))
             .add_systems(FixedUpdate, tick)
             .add_systems(PostUpdate, (draw, draw_fire_fields).before(bevy::asset::AssetEventSystems));
@@ -308,25 +310,6 @@ impl Plugin for WaterPlugin {
 }
 
 type MainCamera<'w, 's> = Query<'w, 's, &'static Transform, (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>;
-
-fn fx_image(images: &mut Assets<Image>, t: &rc_formats::texture::Texture) -> Handle<Image> {
-    let mut img = Image::new_uninit(
-        Extent3d { width: t.width, height: t.height, depth_or_array_layers: 1 },
-        TextureDimension::D2,
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    img.data = Some(t.rgba.clone());
-    // TEX1 0xff9000000260: bilinear, no mips; CLAMP 0: repeat.
-    img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        mag_filter: ImageFilterMode::Linear,
-        min_filter: ImageFilterMode::Linear,
-        ..default()
-    });
-    images.add(img)
-}
 
 fn strip_mesh(d: &StripDescriptor) -> Mesh {
     let pos: Vec<[f32; 3]> = d.vertices.iter().map(|v| [v[0], v[1], v[2]]).collect();
@@ -414,7 +397,7 @@ fn setup(
     let mut fx: Vec<Option<Handle<Image>>> = vec![None; tex.fx_textures.len()];
     let mut image = |i: i32, images: &mut Assets<Image>| -> Option<Handle<Image>> {
         let i = usize::try_from(i).ok()?;
-        if fx.get(i)?.is_none() { fx[i] = Some(fx_image(images, tex.fx_textures[i].as_ref()?)); }
+        if fx.get(i)?.is_none() { fx[i] = Some(crate::fx_draw::fx_image(images, tex.fx_textures[i].as_ref()?)); }
         fx[i].clone()
     };
 
@@ -719,63 +702,9 @@ impl FireFieldTables {
     }
 }
 
-/// Static uniform of one fire-field draw group.
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
-pub struct FireFieldParams {
-    /// x = 1: ALPHA 0x48 (additive `Cs·As + Cd`), 0: ALPHA 0x44 (`(Cs − Cd)·As + Cd`).
-    pub misc: Vec4,
-}
-
-/// One draw group of a fire field (the flames, the smoke elements or the smoke curtain of one registered 760).
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub struct FireFieldMaterial {
-    #[texture(0)]
-    #[sampler(1)]
-    pub texture: Handle<Image>,
-    #[uniform(2)]
-    pub fog: TfragFog,
-    #[uniform(3)]
-    pub params: FireFieldParams,
-    /// List-2 position (Transparent3d order).
-    pub slot: u32,
-}
-
-impl Material for FireFieldMaterial {
-    fn vertex_shader() -> ShaderRef { FIRE_FIELD_SHADER.into() }
-    fn fragment_shader() -> ShaderRef { FIRE_FIELD_SHADER.into() }
-    fn alpha_mode(&self) -> AlphaMode { AlphaMode::Blend }
-    fn depth_bias(&self) -> f32 { LIST2_BIAS + self.slot as f32 }
-    fn enable_prepass() -> bool { false }
-    fn enable_shadows() -> bool { false }
-
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        // TEST_1 0x51001 (ATST NEVER, AFAIL FB_ONLY: colour, never Z; ZTST GEQUAL).
-        GsPass::BlendNoZ.specialize(descriptor);
-        // Both GS equations as one premultiplied blend: the shader outputs (Cs·As, As) for 0x44 and (Cs·As, 0)
-        // for 0x48 (particle_render.rs does the same).
-        if let Some(f) = descriptor.fragment.as_mut() {
-            for t in f.targets.iter_mut().flatten() { t.blend = Some(bevy::render::render_resource::BlendState::PREMULTIPLIED_ALPHA_BLENDING); }
-        }
-        descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
-            Mesh::ATTRIBUTE_COLOR.at_shader_location(2),
-        ])?];
-        Ok(())
-    }
-}
-
-const FIRE_FIELD_SHADER: &str = "shaders/fire_field.wgsl";
-
 /// One registered field's three draw groups (entity, mesh, material).
 /// One draw group's entity, mesh, material and FX image.
-type FireFieldGroup = (Entity, Handle<Mesh>, Handle<FireFieldMaterial>, Handle<Image>);
+type FireFieldGroup = (Entity, Handle<Mesh>, Handle<FxPrimMaterial>, Handle<Image>);
 
 struct FireFieldSlot {
     /// Per group, made when the group first has quads (Bevy's mesh allocator keeps no slab for an empty mesh, so a
@@ -801,39 +730,6 @@ fn fire_field_setup(mut commands: Commands, level: Res<crate::Level>, fog: Optio
     let n = level.0.particles.textures.as_ref().map_or(0, |t| t.fx_textures.len());
     let fog = fog.map(|f| f.uniform).unwrap_or_else(|| TfragFog::new(&level.0.fog));
     commands.insert_resource(FireFieldDraw { tables, fx: vec![None; n], slots: Vec::new(), fog, drawn: None });
-}
-
-/// Mesh data of one draw group being built.
-#[derive(Default)]
-struct QuadBuf {
-    pos: Vec<[f32; 3]>,
-    uv: Vec<[f32; 2]>,
-    color: Vec<[f32; 4]>,
-    idx: Vec<u32>,
-}
-
-impl QuadBuf {
-    /// One `FastDrawQuadReal` quad: game-space corners in GS strip order (triangles 0 1 2, 1 2 3), (s, t), GS
-    /// RGBA bytes. A quad whose four alphas are 0 adds nothing under either equation and is skipped.
-    fn quad(&mut self, p: [[f32; 3]; 4], st: [[f32; 2]; 4], rgba: [u32; 4]) {
-        if rgba.iter().all(|c| c >> 24 == 0) { return; }
-        let b = self.pos.len() as u32;
-        for k in 0..4 {
-            self.pos.push(crate::tfrag_render::game_to_bevy(p[k]).to_array());
-            self.uv.push(st[k]);
-            let c = rgba[k];
-            self.color.push([(c & 0xff) as f32, (c >> 8 & 0xff) as f32, (c >> 16 & 0xff) as f32, (c >> 24) as f32].map(|x| x / 128.0));
-        }
-        self.idx.extend([b, b + 1, b + 2, b + 1, b + 2, b + 3]);
-    }
-
-    fn write(self, mesh: &mut Mesh) {
-        // (Called with the asset's guard: `&mut *guard`.)
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.pos);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uv);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, self.color);
-        mesh.insert_indices(Indices::U32(self.idx));
-    }
 }
 
 fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
@@ -865,14 +761,14 @@ fn basis_point(b: &[[f32; 3]; 3], t: [f32; 3], v: [f32; 3]) -> [f32; 3] {
 }
 
 /// The three groups of one registered field: flames (0x48), smoke elements (0x44), smoke curtain (0x44, if P+0x42 = 0).
-fn fire_field_groups(t: &FireFieldTables, state: &rc_game::moby_update::classes::fire_field::FireFieldState, pv: &[u8], pos: [f32; 3], cub: &[[f32; 4]; 4], scroll_u: f32, cam: [f32; 3]) -> [QuadBuf; 3] {
+fn fire_field_groups(t: &FireFieldTables, state: &rc_game::moby_update::classes::fire_field::FireFieldState, pv: &[u8], pos: [f32; 3], cub: &[[f32; 4]; 4], scroll_u: f32, cam: [f32; 3]) -> [PrimBuf; 3] {
     use rc_game::moby_update::classes::fire_field::{cuboid_point, FireFieldState};
     use rc_game::moby_update::services::pvar as p;
     let bases = fire_field_bases(cam, pos);
     let rgb = p::u32(pv, 0x38) & 0xff_ffff;
     let smoke_rgb = (pv[0x5f] as u32) << 16 | (pv[0x5e] as u32) << 8 | pv[0x5d] as u32;
     let smoke_a = pv[0x5c] as u32;
-    let mut out: [QuadBuf; 3] = Default::default();
+    let mut out: [PrimBuf; 3] = Default::default();
     for i in FireFieldState::range(pv) {
         let Some(e) = state.elems.get(i) else { break };
         let b = &bases[(e.mirror != 0) as usize];
@@ -921,7 +817,7 @@ fn draw_fire_fields(
     level: Res<crate::Level>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
-    mut materials: ResMut<Assets<FireFieldMaterial>>,
+    mut materials: ResMut<Assets<FxPrimMaterial>>,
     mut vis: Query<&mut Visibility>,
 ) {
     let Some(mut st) = state else { return };
@@ -960,12 +856,12 @@ fn draw_fire_fields(
             let img = fx.and_then(|i| {
                 let t = tex?.fx_textures.get(i)?.as_ref()?;
                 if st.fx.len() <= i { st.fx.resize(i + 1, None); }
-                if st.fx[i].is_none() { st.fx[i] = Some(fx_image(&mut images, t)); }
+                if st.fx[i].is_none() { st.fx[i] = Some(crate::fx_draw::fx_image(&mut images, t)); }
                 st.fx[i].clone()
             });
             let slot_no = k as u32;
             let slot = &mut st.slots[k];
-            let show = !q.idx.is_empty() && img.is_some();
+            let show = !q.is_empty() && img.is_some();
             if show {
                 let img = img.expect("checked");
                 match &mut slot.groups[g] {
@@ -980,10 +876,10 @@ fn draw_fire_fields(
                         let mut m = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
                         q.write(&mut m);
                         let mesh = meshes.add(m);
-                        let params = FireFieldParams { misc: Vec4::new((g == 0) as u32 as f32, 0.0, 0.0, 0.0) };
-                        let mat = materials.add(FireFieldMaterial { texture: img.clone(), fog, params, slot: slot_no * 3 + g as u32 });
+                        let params = FxPrimParams::blend(g == 0);
+                        let mat = materials.add(FxPrimMaterial { texture: img.clone(), fog, params, order: LIST2_BIAS + (slot_no * 3 + g as u32) as f32 });
                         let e = commands
-                            .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::IDENTITY, NoFrustumCulling, Visibility::Inherited, Name::new(format!("fire field {slot_no} group {g}"))))
+                            .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone()), Transform::IDENTITY, NoFrustumCulling, Visibility::Inherited, crate::display_blend::DisplayEffect, Name::new(format!("fire field {slot_no} group {g}"))))
                             .id();
                         slot.groups[g] = Some((e, mesh, mat, img));
                         slot.visible[g] = true;

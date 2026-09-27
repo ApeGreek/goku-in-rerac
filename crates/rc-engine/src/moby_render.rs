@@ -338,11 +338,11 @@ fn metal_passes(texel: AlphaRange) -> Vec<GsPass> {
 /// * [`Self::Plain`]: vertex alpha 0x80: the regular moby draw (opaque, texture cut-outs as before);
 /// * [`Self::Fading`]: the distance fade (or mode bit 8): the existing fade draw, unchanged;
 /// * [`Self::Translucent`]: +0x23 below 0x80 (the explosion flashes 0x70 / 1192 are spawned with 0x20..0x40 and
-///   fade to 0, a fading body piece counts it down): **alpha blend, no depth write, sorted back to front**; in the
-///   game such a moby's pixels fail the Z-writing alpha test (below 0x60), so they blend over the scene without
-///   occluding what is behind;
-/// * [`Self::Additive`]: mode bit 0x200 (the game switches the moby to `Cs·As + Cd`): **additive, no depth write,
-///   sorted**.
+///   fade to 0, a fading body piece counts it down): **alpha blend on display bytes (crate::display_blend), no depth
+///   write, sorted back to front**; in the game such a moby's pixels fail the Z-writing alpha test (below 0x60), so
+///   they blend over the scene without occluding what is behind;
+/// * [`Self::Additive`]: mode bit 0x200 (the game switches the moby to `Cs·As + Cd`): **additive on display bytes,
+///   no depth write, sorted**.
 ///
 /// Each value is one entity group per (instance, LOD) ([`Self::passes`]). No class is special-cased.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -380,7 +380,7 @@ impl MobyBlend {
                 let fade = AlphaRange { min: 0, max: ((0x7f * mult.max as u32) >> 7) as u8 };
                 gs_state::draws(moby_lod::AREF_FADE, texel, fade)
             }
-            MobyBlend::Translucent => vec![GsPass::BlendNoZ],
+            MobyBlend::Translucent => vec![GsPass::EffectMix],
             MobyBlend::Additive => vec![GsPass::AdditiveNoZ],
         }
     }
@@ -447,7 +447,7 @@ impl MatCache {
                     })
                     .clone();
                 self.batches.insert((part.mesh.id(), mat.id()));
-                let e = commands.spawn((
+                let mut e = commands.spawn((
                     Mesh3d(part.mesh.clone()),
                     MeshMaterial3d(mat),
                     transform,
@@ -456,6 +456,8 @@ impl MatCache {
                     visibility,
                     Name::new(format!("{name} tex {} {pass:?}", part.texture as isize)),
                 ));
+                // Effect draws (display-byte blending) are drawn by crate::display_blend's effect pass.
+                if pass.state().display { e.insert(crate::display_blend::DisplayEffect); }
                 out.push(e.id());
             }
         }
@@ -1347,9 +1349,10 @@ mod tests {
         assert_eq!(MobyBlend::pick(0x200, true, 0x80), MobyBlend::Additive);
         let o = AlphaRange::OPAQUE;
         assert_eq!(MobyBlend::Plain.passes(o, o), vec![GsPass::Opaque]);
-        assert_eq!(MobyBlend::Translucent.passes(o, o), vec![GsPass::BlendNoZ]);
+        assert_eq!(MobyBlend::Translucent.passes(o, o), vec![GsPass::EffectMix]);
         assert_eq!(MobyBlend::Additive.passes(o, o), vec![GsPass::AdditiveNoZ]);
-        assert!(!GsPass::BlendNoZ.state().depth_write && !GsPass::AdditiveNoZ.state().depth_write);
+        assert!(!GsPass::EffectMix.state().depth_write && !GsPass::AdditiveNoZ.state().depth_write);
+        assert!(GsPass::EffectMix.state().display && GsPass::AdditiveNoZ.state().display && !GsPass::BlendNoZ.state().display);
         assert!(GsPass::AdditiveNoZ.state().additive);
     }
 

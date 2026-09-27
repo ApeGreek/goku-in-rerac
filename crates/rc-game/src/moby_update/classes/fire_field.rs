@@ -52,9 +52,11 @@
 //! constants from the periods at 0x161368 (60, 60, 60 ticks on 00 / 01 / 14): wait, fade-in and fade-out ticks
 //! and the two reciprocals. State 1: the global curtain scroll `0x161374 −= 0.0025` (`+ 8` once ≤ −8).
 //!
-//! **Type-23 smoke particles** (only level 00's instances 163 / 164 set +0x42): `PartType23Spawn` 0x282060 is not
-//! ported (a particle type of its own): the record is taken and the spawner's and the caller's draws are made at
-//! the game's point (`fx::part_unported`), so the stream matches; the particle itself is not simulated.
+//! **Type-23 smoke particles** (only level 00's instances 163 / 164 set +0x42; 0x2fdee0..0x2fe018): per particle the
+//! field's draws (a point on the cuboid's top, 0.5 up; drift `randf_sym(0, dt/4)` ×2 and the rise P.20·dt; size
+//! `randf(P.24, P.28)`; alpha `rand_range(P.2c, P.2e)`; spin `rand_range` of the gp pair), then `PartType23Spawn`
+//! (`crate::particles::type23`, its own draws with a record) and the caller's patch: life `ticks(rand_range(P.30,
+//! P.34))`, phase 3 from that alpha, and `randi(2)` → ALPHA 0x44.
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::classes::draw_callbacks::Callback;
@@ -277,22 +279,43 @@ fn tick(w: &mut World, id: MobyId) {
 fn particle(w: &mut World, id: MobyId, c: &[[f32; 4]; 4]) {
     let x = w.rng.randf_sym(0.0, 1.0);
     let y = w.rng.randf_sym(0.0, 1.0);
-    let _pos = { let mut q = cuboid_point(c, [x, y, 1.0, 1.0]); q[2] += 0.5; q };
-    let _vel = [w.rng.randf_sym(0.0, DT * 0.25), w.rng.randf_sym(0.0, DT * 0.25), p::ff(&w.m(id).pvars, 0x20) * DT];
+    let pos = { let q = cuboid_point(c, [x, y, 1.0, 1.0]); [q[0], q[1], q[2] + 0.5, 1.0] };
+    let vel = [w.rng.randf_sym(0.0, DT * 0.25), w.rng.randf_sym(0.0, DT * 0.25), p::ff(&w.m(id).pvars, 0x20) * DT, 0.0];
     let pv = &w.m(id).pvars;
     let (s_lo, s_hi, a_lo, a_hi, l_lo, l_hi) = (p::ff(pv, 0x24), p::ff(pv, 0x28), p::i16(pv, 0x2c) as i32, p::i16(pv, 0x2e) as i32, p::i32(pv, 0x30), p::i32(pv, 0x34));
-    let _size = w.rng.randf(s_lo, s_hi);
+    let size = w.rng.randf(s_lo, s_hi);
     let a = w.rng.rand_range(a_lo, a_hi);
-    let _rgba = (a as u32) << 24 | PART_RGB;
-    let _frame = w.rng.rand_range(PART_FRAMES.0, PART_FRAMES.1);
-    // PartType23Spawn: CreatePart(23), then (only with a record) 3 × randf_sym(0, 0.5), randi(2), randf(1, 1.01).
-    if !crate::moby_update::creature::fx::part_unported(w, 23) { return; }
-    for _ in 0..3 { w.rng.randf_sym(0.0, PART_JITTER); }
-    w.rng.randi(2);
-    w.rng.randf(1.0, PART_SPEED_HI);
-    // The caller's patch: life ticks(rand_range(P.30, P.34)), then randi(2) picks the 0x44 blend.
-    w.rng.rand_range(l_lo, l_hi);
-    w.rng.randi(2);
+    let rgba = (a as u32) << 24 | PART_RGB;
+    let spin = w.rng.rand_range(PART_FRAMES.0, PART_FRAMES.1);
+    // PartType23Spawn(jitter, 1, speed, size, pos, spin, vel, rgba): the record (and, with it, its 3 × randf_sym(0,
+    // jitter), randi(2), randf(1, speed)); without a particle system only its draws.
+    *w.svc.fx.part_spawns.entry(23).or_default() += 1;
+    let i = match w.particles.as_deref_mut() {
+        Some(sys) => crate::particles::type23::spawn(sys, w.rng, PART_JITTER, 1.0, PART_SPEED_HI, size, pos, spin, vel, rgba),
+        None => {
+            for _ in 0..3 { w.rng.randf_sym(0.0, PART_JITTER); }
+            w.rng.randi(2);
+            w.rng.randf(1.0, PART_SPEED_HI);
+            Some(usize::MAX)
+        }
+    };
+    let Some(i) = i else {
+        w.svc.fx.part_failed += 1;
+        return;
+    };
+    // The caller's patch: life ticks(rand_range(P.30, P.34)), phase 3 (fade in over ticks(30), then out) from the
+    // alpha, and randi(2) picks the 0x44 blend.
+    let n = w.rng.rand_range(l_lo, l_hi);
+    let life = w.ticks(n);
+    let normal = w.rng.randi(2) != 0;
+    if let Some(r) = w.particles.as_deref_mut().and_then(|s| s.pool.recs.get_mut(i)) {
+        use crate::particles::rec;
+        rec::set_i16(r, 0xa, life as i16);
+        rec::set_u32(r, 0x24, 3);
+        r[0x2a] = (rgba >> 24) as u8;
+        r[0x2b] = r[0xa];
+        if normal { r[3] = 0x44; }
+    }
 }
 
 /// The draw callback `0x2fe080`'s state part (see the module doc), run by `draw_callbacks::run_frame`.

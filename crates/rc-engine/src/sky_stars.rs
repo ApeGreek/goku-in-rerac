@@ -36,7 +36,7 @@
 //! [`crate::sky_render::SkyStarOrder`] so they sort between the right shells; the shader adds the pixel offsets
 //! in clip space like `particle.wgsl` and sets depth 0 (unused: compare Always, no write).
 
-use crate::game_camera::{game_rows, NTSC_Y_RATIO, TAN_HALF_FOV_X};
+use crate::game_camera::game_rows;
 use crate::sky_render::{SkyCamera, SkyStarOrder, ORDER_SPACING, SKY_LAYER};
 use crate::tfrag_render::game_to_bevy;
 use anyhow::{bail, Context, Result};
@@ -258,7 +258,7 @@ fn star_frame(
     }
 }
 
-type MainCamera<'w, 's> = Query<'w, 's, &'static Transform, (With<Camera3d>, Without<SkyCamera>)>;
+type MainCamera<'w, 's> = Query<'w, 's, (&'static Transform, Option<&'static Projection>), (With<Camera3d>, Without<SkyCamera>)>;
 
 /// `SkySpriteProc` on the CPU: cull and write this frame's sprites per texture.
 fn build_meshes(
@@ -268,9 +268,10 @@ fn build_meshes(
     mut draws: Query<(&mut Visibility, &StarDraw)>,
 ) {
     let Some(mut sim) = sim else { return };
-    let Some(t) = cams.iter().next() else { return };
+    let Some((t, proj)) = cams.iter().next() else { return };
     let [fwd, left, up] = game_rows(t);
-    let (tx, ty) = (TAN_HALF_FOV_X, TAN_HALF_FOV_X * NTSC_Y_RATIO);
+    // The view's tan_x / tan_y (0x16d0a0 / 0x16cf70 as `UpdateViewContext` sets them): the camera's real projection.
+    let (tx, ty) = crate::particle_render::view_tans(proj);
     let (sec_x, sec_y) = ((1.0 + tx * tx).sqrt(), (1.0 + ty * ty).sqrt());
 
     let StarSim { stars, groups, drawn: drawn_out, .. } = &mut *sim;

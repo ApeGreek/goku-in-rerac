@@ -170,7 +170,9 @@ pub struct ShrubMaterial {
     /// One `ShrubInst` per gameplay instance (see shrub.wgsl), indexed by `MeshTag`.
     #[storage(4, read_only, visibility(vertex))]
     pub instances: Handle<ShaderBuffer>,
-    /// One `vec2<f32>` wind shear `(sx, sy)` per gameplay instance, rewritten every frame (`update_sway`).
+    /// The per-frame buffer ([`ShrubSway`]): one `vec2<f32>` wind shear `(sx, sy)` per gameplay instance (rewritten
+    /// every frame by `update_sway`), then one `vec2` per instance whose x holds its point-light nibble list (u32 bits),
+    /// then the point-light bank (8 × 4 `vec2`; crate::world_lights).
     #[storage(5, read_only, visibility(vertex))]
     pub sway: Handle<ShaderBuffer>,
     /// This draw's GS state (crate::gs_state).
@@ -372,11 +374,21 @@ pub fn runtime_draw_distance(c: &LevelShrubClass, inst: &ShrubInstance) -> f32 {
     d.min(DRAW_DISTANCE_CAP)
 }
 
-/// The storage record (`ShrubInst` in shrub.wgsl): model (16 f32), centre xyz + D, origin xyz + F, 24 palette words.
-fn write_record(out: &mut Vec<u8>, model: &Mat4, centre: Vec3, d: f32, origin: Vec3, f: f32, palette: &[[u8; 4]; PALETTE]) {
+/// The storage record (`ShrubInst` in shrub.wgsl): model (16 f32), centre xyz + D, origin xyz + F, 24 palette words,
+/// then the class's 24 normals `LightShrubs` lights with, packed as the raw s16 (x | y << 16, z) for the point lights
+/// (crate::world_lights; the centre is their origin). The normals travel in the record rather than in a buffer of
+/// their own: a new binding changes the material layout, which reorders the blended shrub draws and so the pixels of
+/// frames without any light.
+#[allow(clippy::too_many_arguments)]
+fn write_record(out: &mut Vec<u8>, model: &Mat4, centre: Vec3, d: f32, origin: Vec3, f: f32, palette: &[[u8; 4]; PALETTE], normals: &[[i16; 4]]) {
     for v in model.to_cols_array() { out.extend_from_slice(&v.to_le_bytes()); }
     for v in [centre.x, centre.y, centre.z, d, origin.x, origin.y, origin.z, f] { out.extend_from_slice(&v.to_le_bytes()); }
     for c in palette { out.extend_from_slice(c); }
+    for j in 0..PALETTE {
+        let n = normals.get(j).copied().unwrap_or([0; 4]);
+        out.extend_from_slice(&(n[0] as u16 as u32 | (n[1] as u16 as u32) << 16).to_le_bytes());
+        out.extend_from_slice(&(n[2] as u16 as u32).to_le_bytes());
+    }
 }
 
 fn spawn_system(
@@ -424,6 +436,25 @@ pub struct ShrubSway {
     len: usize,
     instances: Vec<(u32, u16, [f32; 3])>,
     last_tick: Option<(u32, [f32; 3])>,
+    /// The whole buffer: `len` shears, `len` point-light lists, the bank (see `ShrubMaterial::sway`).
+    data: Vec<u8>,
+}
+
+impl ShrubSway {
+    /// Zero shear, every nibble list empty (0xffff), an empty bank.
+    fn initial_data(n: usize) -> Vec<u8> {
+        let mut d = vec![0u8; n * 16 + crate::world_lights::BANK_BYTES];
+        for i in 0..n { d[n * 8 + i * 8..n * 8 + i * 8 + 4].copy_from_slice(&0xffffu32.to_le_bytes()); }
+        d
+    }
+
+    /// crate::world_lights: the shrubs' nibble lists (instance order) and the bank bytes.
+    pub fn set_point_lights(&mut self, lists: &[u16], bank: &[u8], buffers: &mut Assets<ShaderBuffer>) {
+        let n = self.len;
+        for (i, &l) in lists.iter().take(n).enumerate() { self.data[n * 8 + i * 8..n * 8 + i * 8 + 4].copy_from_slice(&(l as u32).to_le_bytes()); }
+        self.data[n * 16..n * 16 + bank.len()].copy_from_slice(bank);
+        if let Some(mut buf) = buffers.get_mut(&self.buffer) { buf.data = Some(self.data.clone()); }
+    }
 }
 
 /// `ShrubProc`'s sway for every sway-class instance, once per frame, from the 60 Hz fixed clock (the game's
@@ -443,7 +474,10 @@ fn update_sway(
     let eye = [e.x, -e.z, e.y]; // Bevy → game axes
     if sway.last_tick == Some((tick, eye)) { return; }
     sway.last_tick = Some((tick, eye));
-    let mut bytes = vec![0u8; sway.len * 8];
+    let sway = &mut *sway;
+    let len = sway.len;
+    let bytes = &mut sway.data;
+    bytes[..len * 8].fill(0);
     for &(ii, mode, t) in &sway.instances {
         let rel = [t[0] - eye[0], t[1] - eye[1], t[2] - eye[2]];
         if let Some([sx, sy]) = shrub::wind_sway(mode, SWAY_BLOCK_BASE.wrapping_add(ii.wrapping_mul(0x40)), tick, rel) {
@@ -452,7 +486,7 @@ fn update_sway(
             bytes[at + 4..at + 8].copy_from_slice(&sy.to_le_bytes());
         }
     }
-    if let Some(mut buf) = buffers.get_mut(&sway.buffer) { buf.data = Some(bytes); }
+    if let Some(mut buf) = buffers.get_mut(&sway.buffer) { buf.data = Some(bytes.clone()); }
 }
 
 fn spawn_shrubs(
@@ -479,7 +513,7 @@ fn spawn_shrubs(
 
     // Per-instance storage records (index = instance index = MeshTag).
     let a = axes();
-    let mut bytes = Vec::with_capacity(shrubs.instances.len() * 192);
+    let mut bytes = Vec::with_capacity(shrubs.instances.len() * 384);
     let mut models = Vec::with_capacity(shrubs.instances.len());
     let mut culls = Vec::with_capacity(shrubs.instances.len());
     for (ii, inst) in shrubs.instances.iter().enumerate() {
@@ -493,15 +527,18 @@ fn spawn_shrubs(
             }
             None => (origin, 0.0, -1.0),
         };
-        write_record(&mut bytes, &model, centre, d, origin, f, &shrubs.palettes[ii]);
+        let normals = shrubs.class_of[ii].map_or(&[][..], |ci| &shrubs.classes[ci].class.normals[..]);
+        write_record(&mut bytes, &model, centre, d, origin, f, &shrubs.palettes[ii], normals);
         models.push(model);
         culls.push(ShrubCull { centre, d, f, variant: 0 });
     }
     let inst_buffer = buffers.add(ShaderBuffer::new(&bytes, RenderAssetUsages::RENDER_WORLD));
-    // Wind sway: zero shear for every instance until `update_sway` runs (and for good with `RC_SWAY=0`).
+    // Wind sway: zero shear for every instance until `update_sway` runs (and for good with `RC_SWAY=0`); no point
+    // light on any instance until crate::world_lights writes one.
     let n = shrubs.instances.len().max(1);
-    let sway_buffer = buffers.add(ShaderBuffer::new(&vec![0u8; n * 8], RenderAssetUsages::default()));
-    let mut sway = ShrubSway { enabled: sway_enabled(), buffer: sway_buffer.clone(), len: n, instances: Vec::new(), last_tick: None };
+    let data = ShrubSway::initial_data(n);
+    let sway_buffer = buffers.add(ShaderBuffer::new(&data, RenderAssetUsages::default()));
+    let mut sway = ShrubSway { enabled: sway_enabled(), buffer: sway_buffer.clone(), len: n, instances: Vec::new(), last_tick: None, data };
 
     let fog = crate::game_camera::TfragFog::new(&level.fog);
     let fallback = images.add(Image::new_fill(

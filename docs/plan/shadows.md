@@ -415,8 +415,17 @@ shadow; two runs give identical PNGs; MSAA 4× works. Frame rate with / without 
 shadow is off, as in the game; the scene actors themselves (extra mobys of `scene_render.rs`) cast **no shadow yet**:
 wiring `probe_along_dir` needs their records (position, sphere, pose) from `scene_render.rs`.
 
+**Scene actors (2026-09-27, flicker fix).** The actors now cast (their table mobys, `scene_render.rs`). A one-frame
+pop every 96 frames (each streamed chunk switch; on Novalis' arrival frames 301, 397, 493, …, the ear / head shadow
+jumping while Ratchet lies still) came from the order: the pose was written into the actor mobys at the *start* of the
+next frame, so the shadow used the last frame's pose (+0x50..0x54) while the drawn actor used this frame's, and at a
+chunk switch the old chunk's frame index was evaluated on the new chunk's sequence. `CutsceneModeUpdate` writes the
+pose, `MobyBuildMatrix`es and calls *ShadowProbeAlongDir* **after** `MobyUpdateLoop` and before the draw; the port now
+does the same (`scene_render::actor_mobys`, `FixedUpdate` after `GameTick`; the actor probe in `shadow_tick` runs on
+every scene frame after it), so shadow and model share one pose every frame and the moby loop still reads the last
+frame's. Checked: every frame of Novalis scene 5 (240..560) and level 2 scene 1 (20..420) against a shadows-off run, no single-frame pops left; two runs identical; gameplay shots unchanged.
+
 **Not done / known differences.**
-* Scene actors' shadows (above).
 * Casters are chosen by class (a shadow block) for the late draw; the game defers by the run-time mode bits
   0xc00 (e.g. Ratchet without 0x400 on the water surface is drawn early there). Only visible where another caster's
   shadow would fall on such a moby.

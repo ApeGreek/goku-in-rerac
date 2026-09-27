@@ -39,7 +39,8 @@
 //! | `SkyTextured` | Transparent3d on the sky camera | GS equation | off | ALWAYS | – (the 0x3180b test only gates Z, which ZMSK masks) |
 //! | `LateTested { aref }` | Transparent3d (`Blend`) | GS equation | on | GEQUAL | As < AREF (moby metal pass: after every AlphaMask3d draw; a shadow caster's cut-out draws) |
 //! | `LateOpaque` | Transparent3d (`Blend`) | none | on | GEQUAL | – (a shadow caster's opaque draws: after the shadow pass, crate::shadow_render) |
-//! | `AdditiveNoZ` | Transparent3d (`Blend`) | native additive `src·α + dst` | off | GEQUAL | – |
+//! | `EffectMix` | Transparent3d (`Blend`) | GS equation on display bytes (crate::display_blend) | off | GEQUAL | – |
+//! | `AdditiveNoZ` | Transparent3d (`Blend`) | `Cs·As + Cd` on display bytes (crate::display_blend) | off | GEQUAL | – |
 //! | `Hud` | Transparent2d on the HUD camera (crate::hud_render) | GS equation | off | ALWAYS | – |
 //!
 //! `Hud` is TEST_1 0x5380b (ATE GEQUAL 0x80, AFAIL RGB_ONLY, ZTST GEQUAL) with every 2D primitive at Z 0xfffff0,
@@ -69,11 +70,12 @@
 //!   pair each), not ordered (Bevy's `depth_bias` only sorts Transparent3d and Transmissive3d, not the
 //!   binned phases). Within one batch the index order is the packet order.
 //!
-//! `AdditiveNoZ` is not a GS mode model: it is the plain native additive blend (one draw, Z tested, not written,
-//! sorted with the blended items) that effect mobys the game flags additive are drawn with (crate::moby_render
-//! `MobyBlend`). It adds in linear light; the particles' display-byte additive layer (particle_render.rs, a
-//! deferred decision) is not used for it.
-//!
+//! `EffectMix` and `AdditiveNoZ` are the effect mobys' draws (crate::moby_render `MobyBlend::Translucent` /
+//! `Additive`: one draw, Z tested, not written, sorted with the blended items). They are not GS register models: they
+//! blend on the frame's display bytes like every effect (crate::display_blend, user decision 2026-09-27; the shader
+//! gets `DISPLAY_BLEND_MIX` / `DISPLAY_BLEND_ADD`, the pipeline targets the effect pass's display-encoded target, and
+//! the entity carries `DisplayEffect`).
+
 //! `RC_GS_ALPHA=0` restores the previous mapping (any As ≠ 0x80 → one `BlendNoZ` draw) for comparisons.
 
 use bevy::prelude::*;
@@ -162,8 +164,10 @@ pub enum GsPass {
     /// `OpaqueTested` drawn in Transparent3d instead of AlphaMask3d: the moby metal (shine) pass, which the game
     /// draws right after the moby's own packets, so it must land on the moby's AlphaMask3d fragments too.
     LateTested { aref: u8 },
-    /// Native additive blend (`src·α + dst`), no Z write (effect mobys flagged additive).
+    /// `Cs·As + Cd` on display bytes (crate::display_blend), no Z write (effect mobys flagged additive).
     AdditiveNoZ,
+    /// `(Cs − Cd)·As + Cd` on display bytes (crate::display_blend), no Z write (translucent effect mobys).
+    EffectMix,
     /// `Opaque` drawn in Transparent3d: a shadow caster's opaque draws, which the game draws after the shadow pass
     /// (crate::moby_render `caster_pass`, crate::shadow_render).
     LateOpaque,
@@ -183,8 +187,10 @@ pub enum AlphaDiscard {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GsState {
     pub blend: bool,
-    /// Additive (`src·α + dst`) instead of the alpha mix.
+    /// Additive (`Cs·As + Cd`) instead of the alpha mix.
     pub additive: bool,
+    /// Blended on display bytes by the shader (crate::display_blend).
+    pub display: bool,
     pub depth_write: bool,
     pub depth_compare: CompareFunction,
     pub discard: AlphaDiscard,
@@ -193,12 +199,6 @@ pub struct GsState {
 /// `(Cs − Cd)·As + Cd` with As = fragment alpha (ALPHA_1 = 0x8000000044; FIX unused).
 pub const GS_BLEND: BlendState = BlendState {
     color: BlendComponent { src_factor: BlendFactor::SrcAlpha, dst_factor: BlendFactor::OneMinusSrcAlpha, operation: BlendOperation::Add },
-    alpha: BlendComponent::OVER,
-};
-
-/// Native additive: `src·α + dst`.
-pub const BLEND_ADD: BlendState = BlendState {
-    color: BlendComponent { src_factor: BlendFactor::SrcAlpha, dst_factor: BlendFactor::One, operation: BlendOperation::Add },
     alpha: BlendComponent::OVER,
 };
 
@@ -215,11 +215,12 @@ impl GsPass {
             GsPass::SkyTextured => (true, false, Always, D::None),
             GsPass::Hud => (true, false, Always, D::None),
             GsPass::LateTested { aref } => (true, true, GreaterEqual, D::Below(aref)),
-            GsPass::AdditiveNoZ => (true, false, GreaterEqual, D::None),
+            GsPass::AdditiveNoZ | GsPass::EffectMix => (true, false, GreaterEqual, D::None),
             GsPass::LateOpaque => (false, true, GreaterEqual, D::None),
         };
         let additive = matches!(self, GsPass::AdditiveNoZ);
-        GsState { blend, additive, depth_write, depth_compare, discard }
+        let display = matches!(self, GsPass::AdditiveNoZ | GsPass::EffectMix);
+        GsState { blend, additive, depth_write, depth_compare, discard, display }
     }
 
     /// The Bevy phase: Opaque3d, AlphaMask3d (drawn after all of Opaque3d) or Transparent3d.
@@ -241,8 +242,8 @@ impl GsPass {
             ds.depth_compare = Some(s.depth_compare);
         }
         if let Some(f) = descriptor.fragment.as_mut() {
-            let blend = if s.additive { BLEND_ADD } else { GS_BLEND };
-            for t in f.targets.iter_mut().flatten() { t.blend = s.blend.then_some(blend); }
+            for t in f.targets.iter_mut().flatten() { t.blend = s.blend.then_some(GS_BLEND); }
+            if s.display { f.shader_defs.push(if s.additive { "DISPLAY_BLEND_ADD" } else { "DISPLAY_BLEND_MIX" }.into()); }
             let (def, aref) = match s.discard {
                 AlphaDiscard::None => (None, 0),
                 AlphaDiscard::Below(a) => (Some("GS_ATEST_PASS"), a),
@@ -251,6 +252,8 @@ impl GsPass {
             if let Some(d) = def { f.shader_defs.push(d.into()); }
             f.shader_defs.push(ShaderDefVal::UInt("GS_AREF".into(), aref as u32));
         }
+        // Effect draws: the display-encoded target and its blend (crate::display_blend).
+        if s.display { crate::display_blend::specialize(descriptor); }
     }
 }
 

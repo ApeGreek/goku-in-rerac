@@ -10,51 +10,49 @@
 //! (`dir` = the push, `attacker` = the projectile moby, the type bytes, the damage). The class code (459's shot 722,
 //! the gunship's shell 686) keeps its own flight rule and effects.
 //!
-//! **Particle records without a port.** Types 16 (smoke `PartType16Spawn` 0x280f30), 22 (jet exhaust
-//! `PartType22Spawn` 0x281f30) and 26 (glow sprite on a moby `PartType26Spawn` 0x282b00) are taken from the pool and
-//! make the spawn's own draws at the game's point ([`part`]); the particle system kills a type it does not simulate
-//! on its first update (so the update's own draws are missing: `docs/plan/creatures.md` §6). The callers make the
-//! draws for the arguments (colours, lives) themselves, in the game's order. Types 4, 8 and 15 are simulated: the
-//! callers use `fx::part04` / `part08` / `part15`.
+//! **Their particles.** Types 16 (smoke `PartType16Spawn` 0x280f30), 22 (rising puff `PartType22Spawn` 0x281f30)
+//! and 26 (glow sprite on a moby `PartType26Spawn` 0x282b00) are `crate::particles::type16` / `type22` / `type26`;
+//! [`part16`], [`part22`], [`part26`] make the spawner's draws (with a record, or alone without a particle system)
+//! and count the spawn. Types 4, 8 and 15 are the callers' `fx::part04` / `part08` / `part15`.
 
 use super::V;
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{pf as to_pf, pv, HitTemplate, World};
 
-/// A particle type without a simulation (module doc) and its spawn rule.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Part {
-    /// `PartType16Spawn`: nothing for life 0; the frame-load throttle (`randi(3)` / `randi(2)` / `randi(1)` over
-    /// 0.9 / 0.95 / 1.0 of 0x15f5d0, a 0 drops the spawn); a record, then `rand()`.
-    T16 { life: i32 },
-    /// `PartType22Spawn`: a record, then `rand()`.
-    T22,
-    /// `PartType26Spawn`: a record, then `rand()`.
-    T26,
+/// `PartType16Spawn(size, pos, vel, c1, c2, life, kind)`: the frame-load throttle's draws, then the record (one
+/// `rand()` with it). True when a record was taken.
+pub fn part16(w: &mut World, a: &crate::particles::type16::Spawn) -> Option<usize> {
+    let load = f32::from_bits(w.svc.frame_load[0].0);
+    if crate::particles::type16::throttled(w.rng, a.life, load) { return None; }
+    *w.svc.fx.part_spawns.entry(16).or_default() += 1;
+    let Some(sys) = w.particles.as_deref_mut() else {
+        w.rng.rand();
+        return None;
+    };
+    let r = crate::particles::type16::spawn(sys, w.rng, a);
+    if r.is_none() { w.svc.fx.part_failed += 1; }
+    r
 }
 
-impl Part {
-    pub const fn ty(self) -> u8 {
-        match self {
-            Part::T16 { .. } => 16,
-            Part::T22 => 22,
-            Part::T26 => 26,
-        }
-    }
+/// `PartType22Spawn(size, pos, vel, c1, c2, life)`: the record (one `rand()` with it).
+pub fn part22(w: &mut World, a: &crate::particles::type22::Spawn) {
+    *w.svc.fx.part_spawns.entry(22).or_default() += 1;
+    let Some(sys) = w.particles.as_deref_mut() else {
+        w.rng.rand();
+        return;
+    };
+    if crate::particles::type22::spawn(sys, w.rng, a).is_none() { w.svc.fx.part_failed += 1; }
 }
 
-/// The spawn of `p` (module doc): true when a record was taken.
-pub fn part(w: &mut World, p: Part) -> bool {
-    if let Part::T16 { life } = p {
-        if life == 0 { return false; }
-        let l0 = f32::from_bits(w.svc.frame_load[0].0);
-        for (k, n) in [(0.9f32, 3), (0.95, 2), (1.0, 1)] {
-            if k < l0 && w.rng.randi(n) == 0 { return false; }
-        }
-    }
-    let ok = super::fx::part_unported(w, p.ty());
-    if ok { w.rng.rand(); }
-    ok
+/// `PartType26Spawn(size, moby, rgba, life, −1)`: a glow on `moby`'s position (one `rand()` with a record).
+pub fn part26(w: &mut World, size: f32, moby: MobyId, rgba: u32, life: i32) {
+    *w.svc.fx.part_spawns.entry(26).or_default() += 1;
+    let p = w.m(moby).position;
+    let Some(sys) = w.particles.as_deref_mut() else {
+        w.rng.rand();
+        return;
+    };
+    if crate::particles::type26::spawn(sys, w.rng, size, moby, rgba, life, -1, [p[0], p[1], p[2]]).is_none() { w.svc.fx.part_failed += 1; }
 }
 
 /// The hit template the enemy projectiles build (`+0x00` push, `+0x10` attacker, `+0x14` flags, `+0x18`/`+0x19` type

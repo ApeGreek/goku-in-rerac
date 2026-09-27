@@ -51,8 +51,9 @@ so `max(d, d*w)` is always >= 0 (w < 0 gives a weak "back light" of |w| * |d|). 
   and DMA'd (SPR_FROM, QWC = header 0x29 `rgba_size`) **over the tfrag's own RGBA block**
   (`data + header 0x1e`). VU1 then copies that RGBA verbatim. So the stored RGBA on disc is only a
   placeholder; the game never displays it. **[verified]**
-* The port runs the pass once at load (`level_load.rs` -> `tfrag_light::light_level_tfrags`) and
-  replaces `Tfrag::rgba`; the renderer is unchanged. **[equivalent while the port has no point lights]**
+* The port runs the directional pass once at load (`level_load.rs` -> `tfrag_light::light_level_tfrags`) and
+  replaces `Tfrag::rgba`; the point lights are added on top in the vertex shader ("Point lights on world geometry"
+  below). **[equivalent: the game's per-frame pass restarts from the same directional result]**
 
 ## 4. The math (per tfrag `h`, per vertex record `e`, i < `h.vert_count`)
 
@@ -101,8 +102,8 @@ for each vertex: cur = current rgba as 65536 + c/128 (so lights accumulate)
 
 `pos_ofs` always addresses position `i` in the retail data, so the port uses `Tfrag::positions[i]`;
 the origin quadword equals `Tfrag::origin` in every tfrag (golden test). **[verified on data]**
-The port implements this pass and unit-tests it, but the engine passes no point lights (none exist
-until gameplay code creates them). Padding entries `vert_count..rgba_size*4` get scratchpad
+`light_tfrag(.., Some(points))` implements this pass bit-exactly and unit-tests it; the engine does it natively in
+the shader instead ("Point lights on world geometry" below). Padding entries `vert_count..rgba_size*4` get scratchpad
 leftovers in the game; the port keeps the stored bytes there (no vertex references them). **[verified]**
 
 ## 5. Fixed-point / register details that matter for identical bytes
@@ -148,6 +149,78 @@ inside the mixed-sign dot products; the unit test `ps2_arithmetic_truncates` pin
 
 * No ground truth for the exact bytes (emulator RAM dump of the RGBA block after level load would
   settle the float-model questions in §6). **[open]**
-* `LightTies` (`0x2ab218`) and the shrub pass (`FUN_0029e7e8`) share the bank and the same idioms;
-  not ported. **[open]**
-* `header 0x35` (`dir_lights_upd`) is only cleared by this pass; who sets it is unknown. **[open]**
+* `LightTies` (`0x2ab218`) and the shrub pass (`FUN_0029e7e8`) share the bank and the same idioms: ported
+  (docs/plan/tie_lighting.md, shrub_lighting.md), point lights below.
+* `header 0x35` (`dir_lights_upd`) is the dirty byte: `DetachPointLight` sets it when a tfrag's point-light list
+  empties, `TfragProc` then lists the tfrag for one more relight, and this pass clears it. **[verified]**
+
+## 9. Point lights on world geometry (tfrags, ties, shrubs)
+
+Explosions light the level: the Novalis arrival crash turns the rocks, cliff pillars and trees around it yellow, a
+Bomb Glove explosion warms the cave walls and floor. Level01 addresses; the boot copies are named where known.
+
+### 9.1 Which instances a light relights (the attachment)
+
+| What | Where | Notes |
+| --- | --- | --- |
+| Bank | `0x180740 + 0x20·i`, i < 8 | qw0 colour (r, g, b) + intensity (w, the back factor), qw1 position + radius. [verified] |
+| Attachment records | `0x180940 + 0x30·i` | +0x00/+0x02 tie list start/count, +0x04/+0x06 shrub, +0x08/+0x0a tfrag (u16 indices), +0x0c pointer to the slot's 0x200-entry u16 list (`0x180ac0 + 0x400·i`), +0x10 state (0 free, 1 written, 2 attached), +0x20 the position it was attached at. [verified] |
+| `WritePointLight_A/B` | 0x2525f8 / 0x252750 | first slot with state 0 (only while the frame load 0x15f5d4 ≤ 0.8): writes the bank slot, zeroes the 0x30 record, state = 1. [verified] |
+| `UpdateAllPointLights` | 0x2528a8 (boot 0x201a28), once per tick after the mobys | for each slot with state ≠ 0 whose position is more than **8.0** from the attachment position (`vec_distance` 0x221360, 3D): copy the position, then state 1 → `CreatePointLight`, state 2; state 2 → `refresh_point_light` 0x252dd8 = `DetachPointLight` + `CreatePointLight`. A radius change alone never re-attaches. [verified] |
+| `CreatePointLight` | 0x252a28 (boot 0x201ba8) | sphere `(pos, radius + 8)`; tests it (`fun_001f9bb0` 0x2213c8: `(dx² + dy²) + dz² − (r₁ + r₂)² < 0`, strict) against every **tie** record (0x160fc0.., +0x00 sphere), then every **tfrag** header (the sphere ×1024 against header +0x00), then every **shrub** record (0x160494..). A hit takes the first free nibble of the instance's list (tie/shrub +0x1e, tfrag +0x36; 0xffff → `slot | 0xfff0`, then nibble 1, 2, 3; all four taken: skipped) and appends the index to the slot's list. **The list holds 0x200 entries for all three kinds together**: once full, the remaining ties, then all tfrags and shrubs, are not attached. [verified] |
+| `DetachPointLight` | 0x252e08 (boot 0x201f88), also from `FreePointLight` 0x252850 | removes the slot's nibble from every listed instance (higher nibbles move down, 0xf fills the top); an instance whose list becomes 0xffff gets its dirty byte (tie/shrub +0x1b, tfrag +0x35). [verified] |
+
+### 9.2 How often, persistence
+
+* The relight lists are built by the procs every frame: `TfragProc` lists a visible tfrag when `+0x35 != 0 ||
+  +0x36 != 0xffff` (≤ 511 entries, scratch 0x70003000 → 0x1c5880), `TieProc` a visible tie when `+0x1b || +0x1e !=
+  0xffff`, `ShrubProc` likewise (shrub_lighting.md §4). The frame render (0x21a1b8) then runs `LightTfrags(0x1c5880)`,
+  `LightTies(0x1c7780)`, `LightShrubs(0x1bd430)` when their counts (0x16a480 / 0x16a488 / 0x16a490) are non-zero.
+  [verified]
+* Each pass restarts from the baked inputs (per-vertex base colour / ambient table) and redoes the directional part,
+  then adds the listed lights **at their current colour, position and radius**. So what is on screen every frame is
+  `baked + the listed lights`; nothing accumulates. When a light is freed or moves away, the detach marks the emptied
+  instances dirty and they are relit once without it: **the colours revert to the baked ones**. [verified]
+* Instances attached but off screen keep stale colours in RAM, but are relit before they are drawn again. [verified]
+
+### 9.3 How a light adds to the colours
+
+* **Tfrags, per vertex** (§4 above): `v = P − L`, skipped when `r² − |v|² < 0` (current radius); `d = (−N)·v ·
+  (1 − |v|/r)/|v|`, `d = max(d, d·w)`; `rgba += floor(128 · (colour, w) · d)` on all four lanes, rgb clamped at 255.
+  Lights accumulate in nibble order on the already-lit bytes. The morphing LOD vertices blend the relit colours
+  (VU1 reads the relit block). [verified]
+* **Ties and shrubs, per instance** (tie_lighting.md §3, shrub_lighting.md §2): the listed lights that reach the
+  instance's bounding-sphere centre merge into one third light: direction = sum of the unit vectors (centre − L),
+  renormalised only when two or more contribute; colour = Σ colour·(1 − dist/r); back factor = Σ w·(1 − dist/r).
+  Each class normal n (64 tie slots / 24 shrub palette entries) gets `d = −dir · (n through the unit axis columns)`,
+  `max(d, d·back)`, `+ floor(128 · colour · d)`, rgb clamped at **243**; alpha unchanged. The shrub billboards keep
+  the load-time average colour (col1.w is written once, at load). [verified]
+* Colour units: 1.0 adds 128 to a byte. The explosion light (class 0x27f, `rc_game::moby_update::creature::fx`) ramps
+  its channels to 2.55, so everything near it saturates; its intensity byte is 0 (no back light, alpha unchanged).
+
+### 9.4 In the port
+
+* **Attachment:** `rc_game::point_lights::WorldLightLists` reproduces §9.1 exactly (states, the 8-unit move
+  threshold, `radius + 8`, ties → tfrags → shrubs, nibble insert/removal, the shared 0x200 capacity), driven after
+  every tick from the game's bank (`Services::point_lights`; `PointLights::generation` tells a new light in a
+  reused slot). Unit tests: `nibble_lists_fill_from_the_low_end_and_compact`, `overlap_is_strict`,
+  `attach_margin_move_threshold_and_free`, `list_capacity_is_shared_ties_first`.
+* **Lighting:** native, in the vertex shaders (`assets/shaders/world_lights.wgsl`, imported by `tfrag.wgsl`,
+  `tie.wgsl`, `shrub.wgsl`). `crate::world_lights` appends the bank (256 bytes) and one nibble list per tfrag / tie /
+  shrub to each renderer's existing per-frame buffer (`TfragLodState` modes, `TieLodState` words, `ShrubSway`
+  shears; rewritten only when the bank or an attachment changes); the vertex normals ride in the existing static
+  records (tfrag slot word: azimuth | elevation; tie / shrub instance record: the class normals as raw s16). No new
+  material binding: a changed bind-group layout reorders the draws (the alpha-test / blended passes are order
+  dependent) and changed frames without any light, which the A/B check caught. The baked colours stay as they
+  were; an instance with list 0xffff takes the unchanged path, so a frame with no light is byte-identical to the
+  port without this feature (Novalis frame 300, level 03 frame 120). No CPU rewrite of vertex or instance buffers.
+* **Arithmetic:** IEEE f32 with the game's operation order and the byte grid (`floor(128·c·d)` per light); the PS2
+  truncating FMAC is not modelled (≤ 1 byte; docs/plan/hardware_fidelity_layers.md). The bit-exact CPU versions
+  (`light_tfrag(.., Some)`, `tie_light::light_regs(.., Some)`, `shrub_light::light_regs(.., Some)`) stay as the
+  reference.
+* `RC_WORLD_LIGHTS=0` keeps every list empty; `RC_WORLD_LIGHTS_TRACE=1` prints the frame time, the bank and the listed counts every frame.
+* **Results:** the arrival crash (scene 5; two radius-60 lights at the ship) attaches 512 + 2 ties and therefore
+  **no tfrag and no shrub**: the rocks, pillars and tree turn yellow and the grass hill behind the explosion does
+  not, exactly as in the original frame. A Bomb Glove explosion in the Novalis cave (radius 20) attaches 75 tfrags,
+  127 ties and 99 shrubs and washes the walls and floor yellow, fading with the light's colour ramp (~30 ticks).
+

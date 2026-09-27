@@ -531,6 +531,16 @@ impl SceneActorState {
         let k = self.scale * (1.0 / 1024.0);
         [t[0] * k + self.position[0], t[1] * k + self.position[1], t[2] * k + self.position[2], t[3]]
     }
+
+    /// `0x264508(actor, j, out)`: joint `j`'s world matrix (the one-joint chain `[j]` evaluated like `fun_0020cca8`;
+    /// rows 0..2 the joint's axes, with its animated scale, times the actor's identity rotation; row 3 its point
+    /// `P.r3·(scale/1024) + position`).
+    pub fn joint_matrix(&self, j: u8) -> [[f32; 4]; 4] {
+        let m = rc_formats::moby_anim::evaluate_chain(&self.anim, &self.state, None, &[j]);
+        let k = self.scale * (1.0 / 1024.0);
+        let t = m[3];
+        [m[0], m[1], m[2], [t[0] * k + self.position[0], t[1] * k + self.position[1], t[2] * k + self.position[2], t[3]]]
+    }
 }
 
 #[cfg(test)]

@@ -1337,6 +1337,40 @@ impl<'a> World<'a> {
         [v[0] + m.position[0], v[1] + m.position[1], v[2] + m.position[2], v[3]]
     }
 
+    /// The points the live type-26 and type-55 particle records follow ([`Particles::joint_anchors`]), after the moby
+    /// loop: per (moby, joint list) the moby's position (list −1) or the list's point (type 26: moved 0.4 toward the
+    /// camera 0x167240, as `PartType26Update` does). A moby that is gone (state ≥ 0x80), or for type 55 has another
+    /// class than the record's (+0x38), is not listed, so its records die on their next update.
+    pub fn refresh_particle_anchors(&mut self) {
+        use crate::particles::{rec, type19, type26};
+        let Some(p) = self.particles.as_deref() else { return };
+        let keys: Vec<(usize, i16, bool, i16)> = p
+            .pool
+            .live()
+            .filter_map(|(_, r)| {
+                type26::anchor_of(r).map(|(m, j)| (m, j, true, -1)).or_else(|| type19::anchor55(r).map(|(m, j)| (m, j, false, rec::i16(r, 0x38))))
+            })
+            .collect();
+        if keys.is_empty() {
+            if let Some(p) = self.particles.as_deref_mut() { p.joint_anchors.clear(); }
+            return;
+        }
+        let cam = fv(self.camera);
+        let mut out = std::collections::HashMap::new();
+        for (m, j, glow, class) in keys {
+            let Some(mo) = self.table.mobys.get(m) else { continue };
+            if mo.state >= 0x80 || (!glow && mo.o_class != class) { continue; }
+            let mut q = if j < 0 { [mo.position[0], mo.position[1], mo.position[2]] } else { let t = self.joint_point(m, j as usize); [t[0], t[1], t[2]] };
+            if glow && j >= 0 {
+                let d = [cam[0] - q[0], cam[1] - q[1], cam[2] - q[2]];
+                let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                if l != 0.0 { q = [q[0] + d[0] * 0.4 / l, q[1] + d[1] * 0.4 / l, q[2] + d[2] * 0.4 / l]; }
+            }
+            out.insert((m, j), q);
+        }
+        if let Some(p) = self.particles.as_deref_mut() { p.joint_anchors = out; }
+    }
+
     // -----------------------------------------------------------------------------------------------
     // Particle spawners (the record writes and RNG draws of the game's spawn functions; the per-type
     // updates are the particle port's: an unported type kills itself on its first update and is counted)

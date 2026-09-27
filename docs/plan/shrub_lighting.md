@@ -70,7 +70,8 @@ clamp. Everything else (float order, leaky clamp, 1/128 grid) is the tfrag model
   to 0x1bd430, and the EE second half of the frame calls `LightShrubs(0x1bd430)` (render_pipeline.md).
   The pass restarts from the ambient, so without point lights a per-frame relight equals the load-time
   result. **[verified list build/copy; call site from render_pipeline.md]**
-* A port can therefore light once at load and relight only instances touched by point lights.
+* A port can therefore light once at load and relight only instances touched by point lights. The port does
+  that in the vertex shader (docs/plan/tfrag_lighting.md §9, "Point lights on world geometry").
 
 ## 5. Draw rules (`ShrubProc`, level01 0x29cdf0; VU1 56467 / 912339)
 

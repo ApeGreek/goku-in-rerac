@@ -19,10 +19,14 @@
 //!   ([`type06`], class-27 emitters), 8 ([`type08`], explosion puffs), 11 ([`type11`], TNT sparks, smoke rings), 13
 //!   ([`type13`], crate-break dust), 15 ([`type15`], explosion streaks), 52 ([`type52`], goo drips, flat), 25
 //!   ([`type25`], grind / cable sparks), 34 ([`type34`], bubbles), 47 ([`type47`], dust / sand puffs), 53 ([`type53`], bolt-pickup and cable
-//!   sparkles), 59 ([`type59`], hero sparkles), 60 ([`type60`], glints) and 62 ([`type62`], the nanotech orbs and their trails); a record of any other type kills itself on its first update and is
+//!   sparkles), 59 ([`type59`], hero sparkles), 60 ([`type60`], glints), 62 ([`type62`], the nanotech orbs and their
+//!   trails), and (2026-09-27) 16 ([`type16`], smoke), 19 / 55 ([`type19`], ribbons), 22 ([`type22`], rising puffs),
+//!   23 ([`type23`], glow puffs), 26 ([`type26`], moby glow), 35 ([`type35`], drops), 45 / 66 ([`type45`], flat
+//!   rings), 46 ([`type46`], water rings), 64 ([`type64`], bursting scorch); a record of any other type kills itself on its first update and is
 //!   counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
 //! * **RNG.** Updates draw from the `&mut Rng` given to [`Particles::update_parts`] (the game's one stream), in
-//!   pool order; only types 11 (its split spawns five children and its phase changes draw one value), 15 (a
+//!   pool order; only types 11 (its split spawns five children and its phase changes draw one value), 16 (the landing
+//!   smoke), 35 (its rings' spawns), 55 (two a tick), 64 (the burst), 15 (a
 //!   splitting streak's child: 6 + 1) and 34 (a bubble near the surface draws one value a tick) draw.
 //!
 //! **Tick placement.** Game-state update 0x2a4080: moby updates (0x2793d8, where the class-27 emitters spawn)
@@ -46,9 +50,16 @@ pub mod type08;
 pub mod type11;
 pub mod type13;
 pub mod type15;
+pub mod type16;
+pub mod type19;
+pub mod type22;
 pub mod type23;
 pub mod type25;
+pub mod type26;
 pub mod type34;
+pub mod type35;
+pub mod type45;
+pub mod type46;
 pub mod type47;
 pub mod type52;
 pub mod type53;
@@ -57,6 +68,7 @@ pub mod type57;
 pub mod type59;
 pub mod type60;
 pub mod type62;
+pub mod type64;
 
 use crate::ps2v::{self, F};
 use crate::rng::Rng;
@@ -328,6 +340,14 @@ pub struct Particles {
     /// Moby positions for the records attached to a moby (type 62 kind 2 keeps the moby pointer at +0x24 and
     /// follows it), by moby index, written by the owning class during the moby loop.
     pub anchors: std::collections::HashMap<usize, [f32; 3]>,
+    /// The points of the mobys the live type-26 / 55 records follow, by (moby, joint list; −1 = the moby's position,
+    /// type 26 moved 0.4 toward the camera), written by the moby loop at the end of its pass
+    /// (`moby_update::services::World::refresh_particle_anchors`); a moby that is gone is not listed.
+    pub joint_anchors: std::collections::HashMap<(usize, i16), [f32; 3]>,
+    /// 0x13f640: the water level (the hero's; type 35's kind 3 lands on it).
+    pub water_z: f32,
+    /// 0x15ed84: the level number (type 64 adds rings and smoke on level 10).
+    pub level: u32,
 }
 
 impl Particles {
@@ -341,9 +361,16 @@ impl Particles {
         table[11] = Some(type11::update as UpdateFn);
         table[13] = Some(type13::update as UpdateFn);
         table[15] = Some(type15::update as UpdateFn);
+        table[16] = Some(type16::update as UpdateFn);
+        table[19] = Some(type19::update19 as UpdateFn);
+        table[22] = Some(type22::update as UpdateFn);
         table[23] = Some(type23::update as UpdateFn);
         table[25] = Some(type25::update as UpdateFn);
+        table[26] = Some(type26::update as UpdateFn);
         table[34] = Some(type34::update as UpdateFn);
+        table[35] = Some(type35::update as UpdateFn);
+        table[45] = Some(type45::update45 as UpdateFn);
+        table[46] = Some(type46::update as UpdateFn);
         table[47] = Some(type47::update as UpdateFn);
         table[52] = Some(type52::update as UpdateFn);
         table[53] = Some(type53::update as UpdateFn);
@@ -351,8 +378,11 @@ impl Particles {
         table[57] = Some(type57::update as UpdateFn);
         table[59] = Some(type59::update as UpdateFn);
         table[60] = Some(type60::update as UpdateFn);
+        table[55] = Some(type19::update55 as UpdateFn);
         table[62] = Some(type62::update as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default() }
+        table[64] = Some(type64::update as UpdateFn);
+        table[66] = Some(type45::update66 as UpdateFn);
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0 }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -368,6 +398,9 @@ impl Particles {
 
     /// `*def[n]` (0 when the level has no defs).
     pub fn def_first(&self, n: u8) -> u8 { self.defs.as_ref().and_then(|d| d.first_frame(n as usize)).unwrap_or(0) }
+
+    /// `*(def[n] + k)` (0 when the level has no defs).
+    pub fn def_frame(&self, n: u8, k: usize) -> u8 { self.defs.as_ref().and_then(|d| d.start(n as usize).and_then(|s| d.blob.get(s + k).copied())).unwrap_or(0) }
 
     /// `UpdateParts` 0x27c7e8, with the game's `rand` stream.
     pub fn update_parts(&mut self, rng: &mut Rng) {

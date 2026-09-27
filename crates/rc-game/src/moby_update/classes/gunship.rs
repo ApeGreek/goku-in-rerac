@@ -31,7 +31,7 @@
 use super::flyer;
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::debris::flash_spawn;
-use crate::moby_update::creature::projectile::{self, Part};
+use crate::moby_update::creature::projectile;
 use crate::moby_update::creature::{self as c, fx, ScriptRequest};
 use crate::moby_update::services::{pf as to_pf, pv, pvar, reflect, World};
 use crate::particles::{type04, type15};
@@ -311,8 +311,10 @@ pub fn spawn_shell(w: &mut World, ship: MobyId, from: c::V, v: c::V, target: c::
     c::set_pi32(w, m, 0x34, hero_in as i32);
     let l = c::len3(v);
     c::set_pf(w, m, 0x38, l);
-    projectile::part(w, Part::T26);
-    projectile::part(w, Part::T26);
+    let t = w.ticks(0x78);
+    projectile::part26(w, 420000.0, m, 0x2f4f_7f7f, t);
+    let t = w.ticks(0x78);
+    projectile::part26(w, 210000.0, m, 0x4f6f_7f7f, t);
     w.play_sound(0, 0, m);
     w.build_matrix(m);
     Some(m)
@@ -487,15 +489,23 @@ pub fn fire_update(w: &mut World, id: MobyId) {
         spawn_ember(w, 0.05, 1.0, 1.0, 0.75, p, [x, y, 0.0, 0.0], cl, life, 0);
     }
     for _ in 0..2 {
-        let _x = w.rng.randf(c::DT * -0.5, c::DT * 0.5);
-        let _y = w.rng.randf(c::DT * -0.5, c::DT * 0.5);
-        let _z = w.rng.randf(0.0, c::DT * 3.0);
-        let _r = w.rng.randf(0.0, 0.25);
-        let _a = w.rng.rand_angle();
-        let _size = w.rng.randf(70000.0, 140000.0);
+        let x = w.rng.randf(c::DT * -0.5, c::DT * 0.5);
+        let y = w.rng.randf(c::DT * -0.5, c::DT * 0.5);
+        let z = w.rng.randf(0.0, c::DT * 3.0);
+        let r = w.rng.randf(0.0, 0.25);
+        let a = w.rng.rand_angle();
+        let mut pos = c::add([a.cos() * r, a.sin() * r, 0.0, 0.0], base);
+        pos[2] += hz;
+        let vel = [x, y, z + r * c::DT * 8.0, 0.0];
+        let size = w.rng.randf(70000.0, 140000.0);
         let life = w.ticks(0xb4);
-        let _tex = SMOKE_TEX[w.rng.randi(3) as usize];
-        projectile::part(w, Part::T16 { life });
+        let kind = SMOKE_TEX[w.rng.randi(3) as usize] as i16;
+        let a = crate::particles::type16::Spawn { size, pos, vel, c1: 0x0f08_1020, c2: 0x08_1020, life, kind };
+        if let Some(i) = projectile::part16(w, &a) {
+            // The caller's floor: the fire's height − 0.5.
+            let z = c::pos(w, id)[2] - 0.5;
+            if let Some(r) = w.particles.as_deref_mut().and_then(|s| s.pool.recs.get_mut(i)) { crate::particles::rec::set_ff(r, 0x2c, z); }
+        }
     }
 }
 
@@ -568,22 +578,31 @@ pub fn ember_update(w: &mut World, id: MobyId) {
         let pos = c::pos(w, id);
         let vel = c::pv4(w, id, 0);
         for _ in 0..40 {
-            let _d = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0)];
-            let _c = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0)];
-            let _r = w.rng.randf(0.0, 0.5);
-            let _s = w.rng.randf(0.0, 0.5);
-            let _size = w.rng.randf(70000.0, 140000.0);
+            let d = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), 0.0];
+            let o = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), 0.0];
+            let r = w.rng.randf(0.0, 0.5);
+            let at = c::add(to_len(o, r), pos);
+            let s = w.rng.randf(0.0, 0.5);
+            let v = c::add(to_len(d, s * c::DT), vel);
+            let size = w.rng.randf(70000.0, 140000.0);
             let n = w.rng.rand_range(0x14, 0x3c);
-            let _life = w.ticks(n);
-            projectile::part(w, Part::T22);
+            let life = w.ticks(n);
+            projectile::part22(w, &crate::particles::type22::Spawn { size, pos: at, vel: v, c1: 0x1f0c_1820, c2: 0x08_1020, life });
         }
-        let _ = (pos, vel);
     } else if c::dec_timer_pvar_i32(w, id, 0x10) == 0 {
         let a = (c::pi32(w, id, 0x10) * 0x7f) / c::pi32(w, id, 0x28).max(1);
         w.mm(id).alpha = a as u8;
         return;
     }
     w.delete_moby(id);
+}
+
+/// `FastVecNormalize(len, v, v)`: `v` scaled to length `len` (zero stays zero; w kept).
+fn to_len(v: c::V, len: f32) -> c::V {
+    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if l == 0.0 { return v; }
+    let k = len / l;
+    [v[0] * k, v[1] * k, v[2] * k, v[3]]
 }
 
 /// The ember's bounce (`LAB_002f8864`).

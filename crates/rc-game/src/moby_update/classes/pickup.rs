@@ -49,8 +49,8 @@
 //!   `0x300900`) and, 1 in 5 while it is young, two type-60 glints (`0x300808`); all orbs gone after `ticks(300)`
 //!   → deleted (the master waits in 4, turning its table);
 //! * in 0 / 1 / 2 the cluster bobs `0.06·sin` (2° a tick), and when in view (64) places its orbs and a trail puff
-//!   each (life 5 or 40 ticks by camera distance 10). The draw callback `0x301c00` (a glowing mesh drawn straight to
-//!   the GS) is **not ported** (counted as `nanotech draw callback`).
+//!   each (life 5 or 40 ticks by camera distance 10), and registers its draw callback `0x301c00` (list 1: the glow
+//!   sphere, its halo and, on the crate, the glass sheen; drawn by `rc-engine`'s fx_draw from [`nanotech_glow`]).
 //!
 //! Not ported: the cheat 6 (0x15edb6) extensions (full-health pickups, 0x13f510), the platform ride of a free
 //! cluster on a moving moby (kept: the offset bookkeeping).
@@ -570,6 +570,32 @@ pub fn nanotech_update(w: &mut World, id: MobyId) {
     }
 }
 
+/// What the glow callback `0x301c00` reads of a cluster: its position (moby +0x10), the bob (pvar +0x00), the state
+/// (1 = on the crate: the glass sheen is drawn) and its crate's rotation rows (the crate moby's +0xc0 / +0xd0 /
+/// +0xe0; the cluster's own rotation, which is the crate's from the init, when the crate is gone).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NanotechGlow {
+    pub pos: [f32; 3],
+    pub bob: f32,
+    pub on_crate: bool,
+    pub crate_rows: [[f32; 3]; 3],
+    pub crate_pos: [f32; 3],
+}
+
+/// The glow callback's inputs for cluster `id` (None when it is not a live 806).
+pub fn nanotech_glow(t: &crate::moby_runtime::MobyTable, id: MobyId) -> Option<NanotechGlow> {
+    let m = t.mobys.get(id).filter(|m| m.state < 0x80 && m.pvars.len() >= nt::SIZE)?;
+    let c = ptr(&m.pvars, nt::CRATE).and_then(|c| t.mobys.get(c)).unwrap_or(m);
+    let r = sv::euler_rows(pv(c.rotation));
+    Some(NanotechGlow {
+        pos: [m.position[0], m.position[1], m.position[2]],
+        bob: p::ff(&m.pvars, nt::BOB),
+        on_crate: m.state == 1,
+        crate_rows: [f3(r[0]), f3(r[1]), f3(r[2])],
+        crate_pos: [c.position[0], c.position[1], c.position[2]],
+    })
+}
+
 /// State 0.
 fn nt_init(w: &mut World, id: MobyId) {
     let crate_id = ptr(&w.m(id).pvars, nt::CRATE).unwrap_or(id);
@@ -689,7 +715,7 @@ fn nt_common(w: &mut World, id: MobyId) {
     let pos = pos3(w, id);
     let sphere = [pos[0], pos[1], pos[2] + 0.5, 1.0];
     if w.view.map(|v| v.culled(64.0, sphere)).unwrap_or(false) { return; }
-    w.svc.unported("nanotech draw callback 0x301c00");
+    w.svc.draw_callbacks.register(super::draw_callbacks::Callback::NanotechGlow, id);
     let cam = f3(w.camera);
     let life = w.ticks(if len(sub(pos, cam)) > 10.0 { 5 } else { 0x28 });
     let anchor = if w.m(id).state == 2 { id } else { ptr(&w.m(id).pvars, nt::CRATE).unwrap_or(id) };

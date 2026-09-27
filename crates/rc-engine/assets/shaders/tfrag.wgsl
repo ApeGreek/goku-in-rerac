@@ -42,8 +42,15 @@
 // in raw units, n = 32), so LOD = log2(z / 32) + K. MMIN = LINEAR_MIPMAP_NEAREST: level = round(LOD) clamped to
 // 0..MXL (LOD < 0 is magnification, MMAG = LINEAR on level 0), bilinear inside the level. Q is interpolated
 // perspective-correctly per pixel, so z is the exact per-pixel depth.
+//
+// Point lights (`LightTfrags`' point pass, crate::world_lights): when the tfrag's nibble list names any, every
+// position slot the vertex reads gets them added to its baked RGBA (world_lights::tfrag_lit) before the morph
+// blends, as VU1 reads the relit RGBA block. With an empty list (0xffff) nothing changes. The lists (one u32 per
+// tfrag) and the bank (8 × 8 f32 as u32 bits) follow the draw modes in `modes`; a slot's normal is packed in its
+// last word. (No bindings of their own: a changed material layout reorders draws and changes lightless frames.)
 
 #import bevy_pbr::view_transformations::{position_world_to_clip, position_world_to_view}
+#import randcrw::world_lights::{WorldLight, NO_LIGHTS, tfrag_lit}
 
 struct TfragFog {
     // rgb = FOGCOL (display-encoded 0..1), w = 1 when fog is enabled.
@@ -70,7 +77,8 @@ struct Slot {
     p2: u32,
     // 0 none, 1 = written by a LOD-01 primary, 2 = by a LOD-0 primary.
     tier: u32,
-    pad: u32,
+    // The LightTfrags record's normal: azimuth | elevation << 8 | 1 << 16 (0: no record).
+    normal: u32,
 }
 
 struct VInfo {
@@ -89,6 +97,33 @@ struct VInfo {
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> slots: array<Slot>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var<storage, read> vinfos: array<VInfo>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var<storage, read> modes: array<u32>;
+
+// `modes` = n draw modes, n nibble lists, then the bank.
+fn tfrag_count() -> u32 { return (arrayLength(&modes) - 64u) / 2u; }
+
+fn bank() -> array<WorldLight, 8> {
+    let b = 2u * tfrag_count();
+    var ls: array<WorldLight, 8>;
+    for (var k = 0u; k < 8u; k += 1u) {
+        let o = b + 8u * k;
+        ls[k] = WorldLight(
+            bitcast<vec4<f32>>(vec4<u32>(modes[o], modes[o + 1u], modes[o + 2u], modes[o + 3u])),
+            bitcast<vec4<f32>>(vec4<u32>(modes[o + 4u], modes[o + 5u], modes[o + 6u], modes[o + 7u])),
+        );
+    }
+    return ls;
+}
+
+// N = (cos az · cos el, sin az · cos el, sin el) in game axes (256 steps per turn), in Bevy axes (x, z, −y);
+// w = 1 when the slot has a light record.
+fn slot_normal(p: u32) -> vec4<f32> {
+    let a = f32(p & 0xffu) * (6.2831853 / 256.0);
+    let e = f32((p >> 8u) & 0xffu) * (6.2831853 / 256.0);
+    return vec4<f32>(cos(a) * cos(e), sin(e), -sin(a) * cos(e), f32((p >> 16u) & 1u));
+}
+
+// This vertex's tfrag's nibble list (set once per vertex, read by `own`).
+var<private> point_list: u32 = 0xffffu;
 
 struct TfragVertex {
     @location(0) position: vec3<f32>,
@@ -126,7 +161,9 @@ fn w_of(p: vec3<f32>) -> f32 { return depth_raw(p) * lod.misc.x; }
 
 fn own(s: u32) -> Vtx {
     let sl = slots[s];
-    return Vtx(sl.pos, unpack4x8unorm(sl.color) * 255.0);
+    let c = unpack4x8unorm(sl.color) * 255.0;
+    if (point_list == NO_LIGHTS) { return Vtx(sl.pos, c); }
+    return Vtx(sl.pos, tfrag_lit(point_list, bank(), c, sl.pos, slot_normal(sl.normal)));
 }
 
 fn blend(c: Vtx, p1: Vtx, p2: Vtx, t: vec2<f32>) -> Vtx {
@@ -171,6 +208,7 @@ fn vertex(v: TfragVertex) -> TfragVertexOutput {
         out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
         return out;
     }
+    point_list = modes[tfrag_count() + tf] & 0xffffu;
     var e = vinfos[v.tref.x];
     if ((m == 8u && e.tier == 1u) || (m == 14u && e.tier == 2u)) {
         let thr = select(lod.k667.w, lod.k666.w, m == 8u);

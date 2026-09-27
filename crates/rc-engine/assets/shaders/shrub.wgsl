@@ -23,11 +23,17 @@
 // `params.misc.x` selects the ShrubProc list: 0 = always, 1 = opaque list (alpha = 0x80; TEST_1 0x5320b,
 // AREF 0x20), 2 = fading list (alpha < 0x80; TEST_1 0x530cb, AREF 0x0c). The GS_ATEST_* defs select the
 // half of that list's alpha-test split this draw is (gs_state.rs).
+// Point lights (`LightShrubs`' third light, crate::world_lights): when the instance's nibble list names any, the
+// palette entry gets the merged light on that entry's class normal added (clamped at 243), as the game relights
+// the palette. With an empty list (0xffff) nothing changes. (Billboards keep the load-time average colour.)
+// The list and the bank ride in the `sway` buffer (after the shears), the class normals in the instance record,
+// so the material layout is the same as without point lights (shrub_render.rs `write_record`).
 
 #import bevy_pbr::{
     mesh_functions,
     view_transformations::{position_world_to_clip, position_world_to_view},
 }
+#import randcrw::world_lights::{WorldLight, NO_LIGHTS, instance_light, instance_lit_packed}
 
 struct ShrubFog {
     color: vec4<f32>,
@@ -46,6 +52,8 @@ struct ShrubInst {
     // xyz = instance origin (Bevy world), w = billboard fade distance F, or -1.
     origin: vec4<f32>,
     palette: array<u32, 24>,
+    // The class normals (s16: x | y << 16, z) the point lights use.
+    normals: array<vec2<u32>, 24>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
@@ -53,7 +61,24 @@ struct ShrubInst {
 @group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: ShrubFog;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> params: ShrubParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> insts: array<ShrubInst>;
+// n shears, then n (point-light nibble list as u32 bits, 0), then the bank: 8 × (pos.xy, pos.zw, col.xy, col.zw).
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var<storage, read> sway: array<vec2<f32>>;
+
+fn shrub_count() -> u32 { return (arrayLength(&sway) - 32u) / 2u; }
+
+fn bank() -> array<WorldLight, 8> {
+    let b = 2u * shrub_count();
+    var ls: array<WorldLight, 8>;
+    for (var k = 0u; k < 8u; k += 1u) {
+        let o = b + 4u * k;
+        ls[k] = WorldLight(vec4<f32>(sway[o], sway[o + 1u]), vec4<f32>(sway[o + 2u], sway[o + 3u]));
+    }
+    return ls;
+}
+
+fn class_normal(p: vec2<u32>) -> vec3<f32> {
+    return vec3<f32>(f32(bitcast<i32>(p.x << 16u) >> 16u), f32(bitcast<i32>(p.x) >> 16u), f32(bitcast<i32>(p.y << 16u) >> 16u)) / 32768.0;
+}
 
 struct ShrubVertex {
     @builtin(instance_index) instance_index: u32,
@@ -108,7 +133,14 @@ fn vertex(v: ShrubVertex) -> ShrubVertexOutput {
     out.uv = v.uv;
     out.depth = -position_world_to_view(world).z * 1024.0;
     out.k = f32(bitcast<i32>(v.info) >> 20u) / 16.0;
-    let c = unpack4x8unorm((*inst).palette[(v.info & 0xfffu) % 24u]) * (255.0 / 128.0);
+    let entry = (v.info & 0xfffu) % 24u;
+    var rgba = (*inst).palette[entry];
+    let list = bitcast<u32>(sway[shrub_count() + tag].x) & 0xffffu;
+    if (list != NO_LIGHTS) {
+        let il = instance_light(list, bank(), (*inst).centre.xyz);
+        if (il.hit) { rgba = instance_lit_packed(rgba, il, class_normal((*inst).normals[entry]), (*inst).model, 243.0); }
+    }
+    let c = unpack4x8unorm(rgba) * (255.0 / 128.0);
     out.color = vec4<f32>(c.rgb, alpha / 128.0);
     let origin_depth = -position_world_to_view((*inst).origin.xyz).z;
     let fv = min(max(origin_depth * 1024.0 * fog.params.x + fog.params.y, fog.params.z), fog.params.w);

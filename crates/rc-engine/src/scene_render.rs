@@ -167,7 +167,7 @@ pub struct ActiveScene {
 }
 
 #[derive(Resource)]
-struct SceneRuntime {
+pub(crate) struct SceneRuntime {
     mode: Option<Option<usize>>,
     player: Option<ScenePlayer>,
     triggered: bool,
@@ -228,7 +228,7 @@ impl Plugin for SceneRenderPlugin {
             // While a scene runs the gameplay tick runs only on the frames whose CutsceneModeUpdate updates the world
             // (not during the blocking fades and waits), in its mode-2 form (enter_mode2).
             .configure_sets(FixedUpdate, GameTick.run_if(|a: Res<ActiveScene>| !a.running || a.world_runs))
-            .add_systems(FixedUpdate, scene_frame.before(GameTick))
+            .add_systems(FixedUpdate, (scene_frame.before(GameTick), actor_mobys.after(GameTick)))
             .add_systems(RunFixedMainLoop, apply_camera.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop).after(crate::play_camera::apply))
             .add_systems(Update, subtitle_layer.before(crate::hud_render::HudBuild))
             .add_systems(PostUpdate, (upload, fade_pass))
@@ -684,10 +684,26 @@ fn publish_scene(rt: &SceneRuntime, player: &ScenePlayer, camera: Option<SceneCa
             SceneActorState { moby: a.moby, o_class: a.o_class as i16, position, scale: a.scale, anim: a.anim.clone(), state, joint_lists: a.joint_lists.clone() }
         })
         .collect();
-    // The table mobys carry the actors' position (+0x10) as `CutsceneModeUpdate` writes it (the owner position of the
-    // effects spawned on them).
-    // `CutsceneModeUpdate` on each actor moby: +0x50..0x54, position, +0x71 = 0xff, `MobyBuildMatrix` (the rows and the
-    // bounding sphere from the streamed sequence, rc_game::moby_update::scheduler::rebuild_matrix); drawn (+0x31).
+    // The table mobys still carry the last frame's pose here ([`actor_mobys`] wrote it after the last tick).
+    p.svc.cinematic.scene = Some(SceneState { id: player.scene_id(), tick: player.scene_tick(), actors });
+    // FUN_002ac8d8 writes 0x167240 and the rows 0x167450..; the Euler 0x167250 keeps the last gameplay value.
+    if let Some(c) = camera {
+        let v = |x: [f32; 3]| [Pf::f(x[0]), Pf::f(x[1]), Pf::f(x[2]), Pf::ZERO];
+        let out = &mut p.game.camera.out;
+        out.pos = [Pf::f(c.eye[0]), Pf::f(c.eye[1]), Pf::f(c.eye[2]), out.pos[3]];
+        out.rows = c.rows.map(v);
+    }
+}
+
+/// `CutsceneModeUpdate`'s write of the frame's pose into each actor moby, after the moby loop (the game's order:
+/// `MobyUpdateLoop`, then the scene update, then the draw): +0x50..0x54, position (+0x10: the owner position of the
+/// effects spawned on them), +0x71 = 0xff, `MobyBuildMatrix` (the rows and the bounding sphere from the streamed
+/// sequence, rc_game::moby_update::scheduler::rebuild_matrix); drawn (+0x31). Runs after the gameplay tick, so this
+/// frame's moby loop still read the last frame's pose while everything after it (the actors' *ShadowProbeAlongDir*
+/// and shadow volumes, crate::shadow_render) sees the pose the actors are drawn with this frame.
+pub(crate) fn actor_mobys(rt: Res<SceneRuntime>, play: Option<ResMut<Play>>) {
+    let Some(mut p) = play else { return };
+    if rt.player.is_none() { return; }
     for a in &rt.actors {
         if let (Some(id), Some((st, pos))) = (a.moby, a.pose) {
             if let Some(m) = p.game.mobys.mobys.get_mut(id) {
@@ -698,14 +714,6 @@ fn publish_scene(rt: &SceneRuntime, player: &ScenePlayer, camera: Option<SceneCa
                 rc_game::moby_update::scheduler::rebuild_matrix(m, Some(&a.anim));
             }
         }
-    }
-    p.svc.cinematic.scene = Some(SceneState { id: player.scene_id(), tick: player.scene_tick(), actors });
-    // FUN_002ac8d8 writes 0x167240 and the rows 0x167450..; the Euler 0x167250 keeps the last gameplay value.
-    if let Some(c) = camera {
-        let v = |x: [f32; 3]| [Pf::f(x[0]), Pf::f(x[1]), Pf::f(x[2]), Pf::ZERO];
-        let out = &mut p.game.camera.out;
-        out.pos = [Pf::f(c.eye[0]), Pf::f(c.eye[1]), Pf::f(c.eye[2]), out.pos[3]];
-        out.rows = c.rows.map(v);
     }
 }
 

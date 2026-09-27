@@ -159,9 +159,13 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 | `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target, game units) |
 | `RC_SCREENSHOT` | Save a screenshot to this path, then exit |
 | `RC_SCREENSHOT_DELAY` | Seconds before the screenshot (default 3) |
+| `RC_DUMP_FRAMES` | `start..end`: save every frame from update `start` to `end` (inclusive) as `frame_NNNNN.png` into `RC_DUMP_DIR` (default `frames`), then exit (dev only; frame-exact, offscreen like `RC_SCREENSHOT_FRAME`) |
+| `RC_DUMP_DIR` | Folder for `RC_DUMP_FRAMES` |
 | `RC_NOVSYNC` | `1`: present without vsync, so `fps:` measures headroom |
 | `RC_FOG` | `0`: disable fog |
 | `RC_NO_LIGHT` | `1`: skip the load-time lighting passes (tfrag, tie, shrub, moby); stored colours used |
+| `RC_WORLD_LIGHTS` | `0`: point lights (explosions) do not relight tfrags, ties and shrubs |
+| `RC_WORLD_LIGHTS_TRACE` | `1`: print, every frame, the frame time, the point-light bank and the listed tfrag / tie / shrub counts |
 | `RC_LOD` | `0`: force tfrag LOD 0 |
 | `RC_LOD_TINT` | `1`: tint tfrag LOD 1 red, LOD 2 blue, clipping path green |
 | `RC_TIE_LOD` | `0`: force tie LOD 0 with morph k = 0 (culling unchanged) |

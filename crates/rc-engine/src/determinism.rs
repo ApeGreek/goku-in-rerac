@@ -8,6 +8,11 @@
 //!   and `Time` advance by exactly 1/60 s and `FixedUpdate` runs exactly once per update
 //!   (`TimeUpdateStrategy::FixedTimesteps(1)` with a 60 Hz fixed clock), so everything driven by `Time`
 //!   or `FixedUpdate` is a function of the frame number, not of how fast the machine renders.
+//! - `RC_DUMP_FRAMES=<start>..<end>` (dev only, not a Port Option) capture every frame from update `start` to update
+//!   `end` (inclusive) as `<RC_DUMP_DIR>/frame_NNNNN.png` (default folder `frames`), then exit. Implies
+//!   `RC_DETERMINISTIC=1` and the offscreen target below; `RC_SCREENSHOT_FRAME` wins when both are set. A frame
+//!   reached while pipelines still compile is captured anyway, with a warning naming it. Leave `RC_SCREENSHOT` unset
+//!   (`main.rs` would schedule its wall-clock capture and end the run).
 //!
 //! [`GameTicks`] is the game's 60 Hz logic tick count since level start: one per update in deterministic
 //! mode; otherwise the catch-up count `floor(60·t_virtual)`, like the game's main loop at 30 fps.
@@ -81,7 +86,18 @@ fn env(name: &str) -> Option<String> { std::env::var(name).ok().map(|v| v.trim()
 
 pub fn screenshot_frame() -> Option<u64> { env("RC_SCREENSHOT_FRAME").and_then(|v| v.parse().ok()) }
 
-pub fn deterministic() -> bool { screenshot_frame().is_some() || env("RC_DETERMINISTIC").as_deref() == Some("1") }
+/// `RC_DUMP_FRAMES=<start>..<end>` (module docs): the inclusive frame range, when `RC_SCREENSHOT_FRAME` is not set.
+pub fn dump_frames() -> Option<(u64, u64)> {
+    if screenshot_frame().is_some() { return None; }
+    let v = env("RC_DUMP_FRAMES")?;
+    let (a, b) = v.split_once("..")?;
+    let (a, b): (u64, u64) = (a.trim().parse().ok()?, b.trim().trim_start_matches('=').parse().ok()?);
+    (a >= 1 && b >= a).then_some((a, b))
+}
+
+pub fn deterministic() -> bool {
+    screenshot_frame().is_some() || dump_frames().is_some() || env("RC_DETERMINISTIC").as_deref() == Some("1")
+}
 
 /// Pipeline cache state as seen by the render world at the end of its last frame.
 #[derive(Resource, Clone, Default)]
@@ -102,6 +118,19 @@ struct FrameShot {
     saved: Arc<AtomicBool>,
     /// The offscreen image the cameras render to (None with `RC_CAPTURE_WINDOW=1`).
     target: Option<Handle<Image>>,
+}
+
+/// The offscreen image the cameras render to in a capture run (module docs, "Offscreen target").
+#[derive(Resource)]
+struct CaptureTarget(Handle<Image>);
+
+/// `RC_DUMP_FRAMES`: the range, the folder and the number of frames saved so far.
+#[derive(Resource)]
+struct FrameDump {
+    dir: PathBuf,
+    range: (u64, u64),
+    target: Option<Handle<Image>>,
+    saved: Arc<AtomicU64>,
 }
 
 pub struct DeterminismPlugin;
@@ -125,29 +154,40 @@ impl Plugin for DeterminismPlugin {
                 stable_transparent_order.after(sort_phase_system::<Transparent3d>).in_set(RenderSystems::PhaseSort),
             );
         }
-        let Some(frame) = screenshot_frame() else { return };
-        let Some(path) = std::env::var_os("RC_SCREENSHOT") else {
+        let dump = dump_frames();
+        let frame = screenshot_frame();
+        if frame.is_none() && dump.is_none() { return; }
+        let path = std::env::var_os("RC_SCREENSHOT");
+        if frame.is_some() && path.is_none() {
             eprintln!("RC_SCREENSHOT_FRAME is set without RC_SCREENSHOT: no capture");
             return;
-        };
+        }
         let target = (env("RC_CAPTURE_WINDOW").as_deref() != Some("1")).then(|| {
             let mut img = Image::new_target_texture(1024, 832, TextureFormat::Bgra8UnormSrgb, None);
             img.asset_usage = RenderAssetUsages::RENDER_WORLD;
             img.texture_descriptor.usage |= TextureUsages::COPY_SRC;
             app.world_mut().resource_mut::<Assets<Image>>().add(img)
         });
-        if target.is_some() {
+        if let Some(t) = &target {
             println!("determinism: capturing an offscreen copy of the window (RC_CAPTURE_WINDOW=1 captures the window)");
-            app.add_observer(render_offscreen).add_systems(PostUpdate, sync_capture_size);
+            app.insert_resource(CaptureTarget(t.clone())).add_observer(render_offscreen).add_systems(PostUpdate, sync_capture_size);
         }
         let status = PipelineStatus::default();
-        app.insert_resource(status.clone())
-            .insert_resource(FrameShot { path: path.into(), frame: frame.max(1), retry: Arc::default(), saved: Arc::default(), target })
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.insert_resource(status.clone()).add_systems(Render, record_pipelines.in_set(RenderSystems::Cleanup));
+        }
+        app.insert_resource(status);
+        if let Some(range) = dump {
+            let dir = PathBuf::from(std::env::var_os("RC_DUMP_DIR").unwrap_or_else(|| "frames".into()));
+            if let Err(e) = std::fs::create_dir_all(&dir) { eprintln!("RC_DUMP_FRAMES: cannot create {}: {e}", dir.display()); }
+            println!("determinism: RC_DUMP_FRAMES: frames {}..={} into {}", range.0, range.1, dir.display());
+            app.insert_resource(FrameDump { dir, range, target, saved: Arc::default() }).add_systems(Update, dump_frame);
+            return;
+        }
+        let (Some(frame), Some(path)) = (frame, path) else { return };
+        app.insert_resource(FrameShot { path: path.into(), frame: frame.max(1), retry: Arc::default(), saved: Arc::default(), target })
             .add_systems(Update, frame_screenshot)
             .add_systems(Last, exit_before_capture.after(bevy::window::ExitSystems));
-        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.insert_resource(status).add_systems(Render, record_pipelines.in_set(RenderSystems::Cleanup));
-        }
     }
 }
 
@@ -189,17 +229,16 @@ fn unlink_monitor(add: On<Insert, OnMonitor>, mut commands: Commands) {
 }
 
 /// Capture mode: a camera spawned for the primary window renders to the offscreen capture image.
-fn render_offscreen(add: On<Add, Camera>, shot: Res<FrameShot>, targets: Query<&RenderTarget>, mut commands: Commands) {
-    let Some(image) = &shot.target else { return };
+fn render_offscreen(add: On<Add, Camera>, target: Res<CaptureTarget>, targets: Query<&RenderTarget>, mut commands: Commands) {
     if matches!(targets.get(add.entity), Ok(RenderTarget::Window(WindowRef::Primary))) {
-        commands.entity(add.entity).insert(RenderTarget::Image(image.clone().into()));
+        commands.entity(add.entity).insert(RenderTarget::Image(target.0.clone().into()));
     }
 }
 
 /// Keeps the capture image at the primary window's physical size (the letterbox viewport and the projection
 /// are computed from the window).
-fn sync_capture_size(shot: Res<FrameShot>, window: Option<Single<&Window, With<PrimaryWindow>>>, mut images: ResMut<Assets<Image>>) {
-    let (Some(h), Some(w)) = (&shot.target, window) else { return };
+fn sync_capture_size(target: Res<CaptureTarget>, window: Option<Single<&Window, With<PrimaryWindow>>>, mut images: ResMut<Assets<Image>>) {
+    let (h, Some(w)) = (&target.0, window) else { return };
     let size = w.physical_size();
     if size.x == 0 || size.y == 0 { return; }
     let Some(img) = images.get(h) else { return };
@@ -213,6 +252,32 @@ fn exit_before_capture(mut exits: MessageReader<AppExit>, shot: Res<FrameShot>, 
         eprintln!("determinism: the app is exiting at frame {} before the frame-{} capture was saved; exit status 2", frame.0, shot.frame);
         std::process::exit(2);
     }
+}
+
+/// `RC_DUMP_FRAMES`: one capture per frame of the range, saved as `frame_NNNNN.png`; exit once the last is saved.
+fn dump_frame(mut commands: Commands, dump: Res<FrameDump>, frame: Res<FrameNumber>, status: Res<PipelineStatus>) {
+    let (a, b) = dump.range;
+    let n = frame.0;
+    if n < a || n > b { return; }
+    let (total, waiting) = status.get();
+    if waiting != 0 || total == 0 { eprintln!("determinism: RC_DUMP_FRAMES: frame {n} captured with {waiting} of {total} pipelines still compiling"); }
+    let request = match &dump.target {
+        Some(image) => Screenshot::image(image.clone()),
+        None => Screenshot::primary_window(),
+    };
+    let (path, saved, count) = (dump.dir.join(format!("frame_{n:05}.png")), dump.saved.clone(), b - a + 1);
+    commands.spawn(request).observe(move |shot: On<ScreenshotCaptured>, mut exit: MessageWriter<AppExit>| {
+        match shot.image.clone().try_into_dynamic() {
+            Ok(img) => {
+                if let Err(e) = img.to_rgb8().save(&path) { eprintln!("cannot save {}: {e}", path.display()); }
+            }
+            Err(e) => eprintln!("cannot convert the frame-{n} capture: {e:?}"),
+        }
+        if saved.fetch_add(1, Ordering::AcqRel) + 1 == count {
+            println!("determinism: RC_DUMP_FRAMES: {count} frames saved; exiting");
+            exit.write(AppExit::Success);
+        }
+    });
 }
 
 fn frame_screenshot(
