@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
+# Not re-run since the reorg (2026-09-27): moved from decomp/scripts/, paths updated (names: tools/ghidra/names/,
+# decompiler export: work/decomp/, import ELFs: work/ghidra-import/). See tools/ghidra/README.md.
 """Exports decompiled C for the level overlays without decompiling the shared
 engine nineteen times.
 
 * The reference overlay (default level01.elf, Novalis) is exported in full.
 * Every other overlay exports only the functions whose cluster (from
-  decomp/names/clusters.tsv) has no member in the reference overlay.
+  tools/ghidra/names/clusters.tsv) has no member in the reference overlay.
 
-Output: decomp/export/<program>/ as with export_decomp.py.
+Output: work/decomp/<program>/ as with export_decomp.py.
 """
 import os, sys, re, functools
 print = functools.partial(print, flush=True)
 sys.path.insert(0, os.path.dirname(__file__))
 from ghidra_http import get, post
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))  # repo root (tools/ghidra/scripts/)
 ref = sys.argv[1] if len(sys.argv) > 1 else "level01.elf"
 only = set(sys.argv[2:])
 
 # addr -> covered-by-reference, per program
 covered = {}
-for line in open(os.path.join(ROOT, "decomp/names/clusters.tsv")).read().splitlines()[1:]:
+for line in open(os.path.join(ROOT, "tools/ghidra/names/clusters.tsv")).read().splitlines()[1:]:
     members = line.split("\t")[4].split()
     in_ref = any(m.startswith(ref + ":") for m in members)
     for m in members:
@@ -27,7 +29,7 @@ for line in open(os.path.join(ROOT, "decomp/names/clusters.tsv")).read().splitli
         covered[(prog, addr)] = in_ref
 
 def export(prog, selector):
-    out = os.path.join(ROOT, "decomp/export", prog)
+    out = os.path.join(ROOT, "work/decomp", prog)
     os.makedirs(out, exist_ok=True)
     post("open_program", path=f"/levels/{prog}")
     funcs = get("list_functions", program=prog, limit=20000)["functions"]

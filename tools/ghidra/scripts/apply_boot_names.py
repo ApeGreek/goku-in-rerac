@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
+# Not re-run since the reorg (2026-09-27): moved from decomp/scripts/, paths updated (names: tools/ghidra/names/,
+# decompiler export: work/decomp/, import ELFs: work/ghidra-import/). See tools/ghidra/README.md.
 """Applies Lombyte-derived function names to the boot ELF program open in Ghidra.
 
-Reads decomp/names/boot_functions.csv (address, name, path, semantic). Renames
+Reads tools/ghidra/names/boot_functions.csv (address, name, path, semantic). Renames
 each FUN_ function at `address` to `name` and records the source path and any
 semantic name as a plate comment. Existing non-FUN_ names are left alone.
 """

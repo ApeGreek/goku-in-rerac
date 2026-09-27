@@ -1,6 +1,6 @@
 # Creatures and enemies: survey, shared layer, ported classes (2026-09-27)
 
-Addresses are level01 (`decomp/export/level01.elf`) unless noted. The shared layer lives in
+Addresses are level01 (`work/decomp/level01.elf`) unless noted. The shared layer lives in
 `crates/rc-game/src/moby_update/creature.rs` + `creature/*`; the classes in `moby_update/classes/{critter,amoeboid}.rs`.
 Standard `f32` everywhere (no PS2 float model); formulas, constants, operation order and the rand draws are the game's.
 
@@ -59,7 +59,7 @@ Spawn-only classes the ported creatures create or wake: the body pieces 1747–1
 0x30cd18), the explosion light 639 (0x2f3748), the explosion flashes 0x70 (ported before, `classes::debris`), the bolts
 13–16 (ported before).
 
-**The creature code on other levels** (class-table entries whose function has the same cluster hash, `decomp/names/clusters.tsv`,
+**The creature code on other levels** (class-table entries whose function has the same cluster hash, `tools/ghidra/names/clusters.tsv`,
 checked with `lvl.vtbl` of all 19 overlays): `AmoeboidUpdate` runs 572 / 865 / 866 on **01, 05 (Rilgar, 108 instances) and 11**;
 `GroundCritterUpdate` only 577 on 01; the explosion light 639 on **all 19 levels**; `FxGroupUpdate` runs 13 classes on 01
 (1736–1738, 1747–1749, 1761–1763, 1770, 1814, 1815, 1817; other levels use other class numbers for it — the registry is

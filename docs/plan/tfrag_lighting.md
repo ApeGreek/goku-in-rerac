@@ -12,7 +12,7 @@ Confidence tags: **[verified]** read from the disassembly and/or checked on the 
 
 | What | Where | Notes |
 | --- | --- | --- |
-| `LightTfrags(u16 *list)` | boot `0x234f98` (0x6a4 bytes), level01 overlay `0x2a8e40` | Lombyte: `src/assembly/textbin/fun_00234f98.c` (INCLUDE_ASM only). Disassembled from the boot ELF in Ghidra; the level01 decompile (`decomp/export/level01.elf/002a8e40_LightTfrags.c`) is the same code with overlay addresses. **[verified]** |
+| `LightTfrags(u16 *list)` | boot `0x234f98` (0x6a4 bytes), level01 overlay `0x2a8e40` | Lombyte: `src/assembly/textbin/fun_00234f98.c` (INCLUDE_ASM only). Disassembled from the boot ELF in Ghidra; the level01 decompile (`work/decomp/level01.elf/002a8e40_LightTfrags.c`) is the same code with overlay addresses. **[verified]** |
 | Level-load init | level01 `FUN_00255958` | copies lights, resets point-light lists, calls `LightTfrags` on all tfrags. **[verified]** |
 | Per-frame call | level01 `DrawDebugProfiler 0x21a1b8` (real role: frame render) | `if (mask & 2) && DAT_0016a480: LightTfrags(0x1c5880); PatchTfragGifs()` after `VU1_syncChain(2)`. `0x1c5880` is the visible-tfrag list built by `TfragProc`. **[verified call; list origin inferred]** |
 | Directional bank | EE `0x180340`, 16 sets x 0x40 | zeroed (`FastMemZero16(0x180340,0x400)`) then filled from the gameplay file. **[verified]** |

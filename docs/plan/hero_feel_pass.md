@@ -9,7 +9,7 @@ more weight") is only a lead. The first question is the **Heli-Pack long jump** 
 - landing to the next jump: the landing state and anim, momentum ×0.8, the timer 0x13f524, the crouch re-press;
 - the camera following the jump.
 
-Tools: `crates/rc-trace` (`record`, `replay-hero`, `hero-jumps`, `hero-snap`). Code: `hero_trace.rs` (format,
+Tools: `tools/trace` (`record`, `replay-hero`, `hero-jumps`, `hero-snap`). Code: `hero_trace.rs` (format,
 reading a sample from EE memory), `hero_record.rs` (PINE recorder), `hero_replay.rs` (port run), `hero_analysis.rs`
 (jumps, diff, report).
 
@@ -56,8 +56,8 @@ Recordings go to `~/PS2/ratchet1/traces/` (outside the repo, never committed). S
    cargo run -q --release -p rc-trace -- replay-hero --trace ~/PS2/ratchet1/traces/hero_<time>.tsv
    ```
    It prints the first divergence, per-field max / mean error, the per-jump table (PCSX2 vs port) and the state
-   sequences side by side, and writes `hero_<time>.port.tsv` (the port's trace, same format) and
-   `hero_<time>.report.txt` (everything, plus each jump's per-tick height and horizontal-speed curves).
+   sequences side by side, and writes `work/trace/hero_<time>.port.tsv` (the port's trace, same format) and
+   `work/trace/hero_<time>.report.txt` (everything, plus each jump's per-tick height and horizontal-speed curves).
    `hero-jumps --trace FILE` prints the per-jump table of one trace alone.
 
 Several short takes (one per move-script part, each started standing) diff more cleanly than one long take: the

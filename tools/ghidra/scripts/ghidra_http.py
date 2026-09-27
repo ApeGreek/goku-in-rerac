@@ -1,3 +1,4 @@
+# Moved from decomp/scripts/ in the reorg (2026-09-27); unchanged. Used by every script here.
 """Tiny client for the GhidraMCP plugin's HTTP server (default 127.0.0.1:8089)."""
 import json, urllib.request, urllib.parse
 

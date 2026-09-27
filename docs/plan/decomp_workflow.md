@@ -1,17 +1,24 @@
 # Decompilation workflow
 
-The Ghidra project lives outside the repo at `~/ratchet1` (Ghidra GUI project
-`ratchet1`). The GhidraMCP plugin exposes an HTTP API on `127.0.0.1:8089`
-while the GUI is open; the `ghidra` MCP server registered for Claude bridges to
-the same API. Scripts in `decomp/scripts/` talk to it directly.
+The step-by-step workflow (set-up from scratch, naming, export, backups) is `docs/workflows/ghidra.md`; the scripts
+are described in `tools/ghidra/README.md`. This page keeps the conventions and the history of the naming runs.
+
+The Ghidra project lives outside the repo: `~/ratchet1.gpr` + `~/ratchet1.rep` (Ghidra GUI project `ratchet1`; its
+target home is `~/PS2/ratchet1/ghidra/`, which the user moves it to). The GhidraMCP plugin exposes an HTTP API on
+`127.0.0.1:8089` while the GUI is open; the `ghidra` MCP server registered for Claude bridges to the same API.
+Scripts in `tools/ghidra/scripts/` talk to it directly (moved from `decomp/scripts/` on 2026-09-27; not re-run since,
+paths updated).
 
 | Script | Purpose |
 |---|---|
 | `ghidra_http.py` | Minimal GET/POST client for the plugin API |
-| `apply_boot_names.py` | Renames boot ELF functions from `decomp/names/boot_functions.csv` (derived from Lombyte's splat config and semantic header) and records the source path as a plate comment |
-| `import_overlays.py` | Ghidra level import: being redesigned as a proper dev tool; see the upcoming dev-workflow reorg. |
-| (plan) | The redesign is written down in `docs/plan/repo_reorg.md` (deferred): `tools/ghidra/scripts/import_levels.py` importing ELFs from `randcrw-extract export --what code`, scripts and names under `tools/ghidra/`, the export under `work/decomp/`. |
-| `export_decomp.py <program>` | Dumps every function's decompiled C to `decomp/export/<program>/` with an `index.tsv`, for grepping without the GUI |
+| `import_levels.py [NN ...]` | Imports `extracted/boot/SCUS_971.99` (if missing) and `work/ghidra-import/levelNN.elf` into `/levels`, analyses, applies Lombyte's boot-match names (renamed from `import_overlays.py`) |
+| `apply_boot_names.py` | Renames boot ELF functions from `tools/ghidra/names/boot_functions.csv` (derived from Lombyte's splat config and semantic header) and records the source path as a plate comment |
+| `overlay_diff.py` | Clusters functions across the boot ELF and the 19 overlays by a relocation-tolerant hash; writes `tools/ghidra/names/clusters.tsv` and `overlay_names.csv` |
+| `apply_overlay_names.py` | Applies `tools/ghidra/names/overlay_names.csv` to the level programs |
+| `apply_doc_names.py` | Applies the names our docs give (`tools/ghidra/names/doc_names.csv`), below |
+| `export_decomp.py <program>` | Dumps every function's decompiled C to `work/decomp/<program>/` with an `index.tsv`, for grepping without the GUI |
+| `export_overlays.py` | Level01 in full, every other level only its non-shared functions, to `work/decomp/levelNN.elf/` |
 
 Conventions:
 
@@ -20,12 +27,12 @@ Conventions:
 * Names: boot ELF function names come from Lombyte's per-function source file
   names (snake_case, e.g. `check_state_range`), with Lombyte's PascalCase
   semantic name kept in the plate comment when one exists. Names we derive
-  ourselves go in `decomp/names/*.csv` so they can be re-applied to a fresh
+  ourselves go in `tools/ghidra/names/*.csv` so they can be re-applied to a fresh
   project.
 * Types: struct definitions we recover are written to `src/game/**/*.h` as the
   source of truth and pushed into Ghidra, not the other way round, so the port
   and the database never disagree.
-* Re-export after any batch of renames; `decomp/export/` is git-ignored because
+* Re-export after any batch of renames; `work/decomp/` is git-ignored because
   it contains the game's code.
 
 Ground truth beyond Ghidra: `~/Globals/Lombyte` (matching decomp of this exact
@@ -48,17 +55,17 @@ cargo run -p rc-engine       # Bevy app
 
 Agents reverse-engineering subsystems name functions and globals in
 `docs/plan/*.md` and `docs/formats/*.md`. Those identifications are collected in
-`decomp/names/doc_names.csv` (`program, address, name, kind, source_doc,
+`tools/ghidra/names/doc_names.csv` (`program, address, name, kind, source_doc,
 confidence, note`). There is one row per (program, address, kind). When docs
 disagree, the row keeps the preferred name, and the note lists the others as
 `alt X (doc; confidence)`. A name the docs call a misnomer loses to the
 alternative, and the note records `Lombyte name believed wrong: X`.
 
 ```
-python3 decomp/scripts/apply_doc_names.py --dry-run            # plan + log, touches nothing
-python3 decomp/scripts/apply_doc_names.py --apply --export     # rename/comment, save, re-export touched functions
-python3 decomp/scripts/apply_doc_names.py --apply --programs level01   # limit to some programs
-python3 decomp/scripts/apply_doc_names.py --sync-export        # re-export any export entry whose name is stale
+python3 tools/ghidra/scripts/apply_doc_names.py --dry-run            # plan + log, touches nothing
+python3 tools/ghidra/scripts/apply_doc_names.py --apply --export     # rename/comment, save, re-export touched functions
+python3 tools/ghidra/scripts/apply_doc_names.py --apply --programs level01   # limit to some programs
+python3 tools/ghidra/scripts/apply_doc_names.py --sync-export        # re-export any export entry whose name is stale
 ```
 
 Conventions:
@@ -92,7 +99,7 @@ Conventions:
   function at an address where Ghidra has no function (code reached only
   through pointer tables, such as particle updates) gets a label, not a new
   function.
-* **Logs.** `decomp/export/doc_names_apply.tsv` holds one line per action with
+* **Logs.** `work/decomp/doc_names_apply.tsv` holds one line per action with
   the old name, so a batch can be undone. It is git-ignored.
 
 First run (2026-09-26):

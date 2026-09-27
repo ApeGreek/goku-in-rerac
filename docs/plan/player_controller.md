@@ -3,7 +3,7 @@
 What Ratchet does per logic tick on foot, and how the type-0 follow camera follows him, precise enough to port
 basic play on Novalis. Addresses are **level01.elf** (the in-game engine; hero code only exists in the overlays).
 Hero and pad data are fixed **boot .bss** globals, so they have the same address in every overlay. gp = 0x166c00.
-Sources: Ghidra C of level01 (`decomp/export/level01.elf/`) plus disassembly wherever the decompiler dropped float
+Sources: Ghidra C of level01 (`work/decomp/level01.elf/`) plus disassembly wherever the decompiler dropped float
 arguments (it often does for this code). Lombyte only names the camera and pad functions (`UpdatePad__FR3PAD`,
 `ProcessPadInput__FR3PADPUci`, `UpdateAllCameras__Fi`, `Cam_InterpValues__FffPffff`,
 `Camera_handleCollWithHero__FiP9UpdateCam`). Every hero name below is ours.
@@ -81,7 +81,7 @@ Confidence: **H** = read from the instructions, **M** = decompiler C, partly che
 | 0x1413f4 | character (0 = Ratchet; 1/2/3 = other bodies, L) · 0x141403 gravity mode (0 = normal Z) · 0x1415f8 health |
 
 ## 3. State machine
-Per tick, the hero update `0x228870` (`HeroUpdate`; Ghidra's level01 name `PatchShrubGifs` there is a wrong earlier rename, see decomp/names/doc_names.csv) runs:
+Per tick, the hero update `0x228870` (`HeroUpdate`; Ghidra's level01 name `PatchShrubGifs` there is a wrong earlier rename, see tools/ghidra/names/doc_names.csv) runs:
 1. `0x247d48` Ratchet's own anim advance.
 2. **`0x231d18`**: stick → `0x2370b8` per-state **physics** → `0x23c458` **move+collide** → timer++. It also pushes the position/yaw
    history, rebuilds 0x13f350, and sizes the capsule (`0x231ae0`).

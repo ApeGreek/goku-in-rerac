@@ -430,7 +430,7 @@ for each strip record S in strips:
 
 No back-face or double-sided flag is encoded in the strip record, and `high.cpp` has to *repair* winding order after the fact using vertex normals (§8), which strongly suggests the strips as stored do **not** carry a consistent winding and that the game either relies on GS defaults (no culling, or culling configured globally) or on data that Wrench has not identified. **[unknown]**
 
-**Verified against the VU1 program (2026-09-26; `extracted/vu/55907_tfrag.txt` L79–L84, second buffer L93/L122–L125; the fallback program 903379 L4–L7 is identical).** This supersedes the pseudocode above. The walk implemented by `tfrag_triangles` (Rust and C++ oracle) is:
+**Verified against the VU1 program (2026-09-26; `work/vu/55907_tfrag.txt` L79–L84, second buffer L93/L122–L125; the fallback program 903379 L4–L7 is identical).** This supersedes the pseudocode above. The walk implemented by `tfrag_triangles` (Rust and C++ oracle) is:
 
 ```
 record 0:  always load ad-gif z/5; n = x + 128             # L84/L93: no test of x or y

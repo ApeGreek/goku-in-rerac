@@ -1,18 +1,25 @@
-//! `rc-trace`: compare our reimplementation against the PS2's EE memory. Doc: docs/plan/trace_harness.md.
+//! `rc-trace`: compare our reimplementation against the PS2's EE memory. Doc: docs/plan/trace_harness.md,
+//! tools/trace/README.md, docs/workflows/pcsx2.md. Dev tool: output goes to `work/trace/`, never `extracted/`.
 
 use anyhow::{bail, Context, Result};
 use rc_trace::ee::{self, EeSource, Savestate};
 use rc_trace::tfrag_light_cmp::{self as tlc, LevelInputs};
 use rc_trace::novalis_spawn as ns;
-use rc_trace::{default_extracted, pine};
-use std::path::PathBuf;
+use rc_trace::spawn_facts::{self as sf, SpawnFacts};
+use rc_trace::{default_extracted, pine, trace_out_dir, write_output};
+use std::path::{Path, PathBuf};
 
 const USAGE: &str = "\
-rc-trace - PCSX2 ground-truth harness (docs/plan/trace_harness.md)
+rc-trace - PCSX2 ground-truth harness (docs/plan/trace_harness.md, docs/workflows/pcsx2.md)
+
+Where things go: generated output (dumps, reports, CSVs) defaults to work/trace/ (RC_WORK overrides
+work/); nothing is ever written into extracted/. Personal material lives in ~/PS2/ratchet1/ (RC_PERSONAL
+overrides it): kept savestates in savestates/, hero recordings in traces/.
 
 EE memory source (for the commands that read RAM), one of:
-  --state <file.p2s | dir | latest>   PCSX2 savestate; 'latest' = newest SCUS-97199*.p2s in
-                                      ~/Library/Application Support/PCSX2/sstates
+  --state <file.p2s | dir | latest | NAME>   PCSX2 savestate; 'latest' = newest SCUS-97199*.p2s in
+                                      ~/Library/Application Support/PCSX2/sstates; NAME = a kept
+                                      savestate ~/PS2/ratchet1/savestates/NAME.p2s (see save-state)
   --ee <eeMemory.bin>                 raw 32 MiB EE RAM dump
   --pine [slot]                       live read over PCSX2's PINE socket (default slot 28011)
 
@@ -24,7 +31,7 @@ Commands:
       A savestate taken on Novalis after the landing, standing at the spawn: game-state chunks, hero block,
       follow camera, fog globals, rand state + tick counter, static moby table, tie/shrub lit colours,
       each against the port (rc_game run headless for the tick counter's ticks). Report text to
-      extracted/traces/novalis_spawn_report.txt, moby mismatches to novalis_spawn_mobys.csv.
+      work/trace/novalis_spawn_report.txt (--out), moby mismatches to work/trace/novalis_spawn_mobys.csv.
       --no-jump: no scripted ✕ (default: one ✕ tap at the tick the idle counter 0x160ff0 points at).
       --press-ticks N: the scripted ✕ is held N ticks, ending at the idle counter's tick (default 2: the savestate's landing timers match a 2-3 tick press).
       --cutscene-ticks N: the first N port ticks run in game mode 2 (default: ticks − frames in mode 0).
@@ -34,10 +41,17 @@ Commands:
       --no-audio: run the port without the sound layer (diagnostic: no sound draws on the game stream).
   port-load-pass --out FILE [--load-pre-draws N] [--load-emitters-visible]
       Diagnostic: the port's static mobys right after its load pass, as CSV.
+  distill-spawn <source> [--extracted DIR] [--out FILE]
+      Distils a Novalis spawn savestate into the committed, numbers-only fixture the test compares the port
+      with (default tools/trace/tests/fixtures/novalis_spawn.tsv; the one output that is source, not work/).
+      Runs the fixture checks and the savestate checks side by side and refuses to write if they disagree.
   compare-tie-shrub-light <source> [--extracted DIR] [--max-diffs N]
       Only the tie/shrub lit-colour part (level 01).
+  save-state NAME [--from FILE.p2s | latest] [--force]
+      Keeps a PCSX2 savestate: copies the newest one (or --from) to ~/PS2/ratchet1/savestates/NAME.p2s.
   info --state <p2s>                  list savestate entries and version
-  dump-ee <source> --out FILE [--entry NAME]   write EE RAM (or any savestate entry) to FILE
+  dump-ee <source> [--out FILE] [--entry NAME]   write EE RAM (or any savestate entry) to FILE
+                                      (default work/trace/<savestate name>_ee.bin)
   find <source> --bytes HEX [--align N] [--max N]   list EE addresses holding the bytes
   read <source> --addr HEX --len N    hex-dump EE memory
   pine-info [slot]                    print PCSX2 version / game / status over PINE
@@ -53,7 +67,7 @@ Hero feel pass (docs/plan/hero_feel_pass.md):
               [--camera-at-hero] [--out-port FILE] [--report FILE] [--states N]
       Runs the port's hero headless on the recorded level from the first standing sample, fed the recorded
       pad bytes, and diffs per tick: first divergence, per-field max / mean error, per-jump table (PCSX2 vs
-      port), state sequences side by side. Writes <trace>.port.tsv and <trace>.report.txt (full curves).
+      port), state sequences side by side. Writes work/trace/<trace name>.port.tsv and .report.txt (full curves).
   hero-jumps --trace FILE        the per-jump table of one trace
   hero-snap <source>             one hero sample from a savestate / EE dump / PINE (checks the addresses)
 ";
@@ -116,6 +130,8 @@ fn run() -> Result<i32> {
     match cmd.as_str() {
         "compare-tfrag-light" => compare_tfrag_light(a),
         "compare-novalis-spawn" => compare_novalis_spawn(a),
+        "distill-spawn" => distill_spawn(a),
+        "save-state" => save_state(a),
         "port-load-pass" => {
             // Diagnostic: the port's static mobys right after its load pass (no savestate needed).
             let extracted = a.extracted()?;
@@ -130,7 +146,7 @@ fn run() -> Result<i32> {
                 s += &format!("{i},{},{},{},{},{},{},{},{},{},{},{},{},{}\n", sim.moby_to_instance[i], m.o_class, m.state, m.mode, m.position[0], m.position[1], m.position[2],
                     m.rotation[0], m.rotation[1], m.rotation[2], m.pvars.get(0x55).copied().unwrap_or(0), m.anim.seq_b, m.anim.frame_b);
             }
-            std::fs::write(&out, s)?;
+            write_output(&out, s)?;
             println!("wrote {} (load pass: {} draws, rng {:#010x})", out.display(), sim.load_draws, sim.game.rng.state);
             Ok(0)
         }
@@ -156,17 +172,20 @@ fn run() -> Result<i32> {
             Ok(0)
         }
         "dump-ee" => {
-            let out = PathBuf::from(a.opt("--out")?.context("--out required")?);
+            let out = a.opt("--out")?.map(PathBuf::from);
             let entry = a.opt("--entry")?;
             let src = a.source()?;
             a.done()?;
+            let out = out.unwrap_or_else(|| {
+                let stem = match &src { EeSource::State(p) | EeSource::Raw(p) => p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), EeSource::Pine(_) => "pine".into() };
+                trace_out_dir().join(match &entry { Some(e) => format!("{stem}_{e}"), None => format!("{stem}_ee.bin") })
+            });
             let bytes = match (entry, &src) {
                 (Some(e), EeSource::State(p)) => Savestate::open(p)?.archive.read(&e)?,
                 (Some(_), _) => bail!("--entry needs --state"),
                 (None, s) => s.load()?.ram,
             };
-            if let Some(d) = out.parent() { std::fs::create_dir_all(d)?; }
-            std::fs::write(&out, &bytes)?;
+            write_output(&out, &bytes)?;
             println!("wrote {} ({} bytes)", out.display(), bytes.len());
             Ok(0)
         }
@@ -222,8 +241,7 @@ fn run() -> Result<i32> {
             a.done()?;
             let lvl = LevelInputs::load(&extracted, level)?;
             let img = tlc::synthesize(&lvl, base, !unlit);
-            if let Some(d) = out.parent() { std::fs::create_dir_all(d)?; }
-            std::fs::write(&out, &img.ram)?;
+            write_output(&out, &img.ram)?;
             println!("wrote {} ({})", out.display(), img.source);
             Ok(0)
         }
@@ -258,7 +276,7 @@ fn run() -> Result<i32> {
 fn compare_tfrag_light(mut a: Args) -> Result<i32> {
     let level = a.level()?;
     let extracted = a.extracted()?;
-    let csv = a.opt("--csv")?.map(PathBuf::from).unwrap_or_else(|| extracted.join(format!("traces/level{level:02}_tfrag_light_mismatches.csv")));
+    let csv = a.opt("--csv")?.map(PathBuf::from).unwrap_or_else(|| trace_out_dir().join(format!("level{level:02}_tfrag_light_mismatches.csv")));
     let max_diffs: usize = a.opt("--max-diffs")?.map(|s| s.parse()).transpose()?.unwrap_or(20);
     let src = a.source()?;
     a.done()?;
@@ -317,7 +335,7 @@ fn compare_novalis_spawn(mut a: Args) -> Result<i32> {
     let no_audio = a.flag("--no-audio");
     let hold: u64 = a.opt("--press-ticks")?.map(|s| s.parse()).transpose().context("--press-ticks")?.unwrap_or(2);
     let cutscene: Option<u64> = a.opt("--cutscene-ticks")?.map(|s| s.parse()).transpose().context("--cutscene-ticks")?;
-    let report = a.opt("--out")?.map(PathBuf::from).unwrap_or_else(|| extracted.join("traces/novalis_spawn_report.txt"));
+    let report = a.opt("--out")?.map(PathBuf::from).unwrap_or_else(|| trace_out_dir().join("novalis_spawn_report.txt"));
     let src = a.source()?;
     a.done()?;
     let img = src.load()?;
@@ -346,14 +364,13 @@ fn compare_novalis_spawn(mut a: Args) -> Result<i32> {
     ns::check_camera(&img, &sim, &mut out)?;
     ns::check_fog(&img, &lv, &sim, &mut out)?;
     ns::check_rng(&img, &sim, &tl, &mut out)?;
-    ns::check_mobys(&img, &sim, &mut out, &extracted.join("traces/novalis_spawn_mobys.csv"))?;
+    ns::check_mobys(&img, &sim, &mut out, &trace_out_dir().join("novalis_spawn_mobys.csv"))?;
     ns::check_tie_shrub(&img, &extracted, &mut out, max)?;
     println!("\n== summary (matching / total)");
     for (name, ok, total) in &out.tallies {
         println!("  {:<46} {:>7} / {:<7} {}", name, ok, total, if ok == total { "ok" } else { "MISMATCH" });
     }
-    if let Some(d) = report.parent() { std::fs::create_dir_all(d)?; }
-    std::fs::write(&report, &out.text)?;
+    write_output(&report, &out.text)?;
     println!("report written to {}", report.display());
     Ok(if out.tallies.iter().all(|t| t.1 == t.2) { 0 } else { 2 })
 }
@@ -383,8 +400,10 @@ fn replay_hero(mut a: Args) -> Result<i32> {
     let tol: f64 = a.opt("--tol")?.map(|s| s.parse()).transpose().context("--tol")?.unwrap_or(1e-3);
     let max_states: usize = a.opt("--states")?.map(|s| s.parse()).transpose().context("--states")?.unwrap_or(80);
     let camera_at_hero = a.flag("--camera-at-hero");
-    let out_port = a.opt("--out-port")?.map(PathBuf::from).unwrap_or_else(|| path.with_extension("port.tsv"));
-    let report = a.opt("--report")?.map(PathBuf::from).unwrap_or_else(|| path.with_extension("report.txt"));
+    // Generated output goes to work/trace/, not next to the recording (~/PS2/ratchet1/traces/ is personal).
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "hero".into());
+    let out_port = a.opt("--out-port")?.map(PathBuf::from).unwrap_or_else(|| trace_out_dir().join(format!("{stem}.port.tsv")));
+    let report = a.opt("--report")?.map(PathBuf::from).unwrap_or_else(|| trace_out_dir().join(format!("{stem}.report.txt")));
     a.done()?;
     let trace = Trace::read(&path)?;
     if trace.samples.is_empty() { bail!("{} has no samples", path.display()); }
@@ -416,8 +435,76 @@ fn replay_hero(mut a: Args) -> Result<i32> {
     );
     print!("{head}{body}{}", ha::states_side_by_side(rec, &r.samples, names, max_states));
     let full = format!("{head}{body}{}\n== curves\n{}", ha::states_side_by_side(rec, &r.samples, names, usize::MAX), ha::curves_compare(&ja, &jb, names));
-    if let Some(p) = report.parent() { std::fs::create_dir_all(p)?; }
-    std::fs::write(&report, full)?;
+    write_output(&report, full)?;
     println!("\nport trace: {}\nreport (with the per-tick curves): {}", out_port.display(), report.display());
     Ok(if d.first.is_none() { 0 } else { 2 })
+}
+
+/// `distill-spawn`: the savestate's spawn facts as the committed fixture, after checking that the fixture
+/// checks give the same tallies as the savestate checks on this very image.
+fn distill_spawn(mut a: Args) -> Result<i32> {
+    let extracted = a.extracted()?;
+    let out = a.opt("--out")?.map(PathBuf::from).unwrap_or_else(rc_trace::spawn_fixture);
+    let src = a.source()?;
+    a.done()?;
+    let img = src.load()?;
+    let level = img.u32(ns::LEVEL)?;
+    if level != 1 { bail!("level global 0x15ed84 = {level}: this savestate is not on Novalis"); }
+    let facts = SpawnFacts::from_ee(&img, &extracted)?;
+    let header = format!(
+        "Novalis spawn facts, distilled by `cargo run -p rc-trace -- distill-spawn` from {}.\n\
+         Compared with the port by tools/trace/tests/novalis_spawn.rs (needs only extracted/). Doc: docs/workflows/pcsx2.md.",
+        img.source.rsplit('/').next().unwrap_or("")
+    );
+    let text = facts.to_tsv(&header);
+    let back = SpawnFacts::parse_tsv(&text)?;
+    if back != facts { bail!("the TSV does not round-trip (a writer/parser bug)"); }
+    // The same checks, on the facts and on the EE image.
+    let fx = sf::check_all(&back, &extracted)?;
+    let mut ee_out = ns::Out::default();
+    ns::check_tie_shrub(&img, &extracted, &mut ee_out, 0)?;
+    let gs = ns::port_game_state(&extracted)?;
+    ns::check_game_state(&img, &gs, &mut ee_out)?;
+    let tl = ns::Timeline::read(&img)?;
+    let lv = rc_trace::port_sim::LevelData::load(&extracted, 1)?;
+    let opt = rc_trace::port_sim::SimOptions { cutscene_ticks: tl.ticks.saturating_sub(tl.mode_frames.max(0) as u64), ..Default::default() };
+    let sim = ns::run_port_hold(&lv, &tl, 2, &opt)?;
+    ns::check_rng(&img, &sim, &tl, &mut ee_out)?;
+    ns::check_fog(&img, &lv, &sim, &mut ee_out)?;
+    ns::check_mobys(&img, &sim, &mut ee_out, &trace_out_dir().join("novalis_spawn_mobys.csv"))?;
+    println!("\n== fixture checks vs savestate checks (matching / total)");
+    for (name, ok, total) in &fx.tallies {
+        let e = ee_out.tallies.iter().find(|t| &t.0 == name).map_or("-".to_string(), |t| format!("{} / {}", t.1, t.2));
+        println!("  {name:<46} fixture {ok:>6} / {total:<6} savestate {e}");
+    }
+    let bad = sf::disagreements(&fx, &ee_out);
+    if !bad.is_empty() { bail!("fixture and savestate checks disagree: {bad:?}"); }
+    write_output(&out, &text)?;
+    println!("wrote {} ({} bytes: {} chunks, {} moby slots, {} ties, {} shrubs)", out.display(), text.len(), facts.chunks.len(), facts.mobys.len(), facts.ties.len(), facts.shrubs.len());
+    Ok(0)
+}
+
+/// `save-state NAME`: keep a PCSX2 savestate under ~/PS2/ratchet1/savestates/NAME.p2s.
+fn save_state(mut a: Args) -> Result<i32> {
+    let from = a.opt("--from")?;
+    let force = a.flag("--force");
+    let name = if a.0.is_empty() { bail!("save-state needs a NAME\n\n{USAGE}") } else { a.0.remove(0) };
+    a.done()?;
+    if name.contains('/') || name.is_empty() { bail!("NAME is a file name, not a path: {name:?}"); }
+    let src = match from.as_deref() {
+        None | Some("latest") => ee::newest_state(&ee::pcsx2_sstates_dir().context("HOME not set")?)?,
+        Some(p) => PathBuf::from(p),
+    };
+    Savestate::open(&src).with_context(|| format!("{} is not a readable savestate", src.display()))?;
+    let dst = rc_trace::savestates_dir().join(if name.ends_with(".p2s") { name.clone() } else { format!("{name}.p2s") });
+    if dst.exists() && !force { bail!("{} exists (--force to replace it)", dst.display()); }
+    copy_state(&src, &dst)?;
+    println!("kept {} as {}", src.display(), dst.display());
+    Ok(0)
+}
+
+fn copy_state(src: &Path, dst: &Path) -> Result<()> {
+    if let Some(d) = dst.parent() { std::fs::create_dir_all(d)?; }
+    std::fs::copy(src, dst).with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
+    Ok(())
 }

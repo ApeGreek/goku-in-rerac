@@ -5,18 +5,22 @@ and compare it byte for byte with what our code computes from the same disc data
 target is the tfrag lighting pass (`LightTfrags`, docs/plan/tfrag_lighting.md): after a level
 loads, every tfrag's RGBA block in EE RAM holds the game's lit colours.
 
-Code: `crates/rc-trace` (workspace member; depends on `rc-formats`, `rc-game`, `anyhow`, and the pure-Rust
+Code: `tools/trace` (dev tool, never ships; workspace member, package `rc-trace`; README `tools/trace/README.md`,
+workflow `docs/workflows/pcsx2.md`; depends on `rc-formats`, `rc-game`, `anyhow`, and the pure-Rust
 `ruzstd` 0.8 and `miniz_oxide` 0.8 decoders. These are the same versions and a subset of the
 features Bevy already uses, so the crate adds no lockfile packages and does not change the
-engine's feature set). Nothing disc-derived is committed: savestates, dumps and reports go
-under `extracted/traces/` (git-ignored).
+engine's feature set). Nothing disc-derived is committed: dumps, reports and CSVs go under `work/trace/`
+(git-ignored; `RC_WORK` overrides `work/`), kept savestates under `~/PS2/ratchet1/savestates/` and recordings under
+`~/PS2/ratchet1/traces/` (the user's personal folder; `RC_PERSONAL` overrides it). The tool never writes into
+`extracted/`. Findings reach tests only as distilled, numbers-only fixtures (`distill-spawn`, §6).
 
 ## 1. What exists on this machine (2026-09-26)
 
 * PCSX2 **v2.8.2** (`/Applications/PCSX2.app`, Homebrew cask `pcsx2`), set up with the user's BIOS.
 * Disc image: `~/PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso` (SCUS-97199).
 * First savestate: `sstates/SCUS-97199 (CE4933D0).01.p2s` = Novalis after the arrival scene, at the spawn
-  (copies and dumps in `extracted/traces/novalis_spawn*`). Results: docs/plan/trace_results_novalis.md.
+  (kept as `~/PS2/ratchet1/savestates/novalis_spawn.p2s`; dumps in `work/trace/novalis_spawn*`). Results:
+  docs/plan/trace_results_novalis.md.
 
 ## 2. PCSX2 v2.8.2 interfaces used (read from the v2.8.2 sources)
 
@@ -50,7 +54,7 @@ under `extracted/traces/` (git-ignored).
 ## 3. Where the tfrag data sits in EE RAM (level01 = Novalis)
 
 Each level is its own executable (`extracted/levels/NN/overlay.bin`) with its own data
-layout. The addresses below come from the **level01** export (`decomp/export/level01.elf/`).
+layout. The addresses below come from the **level01** export (`work/decomp/level01.elf/`).
 Boot-ELF addresses in other docs (e.g. `0x19bdc0`, `0x18cd00`) are *not* valid while a level
 runs.
 
@@ -94,11 +98,11 @@ is free information about unknown writers such as `dir_lights_upd`.
    PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo run -p rc-trace -- compare-tfrag-light --state latest --level 01
    ```
    `latest` means the newest `SCUS-97199*.p2s` in PCSX2's `sstates` folder. You can also give
-   a path.
+   a path, or the name of a kept savestate (`--state novalis_spawn`).
    **With PINE enabled** you can skip steps 3-4: keep the game running on Novalis and run
    `cargo run -p rc-trace -- compare-tfrag-light --pine`.
-5. Optionally, keep a copy of the state in `extracted/traces/` (git-ignored) for regression
-   runs.
+5. Optionally, keep the state for regression runs: `cargo run -p rc-trace -- save-state <name>` copies the newest
+   one to `~/PS2/ratchet1/savestates/<name>.p2s`.
 
 ## 5. What the tool reports
 
@@ -116,7 +120,7 @@ is free information about unknown writers such as `dir_lights_upd`.
   printed as the baseline.
 * A histogram of `ours - RAM` per channel (-8..8, plus a "far" bucket), the first N
   mismatches with their light records, and every mismatch as a CSV in
-  `extracted/traces/level01_tfrag_light_mismatches.csv`.
+  `work/trace/level01_tfrag_light_mismatches.csv`.
 * The exit status: 0 = every lit byte equal, 2 = mismatches, 1 = error.
 
 A 1-ULP multiplier deviation (tfrag_lighting.md §6) would show up as isolated ±1 differences.
@@ -139,7 +143,7 @@ without Bevy) and prints a summary table; exit 0/2/1 as above. Sections:
   bit lifting), the port's load-pass and per-tick draws; 0x15f5cc vs `Game::counter`.
 * **f. moby table**: array base from Ratchet's moby pointer 0x1413d0 − index·0x100; RAM slot j paired with port slot
   j (the port applies the loader's spawn test, so both create the same slots; each pair is checked for equal class
-  +0xa6 and spawn id +0xb2); per-field and per-class tallies, every mismatch in `extracted/traces/novalis_spawn_mobys.csv`; the slots after the statics.
+  +0xa6 and spawn id +0xb2); per-field and per-class tallies, every mismatch in `work/trace/novalis_spawn_mobys.csv`; the slots after the statics.
 * **g. tie / shrub palettes** (also alone: `compare-tie-shrub-light`): ties via `*0x160fc0` (0x20-byte records,
   +0x10 → 0x1c0 record, +0x40 lit RGBA), shrubs via `*0x160494` / `*0x16049c` / `*0x1604a0`; every record is
   checked by content (ambient copy, matrix) before comparing; lit with the RAM bank and each record's live
@@ -154,15 +158,17 @@ port; by default they are culled by the game's unbuilt view, as in the game). `p
 port's statics right after its load pass (no savestate needed). The loader's spawn test is ported
 (`rc_formats::moby_spawn::spawn_test` / `loader_spawns`), so `port_sim` creates the same 929 slots as the RAM.
 Not modelled in `port_sim` (expected to differ): the arrival scene (actors, camera), hand items, +0x31 beyond a
-draw-distance stand-in, the unported classes. Regression: `tests/novalis_spawn.rs` (skipped
-without `extracted/traces/novalis_spawn_ee.bin`).
+draw-distance stand-in, the unported classes. Regression: `tests/novalis_spawn.rs` compares the port with the
+committed, numbers-only fixture `tools/trace/tests/fixtures/novalis_spawn.tsv` (needs only `extracted/`; skipped
+without it). `distill-spawn <source>` rewrites the fixture from a savestate (`--state novalis_spawn`) or its dump,
+after checking that the fixture checks and the savestate checks give the same tallies on it.
 
 Other commands, for future comparisons:
 
 | Command | Use |
 | --- | --- |
 | `info --state F` | savestate version and entry list |
-| `dump-ee <src> --out F [--entry NAME]` | write EE RAM (or any savestate entry, e.g. `vu1Memory.bin`, `Scratchpad.bin`) |
+| `dump-ee <src> [--out F] [--entry NAME]` | write EE RAM (or any savestate entry, e.g. `vu1Memory.bin`, `Scratchpad.bin`); default `work/trace/<name>_ee.bin` |
 | `find <src> --bytes HEX [--align N]` | locate a byte pattern in EE RAM |
 | `read <src> --addr HEX --len N` | hex-dump EE memory |
 | `pine-info`, `pine-savestate N` | PINE status / trigger a savestate |
@@ -170,8 +176,10 @@ Other commands, for future comparisons:
 | `compare-novalis-spawn <src> [...]` | the Novalis spawn checks a–g (above) |
 | `compare-tie-shrub-light <src>` | tie + shrub lit colours only (level 01 globals) |
 | `port-load-pass --out F [--load-pre-draws N] [--load-emitters-visible]` | the port's statics after its load pass |
+| `save-state NAME [--from F.p2s] [--force]` | keep the newest PCSX2 savestate as `~/PS2/ratchet1/savestates/NAME.p2s` |
+| `distill-spawn <src> [--out F]` | the Novalis spawn facts as the committed test fixture (§5, docs/workflows/pcsx2.md) |
 
-`<src>` is `--state F|dir|latest`, `--ee raw.bin` or `--pine [slot]`.
+`<src>` is `--state F|dir|latest|NAME` (NAME = `~/PS2/ratchet1/savestates/NAME.p2s`), `--ee raw.bin` or `--pine [slot]`. Output defaults go to `work/trace/`.
 
 ## 6. Verification done without a real savestate
 
@@ -212,12 +220,12 @@ a module next to `tfrag_light_cmp.rs` and a subcommand.
 * **VU1 constant blocks and camera** (docs/plan/game_camera_fog.md: tfrag block `0x1de750`,
   view matrices `0x186f40`/`0x186f80`, projection `0x18cdc0`, camera `0x187080`): these are
   **boot-ELF addresses**. For a level, take the level ELF's address from the matching function
-  in `decomp/export/levelNN.elf/` (the Lombyte "exact-boot-match" comments pair the functions),
+  in `work/decomp/levelNN.elf/` (the Lombyte "exact-boot-match" comments pair the functions),
   or find it by content with `find`. Then read the camera from RAM, run our view-context code
   and compare the block. The same block also appears in `vu1Memory.bin` at qw 656..670.
 * **Fixed test points.** Keep savestates for the scenes you test against in
-  `extracted/traces/`. Record in this doc the level, slot, and what is on screen, so
-  comparisons are repeatable.
+  `~/PS2/ratchet1/savestates/` (`save-state <name>`). Record in this doc the level, slot, and what is on screen, so
+  comparisons are repeatable. A test uses a scene only through a distilled fixture (like `distill-spawn`).
 
 ## 8. Triage
 
@@ -247,7 +255,7 @@ code that uses the PS2 float model is still worth a look: it may point at an ope
 * **Tolerance**: a bound the harness can check, e.g. max |d| per channel and the share of samples allowed to differ
   (take them from the histogram in §5), or a float bound in ULPs or absolute units.
 * **Why acceptable**: the hardware cause and why it is not noticeable in play.
-* **Measured**: date, savestate (level, slot, what is on screen; kept in `extracted/traces/`) and the observed numbers.
+* **Measured**: date, savestate (level, slot, what is on screen; kept in `~/PS2/ratchet1/savestates/`) and the observed numbers.
 
 When a comparison command gains a tolerance, give it an option to apply the bound, so the exit status (0/2) reports
 "within tolerance" rather than "bit-equal". Keep the exact counts in the output too: they stay the diagnostic signal.

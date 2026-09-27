@@ -3,8 +3,8 @@
 /assets/
 /out/
 /extracted/
-# Reverse-engineering artifacts (contain game code)
-/decomp/export/
+# Generated dev output (decompiler export, trace dumps, Ghidra import ELFs, VU listings, captures): tools write here only.
+/work/
 # Local config
 /config.local.json
 .env

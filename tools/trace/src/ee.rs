@@ -96,13 +96,23 @@ pub fn pcsx2_sstates_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join("Library/Application Support/PCSX2/sstates"))
 }
 
-/// Resolves `--state`: a `.p2s` path, a directory (newest `SCUS-97199*.p2s` in it), or `latest`
-/// (newest `SCUS-97199*.p2s` in PCSX2's sstates folder).
+/// Resolves `--state`: a `.p2s` path, a directory (newest `SCUS-97199*.p2s` in it), `latest`
+/// (newest `SCUS-97199*.p2s` in PCSX2's sstates folder), or the name of a kept savestate in
+/// `~/PS2/ratchet1/savestates/` (`novalis_spawn` = `novalis_spawn.p2s` there; see `save-state`).
 pub fn resolve_state(arg: &str) -> Result<PathBuf> {
     let p = PathBuf::from(arg);
+    if arg != "latest" && !p.exists() && !arg.contains('/') {
+        let kept = crate::savestates_dir().join(if arg.ends_with(".p2s") { arg.to_string() } else { format!("{arg}.p2s") });
+        if kept.exists() { return Ok(kept); }
+    }
     let dir = if arg == "latest" { pcsx2_sstates_dir().context("HOME not set")? } else if p.is_dir() { p } else { return Ok(p) };
+    newest_state(&dir)
+}
+
+/// The newest `SCUS-97199*.p2s` in `dir`.
+pub fn newest_state(dir: &Path) -> Result<PathBuf> {
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    for e in std::fs::read_dir(&dir).with_context(|| format!("listing {}", dir.display()))? {
+    for e in std::fs::read_dir(dir).with_context(|| format!("listing {}", dir.display()))? {
         let e = e?;
         let name = e.file_name().to_string_lossy().into_owned();
         if !(name.starts_with("SCUS-97199") && name.ends_with(".p2s")) { continue; }

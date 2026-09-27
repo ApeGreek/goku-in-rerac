@@ -8,7 +8,7 @@ Summary of the items below; the milestone lists stay the detailed record.
 - **Golden-tested** (`crates/rc-formats/tests/`, all 19 levels, against the committed snapshot hashes `crates/rc-formats/data/loader_snapshots.tsv` or `extracted/`; the C++ extractor they were first compared with was retired on 2026-09-27): disc/ISO reader, TOC, WAD, level core, textures, tfrags, ties, shrubs, sky, mobys, collision, occlusion (`golden.rs`); moby animation (`moby_anim_golden.rs`); tfrag light records (`tfrag_light_golden.rs`). The M3 "port each verified loader" checklist predates most of these.
 - **Ported bit-exact** (PS2 float model, from the decompiled code): `LightTfrags`, `LightTies`, `LightShrubs`, MobyProc + VU0 104691 moby lighting (GPU path matches the CPU path on 315,913 Novalis vertices), moby `advance`/`evaluate` (`fun_0020d580`/`fun_0020e0e0`, incl. the post-scale bug), `TieProc` LOD/morph/colour weights with the VU1 colour blend. None is yet confirmed against a live PCSX2 run.
 - **C++ reference retired (2026-09-27, decisions.md).** "Golden vs `rc_extract …`" in the items below records what a loader was checked against when it landed; the same checks now run against the committed snapshot hashes (`crates/rc-formats/data/loader_snapshots.tsv`).
-- **Also in the tree, not yet itemised below:** occlusion culling (`rc-engine/src/occlusion.rs`, docs/plan/occlusion_culling.md), collision queries (`crates/rc-game`), the PCSX2 trace harness (`crates/rc-trace`, docs/plan/trace_harness.md).
+- **Also in the tree, not yet itemised below:** occlusion culling (`rc-engine/src/occlusion.rs`, docs/plan/occlusion_culling.md), collision queries (`crates/rc-game`), the PCSX2 trace harness (`tools/trace`, docs/plan/trace_harness.md).
 - **Next:** first real PCSX2 comparison (needs a BIOS dump and a Novalis savestate); tie/shrub/moby VU1 program analysis; GS blend/alpha/fog/sampling rules in shaders; render gaps (shrub billboards and wind, tie mirror pass, point lights, moby sequence changes/blends and low LOD); Ghidra struct types; global lumps and audio.
 
 Milestones are ordered so that each one produces something checkable.
@@ -38,9 +38,9 @@ valid. M3 onward are Rust.
 - [x] Boot ELF + all level overlays imported as separate programs (`SCUS_971.99`, `/levels/levelNN.elf`), r5900 analysis run
 - [x] 1237 boot functions named from Lombyte's splat config; overlay boot-match names applied per level
 - [ ] Struct types imported from Lombyte `include/structs.h`
-- [x] Overlay diff: `decomp/scripts/overlay_diff.py` clusters functions by relocation-tolerant hash; ~1375 functions shared by every overlay (the engine), ~7100 overlay functions inherit boot names (`decomp/names/clusters.tsv`, `overlay_names.csv`)
-- [x] Bulk export of decompiled boot functions to `decomp/export/SCUS_971.99/` (`decomp/scripts/export_decomp.py`)
-- [x] Overlay export: Novalis (level01) in full, every other level only its non-shared functions (`decomp/scripts/export_overlays.py`)
+- [x] Overlay diff: `tools/ghidra/scripts/overlay_diff.py` clusters functions by relocation-tolerant hash; ~1375 functions shared by every overlay (the engine), ~7100 overlay functions inherit boot names (`tools/ghidra/names/clusters.tsv`, `overlay_names.csv`)
+- [x] Bulk export of decompiled boot functions to `work/decomp/SCUS_971.99/` (`tools/ghidra/scripts/export_decomp.py`)
+- [x] Overlay export: Novalis (level01) in full, every other level only its non-shared functions (`tools/ghidra/scripts/export_overlays.py`)
 
 ## M3 — Rust format crate + static level viewer (Bevy)
 - [x] Cargo workspace: `rc-formats` (loaders) and `rc-engine` (Bevy 0.19 app)

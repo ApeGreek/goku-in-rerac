@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/rc-formats", "crates/rc-engine", "crates/rc-trace", "crates/rc-game", "crates/rc-extract", "crates/rc-data"]
+# Product crates (ship) under crates/; dev-only tools under tools/ (never shipped; product never depends on them).
+members = ["crates/rc-formats", "crates/rc-engine", "crates/rc-game", "crates/rc-extract", "crates/rc-data", "tools/trace", "tools/repo-checks"]
 
 [workspace.package]
 edition = "2021"

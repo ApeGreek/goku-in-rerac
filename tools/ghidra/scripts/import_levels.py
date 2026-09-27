@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
+# Not re-run since the reorg (2026-09-27): renamed from decomp/scripts/import_overlays.py, paths updated
+# (reads work/ghidra-import/levelNN.elf and extracted/boot/SCUS_971.99). See tools/ghidra/README.md.
 import functools; print = functools.partial(print, flush=True)  # unbuffered progress when run in the background
-"""Imports every level overlay ELF into the open Ghidra project, analyzes it,
-applies Lombyte's boot-match names, and saves. Idempotent: skips levels whose
-program already exists in the project.
+"""Imports the boot ELF (extracted/boot/SCUS_971.99, as /SCUS_971.99, when the
+project does not have it yet) and every level ELF (work/ghidra-import/levelNN.elf)
+into the open Ghidra project, analyzes them, applies Lombyte's boot-match names
+to the levels, and saves. Idempotent: skips programs that already exist.
+
+    import_levels.py [NN ...]      default: all 19 levels (00..18)
 
 Programs are named levelNN.elf under /levels. Overlay addresses overlap the
-boot ELF by design, so each overlay is its own program.
+boot ELF by design, so each overlay is its own program. The level ELFs are the
+level overlays with their original load addresses: today copies of the retired
+C++ extractor's overlay.elf files; later `randcrw-extract export --what code`
+(a follow-up, docs/plan/repo_reorg.md).
 """
 import json, os, sys, time
 sys.path.insert(0, os.path.dirname(__file__))
 from ghidra_http import get, post
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))  # repo root (tools/ghidra/scripts/)
+IMPORT_DIR = os.path.join(ROOT, "work/ghidra-import")
+BOOT_ELF = os.path.join(ROOT, "extracted/boot/SCUS_971.99")
 NAMES = os.path.expanduser("~/Globals/Lombyte/config/overlays/us/names")
 levels = [int(a) for a in sys.argv[1:]] or list(range(19))
 
@@ -37,6 +47,24 @@ def apply_names(program, level):
             applied += 1
     return applied
 
+def wait_for_analysis(name):
+    while True:
+        st = get("analysis_status", program=name)
+        if isinstance(st, dict) and not st.get("analyzing", st.get("is_analyzing", False)):
+            return
+        time.sleep(5)
+
+root_files = get("list_project_files", folder="/")
+if "SCUS_971.99" not in ({f["name"] for f in root_files.get("files", [])} if isinstance(root_files, dict) else set()):
+    t = time.time()
+    res = post("import_file", file_path=BOOT_ELF, project_folder="/", auto_analyze=True)  # no language: see below
+    if isinstance(res, dict) and res.get("success"):
+        wait_for_analysis("SCUS_971.99")
+        post("save_program", program="SCUS_971.99")
+        print(f"SCUS_971.99: imported and analyzed in {time.time() - t:.0f}s")
+    else:
+        print(f"SCUS_971.99: import failed: {str(res)[:300]}")
+
 have = existing_programs()
 for lv in levels:
     name = f"level{lv:02d}.elf"
@@ -44,15 +72,11 @@ for lv in levels:
         print(f"{name}: already in project, skipping import")
     else:
         t = time.time()
-        res = post("import_file", file_path=os.path.join(ROOT, "ghidra/import", name), project_folder="/levels", auto_analyze=True)  # no language: forces the ELF loader; the EE plugin picks r5900 from e_flags
+        res = post("import_file", file_path=os.path.join(IMPORT_DIR, name), project_folder="/levels", auto_analyze=True)  # no language: forces the ELF loader; the EE plugin picks r5900 from e_flags
         if not (isinstance(res, dict) and res.get("success")):
             print(f"{name}: import failed: {str(res)[:300]}")
             continue
-        while True:
-            st = get("analysis_status", program=name)
-            if isinstance(st, dict) and not st.get("analyzing", st.get("is_analyzing", False)):
-                break
-            time.sleep(5)
+        wait_for_analysis(name)
         print(f"{name}: imported and analyzed in {time.time() - t:.0f}s")
     n = apply_names(name, lv)
     post("save_program", program=name)

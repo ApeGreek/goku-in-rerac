@@ -3,7 +3,7 @@
 A read-only audit of the Rust crates (`rc-formats`, `rc-game`, `rc-engine`, `rc-trace`): every place that
 assumes Novalis (level 01), as a checklist for a later generalisation pass. Nothing was changed, built or run.
 The evidence comes from grep, from byte comparisons of the level overlays (then the C++ `overlay.elf` copies, now `extracted/levels/NN/overlay.bin`), from the per-level
-`lvl.vtbl` class tables, and from `decomp/names/clusters.tsv`.
+`lvl.vtbl` class tables, and from `tools/ghidra/names/clusters.tsv`.
 
 ## Background: what moves between levels
 
@@ -111,7 +111,7 @@ How the address is found on another level:
   `FUN_002b7a48(table, n)` call in the level's ripple class init (code). The module constants are engine data:
   same address in family A (0x1cafe0 also on 02 and 15), bytes found on all others. The module 0x2b7a48
   clusters on 01, 05, 07, 11, 12 and 13, but only Novalis places class 751, so find each level's user through the vtbl.
-- **W3** `rc-engine/src/gameplay.rs:116, :351` and `rc-trace/src/port_sim.rs:41, :111`: `RIPPLE_UPDATE`
+- **W3** `rc-engine/src/gameplay.rs:116, :351` and `tools/trace/src/port_sim.rs:41, :111`: `RIPPLE_UPDATE`
   0x2fd0e8 external for 751. Gated by `has_ripples()`, so it is safe. Generalise through the vtbl.
 - **W4** `rc-game/src/hero/physics.rs:976-978`: the ground probe's `SetWaterLevel(0x1742e0, …)` (L01
   `HeroGroundProbe` 0x232dc0) is replaced by the hit z. On levels with real water tables this will differ.
@@ -176,7 +176,7 @@ How the address is found on another level:
   - `GameStateUpdate` 0x2a4080: levels 10/0xd.
   - `InitLevelRenderGlobals` 0x255958: 0xd, < 9, 10.
   - `PauseAllSounds` 0x28bf50: 0xd.
-  Source list: `grep 'Ram0015ed84 [!=]=' decomp/export/level01.elf/*.c`.
+  Source list: `grep 'Ram0015ed84 [!=]=' work/decomp/level01.elf/*.c`.
 - **H2** `HeroStatePhysics` is 21,408 bytes, and no other overlay has a function of that size. `HeroStateTransitions`
   0x242930 (19,120 B) has a same-size function only in 02. 0x23cf98, 0x233de0 and 0x240ed8 are cluster
   singletons. Diff each against its counterparts in two or three overlays (Ghidra) before assuming it is identical.
@@ -194,7 +194,7 @@ How the address is found on another level:
   `GiveItem` pattern (`:345-350`); the HUD / fonts / strings (glyph tables by the FontPrint pattern,
   `font.rs:136`); the sound bank / music / emitters and fog zones (gameplay section 0x80).
 
-### Trace harness (`crates/rc-trace`)
+### Trace harness (`tools/trace`)
 - **T1** `novalis_spawn.rs:26-40` (TICK 0x15f5cc, MODE 0x15f5c4, VSYNC 0x15f3f8, IDLE 0x160ff0, CAM_* 0x167240..,
   TAN_HALF_FOV 0x16cf70, FOG 0x15f444, UNDERWATER_LOOK 0x161200) and `:320-342`; `main.rs:287` bails unless
   level 1. These are runtime addresses in `.lit`/`.bss`/`.data`, and `.data` starts at 0x166000..0x166a00
@@ -205,7 +205,7 @@ How the address is found on another level:
 - **T4** `port_sim.rs:40-44` (EMITTER/RIPPLE_UPDATE, RIPPLE_CLASS, SHIP_CLASS 531), `:111`, `:298`.
 
 ### Tooling
-- **X1** `decomp/scripts/overlay_diff.py`: also mask the 16-bit immediates of loads, stores and `addiu` whose base
+- **X1** `tools/ghidra/scripts/overlay_diff.py`: also mask the 16-bit immediates of loads, stores and `addiu` whose base
   comes from a `lui` (and `$gp` ones, already done). Re-run it. Expect most n = 5 / n = 1 rows (0x28e600, the hero
   functions) to become n = 19.
 - **X2** There is no single place to ask "where is X on level N". Add `rc_formats::level_overlay`:

@@ -2,17 +2,18 @@
 
 Input: `~/Library/Application Support/PCSX2/sstates/SCUS-97199 (CE4933D0).01.p2s` (PCSX2 v2.8.2, save version
 0x9a590000, EE RAM 32 MiB, zstd). Fresh game, Veldin played, first arrival on Novalis, after the arrival scene,
-standing at the spawn. Copies in `extracted/traces/` (git-ignored): `novalis_spawn.p2s`, `novalis_spawn_ee.bin`
-(EE RAM), `novalis_spawn_spr.bin` (scratchpad), `novalis_spawn.png` (PCSX2's screenshot: Ratchet at the spawn,
-the landing pad on the right is **empty**).
+standing at the spawn. Kept as `~/PS2/ratchet1/savestates/novalis_spawn.p2s` with `novalis_spawn.png` (PCSX2's
+screenshot: Ratchet at the spawn, the landing pad on the right is **empty**); its dumps are in `work/trace/`
+(git-ignored): `novalis_spawn_ee.bin` (EE RAM), `novalis_spawn_spr.bin` (scratchpad). The facts the regression test
+needs are distilled into `tools/trace/tests/fixtures/novalis_spawn.tsv` (numbers only; `distill-spawn`).
 
 Commands (docs/plan/trace_harness.md §5):
 ```
 cargo run -p rc-trace -- compare-tfrag-light   --state latest --level 01
 cargo run -p rc-trace -- compare-novalis-spawn --state latest            # a–g below, exit 2 on any mismatch
-cargo run -p rc-trace -- compare-novalis-spawn --ee extracted/traces/novalis_spawn_ee.bin --load-pre-draws 1 --load-emitters-culled
+cargo run -p rc-trace -- compare-novalis-spawn --ee work/trace/novalis_spawn_ee.bin --load-pre-draws 1 --load-emitters-culled
 ```
-Reports: `extracted/traces/novalis_spawn_report.txt`, moby mismatches `novalis_spawn_mobys.csv`, tfrag
+Reports: `work/trace/novalis_spawn_report.txt`, moby mismatches `novalis_spawn_mobys.csv`, tfrag
 `level01_tfrag_light_mismatches.csv` (not written: no mismatch).
 
 **Classification policy.** The port must *behave* like the game with native systems; bit-exactness is a diagnostic.
@@ -231,8 +232,8 @@ bolt orbit phases and hide bits (depend on scene 5), all unported classes' state
 
 ## Open reads resolved (2026-09-27)
 
-Read-only: Ghidra (`/levels/level01.elf`), the exports in `decomp/export/level01.elf/`, and the savestate's EE RAM
-(`extracted/traces/novalis_spawn_ee.bin`, moby array 0x1e9a480, stride 0x100). Addresses are level01. The H
+Read-only: Ghidra (`/levels/level01.elf`), the exports in `work/decomp/level01.elf/`, and the savestate's EE RAM
+(`work/trace/novalis_spawn_ee.bin`, moby array 0x1e9a480, stride 0x100). Addresses are level01. The H
 tolerances of this report are now in `hardware_fidelity_layers.md` "Tolerances".
 
 ### a. The 3 deleted class-501 crates: the ammo-crate death gate (M)
@@ -354,11 +355,12 @@ tolerances of this report are now in `hardware_fidelity_layers.md` "Tolerances".
 
 ## Fixes applied (2026-09-27)
 
-Re-run: `cargo run -p rc-trace -- compare-novalis-spawn --ee extracted/traces/novalis_spawn_ee.bin` (no knobs; report
-`extracted/traces/novalis_spawn_report_after.txt`). The knob `--load-emitters-culled` is gone (the port's default
+Re-run: `cargo run -p rc-trace -- compare-novalis-spawn --ee work/trace/novalis_spawn_ee.bin` (no knobs; report
+`work/trace/novalis_spawn_report_after.txt`). The knob `--load-emitters-culled` is gone (the port's default
 now culls). `--load-emitters-visible` re-creates the old behaviour as a diagnostic. `--load-pre-draws N` now adds
-draws on top of HeroInit's own draw. Regression: `crates/rc-trace/tests/novalis_spawn.rs` asserts every check marked
-"all" below.
+draws on top of HeroInit's own draw. Regression: `tools/trace/tests/novalis_spawn.rs` asserts every check marked
+"all" below (since 2026-09-27 against the distilled fixture `tools/trace/tests/fixtures/novalis_spawn.tsv`, no
+savestate needed).
 
 | # | fix | rule (level01) | before | after |
 |---|---|---|---|---|
@@ -422,9 +424,9 @@ classes, and tie ±1.
 
 ## Second savestate: idle-tick activity (2026-09-27)
 
-Input: slot 2, `SCUS-97199 (CE4933D0).02.p2s`, taken after slot 1 with the pad untouched. Copies are in
-`extracted/traces/` (git-ignored): `novalis_idle.p2s`, `novalis_idle_ee.bin`, `novalis_idle_spr.bin` and
-`novalis_idle.png`. The screenshot shows Ratchet at the same spot, mid-fidget, with fresh smoke above the city.
+Input: slot 2, `SCUS-97199 (CE4933D0).02.p2s`, taken after slot 1 with the pad untouched. Kept as
+`~/PS2/ratchet1/savestates/novalis_idle.p2s` with `novalis_idle.png`; dumps `novalis_idle_ee.bin` and
+`novalis_idle_spr.bin` in `work/trace/` (git-ignored). The screenshot shows Ratchet at the same spot, mid-fidget, with fresh smoke above the city.
 
 The game side is a RAM diff of the two states. The port side is `compare-novalis-spawn` run on each state's EE dump
 (`--ee …novalis_spawn_ee.bin` / `--ee …novalis_idle_ee.bin`, default options, i.e. the fixes above):
@@ -432,7 +434,7 @@ The game side is a RAM diff of the two states. The port side is `compare-novalis
 * Slot 2 runs 1072 more ticks.
 * The port's window figures are the differences between the two runs.
 
-The consumer analysis used throwaway scripts on the dumps and on `decomp/export/level01.elf`.
+The consumer analysis used throwaway scripts on the dumps and on `work/decomp/level01.elf`.
 
 ### Counters
 
@@ -518,7 +520,7 @@ Ported: class 660 (`BlargFlyerUpdate` 0x2f4428 + `FlyerPathDriver` 0x2f5168), th
 challenge gate and idle states of the teleporter pads 1135 (`TeleporterPadUpdate` 0x308bd8, arms `FUN_003092d0`) and
 of the gold-weapon offers 304 / 1456–1465 (`ItemOfferUpdate` 0x2e1ac0). Spec: moby_update_catalogue.md "In the port:
 Blarg flyers, teleporter pads, gold-weapon offers". New report section §f2 in `compare-novalis-spawn` (spawn
-savestate, `--ee extracted/traces/novalis_spawn_ee.bin`).
+savestate, `--ee work/trace/novalis_spawn_ee.bin`).
 
 | check | before | after |
 |---|---|---|

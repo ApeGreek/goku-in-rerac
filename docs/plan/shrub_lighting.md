@@ -103,7 +103,7 @@ clamp. Everything else (float order, leaky clamp, 1/128 grid) is the tfrag model
 `FUN_00255958`, `ShrubProc` disassembly):
 
 * **VU0 entries.** `LightShrubs` calls `vcallms 0` and `vcallms 0x160` (byte address; entry 0x2c): the same
-  code as the tie entries 0x58 / 0x84. `extracted/vu/436083.txt` prints `maddz.xyzw vf08, vf26, vf08` twice
+  code as the tie entries 0x58 / 0x84. `work/vu/436083.txt` prints `maddz.xyzw vf08, vf26, vf08` twice
   at line 60/61; the binary has it once (instruction 0x3b, then `mul.xyz vf17, vf05, vf30` at 0x3c): a
   listing artefact, not a quirk. **[verified in 436083.bin]**
 * **Differences from `LightTies`** (all in the EE code): blended light sets scale xyz only

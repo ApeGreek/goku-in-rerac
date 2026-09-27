@@ -8,7 +8,7 @@ Companion of `docs/plan/player_controller.md` (the detailed spec of the ported s
 
 Confidence: **H** read from the instructions / decompiler C of the switch case itself, **M** from the case plus its
 callers, **L** inferred (identity guessed from behaviour, flagged). Addresses are level01 unless marked `L00`
-(level00, the superset build; decompiler C in `decomp/export/level00.elf/`).
+(level00, the superset build; decompiler C in `work/decomp/level00.elf/`).
 
 ## 0. How the state machine is built (and one surprise)
 
@@ -29,8 +29,8 @@ callers, **L** inferred (identity guessed from behaviour, flagged). Addresses ar
   its data leads to it). Surface rules are the one place where the superset could change a level's behaviour
   (a face with surface 7 on a level whose reaction ignores 7): package P1 checks the surface ids each level's faces
   use against that level's own reaction.
-- Scripts used for this inventory: `decomp/export/*/` (all levels' unique functions), the per-level case union and
-  level01-name mapping through `decomp/names/clusters.tsv` (the scripts were throwaway; rerun by grepping each
+- Scripts used for this inventory: `work/decomp/*/` (all levels' unique functions), the per-level case union and
+  level01-name mapping through `tools/ghidra/names/clusters.tsv` (the scripts were throwaway; rerun by grepping each
   level's export for `param_1 != 100` + `iRam001413dc == 0x14`).
 
 ### 0.1 Items (the game state's owned table `0x13d4c0 + id`; `GetClankModule(slot)` 0x22ddd8 = the ready item of item slot `slot`, slot 0 the hand, slot 3 the back)

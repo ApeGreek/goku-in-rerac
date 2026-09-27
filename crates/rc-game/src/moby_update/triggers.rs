@@ -1,5 +1,5 @@
 //! Trigger volumes and moving platforms: the shared helpers every class calls (docs/plan/triggers.md). Level01
-//! addresses; the functions are engine code, identical in all 19 level overlays (decomp/names/clusters.tsv).
+//! addresses; the functions are engine code, identical in all 19 level overlays (tools/ghidra/names/clusters.tsv).
 //!
 //! **Volume tests.** A class keeps volume *indices* in its pvars (s32, −1 = none) and passes a test point:
 //! Ratchet's feet `0x13f3d0` (almost every caller), the camera `0x167240` (water 751, gunship 688) or the hero

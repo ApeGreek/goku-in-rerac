@@ -1,6 +1,6 @@
 # Moby skinning and lighting (EE + VU0)
 
-Where the moby vertex work happens before VU1 program 13859 (which only transforms, culls and clips). Addresses are boot ELF `SCUS_971.99` unless marked "L01" (level01.elf overlay). Evidence comes from the Ghidra disassembly of the functions named below (the decompiler output for these hand-written asm routines is unusable), the VU0 disassembly `extracted/vu/104691.txt` (instruction indices = MSCAL/CMSAR0 units, byte address = index × 8), and a scan of every moby class blob in `extracted/levels/*/core/moby_class/`.
+Where the moby vertex work happens before VU1 program 13859 (which only transforms, culls and clips). Addresses are boot ELF `SCUS_971.99` unless marked "L01" (level01.elf overlay). Evidence comes from the Ghidra disassembly of the functions named below (the decompiler output for these hand-written asm routines is unusable), the VU0 disassembly `work/vu/104691.txt` (instruction indices = MSCAL/CMSAR0 units, byte address = index × 8), and a scan of every moby class blob in `extracted/levels/*/core/moby_class/`.
 
 ## Summary
 

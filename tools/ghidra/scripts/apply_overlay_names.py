@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Applies names from decomp/names/overlay_names.csv (produced by
+# Not re-run since the reorg (2026-09-27): moved from decomp/scripts/, paths updated (names: tools/ghidra/names/,
+# decompiler export: work/decomp/, import ELFs: work/ghidra-import/). See tools/ghidra/README.md.
+"""Applies names from tools/ghidra/names/overlay_names.csv (produced by
 overlay_diff.py) to the overlay programs in Ghidra. Only FUN_ functions are
 renamed; a plate comment records the boot function the name came from."""
 import csv, os, sys, collections, functools

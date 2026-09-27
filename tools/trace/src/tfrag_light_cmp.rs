@@ -65,7 +65,7 @@ fn bank_to_bytes(sets: &[DirLightSet]) -> Vec<u8> {
 fn f32s<const N: usize>(b: &[u8]) -> [f32; N] { std::array::from_fn(|k| f32::from_le_bytes(b[4 * k..4 * k + 4].try_into().unwrap())) }
 
 /// EE addresses known for one level ELF (each level is its own executable with its own data layout;
-/// see decomp/export/level01.elf). Only level01 has been read so far.
+/// see work/decomp/level01.elf). Only level01 has been read so far.
 #[derive(Clone, Copy, Debug)]
 pub struct KnownAddrs {
     /// Global holding the decompressed core-data base (`InitMemSlots`: `DAT_00174294`).
@@ -349,8 +349,7 @@ impl Report {
                 d.ours[0], d.ours[1], d.ours[2], d.ours[3], d.ram[0], d.ram[1], d.ram[2], d.ram[3], d.disc[0], d.disc[1], d.disc[2], d.disc[3]
             );
         }
-        if let Some(p) = path.parent() { std::fs::create_dir_all(p)?; }
-        std::fs::write(path, s).with_context(|| format!("writing {}", path.display()))
+        crate::write_output(path, s).with_context(|| format!("writing {}", path.display()))
     }
 }
 

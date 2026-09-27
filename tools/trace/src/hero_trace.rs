@@ -249,8 +249,7 @@ impl Trace {
     }
 
     pub fn write(&self, path: &Path) -> Result<()> {
-        if let Some(d) = path.parent() { std::fs::create_dir_all(d)?; }
-        std::fs::write(path, self.to_text()).with_context(|| format!("writing {}", path.display()))
+        crate::write_output(path, self.to_text()).with_context(|| format!("writing {}", path.display()))
     }
 
     pub fn parse(text: &str) -> Result<Trace> {

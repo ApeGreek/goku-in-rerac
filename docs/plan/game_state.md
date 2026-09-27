@@ -1,6 +1,6 @@
 # Game state, new game and memory-card saves (RAC1, SCUS_971.99)
 
-Reversed 2026-09-26 from the boot ELF (`decomp/export/SCUS_971.99`), level01/level00 overlays and the disc's
+Reversed 2026-09-26 from the boot ELF (`work/decomp/SCUS_971.99`), level01/level00 overlays and the disc's
 `save_game` lump (global ToC +0x10). Addresses are EE addresses. `L01 0x…` = level01 overlay, `[0x…]` = boot copy.
 gp = 0x166c00 (`gp−0x7e7c` = 0x15ed84). Confidence: **H** read directly from code/data and cross-checked,
 **M** inferred from a few uses, **L** guess. Chunk names were cross-checked against Wrench's `savegame.wtf`

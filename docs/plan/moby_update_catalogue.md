@@ -2,7 +2,7 @@
 
 How a moby gets its per-class behaviour, what every class placed on Novalis (level 01) does, and which of
 them leave sequence 0. Addresses are **level01.elf** (the in-game engine; "boot" = SCUS_971.99). Sources:
-Ghidra C exports in `decomp/export/level01.elf/`, the class table read from the level 01 overlay (then via the C++ `overlay.elf`, now
+Ghidra C exports in `work/decomp/level01.elf/`, the class table read from the level 01 overlay (then via the C++ `overlay.elf`, now
 `overlay.bin`), instance and pvar data from the decompressed `levels/01/gameplay_ntsc.bin`, class blobs from the
 level 01 core blocks `moby_class/NNNN`. Twelve update functions are only referenced by pointer and are not defined in
 Ghidra (0x2bb128, 0x2cbda8, 0x2df448, 0x2e30b0, 0x2ece90, 0x2eda00, 0x2f3568, 0x2f6128, 0x300080,
@@ -99,7 +99,7 @@ fixup lists. The layout is per class.** Verified (loader read); the per-class la
 ## 3. Novalis catalogue (85 placed classes, 983 instances)
 
 `#` = instances. `fn` = update function (level01). `cl` = cluster hash/programs from
-`decomp/names/clusters.tsv`. **/19 means shared by every level** (engine-wide gameplay); /1 means
+`tools/ghidra/names/clusters.tsv`. **/19 means shared by every level** (engine-wide gameplay); /1 means
 Novalis-only. "no geo" = no class blob, so there is nothing to draw. Seq = sequences the update selects.
 Summary sources: my own reading for the top classes; the rest from read-only sub-agent passes over the C
 (confidence noted in §4 or marked "med").

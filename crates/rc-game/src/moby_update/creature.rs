@@ -1,5 +1,5 @@
 //! The shared creature and enemy layer of the game's engine code (level01 addresses; every function here is in
-//! the ~1375 engine functions each level overlay links, `decomp/names/clusters.tsv`). The per-class creature updates
+//! the ~1375 engine functions each level overlay links, `tools/ghidra/names/clusters.tsv`). The per-class creature updates
 //! (`classes::critter` 577, `classes::amoeboid` 572/865/866, …) are thin state machines over these, exactly as the
 //! game's class code calls its shared helpers. Spec and the class status: `docs/plan/creatures.md`.
 //!

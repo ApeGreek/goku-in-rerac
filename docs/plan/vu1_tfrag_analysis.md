@@ -1,6 +1,6 @@
 # tfrag VU1 microprogram (55907) — analysis for a shader port
 
-All line numbers refer to `/Users/aslanhud/Repos/randcre/extracted/vu/55907_tfrag.txt` unless prefixed `FB:` (`/Users/aslanhud/Repos/randcre/extracted/vu/903379.txt`). Micro addresses are instruction-pair indices (MSCAL units).
+All line numbers refer to `work/vu/55907_tfrag.txt` unless prefixed `FB:` (`work/vu/903379.txt`). Micro addresses are instruction-pair indices (MSCAL units).
 
 ## 1. Program map
 

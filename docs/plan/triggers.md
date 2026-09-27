@@ -1,7 +1,7 @@
 # Trigger volumes and moving platforms
 
 Addresses are **level01.elf** unless marked; every function named here is engine code present in all 19 level
-overlays (decomp/names/clusters.tsv) unless its row says otherwise. gp = 0x166c00. Hero globals: 0x13f3d0
+overlays (tools/ghidra/names/clusters.tsv) unless its row says otherwise. gp = 0x166c00. Hero globals: 0x13f3d0
 position (feet), 0x13f420 body point, 0x13f64c ground moby, 0x13f65e air ticks, 0x1413d4 state, 0x1413dc
 movement group. Camera position 0x167240. dt 0x15ed6c.
 

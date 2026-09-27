@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Not re-run since the reorg (2026-09-27): moved from decomp/scripts/, paths updated (names: tools/ghidra/names/,
+# decompiler export: work/decomp/, import ELFs: work/ghidra-import/). See tools/ghidra/README.md.
 """Clusters functions across the boot ELF and all 19 level overlays by a
 relocation-tolerant hash of their MIPS code, so shared engine code is
 identified once and boot-ELF names propagate to every overlay.
@@ -8,7 +10,7 @@ raw bytes we extracted (boot ELF, level overlay lumps), with the next function s
 masks the fields that differ between links of the same source: jal/j targets,
 lui immediates, and $gp-relative offsets.
 
-Outputs (decomp/names/):
+Outputs (tools/ghidra/names/):
   clusters.tsv      one row per hash: n_programs, boot_name, members
   overlay_names.csv address/name pairs per level to apply to Ghidra
 """
@@ -16,7 +18,7 @@ import hashlib, os, struct, sys, csv, collections
 sys.path.insert(0, os.path.dirname(__file__))
 from ghidra_http import get, post
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))  # repo root (tools/ghidra/scripts/)
 programs = ["SCUS_971.99"] + [f"level{i:02d}.elf" for i in range(19)]
 
 def elf_text(path):
@@ -110,10 +112,10 @@ for prog in programs:
         clusters[norm_hash(code)].append((prog, addr, name, len(code)))
     print(f"{prog}: {len(fl)} functions hashed")
 
-os.makedirs(os.path.join(ROOT, "decomp/names"), exist_ok=True)
+os.makedirs(os.path.join(ROOT, "tools/ghidra/names"), exist_ok=True)
 overlay_names = []
 n_prog = collections.Counter()
-with open(os.path.join(ROOT, "decomp/names/clusters.tsv"), "w") as f:
+with open(os.path.join(ROOT, "tools/ghidra/names/clusters.tsv"), "w") as f:
     f.write("hash\tn_programs\tsize\tboot_name\tmembers\n")
     for h, members in sorted(clusters.items(), key=lambda kv: -len({m[0] for m in kv[1]})):
         progs = {m[0] for m in members}
@@ -125,7 +127,7 @@ with open(os.path.join(ROOT, "decomp/names/clusters.tsv"), "w") as f:
             for m in members:
                 if m[0] != "SCUS_971.99" and m[2].startswith("FUN_"):
                     overlay_names.append({"program": m[0], "address": f"{m[1]:08x}", "name": boot_name, "source": f"boot-hash-match {boot[0][1]:08x}"})
-with open(os.path.join(ROOT, "decomp/names/overlay_names.csv"), "w") as f:
+with open(os.path.join(ROOT, "tools/ghidra/names/overlay_names.csv"), "w") as f:
     w = csv.DictWriter(f, fieldnames=["program", "address", "name", "source"]); w.writeheader(); w.writerows(overlay_names)
 print("clusters by number of programs sharing them:", sorted(n_prog.items()))
 print(f"overlay functions nameable from boot matches: {len(overlay_names)}")

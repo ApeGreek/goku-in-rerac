@@ -5,7 +5,7 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 ## 1. The standing rules (from the user)
 
 - The goal is a **faithful reimplementation** in Rust/Bevy of the user's own copy of Ratchet & Clank (2002, PS2, SCUS_971.99): identical behaviour, not a bit-exact C++ port and not emulation. Decompilation (Ghidra + Lombyte) is the behaviour reference; PCSX2 traces are the diagnostic truth test (behaviour is the goal, bit-exactness is not: §3.6); loaders are regression-tested against committed snapshot hashes (the C++ reference extractor that first verified them was retired on 2026-09-27, decisions.md).
-- Nothing disc-derived is ever committed. `extracted/`, `decomp/export/`, `target/`, `dist/` are git-ignored; committed verification tables hold only sizes, counts and hashes (`crates/rc-extract/data/*.tsv`, `crates/rc-formats/data/loader_snapshots.tsv`). No disc bytes in source or tests; tests read `extracted/` or the ISO at runtime and skip when absent. Nothing has been committed yet (the user never asked; don't commit unless asked).
+- Nothing disc-derived is ever committed. `extracted/`, `work/`, `target/`, `dist/` are git-ignored; committed verification tables hold only sizes, counts and hashes (`crates/rc-extract/data/*.tsv`, `crates/rc-formats/data/loader_snapshots.tsv`). No disc bytes in source or tests; tests read `extracted/` or the ISO at runtime and skip when absent. Nothing has been committed yet (the user never asked; don't commit unless asked).
 - **Build times are sacred.** Never change the Bevy version, `[profile.*]`, `.cargo/config.toml`, workspace dependency versions or Bevy features. Engine builds only via `cargo dev` / `cargo dev-build` (dynamic linking, ~1 s incremental). Warn before anything that could invalidate the Bevy cache. Adding a workspace path crate is fine; adding an external dependency needs a reason and a note.
 - The orchestrator model must not do the work. **Every** code change, build, test, doc edit or investigation goes to an Opus 5.5 subagent (`model: "opus"`, `subagent_type: "general-purpose"`, `run_in_background: true`). Never spawn a Fable subagent. The orchestrator may: write briefs, read reports, send follow-up messages to agents, save its own memory notes, send screenshots to the user, and answer the user's questions.
 - Wrench (`~/Globals/wrench`) is GPL: orientation only, never copy code. OpenGOAL (`~/Globals/jak-project`) and its vendored VU disassembler are ISC and may be mirrored with attribution.
@@ -15,10 +15,18 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 - `crates/rc-formats`: all loaders, golden-tested on all 19 levels against committed snapshot hashes (`data/loader_snapshots.tsv`, generated while byte-identical to the retired C++ oracle) (wad, toc, level core, textures, tfrag, tie, shrub, sky, moby, gadget, collision, occlusion, particle/FX textures, moby animation, lighting passes, disc/ISO reader, gameplay sections, fog zones, hud/strings/sound-bank/scene in flight). PS2 float model in `tfrag_light::ps2`.
 - `crates/rc-game`: pure gameplay logic, no Bevy: collision kernels, rng, particles, hero controller + pad + follow camera + tick, fog zones, sky stars, water sim, moby runtime; scheduler/menus/game-state/audio/scene player in flight.
 - `crates/rc-engine`: Bevy app. One module per renderer (`tfrag_*`, `tie_*`, `shrub_*`, `moby_*`, `sky_*`, `particle_render`, `water_render`, `hud_*`, …), `gs_state.rs` (GS alpha/depth rules), `determinism.rs` (frame-exact capture), `occlusion.rs`, `fog_state.rs`, `disc_source.rs`. Env switches are listed in `README.md`.
-- `crates/rc-trace`: PCSX2 savestate/PINE comparison harness (`docs/plan/trace_harness.md`).
 - `crates/rc-extract`: `randcrw-extract` (Tier 0 archive checked against `data/scus_971_99.tsv`, Tier 1 cache, Tier 2 exports). The C++ oracle (`src/core`, `tools/extract`) was retired on 2026-09-27; a new loader gets a golden test in `crates/rc-formats/tests/golden.rs` that records snapshot rows (`tests/snapshot/mod.rs`).
 - `docs/formats/*`: verified format docs. `docs/plan/*`: one investigation doc per system (player_controller, moby_update_catalogue, particles, hud_text, audio, world_animation, occlusion_culling, collision_queries, game_state, menus, cutscenes_transitions, moby_animation, moby_skinning_lighting, tfrag_lighting, tie_lighting, shrub_lighting, sky_render_notes, game_camera_fog, level_sweep, trace_harness). `docs/plan/roadmap.md` has a dated status block at the top.
-- `decomp/`: Ghidra scripts and names (`decomp/names/*.csv`, `clusters.tsv`); exports in `decomp/export/<program>/`.
+- `tools/` (dev only, never ships; each tool has a README): `tools/trace` (package `rc-trace`: PCSX2 savestate/PINE
+  comparison harness, `docs/plan/trace_harness.md`), `tools/ghidra/scripts` + `tools/ghidra/names` (Ghidra scripts and
+  name tables, `names/*.csv`, `clusters.tsv`), `tools/package` (release packaging), `tools/repo-checks` (layout guard
+  tests).
+- `docs/workflows/`: one page per dev workflow, one command per task (ghidra, pcsx2, game-data, release, launcher).
+- `extracted/` (git-ignored): game data only, what `randcrw-extract` writes. `work/` (git-ignored): generated dev output
+  (`work/decomp/<program>/` decompiler export, `work/trace/`, `work/ghidra-import/`, `work/vu/`, `work/exports/`,
+  `work/captures/`). `~/PS2/ratchet1/` (outside the repo): the user's ISO, `savestates/`, `traces/` (recordings); the
+  Ghidra project is `~/ratchet1.gpr` + `~/ratchet1.rep` (target home `~/PS2/ratchet1/ghidra/`). Full layout:
+  `docs/plan/repo_reorg.md`.
 
 ## 3. The working method
 
@@ -33,6 +41,7 @@ Renderers follow a fixed recipe: establish the GS state and math from the decomp
 ### 3.2 The brief template
 Every brief carries, in this order:
 - One paragraph of context: what exists, where (file paths, doc names, the exact API names the agent will call, copied from the previous agent's report).
+- **Product or tooling, and which folder**: "Product work in `crates/<crate>`" or "Tooling work in `tools/<tool>`" (plus `docs/` as needed). Product work never adds a dependency on `tools/`; tooling work writes its output only to `work/`.
 - **Hard constraints** block: cargo path (`export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`); `cargo dev` only; no Bevy/profile/dep/feature changes; **file ownership** (explicit list of files it may create/edit; "minimal insertions, re-read right before each edit" for `main.rs`, `level_load.rs`, `lib.rs`; explicit "do NOT touch" list naming the files other running agents own); no commits; no disc bytes; tests green and clippy clean for its files; Ghidra MCP URL and API gotchas (`decompile_function` takes `address`; pass the program per call; disassembly for asm/VU0 code); Lombyte path.
   Every brief also carries these standard lines verbatim:
   - "Use standard floats and native mechanisms; do not add hardware modelling. If a PS2 arithmetic effect is noticeable in play, reproduce the result, not the mechanism, and record it in hardware_fidelity_layers.md."
@@ -80,7 +89,7 @@ Source: docs/plan/decisions.md, "Native-first fidelity policy (2026-09-27)". The
 | Audio port (bank, VAG, voices, music, mixer) | `rc-formats/{sound_bank,vag}.rs`, `rc-game/audio*`, `rc-engine/audio_out.rs` | scene speech, moby sound triggers |
 | Water surfaces (strips, ripples, foam) | `rc-formats/water.rs`, `rc-game/water.rs`, `rc-engine/water_render.rs` | underwater hooks in `fog_state.rs`, other levels' water |
 | Moby low LOD + chrome/glass + untextured (−1) fix | `rc-engine/moby_render.rs`, `moby_lod.rs`, `moby_metal.wgsl` | frees `moby_render.rs` |
-| Ghidra name consolidation | `decomp/names/*`, Ghidra project | nothing; improves later work |
+| Ghidra name consolidation | `tools/ghidra/names/*`, Ghidra project | nothing; improves later work |
 | Game state + save format | `rc-formats/save_game.rs`, `rc-game/game_state.rs` | menus options, quick-select slots, bolts counter |
 | Gameplay wiring (playable Novalis) | `rc-engine/{gameplay,input_map,play_camera}.rs` | everything gameplay-side on screen; defines pad bytes, `Mode`, tick driver |
 | Moby update scheduler + bolts/crates/grass | `rc-game/moby_update/*` | `TickHooks.mobys` fill-in; more classes |
@@ -109,6 +118,19 @@ These apply to every dispatch from now on (the brief lines are in §3.2):
 - One cargo/engine process at a time.
 - Engine runs use `RC_SCENE=0`.
 - Every port-only option goes on the native-looking "Port Options" page under Options.
+- Every brief states product (`crates/`) or tooling (`tools/`) and which folder it touches (§3.2).
+- Tools write generated output only to `work/` (never `extracted/`, never the repo tree outside `work/`); the one
+  exception is a deliberate, committed fixture (e.g. `rc-trace distill-spawn`).
+- No test may depend on personal files (ISO copies, savestates, recordings, EE dumps). PCSX2 findings reach tests
+  only as distilled, numbers-only fixtures (docs/workflows/pcsx2.md). `tools/repo-checks` enforces the product side.
+- Scratch and debug captures go in the agent's scratchpad subfolder or `work/captures/`, never in the repo tree or
+  `extracted/`.
+- Agents read decompiled code from `work/decomp/<program>/` (`index.tsv` + one `.c` per function).
+- Paths agents use: product `crates/`; tools `tools/trace`, `tools/ghidra/{scripts,names}`, `tools/package`,
+  `tools/repo-checks`; game data `extracted/` (`RC_EXTRACTED`); dev output `work/{decomp,trace,ghidra-import,vu,exports,captures}/`
+  (`RC_WORK`); personal `~/PS2/ratchet1/{savestates,traces}/` (`RC_PERSONAL`, read-only for agents unless the brief
+  says otherwise); the Ghidra project `~/ratchet1.gpr` + `.rep` (only through the Ghidra MCP, only when the brief
+  allows it); workflows `docs/workflows/`.
 
 ### 4.4 User-gated
 - **PCSX2 comparison** (mismatches are triaged per `trace_harness.md` "Triage"): the user must install the BIOS in PCSX2 2.8.2, play to Novalis, press F1 (Fn+F1) for a savestate, then run `cargo run -p rc-trace -- compare-tfrag-light --state latest --level 01` (or enable PINE and use `--pine`). First targets: tfrag lit RGBA, then hero position per tick, moby colours, scene-5 trigger tick, fog values.
@@ -116,7 +138,7 @@ These apply to every dispatch from now on (the brief lines are in §3.2):
 
 ## 5. Gotchas collected
 - Ghidra MCP: `import_file` with a `language` param forces the raw loader; `rename_function` returns `{status:"success"}`; `set_comment` uses `type`; `delete_file` uses `filePath`; don't leave the active program switched; the GUI holds programs. Some level overlays time out on `open_program`; use identical copies in another level.
-- Lombyte names are mostly right but several are wrong (listed in `decomp/names/doc_names.csv` notes and `docs/plan/menus.md`). Never override a Lombyte name in Ghidra; add a plate comment.
+- Lombyte names are mostly right but several are wrong (listed in `tools/ghidra/names/doc_names.csv` notes and `docs/plan/menus.md`). Never override a Lombyte name in Ghidra; add a plate comment.
 - Each level overlay is its own executable: boot-ELF addresses are not valid in-level; docs say which program an address belongs to.
 - Screenshot harness: `RC_SCREENSHOT_FRAME=N` (offscreen capture; exit 2/3 on failure). The default camera can be inside geometry on some levels; use `RC_CAM`. `RC_OCCL=0` for free-fly.
 - Agents occasionally hit transient compile errors from another agent's mid-edit; they should wait and retry, not edit the other file.

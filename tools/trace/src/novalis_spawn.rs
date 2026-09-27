@@ -54,12 +54,15 @@ pub struct Timeline {
 
 impl Timeline {
     pub fn read(ee: &EeImage) -> Result<Timeline> {
-        let tick_counter = ee.u32(TICK)?;
-        let idle = ee.u32(IDLE)? as i32;
+        Ok(Timeline::from_counters(ee.u32(TICK)?, ee.u32(MODE)? as i32, ee.u32(MODE_FRAMES)? as i32, ee.u32(IDLE)? as i32))
+    }
+
+    /// The timeline from the four RAM counters (also what `crate::spawn_facts` stores).
+    pub fn from_counters(tick_counter: u32, mode: i32, mode_frames: i32, idle: i32) -> Timeline {
         let ticks = tick_counter.saturating_sub(1) as u64;
         // The idle counter is 0 on the tick a button is held and +1 per neutral tick after it.
         let press_at = (idle >= 0 && (idle as u64) < ticks).then(|| ticks - 1 - idle as u64);
-        Ok(Timeline { tick_counter, mode: ee.u32(MODE)? as i32, mode_frames: ee.u32(MODE_FRAMES)? as i32, idle, ticks, press_at })
+        Timeline { tick_counter, mode, mode_frames, idle, ticks, press_at }
     }
 }
 
@@ -72,12 +75,12 @@ pub struct Out {
 }
 
 impl Out {
-    fn line(&mut self, s: impl AsRef<str>) {
+    pub fn line(&mut self, s: impl AsRef<str>) {
         println!("{}", s.as_ref());
         self.text.push_str(s.as_ref());
         self.text.push('\n');
     }
-    fn tally(&mut self, name: &str, ok: u64, total: u64) { self.tallies.push((name.to_string(), ok, total)); }
+    pub fn tally(&mut self, name: &str, ok: u64, total: u64) { self.tallies.push((name.to_string(), ok, total)); }
 }
 
 fn f(ee: &EeImage, a: u32) -> f32 { f32::from_le_bytes(ee.bytes(a, 4).unwrap().try_into().unwrap()) }
@@ -136,7 +139,7 @@ fn chunk_name(scope: Scope, id: i32) -> &'static str {
 
 /// Chunks whose value depends on how (and how long) Veldin and the Novalis intro were played, not on a
 /// port rule: reported with their values, not counted as port mismatches.
-fn play_dependent(scope: Scope, id: i32) -> bool {
+pub fn play_dependent(scope: Scope, id: i32) -> bool {
     match scope {
         Scope::Global => matches!(id, 1 | 3 | 4 | 9 | 15 | 16 | 17 | 18 | 1000 | 1001 | 1002 | 1003 | 1004 | 1005 | 1008 | 1009 | 1010 | 1011),
         Scope::Level(l) => l <= 1 && matches!(id, 3002 | 3003 | 3004 | 3005 | 3006 | 3008 | 4000 | 4001 | 4002),
@@ -152,7 +155,7 @@ fn nonzero_words(b: &[u8]) -> String {
     let v: Vec<String> = words(b).iter().enumerate().filter(|(_, &x)| x != 0).map(|(i, x)| format!("[{i}]={x}")).collect();
     if v.is_empty() { "all 0".into() } else { v.join(" ") }
 }
-fn describe(scope: Scope, id: i32, b: &[u8]) -> String {
+pub fn describe(scope: Scope, id: i32, b: &[u8]) -> String {
     match (scope, id, b.len()) {
         (_, _, 4) => format!("{}", i32::from_le_bytes(b.try_into().unwrap())),
         (Scope::Global, 9 | 13 | 32 | 1000 | 1001 | 1002, _) => nonzero_words(b),
@@ -526,8 +529,7 @@ pub fn check_mobys(ee: &EeImage, sim: &PortSim, out: &mut Out, csv: &Path) -> Re
     out.line(format!("  load-pass draws: bolt spin bits (pvar+0x55) {spin_ok}/{spin_n}, class-500 crate turns (rot z) {turn_ok}/{turn_n}"));
     out.tally("e. load pass: bolt spin bits", spin_ok, spin_n);
     out.tally("e. load pass: crate 500 turns", turn_ok, turn_n);
-    if let Some(d) = csv.parent() { std::fs::create_dir_all(d)?; }
-    std::fs::write(csv, rows)?;
+    crate::write_output(csv, rows)?;
     let line: Vec<String> = FIELDS.iter().map(|f| { let (a, b) = totals.get(f).copied().unwrap_or_default(); format!("{f} {a}/{b}") }).collect();
     out.line(format!("  totals: {}", line.join(", ")));
     for fname in FIELDS { let (a, b) = totals.get(fname).copied().unwrap_or_default(); out.tally(&format!("f. moby {fname}"), a, b); }

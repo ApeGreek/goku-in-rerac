@@ -2,7 +2,7 @@
 
 Addresses are **level01.elf** (Novalis overlay) unless marked *boot*. The particle engine is shared code:
 95 of its ~130 functions hash-match in all 19 level overlays and most others in several
-(`decomp/names/clusters.tsv` maps the addresses per overlay). The boot ELF only carries the allocator,
+(`tools/ghidra/names/clusters.tsv` maps the addresses per overlay). The boot ELF only carries the allocator,
 `UpdateParts` and `PartProc` (it has no particle types). Confidence tags: **high** = read from
 disassembly/decomp and constants re-read from memory; **med** = inferred from usage; **low** = guess.
 
@@ -422,7 +422,7 @@ lines (game RNG included) and stats lines. Type 11 is covered by the unit tests 
 
 ## Blarg flyer trails (2026-09-28): what draws them, and the display-byte additive fix
 
-**What the game draws (from the savestates' RAM, `extracted/traces/novalis_{spawn,idle}_ee.bin`).** All ten class-27
+**What the game draws (from the savestates' RAM, `work/trace/novalis_{spawn,idle}_ee.bin`).** All ten class-27
 emitters (mobys 285–294, pvars 0x1ef4920 + 0xe0·k) are the flyers' exhausts: each flyer 619–628 (class 660, pvar
 +0x120 = 2: flag bit 1 only, link +0x140 = one emitter) carries one, and the emitters sit at the flyers' joints, not
 at their placed positions (§9's "steam over the crater" is only what the emitters do before the flyers move them).

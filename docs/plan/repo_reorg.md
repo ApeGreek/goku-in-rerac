@@ -1,169 +1,128 @@
-# Repo reorg: product vs dev tools (deferred plan)
+# Repo layout: product vs dev tools (as built)
 
-Status: **planned, not started** (written 2026-09-27). Carry it out at a natural pause; about 20–30 minutes
-of agent time. Until then the current layout stays as it is.
+Status: **done** 2026-09-27 (commit "Reorganise repo: product crates vs dev tools"). This is the as-built spec; the
+deferred product changes are under **Follow-ups**. Decision row: `docs/plan/decisions.md` (2026-09-27).
 
-## 1. Problem
+## 1. Why
 
-Dev helpers have landed wherever the task that needed them happened to run, so the repo mixes the product
-with the tooling that helps build it. There are no decided folders and no documented workflows. Examples as of
-2026-09-27:
+Dev helpers had landed wherever the task that needed them ran: Ghidra scripts and name tables in a root `decomp/`
+beside the product, PCSX2 dumps and the user's savestates inside the game-data folder (`extracted/traces/`), a
+committed test that read a dump of the user's personal savestate, a Ghidra import script pointing at a removed
+folder, and the PCSX2 harness among the shipped crates.
 
-- **Ghidra level import.** A former C++ function wrote level overlays into a root `ghidra/import/` folder for
-  Ghidra. It left with the C++ retirement (afe8174), but `decomp/scripts/import_overlays.py` is still here,
-  untouched, and still reads `ghidra/import/`.
-- **`decomp/` at the root** next to product code. It holds Ghidra scripts (`decomp/scripts/`), name tables
-  (`decomp/names/`) and a 65 MB git-ignored decompiler export (`decomp/export/`).
-- **PCSX2 trace data in the game-data folder.** `extracted/traces/` (101 MB) mixes the user's own recordings
-  (`novalis_spawn.p2s`, `novalis_idle.p2s` savestates and their screenshots) with regenerable output: EE and
-  scratchpad dumps (`*_ee.bin`, `*_spr.bin`, 32 MB each), reports, stdout captures and CSVs. `rc-trace` writes
-  there by default (`crates/rc-trace/src/main.rs`: `compare-tfrag-light` CSV, `compare-novalis-spawn` report
-  and moby CSV), and `crates/rc-trace/tests/novalis_spawn.rs` reads `traces/novalis_spawn_ee.bin` from it.
-  Only `record-hero` already writes outside the repo (`~/PS2/ratchet1/traces/`, `hero_record.rs`).
-- **C++-era leftovers in `extracted/`.** Files a `randcrw-extract` data folder does not have are still in the
-  dev tree: `levels/NN/*.dec`, `*_dump.bin`, `overlay.elf`, `overlay.txt`, `*.obj`, `*_topdown.png`,
-  `moby_0000_front.png`, the `core/`, `gameplay/` and `textures/` splits, and `extracted/vu/` (VU disassembly
-  listings that the format docs cite by line number). `launcher_extractor.md` §4.1 already lists them as derived
-  dev data, about 5 GiB, that nothing has read since 2026-09-27.
-- **`rc-trace` sits in `crates/`** beside the shipped crates, although it is a PCSX2 dev tool.
+## 2. Four kinds of data, four homes
 
-## 2. Target layout
+| Kind | Home | Git |
+|---|---|---|
+| Source: code, docs, Ghidra scripts, name lists, committed expected values (hash tables, distilled fixtures) | repo | yes |
+| Game data, rebuildable from the ISO | `extracted/` (dev) | no |
+| Generated dev output, rebuildable by a tool | `work/` | no |
+| The user's personal material: ISO, Ghidra project, savestates, recordings | `~/PS2/ratchet1/` | no |
+
+Only source and game data may feed tests. Personal material never does.
+
+## 3. Layout
 
 ```
-randcre/
-├── crates/                 PRODUCT: ships; never depends on tools/
-│   ├── rc-formats          disc + level format readers, load-time passes
-│   ├── rc-data             Tier 1 engine cache
-│   ├── rc-game             game logic ports
-│   ├── rc-engine           Bevy app, binary `randcrw`
-│   └── rc-extract          binary `randcrw-extract` (extract / verify / prepare / export)
-├── tools/                  DEV TOOLING: never ships (package allow-list); one README per tool
-│   ├── ghidra/
-│   │   ├── README.md
-│   │   ├── scripts/        ghidra_http, import_levels, apply_*_names, export_decomp, overlay_diff
-│   │   └── names/          today's decomp/names (boot_functions.csv, overlay_names.csv, doc_names.csv, clusters.tsv)
-│   ├── trace/              today's crates/rc-trace (PCSX2 harness; workspace member at the new path)
-│   ├── package/            release packaging (package.sh)
-│   └── vu/                 (future, only if renderer or shadow work needs it) VU microprogram disassembler
-├── docs/
-│   ├── formats/  plan/
-│   └── workflows/          ghidra.md, pcsx2.md, game-data.md, release.md, launcher.md
-├── extracted/   (ignored)  ONLY game data written by randcrw-extract: Tier 0, cache/, optionally exports/
-├── work/        (ignored)  regenerable dev output
-│   ├── decomp/             decompiler export (today decomp/export/)
-│   ├── ghidra-import/      level ELFs from `randcrw-extract export --what code`
-│   └── trace/              EE/scratchpad dumps, reports, CSVs, stdout captures
-├── dist/        (ignored)  release packages
-└── target/      (ignored)
-
-~/PS2/ratchet1/             the user's persistent personal files, outside the repo
-├── <disc>.iso
-├── ghidra/                 Ghidra project (the user moves today's ~/ratchet1.gpr + ~/ratchet1.rep here)
-└── traces/                 recordings (hero_*.tsv), PCSX2 savestates (*.p2s) and their screenshots
+crates/                 PRODUCT: rc-formats rc-data rc-game rc-engine (randcrw) rc-extract (randcrw-extract)
+tools/                  DEV ONLY, each subfolder has a README (purpose, commands, inputs, outputs)
+  ghidra/scripts/         Ghidra scripts (from decomp/scripts/; import_overlays.py renamed import_levels.py)
+  ghidra/names/           name tables (from decomp/names/)
+  trace/                  PCSX2 harness, package rc-trace (from crates/rc-trace)
+  package/                release packaging
+  repo-checks/            guard tests for this layout (no dependencies)
+docs/formats/ docs/plan/ docs/workflows/
+extracted/   (ignored)  game data only (what randcrw-extract writes)
+work/        (ignored)  generated dev output:
+  decomp/                 decompiler export (from decomp/export/, moved by hand, not regenerated)
+  ghidra-import/          level ELFs for a from-scratch Ghidra import (levelNN.elf, 19 files)
+  trace/                  EE / scratchpad dumps, reports, CSVs, replay output of rc-trace
+  vu/                     VU microprogram listings the format docs cite by line number
+  exports/ captures/      conventions: randcrw-extract exports for dev work; screenshots and debug captures
+dist/ target/ (ignored)
+~/PS2/ratchet1/         the ISO; savestates/; traces/ (recordings); ghidra/ (the project's future home)
 ```
 
-No other top-level folders: no `ghidra/`, no `decomp/`.
+No other top-level folders (`tools/repo-checks` checks it). The Ghidra project stays at `~/ratchet1.gpr` +
+`~/ratchet1.rep` until the user moves it to `~/PS2/ratchet1/ghidra/`.
 
-## 3. Rules
+## 4. Rules
 
-1. **Product vs tooling.** `crates/` ships and never depends on anything under `tools/`. A workspace test
-   enforces this with `cargo metadata` (no product package has a path dependency under `tools/`). `tools/`
-   never ships; `tools/package/package.sh`'s allow-list already enforces that.
-2. **Data goes to its one home.** `extracted/` holds only what `randcrw-extract` writes. Regenerable dev output
-   goes to `work/`. The user's irreplaceable files go to `~/PS2/ratchet1/`. No tool writes into `extracted/`.
-3. **One documented command per task** in `docs/workflows/`. Never write a doc instruction telling anyone to
-   recover something from git history for a simple task; if a workflow needs it, it lives in the tree.
-4. **Every agent brief states product or tooling, and which folder it touches.** Added to the orchestration
-   handbook (`docs/plan/orchestration.md` §3.2 brief template and §4.3 standing rules).
-5. **No speculative code.** Only port or keep what a current, concrete workflow uses. Ghidra and PCSX2 are real
-   workflows, so their tools are legitimate; `tools/vu/` comes back only when a task needs it.
+1. **Product vs tooling.** `crates/` ships and never depends on anything under `tools/` (`tools/repo-checks` parses
+   every `crates/*/Cargo.toml`). `tools/` never ships (`tools/package/package.sh`'s allow-list).
+2. **Data goes to its one home.** `extracted/` holds only what `randcrw-extract` writes. Tools write generated output
+   only to `work/` (`rc-trace` refuses paths inside `extracted/`); the one deliberate exception is a committed
+   fixture (`rc-trace distill-spawn`). Personal material stays in `~/PS2/ratchet1/`.
+3. **No test depends on personal files.** PCSX2 findings reach tests only as distilled, numbers-only fixtures
+   (`tools/trace/tests/fixtures/novalis_spawn.tsv`). `tools/repo-checks` rejects product files that mention `.p2s`,
+   `~/PS2`, `PS2/ratchet1`, `work/`, `/traces/` or `RC_PERSONAL`, apart from the listed known lines (Follow-up 6).
+4. **One documented command per task** in `docs/workflows/`; no instruction to recover anything from git history.
+5. **Every agent brief states product or tooling, and which folder** (`docs/plan/orchestration.md` §3.2, §4.3).
+6. **No speculative code.** Only what a current workflow uses.
 
-## 4. Migration checklist
+## 5. What was done
 
-Do the moves with `git mv` so history follows. One agent, tooling work; touches `tools/`, `docs/`, `crates/`
-(workspace list and the dependency test only), `.gitignore`, `README.md`.
+**Moves.** `git mv`: `decomp/scripts` → `tools/ghidra/scripts`, `decomp/names` → `tools/ghidra/names`,
+`crates/rc-trace` → `tools/trace` (package name `rc-trace` kept, so `cargo run -p rc-trace` works). Plain `mv`
+(untracked): `decomp/export/*` → `work/decomp/`; `extracted/traces/` → the two savestates `novalis_spawn.p2s`,
+`novalis_idle.p2s` and their PNGs to `~/PS2/ratchet1/savestates/`, everything else (dumps, reports, CSVs, stdout
+captures) to `work/trace/`. Copied, not moved (the user's `extracted/` stays until regenerated):
+`extracted/levels/NN/overlay.elf` → `work/ghidra-import/levelNN.elf` (00–18) and `extracted/vu/` → `work/vu/`.
+`decomp/` and `extracted/traces/` are gone. `.gitignore`: `/work/` replaces `/decomp/export/`.
 
-### 4.1 Save first
+**tools/trace.** `work_dir()` (`RC_WORK`, else `<repo>/work`), `trace_out_dir()` (`work/trace`), `personal_dir()`
+(`RC_PERSONAL`, else `~/PS2/ratchet1`), `savestates_dir()`, `recordings_dir()`; every write goes through
+`write_output`, which refuses `extracted/`. Default outputs moved to `work/trace/` (tfrag CSV, spawn report and moby
+CSV, `dump-ee` default `work/trace/<name>_ee.bin`, `replay-hero` output). `--state NAME` resolves
+`~/PS2/ratchet1/savestates/NAME.p2s`. New commands: `save-state NAME` (keep the newest PCSX2 state) and
+`distill-spawn` (below).
 
-- [ ] Before any cleanup of `extracted/`, copy the 19 `extracted/levels/NN/overlay.elf` files (still present on
-      2026-09-27) to `work/overlay_elf_reference/`. They are the byte-identical reference for §4.4.
+**The spawn test.** `tests/novalis_spawn.rs` used to read `extracted/traces/novalis_spawn_ee.bin`, a dump of the user's
+savestate. `distill-spawn` now reads such a dump once and writes `tests/fixtures/novalis_spawn.tsv` (176 KB of
+numbers: counters, fog and underwater look, RAM light bank, per-chunk FNV-1a hashes, the 1022 moby slots' slot /
+class / spawn id / state / mode / group / distances / load-pass draws, per-palette hashes of 1508 ties and 1208
+shrubs). The test compares the port (only `extracted/` needed) with it using the same thresholds. `distill-spawn`
+runs the fixture checks and the savestate checks side by side and refuses to write when a tally differs; on
+2026-09-27 all 11 shared tallies agreed (tie instances 1507/1508, shrubs 1208/1208, game state 250/254, moby slots
+929/929, rejected 54/54, spin bits 281/281, crate turns 199/199, fog, underwater, tick counter equal; rand state 0/1
+in both). The ties are compared per instance by hash (the savestate check also counted entries: 96511/96512).
+The other trace tests (`hero_replay_selfcheck`, `synthetic`) never read personal files.
 
-### 4.2 Moves
+**Ghidra scripts.** Paths repointed (names `tools/ghidra/names/`, export `work/decomp/`, import ELFs
+`work/ghidra-import/`, `ROOT` one level deeper); `import_levels.py` also imports `extracted/boot/SCUS_971.99` when
+the project lacks it. Every script says in its header that it has not been re-run since the reorg. Nothing was run
+against the project.
 
-- [ ] `decomp/scripts/*` → `tools/ghidra/scripts/`; `decomp/names/*` → `tools/ghidra/names/`.
-- [ ] `decomp/export/` → `work/decomp/` (plain move, ignored data).
-- [ ] Delete `decomp/scripts/import_overlays.py` once `import_levels.py` (§4.4) works. Check whether
-      `export_overlays.py` is still used; drop it if no workflow uses it (rule 5).
-- [ ] `crates/rc-trace` → `tools/trace` (package name stays `rc-trace`).
-- [ ] `extracted/traces/`: `*.p2s` and their `*.png` screenshots → `~/PS2/ratchet1/traces/`; everything else
-      (`*_ee.bin`, `*_spr.bin`, `*_report*.txt`, `*_stdout*.txt`, `*.csv`, `tfrag_cmp.txt`) → `work/trace/`.
-      Then remove `extracted/traces/`.
-- [ ] Audit `extracted/`: run `randcrw-extract extract` into a scratch folder and list every path in
-      `extracted/` it does not produce (expected: the C++-era files of §1 and `traces/`, about 5 GiB). Delete them
-      after §4.1, except
-      `extracted/vu/` (open question 2).
+**tools/repo-checks.** Three guards (§4 rules 1–3) plus self-tests of the scanners.
 
-### 4.3 Path references to update
+**Docs.** `docs/workflows/{ghidra,pcsx2,game-data,release,launcher}.md`, READMEs for every tool, the README's repo map,
+the orchestration handbook's rules, and every reference to the old paths.
 
-- [ ] **Workspace members** (`Cargo.toml`): `crates/rc-trace` → `tools/trace`; fix its `path = "../rc-formats"`
-      style dependencies to `../../crates/…`. `Cargo.lock` needs no manual edit.
-- [ ] **rc-trace paths**: default outputs in `main.rs` (`traces/level{NN}_tfrag_light_mismatches.csv`,
-      `traces/novalis_spawn_report.txt`, `traces/novalis_spawn_mobys.csv`) → `<repo>/work/trace/`; the usage
-      text line that names `extracted/traces/`; `tests/novalis_spawn.rs` reads `work/trace/novalis_spawn_ee.bin`
-      (still skips when missing). `record-hero` already uses `~/PS2/ratchet1/traces/`.
-- [ ] **`.gitignore`**: replace `/decomp/export/` with `/work/`.
-- [ ] **Scripts**: `ROOT`-relative paths in the Ghidra scripts (`decomp/names`, `decomp/export`) → the new
-      folders; `overlay_diff.py` keeps reading `extracted/boot` and `extracted/levels/NN/overlay.bin` (Tier 0).
-- [ ] **Code comments** that cite `decomp/`: `rc-game/src/moby_update/{creature,triggers}.rs`,
-      `rc-trace/src/tfrag_light_cmp.rs`.
-- [ ] **Docs** that cite `decomp/` or `extracted/traces/`: `decomp_workflow.md` (becomes a pointer to
-      `docs/workflows/ghidra.md`), `trace_harness.md`, `trace_results_novalis.md`, `particles.md`,
-      `hardware_fidelity_layers.md`, `creatures.md`, `game_state.md`, `hero_states.md`, `level_generalisation.md`,
-      `moby_update_catalogue.md`, `player_controller.md`, `roadmap.md`, `tfrag_lighting.md`, `triggers.md`, and
-      the leftovers row of `launcher_extractor.md` §4.1. (`hero_feel_pass.md` already uses `~/PS2/ratchet1/traces/`.) Grep `decomp/`, `extracted/traces`, `crates/rc-trace`,
-      `~/ratchet1` afterwards; zero hits outside dated history lines.
-- [ ] **Handbook** (`docs/plan/orchestration.md`): §2 repository map, the brief template line (rule 4), §4.3.
-- [ ] **README**: open with the repo map (the §2 tree, short form); the path table loses `decomp/` and
-      moves `rc-trace` under tools.
-- [ ] **decisions.md**: turn the pending row into a dated decision row.
+## 6. Follow-ups
 
-### 4.4 New pieces
+Deferred because they need product changes (hard limit of the reorg) or a Ghidra run:
 
-- [ ] `randcrw-extract export --what code [--level NN]` (product, `crates/rc-extract`): writes each level's
-      overlay as an ELF with the original load addresses, in Rust, to `--to` (the workflow uses
-      `work/ghidra-import/`). Check: byte-identical to the saved `overlay.elf` files from §4.1 for all 19 levels.
-      Without them, the check is the Ghidra import itself.
-- [ ] `tools/ghidra/scripts/import_levels.py`: imports those ELFs into the project's `/levels` folder via
-      GhidraMCP (no language argument: that forces the raw loader; see memory gotchas).
-- [ ] Workspace test for rule 1 (`cargo metadata`, in `crates/rc-extract/tests/` or a small workspace test).
-- [ ] READMEs: `tools/ghidra/README.md`, `tools/trace/README.md`, `tools/package/README.md` (purpose + commands).
-- [ ] `docs/workflows/`:
-  - `ghidra.md`: set up the project from scratch (`~/PS2/ratchet1/ghidra/`, GhidraMCP), import boot + levels,
-    apply names, export decomp to `work/decomp/`.
-  - `pcsx2.md`: PINE (Tools → Show Advanced Settings), savestates to `~/PS2/ratchet1/traces/`, record/replay,
-    regenerate EE dumps into `work/trace/`.
-  - `game-data.md`: extract / verify / prepare / export; regenerating dev data (`work/`).
-  - `release.md`: `tools/package/package.sh`.
-  - `launcher.md`: building the game for the `randcrw-launcher` Development source.
-
-### 4.5 Verification
-
-- [ ] `cargo test --workspace` (including the new dependency test and rc-trace's tests at the new path).
-- [ ] `cargo dev-build`.
-- [ ] One Ghidra import test: export `--what code --level 01`, run `import_levels.py` into a **throwaway Ghidra
-      folder** (not `/levels`), confirm it analyses as r5900 at the original addresses, then delete it. One level
-      only: Ghidra analysis is slow.
-- [ ] `git status` shows nothing new under `extracted/`; `ls` at the root shows no `decomp/` or `ghidra/`.
-
-## 5. Open questions
-
-1. **Ghidra project move.** The project is `~/ratchet1.gpr` + `~/ratchet1.rep` today (the workflow doc says
-   `~/ratchet1`). The user moves it to `~/PS2/ratchet1/ghidra/`; confirm the new name before docs cite it.
-2. **`extracted/vu/`** (784 KB of C++-era VU disassembly the format docs cite by line number). Options: keep it
-   in `work/vu/` as reference data with a note, or regenerate it once `tools/vu/` exists. Deleting it breaks
-   those citations.
-3. **`~/PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It)/`** holds an unpacked disc filesystem next to the
-   ISO. Is it still needed?
-4. **`work/` vs a per-user location** for large regenerable data (trace dumps are 32 MB each). `work/` is the
-   default; revisit only if disk use becomes a problem.
-5. **Package name.** Keep `rc-trace` for the moved crate, or rename to match `tools/trace`?
+1. **`randcrw-extract export --what code [--level NN]`** (product, `crates/rc-extract`): each level's overlay as an
+   ELF with the original load addresses, for `work/ghidra-import/`. Check: byte-identical to the 19 saved
+   `work/ghidra-import/levelNN.elf`. Then `docs/workflows/ghidra.md` step 2 uses it.
+2. **`randcrw-extract verify --strict`** (product): also report files in a data folder the archive does not have
+   (e.g. C++-era leftovers in a dev `extracted/`).
+3. **`RC_REQUIRE_DATA=1`** (product, `rc_formats::test_data` and the test helpers): tests fail instead of skipping
+   when `extracted/` is missing, for CI-style runs.
+4. **Loud "SKIPPED" messages** in `rc_formats::test_data` (product): one clear line per test that skips for want of
+   data.
+5. **Engine captures default to `work/captures/`** (product, `rc-engine` `RC_SCREENSHOT`): a relative or bare name
+   lands there instead of the working directory.
+6. **The disc golden tests' ISO fallback** (product tests): `crates/rc-formats/tests/golden.rs`
+   (`disc_matches_extracted_for_every_level`, doc line and fallback line), `crates/rc-game/tests/game_state_novalis.rs`
+   (`disc_save_game_lump_matches_extracted`) and the example command in `crates/rc-extract/tests/golden.rs` name
+   `~/PS2/ratchet1/<disc>.iso`. Make them `RC_ISO`-only, then drop the four `KNOWN_OFFENDERS` entries in
+   `tools/repo-checks/src/lib.rs`.
+7. **Merge the three apply scripts** (`apply_boot_names.py`, `apply_overlay_names.py`, `apply_doc_names.py`) into
+   one; needs a Ghidra run to verify, so not done blind.
+8. **VU microprogram disassembler** as a dev tool (`tools/vu/`, OpenGOAL's ISC disassembler may be mirrored with
+   attribution) to regenerate `work/vu/`; until then `work/vu/` is hand-kept reference data.
+9. **Re-run the Ghidra scripts once** (dry runs first) to confirm the path updates, then drop the "not re-run" headers.
+10. **User steps:** move the Ghidra project to `~/PS2/ratchet1/ghidra/`; regenerate the dev `extracted/`
+    (`docs/workflows/game-data.md`) to drop the ~5 GiB of C++-era leftovers; decide whether the unpacked disc folder
+    `~/PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It)/` next to the ISO is still needed.

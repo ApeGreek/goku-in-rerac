@@ -34,11 +34,12 @@ Level overlays may carry additional VU code in their `.data`; not yet checked.
 
 ## Disassembly
 
-The listings the format docs cite by line number, `extracted/vu/<id>.txt` (`lower | upper` per line, labels `Ln:` at
-branch targets; images in `extracted/vu/<id>.bin`), were written by the C++-era tools `tools/vu/extract_vu.py` and
+The listings the format docs cite by line number, `work/vu/<id>.txt` (`lower | upper` per line, labels `Ln:` at
+branch targets; images in `work/vu/<id>.bin`), were written by the C++-era tools `tools/vu/extract_vu.py` and
 `rc_vudis` (a vendored copy of OpenGOAL's VU disassembler). Both were removed with the C++ reference on 2026-09-27;
-the listings stay in the development `extracted/` tree. All 12 programs disassembled completely. A VU disassembler
-is still needed as a proper dev tool (no Rust one yet).
+the listings were copied from the development `extracted/vu/` into `work/vu/` (git-ignored reference data, kept by
+hand) in the repo reorg of 2026-09-27. All 12 programs disassembled completely. A VU disassembler is still needed as a
+proper dev tool (no Rust one yet; a follow-up in docs/plan/repo_reorg.md) to regenerate them.
 
 Upstream OpenGOAL's decode tables lack five instructions that R&C uses; the removed vendored copy had them added (a
 new tool needs them too):

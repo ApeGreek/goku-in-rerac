@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+# Not re-run since the reorg (2026-09-27): moved from decomp/scripts/, paths updated (names: tools/ghidra/names/,
+# decompiler export: work/decomp/, import ELFs: work/ghidra-import/). See tools/ghidra/README.md.
 """Bulk-exports decompiled C for every function of a program open in Ghidra to
-decomp/export/<program>/<address>_<name>.c plus an index.tsv, so the code can be
+work/decomp/<program>/<address>_<name>.c plus an index.tsv, so the code can be
 grepped and read without round-tripping through the GUI. Re-run after renames.
 """
 import os, sys, re
@@ -8,7 +10,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 from ghidra_http import get, post
 
 program = sys.argv[1] if len(sys.argv) > 1 else "SCUS_971.99"
-out = os.path.join(os.path.dirname(__file__), "../export", re.sub(r"[^A-Za-z0-9_.-]", "_", program))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))  # repo root (tools/ghidra/scripts/)
+out = os.path.join(ROOT, "work/decomp", re.sub(r"[^A-Za-z0-9_.-]", "_", program))
 os.makedirs(out, exist_ok=True)
 funcs = get("list_functions", program=program, limit=20000)["functions"]
 index = []

@@ -3,19 +3,43 @@
 A faithful reimplementation of Ratchet & Clank (2002, PS2) in Rust on Bevy, run from the
 owner's own disc, extracted once from their disc image. This is a personal project: it is not
 redistributed, and nothing from the disc (assets, code, dumps, savestates) is stored in this
-repository. Everything disc-derived lives in git-ignored directories (`extracted/`, `decomp/export/`) or in
-the user's own data folder; the committed verification tables hold only sizes, counts and hashes.
+repository; the committed verification tables hold only sizes, counts and hashes.
 
-| Path | What it is |
-|---|---|
-| `crates/rc-formats` | Disc and level format readers plus bit-exact ports of load-time passes (lighting, animation), golden-tested against committed snapshot hashes (`data/loader_snapshots.tsv`) |
-| `crates/rc-engine` | Bevy app (the `randcrw` executable): level viewer replaying the game's per-frame render decisions (LOD, culling, fog, sky) |
-| `crates/rc-game` | Game logic ports (collision queries so far) |
-| `crates/rc-trace` | PCSX2 harness: compares our results with the game's EE RAM (savestate or PINE) |
-| `crates/rc-extract`, `crates/rc-data` | `randcrw-extract` (Tier 0 archive, checked against `data/scus_971_99.tsv`; Tier 2 exports) and the Tier 1 engine cache |
-| `tools/package` | Release packaging (`package.sh`) |
-| `decomp/` | Ghidra naming/export scripts and name tables (the exports themselves are ignored) |
-| `docs/formats`, `docs/plan` | Format specs, reverse-engineering notes, roadmap and decisions |
+## Repository map
+
+```
+crates/                 PRODUCT (ships; never depends on tools/)
+  rc-formats              disc and level format readers, bit-exact load-time passes, golden-tested
+                          against committed snapshot hashes (data/loader_snapshots.tsv)
+  rc-data                 Tier 1 engine cache
+  rc-game                 game logic ports (pure Rust, no Bevy)
+  rc-engine               Bevy app, executable `randcrw`
+  rc-extract              `randcrw-extract`: extract / verify / prepare / export
+tools/                  DEV ONLY (never ships; one README each)
+  ghidra/scripts, names   Ghidra import / naming / export scripts and the name tables
+  trace                   PCSX2 harness (package `rc-trace`): the port vs the game's EE RAM
+  package                 release packaging (package.sh)
+  repo-checks             guard tests for this layout
+docs/                   formats/ (format specs), plan/ (investigations, roadmap, decisions),
+                        workflows/ (one page per dev workflow: ghidra, pcsx2, game-data, release, launcher)
+extracted/   (ignored)  game data only, as randcrw-extract writes it
+work/        (ignored)  generated dev output: decomp/, trace/, ghidra-import/, vu/, exports/, captures/
+dist/, target/ (ignored) release packages, build output
+~/PS2/ratchet1/         outside the repo: the ISO, savestates/, traces/ (recordings), the Ghidra project's
+                        future home ghidra/ (today ~/ratchet1.gpr + ~/ratchet1.rep)
+```
+
+Four kinds of data, four homes:
+
+| Kind | Home | In git |
+|---|---|---|
+| Source: code, docs, Ghidra scripts, name lists, committed expected values (hash tables, distilled fixtures) | the repo | yes |
+| Game data, rebuildable from the ISO | `extracted/` (dev; players: the launcher's data folder) | no |
+| Generated dev output, rebuildable by a tool | `work/` | no |
+| Personal material: the ISO, the Ghidra project, savestates, recordings | `~/PS2/ratchet1/` | no |
+
+Only source and game data may feed tests; personal material never does (PCSX2 findings reach tests as distilled,
+numbers-only fixtures). `tools/repo-checks` guards the product side. Layout and rules: `docs/plan/repo_reorg.md`.
 
 ## Toolchain
 
@@ -88,7 +112,7 @@ Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` over
 skip when it is absent. Decompressed lumps, core blocks (`moby_class/NNNN`, `ratchet_seq/NNN`, …) and gameplay
 sections (`level_settings`, …) come from the Rust loaders (`rc_formats::test_data`). An `extracted/` tree written by
 the retired C++ extractor still works; its extra files (`.dec`, `*_dump.bin`, `core/` and `gameplay/` splits,
-`overlay.elf`, PNG/OBJ previews, `vu/`) are no longer read.
+`overlay.elf`, PNG/OBJ previews, `vu/`) are no longer read; `docs/workflows/game-data.md` regenerates a clean tree.
 
 Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/randcrw/settings.toml`
 (macOS), `$XDG_CONFIG_HOME/randcrw/` (Linux) or `%APPDATA%\randcrw\` (Windows); an older
@@ -145,15 +169,16 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 | `RC_GIVE_ITEMS` | `id,id,…` (decimal or `0x` hex): own those items from the start (debug); the last back item among them (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack) is the saved back item Clank wears, and the last hand item (e.g. 12, the Swingshot) is requested into the hand |
 | `RC_HERO_AT` | `x,y,z[,yaw]`: place Ratchet there at the level load, before the hero init's ground snap (debug; e.g. on a grind rail with `RC_GIVE_ITEMS=29`) |
 
-## PCSX2 harness
+## Dev workflows
 
-With a savestate taken on Novalis (see `docs/plan/trace_harness.md` for the setup):
+One page each in `docs/workflows/`: `ghidra.md` (the Ghidra project: set-up, naming, decompiler export),
+`pcsx2.md` (savestates, PINE, recording and comparing with `rc-trace`), `game-data.md` (extract / verify / prepare /
+export, regenerating the dev `extracted/`), `release.md` (packaging) and `launcher.md` (the launcher's dev setup).
+For example, with a savestate taken on Novalis:
 
 ```
 PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo run -p rc-trace -- compare-tfrag-light --state latest --level 01
 ```
-
-With PINE enabled in PCSX2, `--pine` replaces `--state latest` and reads the running game.
 
 ## Reference material (not vendored)
 

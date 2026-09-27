@@ -97,10 +97,8 @@ pub struct RecordSummary {
     pub level_changes: u32,
 }
 
-/// `~/PS2/ratchet1/traces/`.
-pub fn default_dir() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("PS2/ratchet1/traces")
-}
+/// `~/PS2/ratchet1/traces/` (`RC_PERSONAL` overrides `~/PS2/ratchet1`; see [`crate::recordings_dir`]).
+pub fn default_dir() -> PathBuf { crate::recordings_dir() }
 
 /// UTC `YYYYMMDD-HHMMSS` of now (no date crate: the civil-from-days algorithm).
 pub fn utc_stamp() -> String {
@@ -163,6 +161,7 @@ pub fn record(opt: &RecordOptions) -> Result<RecordSummary> {
     trace.set_meta("level", level.to_string());
     trace.set_meta("moby", format!("{moby:#x}"));
     trace.set_meta("camera", camera.map_or("none".into(), |c| format!("{c:#x}")));
+    crate::ensure_not_extracted(&opt.out)?;
     if let Some(d) = opt.out.parent() { std::fs::create_dir_all(d).with_context(|| format!("creating {}", d.display()))?; }
     let file = std::fs::File::create(&opt.out).with_context(|| format!("creating {}", opt.out.display()))?;
     let mut w = std::io::BufWriter::new(file);

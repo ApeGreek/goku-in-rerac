@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+# Not re-run since the reorg (2026-09-27): moved from decomp/scripts/, paths updated (names: tools/ghidra/names/,
+# decompiler export: work/decomp/, import ELFs: work/ghidra-import/). See tools/ghidra/README.md.
 """Applies the names our own notes (docs/plan/*.md, docs/formats/*.md) give to
-functions and globals, recorded in decomp/names/doc_names.csv, to the Ghidra
+functions and globals, recorded in tools/ghidra/names/doc_names.csv, to the Ghidra
 project, and propagates function names to every overlay through the
-function-hash clusters in decomp/names/clusters.tsv.
+function-hash clusters in tools/ghidra/names/clusters.tsv.
 
     apply_doc_names.py --dry-run          plan only (default); writes the plan log
     apply_doc_names.py --apply            rename / comment, then save the programs
@@ -37,7 +39,7 @@ print = functools.partial(print, flush=True)
 sys.path.insert(0, os.path.dirname(__file__))
 from ghidra_http import get, post
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))  # repo root (tools/ghidra/scripts/)
 DEFAULT_PREFIXES = ("FUN_", "fun_", "func_", "thunk_", "LAB_")
 CONF_RANK = {"verified": 0, "inferred": 1, "suggested": 2}
 
@@ -47,10 +49,10 @@ ap.add_argument("--dry-run", action="store_true")
 ap.add_argument("--export", action="store_true")
 ap.add_argument("--no-propagate", action="store_true")
 ap.add_argument("--sync-export", action="store_true",
-                help="only re-export decomp/export entries whose name no longer matches Ghidra, then exit")
+                help="only re-export work/decomp entries whose name no longer matches Ghidra, then exit")
 ap.add_argument("--programs", nargs="*", default=None, help="boot, level01, ... (default: all)")
-ap.add_argument("--csv", default=os.path.join(ROOT, "decomp/names/doc_names.csv"))
-ap.add_argument("--log", default=os.path.join(ROOT, "decomp/export/doc_names_apply.tsv"))
+ap.add_argument("--csv", default=os.path.join(ROOT, "tools/ghidra/names/doc_names.csv"))
+ap.add_argument("--log", default=os.path.join(ROOT, "work/decomp/doc_names_apply.tsv"))
 args = ap.parse_args()
 APPLY = args.apply and not args.dry_run
 
@@ -69,7 +71,7 @@ def short(path):
 
 
 def export_dir(path):
-    return os.path.join(ROOT, "decomp/export", "SCUS_971.99" if path == "/SCUS_971.99" else path.split("/")[-1])
+    return os.path.join(ROOT, "work/decomp", "SCUS_971.99" if path == "/SCUS_971.99" else path.split("/")[-1])
 
 
 def norm(name):
@@ -111,7 +113,7 @@ def src_label(row):
 
 def reexport(path, addrs, full):
     """Re-decompile `addrs` ({addr: current name}) of `path` into its
-    decomp/export directory, replacing the old file and index line."""
+    work/decomp directory, replacing the old file and index line."""
     out = export_dir(path)
     idx_path = os.path.join(out, "index.tsv")
     if not os.path.exists(idx_path):
@@ -172,7 +174,7 @@ want = {path_of(p) for p in args.programs} if args.programs else None
 
 clusters = {}        # (path, addr) -> list of (path, addr)
 cluster_id = {}
-for line in open(os.path.join(ROOT, "decomp/names/clusters.tsv")).read().splitlines()[1:]:
+for line in open(os.path.join(ROOT, "tools/ghidra/names/clusters.tsv")).read().splitlines()[1:]:
     h, _, _, _, members = line.split("\t")
     mem = [(path_of(m.split(":")[0]), m.split(":")[1]) for m in members.split()]
     per_prog = collections.Counter(p for p, _ in mem)
