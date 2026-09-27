@@ -498,11 +498,11 @@ pub fn is_camera_record(rec: &[u8], hero: [f32; 3]) -> bool {
     let f = |o: usize| f32::from_le_bytes(rec[o..o + 4].try_into().unwrap());
     if f(0xc) != 0.0 || f(0x1c) != 0.0 { return false; }
     let len = |o: usize| (f(o).powi(2) + f(o + 4).powi(2) + f(o + 8).powi(2)).sqrt();
-    if [0x210, 0x220, 0x230].iter().any(|&o| !((len(o) - 1.0).abs() < 1e-3)) { return false; }
+    if [0x210, 0x220, 0x230].iter().any(|&o| (len(o) - 1.0).abs().partial_cmp(&1e-3) != Some(std::cmp::Ordering::Less)) { return false; }
     let yaw = f(0x214).atan2(f(0x210));
     let mut d = (yaw - f(0x18)).abs();
     if d > std::f32::consts::PI { d = std::f32::consts::TAU - d; }
-    if !(d < 2e-3) { return false; }
+    if d.partial_cmp(&2e-3) != Some(std::cmp::Ordering::Less) { return false; }
     let dist = ((f(0) - hero[0]).powi(2) + (f(4) - hero[1]).powi(2) + (f(8) - hero[2]).powi(2)).sqrt();
     dist.is_finite() && dist < 60.0 && dist > 0.1
 }
@@ -585,8 +585,7 @@ mod tests {
         for mirror in [false, true] {
             for (lock, inp) in inputs.iter().enumerate().flat_map(|(i, p)| [(0, (i, p)), (2, (i, p))]) {
                 let bytes = inp.1.bytes();
-                let mut p = PadState::default();
-                p.lock = lock;
+                let mut p = PadState { lock, ..Default::default() };
                 p.update(Some(&bytes), mirror);
                 let analog: [f32; 16] = std::array::from_fn(|k| p.analog_copy[k].to_f32());
                 let rebuilt = pad_bytes(&analog, p.held_unmirrored, p.raw, mirror);

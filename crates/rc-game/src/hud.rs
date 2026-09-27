@@ -1101,7 +1101,7 @@ mod tests {
 
     fn glyphs() -> GlyphTable {
         let mut t = [Glyph::default(); GLYPHS];
-        for c in 0x21..0x7b { t[c].advance = 10; }
+        for g in &mut t[0x21..0x7b] { g.advance = 10; }
         t[b' ' as usize].advance = 5;
         for d in b'0'..=b'9' { t[d as usize].advance = 13; }
         t[b'\'' as usize].advance = 4;

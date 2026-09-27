@@ -320,7 +320,7 @@ pub fn collapse_update(w: &mut World, id: MobyId) {
                 let vz = p::ff(&m.pvars, 0x68) - DT * DT * 30.0;
                 p::set_ff(&mut m.pvars, 0x68, vz);
                 let v = p::v4f(&m.pvars, 0x60);
-                for k in 0..4 { m.position[k] += v[k]; }
+                for (p, d) in m.position.iter_mut().zip(v) { *p += d; }
             }
             if dec(w, 0x86) != 0 && 20.0 < p::ff(&w.m(id).pvars, 0x78) - w.m(id).position[2] {
                 let t = w.ticks(0x14);
@@ -337,13 +337,11 @@ pub fn collapse_update(w: &mut World, id: MobyId) {
                 w.svc.save.death_level.insert(sid);
             }
         }
-        4 => {
-            if p::i16(&w.m(id).pvars, 0x84) == 0 && p::i32(&w.m(id).pvars, 0x8c) != -1 {
-                crate::cinematic::camera_script2(w, 0);
-                crate::cinematic::hero_state(w, 0, true);
-                crate::cinematic::letterbox(w, false);
-                p::set_i32(&mut w.mm(id).pvars, 0x8c, -1);
-            }
+        4 if p::i16(&w.m(id).pvars, 0x84) == 0 && p::i32(&w.m(id).pvars, 0x8c) != -1 => {
+            crate::cinematic::camera_script2(w, 0);
+            crate::cinematic::hero_state(w, 0, true);
+            crate::cinematic::letterbox(w, false);
+            p::set_i32(&mut w.mm(id).pvars, 0x8c, -1);
         }
         _ => {}
     }

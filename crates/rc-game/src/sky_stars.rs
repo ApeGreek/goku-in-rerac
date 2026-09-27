@@ -109,7 +109,7 @@ impl OverlayTables {
 
     /// Builds the tables with `read(vaddr, len)` over the level's overlay memory image.
     pub fn read(mut read: impl FnMut(u32, usize) -> Option<Vec<u8>>) -> Option<OverlayTables> {
-        let words = |b: Vec<u8>| b.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect::<Vec<u32>>();
+        let words = |b: Vec<u8>| b.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect::<Vec<u32>>();
         let pos = words(read(Self::FIXED_POS.0, Self::FIXED_POS.1)?);
         let fixed = words(read(Self::FIXED_RGBA.0, Self::FIXED_RGBA.1)?);
         let moving = words(read(Self::MOVING_RGBA.0, Self::MOVING_RGBA.1)?);

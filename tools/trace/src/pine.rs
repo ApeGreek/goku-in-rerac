@@ -88,7 +88,7 @@ impl Pine {
         }
         let r = self.call(&cmds)?;
         ensure!(r.len() == addrs.len() * 8, "PINE returned {} bytes for {} reads", r.len(), addrs.len());
-        Ok(r.chunks_exact(8).map(|c| c.try_into().unwrap()).collect())
+        Ok(r.as_chunks::<8>().0.to_vec())
     }
 
     /// Reads `len` bytes of EE memory at `addr` (both multiples of 8) through batched `MsgRead64`.

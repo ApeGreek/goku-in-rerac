@@ -245,7 +245,7 @@ fn fast_dec_timer(t: &mut i16) -> bool {
 
 /// `FastNormalizeAngle` (0x222088).
 fn normalize(mut a: Pf) -> Pf {
-    while !(a < PI) { a = (a - PI) - PI; }
+    while a >= PI { a = (a - PI) - PI; }
     let npi = -PI;
     while a < npi { a = (a + PI) + PI; }
     a
@@ -382,7 +382,7 @@ impl QuickSelect {
                 if start != -1 {
                     let u = fast_subtract_rotations(angle, HALF_PI);
                     let d = fast_diff_rots((Pf::from_i32(start) * TWO_PI) / nf - PI, u);
-                    keep = !(HYSTERESIS < d);
+                    keep = HYSTERESIS >= d;
                 }
                 if !keep {
                     let mut k = v.to_i32() % n;
@@ -810,7 +810,7 @@ mod tests {
     #[test]
     fn draw_emits_ring_icons_cursor_and_text() {
         let mut glyphs = [[Glyph::default(); GLYPHS]; 3];
-        for t in glyphs.iter_mut() { for c in 0x20..0x7f { t[c].advance = 10; } }
+        for t in glyphs.iter_mut() { for g in &mut t[0x20..0x7f] { g.advance = 10; } }
         let hud = HudAssets { icons: vec![], frame_sizes: vec![(32, 32); 4], glyphs, messages: vec![] };
         let a = MenuAssets::new(hud, Overlay::default());
         let mut q = armed(0);

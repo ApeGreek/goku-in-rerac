@@ -10,6 +10,9 @@ use rc_formats::moby_anim::{self, AnimState, MobyAnimClass};
 use rc_formats::moby_shadow::ShadowBlock;
 use rc_game::shadows::volume::{self, CasterPose};
 
+/// One fixture primitive: kind, segments, end A, end B.
+type Prim = (u8, [i32; 2], [f32; 4], [f32; 4]);
+
 struct Fixture {
     anim: (u8, u8, u8, u8, f32),
     rows: [[f32; 3]; 3],
@@ -20,7 +23,7 @@ struct Fixture {
     dir: [f32; 3],
     dir0: [f32; 3],
     pitch: f32,
-    prims: Vec<(u8, [i32; 2], [f32; 4], [f32; 4])>,
+    prims: Vec<Prim>,
 }
 
 fn fixture() -> Fixture {

@@ -310,7 +310,7 @@ mod tests {
     fn budget_stops_after_the_area_is_passed() {
         // Ratchet: 0x20 + 21 capsules = 0x410 bytes; 8 of them start inside the 0x1f80 area (the 9th starts past it).
         let ratchet = HEADER_BYTES + 21 * 0x30;
-        assert_eq!(fitting(std::iter::repeat(ratchet).take(20)), 8);
+        assert_eq!(fitting(std::iter::repeat_n(ratchet, 20)), 8);
         assert_eq!(fitting([LIST_BYTES, 0x40, 0x40]), 2, "a caster starting exactly at the end is still posed");
         assert_eq!(fitting(std::iter::empty()), 0);
     }
@@ -338,7 +338,7 @@ mod tests {
         assert!(close3([c.a[0], c.a[1], c.a[2]], [100.0, 200.0 - 0.0390625, 50.0], 1e-5), "{c:?}");
         // −10 at end B only: B moves away from A.
         let c = pose_one(ShadowPrim::Capsule { joints: [0, 0], segments: [4, -10], a: [0.0; 4], b: [4096.0, 0.0, 0.0, 0.0] }, &joints, FULL_SIZE);
-        assert!(close3([c.b[0], c.b[1], c.b[2]], [100.0, 201.0390625, 50.0], 1e-5), "{c:?}");
+        assert!(close3([c.b[0], c.b[1], c.b[2]], [100.0, 201.039_06, 50.0], 1e-5), "{c:?}");
     }
 
     #[test]

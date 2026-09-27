@@ -13,7 +13,7 @@ use rc_trace::hero_trace::{Hex, Sample, Trace};
 fn pad(t: u32) -> PadInput {
     let mut p = PadInput::neutral();
     if t >= 20 { p = p.stick(0.0, -1.0); }
-    if t >= 60 && t < 60 + 5 * 70 {
+    if (60..60 + 5 * 70).contains(&t) {
         let k = (t - 60) % 70;
         if k < 11 { p = p.press(button::R1); }
         if k == 10 { p = p.press(button::CROSS); }

@@ -48,7 +48,7 @@ pub fn segment(s: &[Sample]) -> Vec<Jump> {
         let any_jump = (entry..landing).any(|k| jump_group(s[k].group));
         if air >= MIN_AIR || any_jump || landing == s.len() {
             let mut states: Vec<i32> = Vec::new();
-            for k in entry..landing { if states.last() != Some(&s[k].state) { states.push(s[k].state); } }
+            for x in &s[entry..landing] { if states.last() != Some(&x.state) { states.push(x.state); } }
             out.push(Jump { entry, takeoff, landing, states });
         }
         i = landing;
@@ -464,9 +464,9 @@ mod tests {
     #[test]
     fn ignores_short_drops_and_handles_trace_ending_in_air() {
         let mut s = synth(0, 40, 0, 0, 0.0, 0.0);
-        for k in 10..12 { s[k].air_ticks = (k - 9) as i16; } // a 2-tick step down: not a jump
+        for (k, x) in s[10..12].iter_mut().enumerate() { x.air_ticks = k as i16 + 1; } // a 2-tick step down: not a jump
         let n = s.len();
-        for k in n - 5..n { s[k].air_ticks = 1; s[k].state = 6; s[k].group = 2; }
+        for x in &mut s[n - 5..n] { x.air_ticks = 1; x.state = 6; x.group = 2; }
         let j = segment(&s);
         assert_eq!(j.len(), 1);
         assert_eq!(j[0].landing, n);
