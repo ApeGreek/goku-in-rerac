@@ -20,6 +20,7 @@ tools/                  DEV ONLY (never ships; one README each)
   trace                   PCSX2 harness (package `rc-trace`): the port vs the game's EE RAM
   package                 release packaging (package.sh)
   repo-checks             guard tests for this layout
+  xtask                   `cargo xtask <command>`: dev chores, one short command each (regen-data, package)
 docs/                   formats/ (format specs), plan/ (investigations, roadmap, decisions),
                         workflows/ (one page per dev workflow: ghidra, pcsx2, game-data, release, launcher)
 extracted/   (ignored)  game data only, as randcrw-extract writes it
@@ -49,10 +50,14 @@ Rust comes from Homebrew's rustup; put it on `PATH` first:
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 cargo dev                        # run the engine (Bevy dynamically linked, fast relink)
 cargo test --workspace           # all tests (the ones that need game data skip without extracted/)
+cargo xtask regen-data           # (re)build the dev game data extracted/ from your disc image (RC_ISO)
+cargo xtask package              # release packaging (tools/package/package.sh)
+cargo xtask help                 # the other dev chores
 cargo run --release -p rc-engine # release / profiling build
 ```
 
-`cargo dev` and `cargo dev-build` are aliases in `.cargo/config.toml` (`-p rc-engine --features dev`).
+`cargo dev` and `cargo dev-build` are aliases in `.cargo/config.toml` (`-p rc-engine --features dev`); so is
+`cargo xtask` (`run -q -p xtask --`, the dev-chore runner in `tools/xtask`, std only).
 The crate is `rc-engine`; its executable is `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
 
 The loaders' golden tests (`crates/rc-formats/tests/golden.rs`) compare what the Rust loaders produce for all 19
@@ -69,6 +74,7 @@ data folder (layout: `docs/plan/launcher_extractor.md` §4.1; contract:
 `docs/plan/launcher_contract.md`):
 
 ```
+cargo xtask regen-data                    # development: (re)build <repo>/extracted from RC_ISO
 cargo run --release -p rc-extract -- extract --iso "<your disc>.iso" --out <data folder>
 cargo dev -- --data-dir <data folder>     # or RC_DATA_DIR=<data folder> cargo dev
 cargo dev -- --version-json               # {"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}
@@ -112,7 +118,8 @@ Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` over
 skip when it is absent. Decompressed lumps, core blocks (`moby_class/NNNN`, `ratchet_seq/NNN`, …) and gameplay
 sections (`level_settings`, …) come from the Rust loaders (`rc_formats::test_data`). An `extracted/` tree written by
 the retired C++ extractor still works; its extra files (`.dec`, `*_dump.bin`, `core/` and `gameplay/` splits,
-`overlay.elf`, PNG/OBJ previews, `vu/`) are no longer read; `docs/workflows/game-data.md` regenerates a clean tree.
+`overlay.elf`, PNG/OBJ previews, `vu/`) are no longer read; `cargo xtask regen-data` regenerates a clean tree
+(`docs/workflows/game-data.md`).
 
 Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/randcrw/settings.toml`
 (macOS), `$XDG_CONFIG_HOME/randcrw/` (Linux) or `%APPDATA%\randcrw\` (Windows); an older
@@ -121,9 +128,11 @@ Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Sup
 ## Packaging
 
 ```
-tools/package/package.sh              # release build of randcrw + randcrw-extract, then package
-tools/package/package.sh --no-build   # package the binaries already in target/release
+cargo xtask package                   # release build of randcrw + randcrw-extract, then package
+cargo xtask package --no-build        # package the binaries already in target/release
 ```
+
+(`cargo xtask package` runs `tools/package/package.sh` with the same arguments.)
 
 It writes `dist/randcrw-<version>-<os>-<arch>/` and a `.zip` of it (`dist/` is git-ignored). The folder is a
 launcher version (`docs/plan/launcher_contract.md`): `randcrw`, `randcrw-extract`, `assets/shaders/*.wgsl`,

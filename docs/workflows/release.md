@@ -1,11 +1,15 @@
 # Workflow: release packaging
 
-Tool: `tools/package/package.sh` (README there). Launcher contract: `docs/plan/launcher_contract.md`.
+Tool: `tools/package/package.sh` (README there), run through `cargo xtask package` (`tools/xtask`). Launcher
+contract: `docs/plan/launcher_contract.md`.
 
 | Task | Command |
 |---|---|
-| Build and package a release | `tools/package/package.sh` |
-| Package the binaries already in `target/release` | `tools/package/package.sh --no-build` |
+| Build and package a release | `cargo xtask package` |
+| Package the binaries already in `target/release` | `cargo xtask package --no-build` |
+
+`cargo xtask package [args]` runs `tools/package/package.sh [args]` from the repo root; calling the script directly
+does the same.
 
 Output: `dist/randcrw-<version>-<os>-<arch>/` and its `.zip` (git-ignored). The version comes from
 `crates/rc-engine/Cargo.toml`. The build is a plain `--release` build (never `--features dev`).

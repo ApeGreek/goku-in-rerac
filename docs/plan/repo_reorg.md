@@ -31,6 +31,7 @@ tools/                  DEV ONLY, each subfolder has a README (purpose, commands
   trace/                  PCSX2 harness, package rc-trace (from crates/rc-trace)
   package/                release packaging
   repo-checks/            guard tests for this layout (no dependencies)
+  xtask/                  `cargo xtask <command>` dev chores: regen-data, package (std only; added 2026-09-27)
 docs/formats/ docs/plan/ docs/workflows/
 extracted/   (ignored)  game data only (what randcrw-extract writes)
 work/        (ignored)  generated dev output:
@@ -39,6 +40,8 @@ work/        (ignored)  generated dev output:
   trace/                  EE / scratchpad dumps, reports, CSVs, replay output of rc-trace
   vu/                     VU microprogram listings the format docs cite by line number
   exports/ captures/      conventions: randcrw-extract exports for dev work; screenshots and debug captures
+  data-staging/ data-old/ transient: `cargo xtask regen-data` extracts into the first and swaps the old extracted/
+                          through the second (both gone after a successful run)
 dist/ target/ (ignored)
 ~/PS2/ratchet1/         the ISO; savestates/; traces/ (recordings); ghidra/ (the project's future home)
 ```
@@ -124,5 +127,5 @@ Deferred because they need product changes (hard limit of the reorg) or a Ghidra
    attribution) to regenerate `work/vu/`; until then `work/vu/` is hand-kept reference data.
 9. **Re-run the Ghidra scripts once** (dry runs first) to confirm the path updates, then drop the "not re-run" headers.
 10. **User steps:** move the Ghidra project to `~/PS2/ratchet1/ghidra/`; regenerate the dev `extracted/`
-    (`docs/workflows/game-data.md`) to drop the ~5 GiB of C++-era leftovers; decide whether the unpacked disc folder
+    (`cargo xtask regen-data`, `docs/workflows/game-data.md`) to drop the ~5 GiB of C++-era leftovers; decide whether the unpacked disc folder
     `~/PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It)/` next to the ISO is still needed.

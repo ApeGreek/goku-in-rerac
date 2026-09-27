@@ -20,7 +20,7 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 - `tools/` (dev only, never ships; each tool has a README): `tools/trace` (package `rc-trace`: PCSX2 savestate/PINE
   comparison harness, `docs/plan/trace_harness.md`), `tools/ghidra/scripts` + `tools/ghidra/names` (Ghidra scripts and
   name tables, `names/*.csv`, `clusters.tsv`), `tools/package` (release packaging), `tools/repo-checks` (layout guard
-  tests).
+  tests), `tools/xtask` (`cargo xtask <command>`: `regen-data` rebuilds `extracted/` from `RC_ISO`, `package`).
 - `docs/workflows/`: one page per dev workflow, one command per task (ghidra, pcsx2, game-data, release, launcher).
 - `extracted/` (git-ignored): game data only, what `randcrw-extract` writes. `work/` (git-ignored): generated dev output
   (`work/decomp/<program>/` decompiler export, `work/trace/`, `work/ghidra-import/`, `work/vu/`, `work/exports/`,
@@ -127,7 +127,8 @@ These apply to every dispatch from now on (the brief lines are in §3.2):
   `extracted/`.
 - Agents read decompiled code from `work/decomp/<program>/` (`index.tsv` + one `.c` per function).
 - Paths agents use: product `crates/`; tools `tools/trace`, `tools/ghidra/{scripts,names}`, `tools/package`,
-  `tools/repo-checks`; game data `extracted/` (`RC_EXTRACTED`); dev output `work/{decomp,trace,ghidra-import,vu,exports,captures}/`
+  `tools/repo-checks`, `tools/xtask` (`cargo xtask help`; agents never run `regen-data` on the real `extracted/`
+  unless the brief says so: use `--data-dir` on a scratch folder); game data `extracted/` (`RC_EXTRACTED`); dev output `work/{decomp,trace,ghidra-import,vu,exports,captures}/`
   (`RC_WORK`); personal `~/PS2/ratchet1/{savestates,traces}/` (`RC_PERSONAL`, read-only for agents unless the brief
   says otherwise); the Ghidra project `~/ratchet1.gpr` + `.rep` (only through the Ghidra MCP, only when the brief
   allows it); workflows `docs/workflows/`.

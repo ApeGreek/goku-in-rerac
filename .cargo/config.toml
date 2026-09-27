@@ -3,6 +3,7 @@
 [alias]
 dev = "run -p rc-engine --features dev"
 dev-build = "build -p rc-engine --features dev"
+xtask = "run -q -p xtask --"
 
 [build]
 # Cap parallelism a little below core count so the machine stays responsive during big builds.

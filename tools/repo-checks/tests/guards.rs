@@ -16,7 +16,7 @@ fn product_crates_do_not_depend_on_tools() {
         let dir = Path::new("crates").join(e.file_name());
         for p in tool_dependencies(&dir, &text) { bad.push(format!("{}: path = {p:?}", manifest.display())); }
         // A workspace-inherited or git dependency naming a tool package would also be a dependency on tools/.
-        for tool in ["rc-trace", "repo-checks"] {
+        for tool in ["rc-trace", "repo-checks", "xtask"] {
             if text.lines().any(|l| l.trim_start().starts_with(&format!("{tool} ")) || l.trim_start().starts_with(&format!("{tool}="))) {
                 bad.push(format!("{}: depends on the tool package {tool}", manifest.display()));
             }
