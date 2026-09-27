@@ -225,6 +225,10 @@ impl AudioOut {
         self.buf.clear();
         if self.trace {
             for (tick, class, index, flags, slot) in self.system.play_log.as_mut().map(std::mem::take).unwrap_or_default() {
+                if class == audio::class_sounds::FOOTSTEP_LOG_CLASS {
+                    println!("audio trace: tick {tick}: footstep, level def {index}, flags {flags:#x} -> slot {slot}");
+                    continue;
+                }
                 let who = match class { 0 => "Ratchet", 0x47 => "wrench", 0xd0 => "Swingshot", _ => "moby" };
                 println!("audio trace: tick {tick}: class sound {index} of class {class} ({who}), flags {flags:#x} -> slot {slot}");
             }

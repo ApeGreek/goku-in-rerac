@@ -365,19 +365,19 @@ pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         Some(super::melee::list_point(&p[0], &it.rows, it.position, it.scale))
     };
     let r = Pf::b(0x3ecc_cccd);
-    let mut hit = false;
+    let mut hit = None;
     for list in [1, 0] {
         let c = point(list).unwrap_or_else(|| from_f32x3(it.position));
-        if hits.sphere(table, r, c, 0, ignore, &tmpl).is_some() {
-            hit = true;
+        if let Some(m) = hits.sphere(table, r, c, 0, ignore, &tmpl) {
+            hit = Some(m);
             break;
         }
     }
-    if hit && hero.melee.hit == 0 {
+    if hit.is_some() && hero.melee.hit == 0 {
         if let Some(it) = hero.items.slot.item.as_mut() { it.hit_timer = ticks(30); }
         hero.melee.hit = 1;
         hero.items.hit_sounds += 1;
-        hero.fx.item_sounds.push(super::melee::WRENCH_HIT_SOUND);
+        hero.fx.item_sounds.push(super::melee::wrench_hit_sound(table, hit));
     }
 }
 

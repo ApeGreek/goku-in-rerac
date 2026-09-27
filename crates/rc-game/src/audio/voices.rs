@@ -177,10 +177,14 @@ fn length(v: V3) -> f32 {
 
 /// Distance volume `fun_0022c6f8` 0x2a02e0: `vol_near` inside `near`, `vol_far` beyond `far`, else
 /// `vol_far + trunc((far − d)·f32(vol_near − vol_far) / (far − near))`, squared terms with def flag bit 0.
-pub fn distance_volume(d: f32, def: &SoundDef) -> i32 {
-    if d <= def.near { return def.vol_near; }
-    if def.far <= d { return def.vol_far; }
-    let (d, near, far) = (Pf::f(d), Pf::f(def.near), Pf::f(def.far));
+pub fn distance_volume(d: f32, def: &SoundDef) -> i32 { distance_volume_between(d, def.near, def.far, def) }
+
+/// `SoundDistanceVolume(d, near, far, def)` (0x2a02e0) with the caller's `near` / `far` (the box emitter passes its
+/// own); the def gives the volumes and the falloff bit.
+pub fn distance_volume_between(d: f32, near: f32, far: f32, def: &SoundDef) -> i32 {
+    if d <= near { return def.vol_near; }
+    if far <= d { return def.vol_far; }
+    let (d, near, far) = (Pf::f(d), Pf::f(near), Pf::f(far));
     let range = Pf::from_i32(def.vol_near - def.vol_far);
     let (a, b) = if def.flags & 1 == 0 { (far - d, far - near) } else { ((far - d) * (far - d), (far - near) * (far - near)) };
     def.vol_far + ((a * range) / b).to_i32()
@@ -526,7 +530,7 @@ pub struct EmitterPvars {
 pub struct Emitters {
     pub instances: Vec<SoundInstance>,
     pub pvars: Vec<EmitterPvars>,
-    /// Classes met whose update is not ported (1 box volume, 2 box one-shot, 3 reverb box), counted once.
+    /// Classes met whose update is not ported (3 reverb box: the port has no reverb), counted once.
     pub unported: Vec<(usize, i16)>,
 }
 
@@ -548,16 +552,94 @@ impl Emitters {
                 EmitterPvars { def: w(0), min_s: w(1), max_s: w(2), timer: w(3), slot: w(4) }
             })
             .collect();
-        let unported = instances.iter().enumerate().filter(|(_, s)| matches!(s.o_class, 1..=3)).map(|(i, s)| (i, s.o_class)).collect();
+        let unported = instances.iter().enumerate().filter(|(_, s)| s.o_class == 3).map(|(i, s)| (i, s.o_class)).collect();
         Emitters { instances, pvars, unported }
     }
 
-    /// The per-frame sound-instance update (0x2a19a8 dispatch) for class 0 (sphere, `0x3197a0`) and class 5
-    /// (underwater loop at the camera, `0x31a078`: flags 0x15 while `underwater`).
+    /// The per-frame sound-instance update (0x2a19a8 dispatch) for class 0 (sphere, `0x3197a0`), class 1 (box with
+    /// the volume by depth, `0x319928`), class 2 (box one-shots at random points, `0x319cc8`) and class 5 (underwater
+    /// loop at the camera, `0x31a078`: flags 0x15 while `underwater`). Class 3 (reverb box) has no sound of its own;
+    /// class 6 (music box) is `music::MusicBox`.
     pub fn update(&mut self, slots: &mut SoundSlots, sounds: &LevelSounds, l: &Listener, rng: &mut Rng) {
         for (i, inst) in self.instances.iter().enumerate() {
             let pv = &mut self.pvars[i];
+            // `PlayLevelSoundAtInstance` / `release_voice_slot` guard: the slot still plays this instance's sound.
+            let ours = |slots: &SoundSlots, k: i32| usize::try_from(k).ok().and_then(|k| slots.slots.get(k)).is_some_and(|s| s.sndinst == i as i32 && s.state != state::FREE);
             match inst.o_class {
+                1 => {
+                    // The camera in box space (the inverse rows +0x50) and the box's half size (range, range, range).
+                    let p = inst.position();
+                    let local = inst.to_local(vsub(l.pos, p));
+                    let half = inst.to_local([inst.range; 3]);
+                    let (outer, d) = (length(half), length(local));
+                    if outer <= d {
+                        if ours(slots, pv.slot) { slots.release(pv.slot); }
+                        pv.slot = -1;
+                        continue;
+                    }
+                    let Some(def) = usize::try_from(pv.def).ok().and_then(|k| sounds.def(SoundOwner::Level, k)) else { continue };
+                    // Inside the unit cube: the def's near volume; outside it: the distance law from the cube's surface
+                    // (|clamped|) to the box's corner (|half|).
+                    let mut c = local;
+                    let vol = if local.iter().any(|x| 1.0 < x.abs()) {
+                        for x in &mut c { *x = x.clamp(-1.0, 1.0); }
+                        distance_volume_between(d, length(c), outer, def)
+                    } else {
+                        def.vol_near
+                    };
+                    let fl = flags::FIXED_VOLUME | if def.looped != 0 { flags::LOOP } else { 0 };
+                    if !ours(slots, pv.slot) {
+                        if !fast_dec_timer(&mut pv.timer) {
+                            pv.slot = -1;
+                            continue;
+                        }
+                        let k = slots.play(def, fl, None, None, Some(p), vol, l, rng);
+                        if k >= 0 {
+                            let s = &mut slots.slots[k as usize];
+                            s.class_index = pv.def as u16;
+                            s.sndinst = i as i32;
+                        }
+                        pv.slot = k;
+                        if pv.max_s > 0 {
+                            let r = rng.randi(pv.max_s - pv.min_s);
+                            pv.timer = (((pv.min_s + r) as f32 + 0.5) as i32 as f32 * 60.0) as i32;
+                        }
+                    }
+                    if let Some(s) = usize::try_from(pv.slot).ok().and_then(|k| slots.slots.get_mut(k)) {
+                        // SoundSetVolume, and the sound at the clamped point in world space (the rows +0x10).
+                        s.vol = vol;
+                        let m = &inst.matrix;
+                        s.pos = std::array::from_fn(|k| c[0] * m[0][k] + c[1] * m[1][k] + c[2] * m[2][k] + p[k]);
+                    }
+                }
+                2 => {
+                    let p = inst.position();
+                    let local = inst.to_local(vsub(l.pos, p));
+                    let half = inst.to_local([inst.range; 3]);
+                    let inside = (0..3).all(|k| local[k].abs() <= half[k].abs() + 1.0);
+                    if !inside || ours(slots, pv.slot) { continue; }
+                    if !fast_dec_timer(&mut pv.timer) {
+                        pv.slot = -1;
+                        continue;
+                    }
+                    // PlayLevelSoundAtInstance refuses a def index at or past the level's count (−1).
+                    let def = usize::try_from(pv.def).ok().and_then(|k| sounds.def(SoundOwner::Level, k));
+                    let k = def.map_or(-1, |def| slots.play(def, 0, None, None, Some(p), 0x400, l, rng));
+                    pv.slot = k;
+                    if k >= 0 {
+                        let s = &mut slots.slots[k as usize];
+                        s.class_index = pv.def as u16;
+                        s.sndinst = i as i32;
+                        // A random point of the box: randf(−1, 1) per axis through the rows +0x10.
+                        let r = [rng.randf(-1.0, 1.0), rng.randf(-1.0, 1.0), rng.randf(-1.0, 1.0)];
+                        let m = &inst.matrix;
+                        s.pos = std::array::from_fn(|k| r[0] * m[0][k] + r[1] * m[1][k] + r[2] * m[2][k] + p[k]);
+                    }
+                    if pv.max_s > 0 {
+                        let r = rng.randi(pv.max_s - pv.min_s);
+                        pv.timer = (((pv.min_s + r) as f32 + 0.5) as i32 as f32 * 60.0) as i32;
+                    }
+                }
                 0 => {
                     if pv.def < 0 { continue; }
                     let d = length(vsub(l.pos, inst.position()));

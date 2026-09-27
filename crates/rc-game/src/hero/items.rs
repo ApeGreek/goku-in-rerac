@@ -350,6 +350,16 @@ pub fn glove_frame(hero: &MobyFrame, class: &MobyAnimClass, table: &[u8]) -> Mob
     MobyFrame { header, quats, scales, trans, payload }
 }
 
+/// The hand item's `MobyAnimAdvance` with its sound trigger (`rc_formats::moby_anim::advance_trigger`): the fired
+/// class sound is `PlayClassSound(sound, 0, item)`, queued with the item's other sounds (played right after its update,
+/// `super::gadgets::flush_item_sounds`). The loop-sound refresh of the item's sequences (gadgets 168 seq 4, 185 seq 3) is
+/// not routed (docs/plan/audio.md "Sound paths").
+fn advance_item(anim: &mut moby_anim::AnimState, class: &moby_anim::MobyAnimClass, sounds: &mut Vec<i32>) {
+    let before = *anim;
+    moby_anim::advance(anim, class);
+    if let Some(s) = moby_anim::advance_trigger(&before, anim, class) { sounds.push(s as i16 as i32); }
+}
+
 /// `HeroItemsAttach` 0x22fec0, hand part: position = `W.r3` of the attach list (`FUN_0022a940`'s matrices
 /// from Ratchet's current pose); not a glove: `MobyAnimAdvance`, rows = `W.r0..r2`, columns normalised;
 /// a glove: rows = W, no advance, no normalisation, and its pose is Ratchet's hand ([`glove_frame`]; frame
@@ -369,14 +379,14 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
     if detached {
         // A detached item (the thrown wrench): the hand point 0x1403c0 only, `MobyAnimAdvance`; the moby keeps its
         // own position and rotation.
-        if let Some(c) = env.data.class(it.o_class) { moby_anim::advance(&mut it.anim, &c.anim); }
+        if let Some(c) = env.data.class(it.o_class) { advance_item(&mut it.anim, &c.anim, &mut hero.fx.item_sounds); }
         hero.items.slot.hand_point = hp;
         return;
     }
     it.position = hp;
     let glove = is_glove(id);
     if !glove {
-        if let Some(c) = env.data.class(it.o_class) { moby_anim::advance(&mut it.anim, &c.anim); }
+        if let Some(c) = env.data.class(it.o_class) { advance_item(&mut it.anim, &c.anim, &mut hero.fx.item_sounds); }
     }
     let mut rows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| w[i].map(f32::to_bits));
     if !glove { moby_anim::normalise_columns(&mut rows); }

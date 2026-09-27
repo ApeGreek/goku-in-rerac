@@ -281,8 +281,8 @@ impl AnimState {
     }
 }
 
-/// `fun_0020d580` MobyAnimAdvance: one 60 Hz tick. Sound triggers and the loop-sound voice refresh are
-/// not ported. Returns false (state unchanged but `flags` cleared, as in the game) when the rate or the
+/// `fun_0020d580` MobyAnimAdvance: one 60 Hz tick. The sound trigger ([`advance_trigger`]) and the loop-sound
+/// refresh are the caller's (they need the sound system: `rc_game::moby_update::anim_sound`). Returns false (state unchanged but `flags` cleared, as in the game) when the rate or the
 /// speed is 0; also stops without touching the state when a sequence the step needs is missing (the game
 /// would read through a null pointer).
 pub fn advance(s: &mut AnimState, class: &MobyAnimClass) -> bool {
@@ -381,6 +381,8 @@ pub fn hard_cut(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i32) -
     s.frame_b = b;
     s.rate = fa.header.rate;
     s.flags &= !2;
+    // update_moby_animation_state (0x263718): +0x7e = key A's trigger count (+0x7c, the loop sound: the moby's).
+    s.trigger_count = q.header.trigger_count;
     true
 }
 
@@ -390,7 +392,8 @@ pub fn hard_cut(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i32) -
 /// which becomes key A (`seq_a` = [`SNAPSHOT_SEQ`]); otherwise key A is left as it is (possibly another
 /// sequence). Then seq B = `seq`, speed = 1, t = 0, flag bit 1 cleared and rate = 1 / `blend_ticks`
 /// (`cvt.s.w` then `div.s`; 0 ticks gives the FPU's +MAX, i.e. the next advance lands on the target at
-/// once, one key interval already started). The loop-sound byte (+0x7c) is not modelled. `snapshot` holds
+/// once, one key interval already started). +0x7e (trigger count) is set as `update_moby_animation_state` does; the
+/// loop-sound byte +0x7c lives on the moby ([`loop_sound_of`]). `snapshot` holds
 /// the moby's current snapshot frame (read when key A is one) and receives the new one. Returns false,
 /// changing nothing, when the class has no sequence `seq`.
 pub fn set_sequence(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i32, blend_ticks: i32, snapshot_frame: &mut Option<MobyFrame>) -> bool {
@@ -407,12 +410,40 @@ pub fn set_sequence(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i3
     }
     s.frame_b = b;
     s.seq_b = seq;
+    // update_moby_animation_state (0x263718): +0x7e = key A's trigger count, 0 for a snapshot key.
+    s.trigger_count = if s.seq_a == SNAPSHOT_SEQ { 0 } else { class.sequence(s.seq_a).map_or(0, |a| a.header.trigger_count) };
     s.speed = 1.0;
     s.t = 0.0;
     s.flags &= !2;
     s.rate = f32::from_bits(ps2::div(ONE, (blend_ticks as f32).to_bits()));
     true
 }
+
+/// The sound trigger of one `MobyAnimAdvance` (0x265260, its tail): with key A and key B on the same sequence
+/// before the advance (`before`) and a trigger count +0x7e, the first trigger word of the sequence (lo16 class
+/// sound, hi16 time in 1/16 frames, unsigned) with `16·frame_a₀ + trunc(16·t₀) < time ≤ 16·frame_a₁ + trunc(16·t₁)`
+/// (`after` = the state the advance left) fires: the game plays `PlayClassSound(sound, 0, moby)` and returns (no
+/// loop-sound refresh that tick). A tick whose advance landed a transition (key A ≠ key B before) never fires.
+pub fn advance_trigger(before: &AnimState, after: &AnimState, class: &MobyAnimClass) -> Option<u16> {
+    if before.seq_a != before.seq_b || before.trigger_count == 0 { return None; }
+    let seq = class.sequence(before.seq_b)?;
+    let hi = after.frame_a as i32 * 16 + (after.t * 16.0) as i32;
+    let lo = before.frame_a as i32 * 16 + (before.t * 16.0) as i32;
+    if hi - lo <= 0 { return None; }
+    seq.triggers.iter().take(before.trigger_count as usize).find(|&&w| {
+        let time = (w >> 16) as i32;
+        lo < time && time <= hi
+    }).map(|&w| w as u16)
+}
+
+/// Whether a `MobyAnimAdvance` landed a transition (key A ≠ key B before, equal after): the game then returns
+/// before the trigger check and the loop-sound refresh (it sets its +0x7c word to 0xffff for the rest of the call).
+pub fn advance_landed(before: &AnimState, after: &AnimState) -> bool { before.seq_a != before.seq_b && after.seq_a == after.seq_b }
+
+/// The loop-sound byte a sequence change leaves in moby +0x7c: `update_moby_animation_state` takes key A's
+/// (0xff for a snapshot key), and the blend `fun_00212f90` then stores key B's; both equal key B's sequence
+/// header +0x11 after a hard cut (A = B) or a blend. 0xff when the sequence is missing.
+pub fn loop_sound_of(class: &MobyAnimClass, seq: u8) -> u8 { class.sequence(seq).map_or(0xff, |q| q.header.loop_sound) }
 
 /// VU `ftoiN`: `x · 2^n` truncated toward zero, saturated to the s32 range (exponent 0 = 0; the PS2's
 /// exponent-255 values are ordinary huge numbers and saturate).

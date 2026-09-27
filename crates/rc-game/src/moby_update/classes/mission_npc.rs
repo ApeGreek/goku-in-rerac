@@ -139,7 +139,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 let o = w.m(id).o_class;
                 if let Some(class) = w.classes.anim(o) {
                     let class = class.clone();
-                    rc_formats::moby_anim::hard_cut(&mut w.mm(id).anim, &class, 1, 0);
+                    if rc_formats::moby_anim::hard_cut(&mut w.mm(id).anim, &class, 1, 0) { crate::moby_update::anim_sound::after_sequence_change(w.mm(id), &class); }
                 }
             }
             if w.m(id).position[2] <= land {

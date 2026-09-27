@@ -300,6 +300,8 @@ impl Game {
                 // update.
                 crate::hero::gadgets::flush_item_sounds(&mut self.hero, &self.mobys.mobys[self.hero_moby], hero_sounds, &mut self.rng);
             }
+            // FUN_00227e90: the walk / run footsteps (after HeroItemsUpdate in 0x228870).
+            crate::hero::fx::walk_footsteps(&mut self.hero, &self.mobys.mobys[self.hero_moby], &anim.view(), hero_sounds, &mut self.rng);
         }
         (hooks.particles)(&self.hero, &self.camera.out, &mut self.rng, self.counter);
         let resets = self.camera.resets;

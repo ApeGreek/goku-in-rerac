@@ -518,6 +518,9 @@ pub trait SoundSink {
     /// `release_voice_slot(slot)` 0x2a1348 when the slot still plays a sound of `moby` (the classes' guard: owner
     /// and state checked first): a looping sound stops. Default: nothing.
     fn release(&mut self, _slot: i32, _moby: MobyId) {}
+    /// Slot `slot`'s owner (+0x18, zeroed when the voice is freed) and class-sound index (+0xe), whatever its state:
+    /// what the loop-sound refresh `FUN_002637d8` reads (`anim_sound`). None: no owner. Default: None.
+    fn slot_owner(&self, _slot: i32) -> Option<(MobyId, u16)> { None }
 }
 
 /// One glint (0x16eec0 + i·0x20): the sparkle drawn on idle bolts.
@@ -1257,6 +1260,7 @@ impl<'a> World<'a> {
     pub fn create_moby(&mut self, o_class: i16) -> Option<MobyId> {
         let info = self.classes.info(o_class);
         let id = self.table.create(o_class, info.as_ref(), self.counter)?;
+        crate::moby_update::anim_sound::init(&mut self.table.mobys[id], self.classes.anim(o_class));
         if self.svc.snapshots.len() <= id { self.svc.snapshots.resize(id + 1, None); }
         self.svc.snapshots[id] = None;
         Some(id)
@@ -1308,7 +1312,10 @@ impl<'a> World<'a> {
         let Some(class) = self.classes.anim(o) else { return false };
         if self.svc.snapshots.len() <= id { self.svc.snapshots.resize(id + 1, None); }
         let snap = &mut self.svc.snapshots[id];
-        rc_formats::moby_anim::set_sequence(&mut self.table.mobys[id].anim, class, seq, frame, ticks, snap)
+        let ok = rc_formats::moby_anim::set_sequence(&mut self.table.mobys[id].anim, class, seq, frame, ticks, snap);
+        // +0x7c = the target's loop sound (crate::moby_update::anim_sound).
+        if ok { crate::moby_update::anim_sound::after_sequence_change(&mut self.table.mobys[id], class); }
+        ok
     }
 
     /// `MobyBuildMatrix` 0x265bd8 on one moby.

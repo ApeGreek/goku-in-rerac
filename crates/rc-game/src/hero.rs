@@ -642,6 +642,9 @@ pub trait HeroSounds {
     /// `o_class` at `pos`), e.g. the Swingshot's fire / hit / pull and the wrench's hit; returns the sound slot (−1:
     /// none). Played by the tick right after the hand item's update ([`gadgets::flush_item_sounds`]).
     fn item_sound(&mut self, _o_class: i16, _pos: [f32; 3], _index: i32, _flags: u32, _rng: &mut crate::rng::Rng) -> i32 { -1 }
+    /// `PlayFootstepSound(class, foot, variant, 0, Ratchet)` (0x2a1898) on level `level` (0x15ed84): a level def
+    /// ([`fx::footstep`], [`fx::walk_footsteps`]); returns the sound slot (−1: none).
+    fn footstep(&mut self, _moby: &crate::moby_runtime::Moby, _level: i32, _class: u8, _foot: u8, _variant: u8, _rng: &mut crate::rng::Rng) -> i32 { -1 }
 }
 
 /// No sound layer: [`hero_update`].

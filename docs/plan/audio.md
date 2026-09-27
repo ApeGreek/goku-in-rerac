@@ -392,7 +392,7 @@ savestate", difference 2):
   same object (`HeroSounds::voice`). No Ratchet sequence has a loop sound (header +0x11 = 0xff for all 256).
 * **Not routed**: Clank (601) and the back packs (607–609) have 0 class sound defs on every level (header
   +0x0d), so their triggers never play or draw. The hand items' triggers (wrench 71, …) and footsteps
-  (0x2a1898) are not routed yet.
+  (0x2a1898) are routed since 2026-09-27 ("Sound paths" below), with every moby's triggers and loop sounds.
 * **Engine** (crate::audio_out, crate::gameplay): the gameplay tick borrows `AudioOut` for both hooks. The sound
   step pushes the frame to the output ring and to the `RC_AUDIO_WAV` capture. When a rendered frame's ticks did
   not run (menu, catch-up), `run_audio` fills in IOP-only frames: 989snd and the SPU run, with no EE update and
@@ -485,3 +485,71 @@ unchanged. Two idle runs give identical traces, PNGs and WAVs.
   group 5 = sfx option, then the SPU master: unity gain at the defaults [L]) and `AudioSystem::movie_exit`; the
   engine pushes one 800-sample frame of movie audio per movie vsync (silence in the fades).
 
+
+## Sound paths: how the game triggers every sound (2026-09-27)
+
+The user heard the jump, the enemy shots, the Bomb Glove, the ambience and the music, but no footsteps, no enemy hit /
+reload / jetpack sounds and no flyer engines. The reason is structural: the game has **several shared trigger paths**,
+and only the ones whose calls sit in ported class or hero code worked. The rest are driven by the level data through
+shared engine code that had not been ported. Addresses level01 (boot equivalents in `tools/ghidra/names/clusters.tsv`).
+
+| # | Path | Shared function(s) | Data it reads | Port status |
+|---|---|---|---|---|
+| 1 | Explicit class-code calls | `PlayClassSound` 0x2a1618, `PlayClassSoundByClass` 0x2a16c0, `SoundIsAlive` 0x2a12f0, `release_voice_slot` 0x2a1348 | class sound defs (class +0x28, count +0x0d, remapped at load) | worked: every ported class calls `World::play_sound` (crates, bolts, platforms, the troopers' glob 722, the gunship shells, the explosions' sound of `SpawnBeamExplosion` 0x273310 / `0x273f50`) |
+| 2 | Hero code | voices `0x236738`, loops `0x236798`, `HeroStatePhysics` 0x2370b8, `HeroPdaGadget` 0x240ed8, the hand item's update (wrench `0x2be1c0`, Swingshot) | Ratchet's class defs (class 0), the gadget defs parked at 0x1b02e0 | worked (`HeroSounds`) |
+| 3 | **Animation triggers** | `MobyAnimAdvance` 0x265260 (its tail); Ratchet's own `RatchetAnimAdvance` 0x247d48 | sequence trigger words (`lo16` class sound, `hi16` time in 1/16 frames), count +0x12 → moby +0x7e | Ratchet: worked (his jump / land / swing voices). **Every other moby: not ported → now general** (`moby_update::anim_sound`): trooper steps / reload / hit reactions, critter steps and squeaks, amoeboids, NPCs; the hand item's triggers (wrench whooshes) too |
+| 4 | **Sequence loop sounds** (engines, jetpacks, hums) | `MobyAnimAdvance` → `FUN_002637d8`; set by `update_moby_animation_state` 0x263718 (`hard_cut` 0x26c5a8, `InitMobyInstance` 0x263488) and `MobyAnimBlend` 0x26c660 | sequence header +0x11 → moby +0x7c (class sound), +0x7d (voice slot) | **not ported → now general**: the Blarg flyers' (660) and gunship's (688) engines, the troopers' jetpack (459 seq 8), spinners 705, amoeboid 572/865/866 loops. Pitch / volume / pan / doppler by distance and speed are `sound_update`'s (§3.2, already ported), since the slot follows its owner moby |
+| 5 | Hit / damage sounds | none in the shared hit resolver (`MobyGetHitMessage` 0x26f320, the damage records 0x26f378): the **victim** sounds through its hit-reaction sequences (path 3); the **attacker** plays its own: the wrench `FUN_002bda88` picks class sound 1 when the hit moby's damage record (`FUN_002711f8`, pvar +0 pointer) has +9 = 1, else 0 | the creature pvar header | victim: via path 3 (now); wrench selection **was a constant 0 → now read from the hit moby** (`melee::wrench_hit_sound`; Novalis troopers and critters have +9 = 0, so they get sound 0, as in the game) |
+| 6 | **Footsteps by surface** | `HeroFootstepSound` 0x227e48 → `PlayFootstepSound` 0x2a1898; callers `FUN_00227e90` (in `0x228870` after `HeroItemsUpdate`: walk seq 3 at key times 49.5 / 17.0, run seq 4 at 12.5 / 1.0, the 22nd tick of state 2) and the landing of the fall (`HeroStateTransitions` case 6 / 0x2d) | level def `tbl[level] + class·4 + foot·2 + variant + 0x15f574` (table `g_footstep_level_base` 0x1bdca0 = `[0,2,6,1,0,2,2,0,2,2,1,7,0,0,4,0,0,0,0]`, identical in all 19 overlays; 0x15f574 = 2), class = collision type bits 5–6 of the ground (`CollSoundClass` 0x215208 via the ground probe → 0x14063d), variant 1 with the Magneboots model on the feet | **never ported → now** (`hero::fx::walk_footsteps`, `fx::footstep`, `AudioSystem::play_footstep`). Ratchet's walk / run sequences carry no triggers: path 6 is the only source of steps |
+| 7 | Level defs at a moby / at the listener | `PlayLevelSoundAtMoby` 0x2a1770 (defs < 0x15f574) | level defs 0–1 | not ported: the skill-point jingle of the flyer / gunship kills (skill points are not ported) and the menu / help beeps |
+| 8 | Sound instances | `SoundInstanceUpdate` 0x2a19a8, table 0x20c580 `{0 sphere 0x3197a0, 1 box volume 0x319928, 2 box one-shot 0x319cc8, 3 reverb box 0x319f18, 5 underwater 0x31a078, 6 music box 0x31a128}` | gameplay section 0x0c + pvars | 0, 5, 6 worked; **1 and 2 now ported** (Novalis has 2 and 8 of them, most levels use them); 3 needs reverb (not modelled) |
+| 9 | Music and scene streams | `music_Update` 0x27a688, scene speech | level header music table, scene sounds | worked (§4, "Scene audio on the game tick") |
+
+**Now general** (one implementation each, data-driven, every class, every level):
+* `rc_formats::moby_anim::{advance_trigger, advance_landed, loop_sound_of}`; `set_sequence` / `hard_cut` set +0x7e as
+  `update_moby_animation_state` does.
+* `rc_game::moby_update::anim_sound`: `advance(w, id)` = `MobyAnimAdvance` with its trigger (`PlayClassSound(s, 0, m)`, then
+  no refresh that tick), the landing rule (a tick that lands a blend does neither) and the loop refresh `refresh_loop` =
+  `FUN_002637d8` (play with flags 4 when +0x7d = 0xff; forget the slot when its owner changed; release it when it plays
+  another class sound); the refresh of a moby without a slot runs on its phase `(address >> 8 & 3) == (0x15f5cc & 3)` =
+  `index & 3` (array at 0x1e9a480 on Novalis); `init` / `after_sequence_change` keep +0x7c. The scheduler, the dropship's
+  carried troopers, `World::anim_blend`, `create_moby` and the load all go through it. `SoundSink::slot_owner` gives the
+  refresh the slot's owner (+0x18, zeroed on free: callbacks 0x2a1bc8 / 0x2a1c10 disassembled) and class-sound index.
+* The hand item's advance (`hero::items::advance_item`): its triggers queue with the item's sounds.
+* Footsteps (path 6), the wrench hit selection (path 5), sound instance classes 1 and 2 (path 8).
+
+**Conformance** (`crates/rc-game/tests/sound_conformance.rs`, all 19 levels): every trigger and loop sound of every
+sequence of every loaded class (level classes, Ratchet's `ratchet_seq`, the gadgets) resolves to a def with a valid
+bank id and, played at the listener through `AudioSystem::play_class_sound`, gets a slot and a live 989snd handle: 4252
+references, 4251 played, 1 refused exactly as the game refuses it (level 13 class 83 seq 1: volumes 0..20 < 0x20). Every
+footstep def (class, foot, variant) plays, except the water class 3 defs on levels 5, 6, 7, 9, 13, 17, which are looped
+or past the defs there and are refused as in the game (class 3 is only produced on levels 1 and 0x12). The footstep
+table and 0x15f574 are checked in every overlay.
+
+**The footsteps "regression"** (bisect, worktrees in scratch): no committed version ever played footsteps. The first
+commit d815fa9 and HEAD 5746893 give the same effects-only RMS over a scripted 3.7 s run (100 ms windows equal or
+within 4 %, no step transients in either); `0x2a1898` has never been called and Ratchet's walk / run sequences
+3 / 4 have no triggers. What the user praised on 2026-09-26 (before the first commit) was most likely Ratchet's
+trigger sounds 30 / 31 / 39 (the foot plants at the end of the jump, landing and stop sequences), which play in every
+commit (inferred: that tree was never committed).
+
+**RNG** (`compare-novalis-spawn` on `novalis_spawn_ee.bin` / `novalis_idle_ee.bin`, window = 1072 ticks): 47.31 → 47.57
+draws per tick (game 52.31). The new draws are the loop and trigger plays' pitch bends in the moby loop (at the moby's
+advance, before its update) and the 18-draw occlusion batch of each new occluded sound in the sound step (3.02 → 3.22 per
+tick): in the window the port starts 14 flyer engine loops as flyers cross the ≈ 84-unit start threshold (squared falloff,
+far 100) at the edge of their paths (flyer positions within 2.3 units of RAM, report §f2). The slot table at the two
+savestates holds flyer loops in the game too (slots 1 and 5), so these starts are the game's; the "3.00 per tick" of the
+game's sound in the attribution table was a model, not a measurement.
+
+**Evidence** (engine, `RC_SCENE=0`, `RC_AUDIO_MUSIC=0`, `RC_AUDIO_TRACE=1`, scratch `sound/before` vs `sound/after`):
+running (`30-250:stick 0 -1`): 19 footsteps (level defs 4 / 6: surface class 0, left / right) vs none; the flyers' engine
+loop (class 660 sound 0, flags 4) 8–12 starts per run, the gunship's (688) from tick 4, the troopers' jetpack (459 sound 6)
+vs none; wrench on a trooper: its hit reactions 459 sounds 3 and 5 and the death explosion's 4 vs only 4; at the trooper
+firing position: 459 sounds 0 and 7 next to the glob 722; critters: 577 sounds 0–6 (steps, hit, death) vs only 4. Two
+identical runs give identical WAV and PNG. The arrival scene: the music / speech trace (voices playing / held, speech,
+player state, resume) is line-for-line identical to before; the mix differs only by the added engine loops during the
+first 2 s (correlation ≥ 0.98 through the speech).
+
+**Not done:** the hand items' own loop sounds (gadgets 168 Blaster seq 4, 185 seq 3; weapons not ported), path 7
+(skill points), reverb boxes (class 3, no reverb), the class-specific flyer sounds of `FlyerPathDriver` for classes 0x33,
+0x46a, 0x473, 0x474 (not on Novalis; not dispatched to the port yet), the underwater flag in the engine.

@@ -19,6 +19,12 @@
 //!   (mode 0) `0x236860` counts every entry's timer down and plays `0x236738(sound, flags)` when it runs out
 //!   ([`flush`]). The swim code's own voices (`SwimEvent::Sound` / `Voice`, which it records instead of playing)
 //!   go through the same flush, at the same point.
+//! * **Footsteps** (`HeroFootstepSound` 0x227e48 → `PlayFootstepSound` 0x2a1898, [`HeroSounds::footstep`]): the level def
+//!   `tbl[level] + class·4 + foot·2 + variant + 2` (docs/plan/audio.md "Sound paths"), class = the footstep class of the
+//!   ground under the feet 0x14063d (collision type bits 5–6, set by the ground probe), variant 1 with the Magneboots
+//!   worn. Walking and running play them at fixed key times of sequences 3 / 4 ([`walk_footsteps`], `FUN_00227e90`,
+//!   after the hand item's update); the landing of the fall (0x242930 case 6 / 0x2d, on the ground) plays both feet
+//!   ([`HeroFx::footsteps`], queued in the transitions and played by [`flush`]).
 
 use super::swim::SwimEvent;
 use super::{Hero, HeroSounds};
@@ -70,6 +76,9 @@ pub struct HeroFx {
     /// Ratchet's own sounds the hand item's update makes (`0x236738` voices, the thrown wrench's whoosh loop in slot
     /// 0x14156c and its release), played with the item sounds (`super::gadgets::flush_item_sounds`).
     pub item_voices: Vec<super::packs::SoundCmd>,
+    /// Footsteps the transitions played this tick (`HeroFootstepSound(class, foot, 1)` of the landing), in order:
+    /// `(class, foot)`, played by [`flush`] right after the transitions.
+    pub footsteps: Vec<(u8, u8)>,
     /// The length of `swim.events` when this tick's hero update started (the swim events after it are this tick's;
     /// the engine drains the list after the tick).
     pub swim_mark: usize,
@@ -173,6 +182,7 @@ pub(super) fn begin(h: &mut Hero) {
 /// `0x236860`: every queue entry's timer counts down (`FastDecTimer__FRs`), and an entry whose timer runs out this
 /// tick is freed and its voice played.
 pub(super) fn flush(h: &mut Hero, moby: &Moby, sounds: &mut dyn HeroSounds, rng: &mut Rng) {
+    for (class, foot) in std::mem::take(&mut h.fx.footsteps) { footstep(h, moby, class, foot, sounds, rng); }
     let new: Vec<SwimEvent> = h.swim.events.get(h.fx.swim_mark..).map(|e| e.to_vec()).unwrap_or_default();
     h.fx.swim_mark = h.swim.events.len();
     for e in new {
@@ -195,6 +205,36 @@ pub(super) fn flush(h: &mut Hero, moby: &Moby, sounds: &mut dyn HeroSounds, rng:
     }
 }
 
+/// `HeroFootstepSound(class, foot, 1)` (0x227e48): the variant is 1 when the feet item 0x140430 is the Magneboots
+/// model (class 0xad; the port reads the ownership, as `super::boots` does), then `PlayFootstepSound(class, foot,
+/// variant, 0, Ratchet)` 0x2a1898 on the level `0x15ed84`.
+pub fn footstep(h: &Hero, moby: &Moby, class: u8, foot: u8, sounds: &mut dyn HeroSounds, rng: &mut Rng) -> i32 {
+    let variant = h.owned.has(super::boots::MAGNEBOOTS) as u8;
+    sounds.footstep(moby, h.idle.level, class, foot, variant, rng)
+}
+
+/// `FUN_00227e90` (in `0x228870` after `HeroItemsUpdate`, mode 0): the walk / run footsteps. Unless Ratchet is in state
+/// 2 for fewer than 15 ticks: in state 2 at exactly tick 22 the left foot; then on sequence 3 (walk) the key times 49.5
+/// (left) and 17.0 (right), on sequence 4 (run) 12.5 (left) and 1.0 (right), when passed this tick (`0x231f18`) and no
+/// blend runs (0x13fdec). `view` = Ratchet's anim fields after this tick's advance.
+pub fn walk_footsteps(h: &mut Hero, moby: &Moby, view: &super::AnimView, sounds: &mut dyn HeroSounds, rng: &mut Rng) {
+    use super::physics::ticks;
+    if h.mode != 0 { return; }
+    if h.state == 2 && h.timer < ticks(0xf) { return; }
+    let class = h.footstep;
+    if h.state == 2 && h.timer == ticks(0x16) { footstep(h, moby, class, 0, sounds, rng); }
+    let passed = |f: f32| super::comet::passed(view, f);
+    let keys: &[(f32, u8)] = match view.seq_b {
+        3 => &[(49.5, 0), (17.0, 1)],
+        4 => &[(12.5, 0), (1.0, 1)],
+        _ => &[],
+    };
+    if view.blending() { return; }
+    for &(f, foot) in keys {
+        if passed(f) { footstep(h, moby, class, foot, sounds, rng); }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +246,37 @@ mod tests {
             self.0.push((index, flags));
             0
         }
+        fn footstep(&mut self, _: &Moby, level: i32, class: u8, foot: u8, variant: u8, _: &mut Rng) -> i32 {
+            self.0.push((1000 * level + 100 * class as i32 + 10 * foot as i32 + variant as i32, 0xf));
+            0
+        }
+    }
+
+    /// `FUN_00227e90`: the run (sequence 4) steps at key times 12.5 (left) and 1.0 (right) when passed this tick, none
+    /// during a blend or in the first 15 ticks of state 2; the landing's two steps from the queue.
+    #[test]
+    fn walk_and_landing_footsteps() {
+        let mut h = Hero::new();
+        h.state = 2;
+        h.timer = 40;
+        h.footstep = 1;
+        h.idle.level = 1;
+        let moby = Moby::zeroed();
+        let mut rng = Rng::new();
+        let mut log = Log(Vec::new());
+        let view = |frame: f32, step: f32| super::super::AnimView { seq_a: 4, seq_b: 4, frame, frame_step: step, ..Default::default() };
+        walk_footsteps(&mut h, &moby, &view(12.6, 0.3), &mut log, &mut rng);
+        walk_footsteps(&mut h, &moby, &view(12.9, 0.3), &mut log, &mut rng);
+        walk_footsteps(&mut h, &moby, &view(1.2, 0.3), &mut log, &mut rng);
+        assert_eq!(log.0, vec![(1100, 0xf), (1110, 0xf)]);
+        let blend = super::super::AnimView { seq_a: 0xff, ..view(12.6, 0.3) };
+        walk_footsteps(&mut h, &moby, &blend, &mut log, &mut rng);
+        h.timer = 10;
+        walk_footsteps(&mut h, &moby, &view(12.6, 0.3), &mut log, &mut rng);
+        assert_eq!(log.0.len(), 2);
+        h.fx.footsteps.extend([(0, 0), (0, 1)]);
+        flush(&mut h, &moby, &mut log, &mut rng);
+        assert_eq!(&log.0[2..], &[(1000, 0xf), (1010, 0xf)]);
     }
 
     /// The surfacing gasps: queued twice (27 and 40 ticks), played when each timer runs out; the splash voice at
@@ -262,3 +333,4 @@ mod tests {
         assert_eq!(h.fx.voices.iter().map(|e| e.sound).collect::<Vec<_>>(), (0..8).collect::<Vec<_>>());
     }
 }
+

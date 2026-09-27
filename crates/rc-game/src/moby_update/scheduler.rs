@@ -203,11 +203,8 @@ pub fn rebuild_matrix(m: &mut Moby, class: Option<&MobyAnimClass>) {
 pub fn run_moby(w: &mut World, id: MobyId) {
     if w.m(id).state >= 0x80 { return; }
     let o_class = w.m(id).o_class;
-    if w.m(id).mode & mode::NO_ANIM == 0 {
-        if let Some(class) = w.classes.anim(o_class) {
-            moby_anim::advance(&mut w.table.mobys[id].anim, class);
-        }
-    }
+    // MobyAnimAdvance with its sound triggers and loop sound (crate::moby_update::anim_sound).
+    if w.m(id).mode & mode::NO_ANIM == 0 { crate::moby_update::anim_sound::advance(w, id); }
     if let Some(addr) = w.m(id).update_fn {
         if let Some(u) = ported(addr) {
             classes::dispatch(u, w, id);
@@ -353,6 +350,7 @@ pub fn load_level_mobys(
         let oc = inst.o_class as i16;
         let info = classes.classes.get(&oc).map(|c| c.0);
         let mut m = Moby::init_instance(id as u32, oc, info.as_ref());
+        crate::moby_update::anim_sound::init(&mut m, classes.classes.get(&oc).and_then(|c| c.1.as_ref()));
         m.spawn_id = inst.spawn_id as i16;
         m.spawn_flag = t.b1;
         m.b4 = t.b4;

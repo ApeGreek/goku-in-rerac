@@ -19,7 +19,7 @@ use super::items::{HitSink, ItemEnv, HERO_LISTS};
 use super::physics::*;
 use super::states::Ctx;
 use super::Hero;
-use crate::moby_runtime::MobyTable;
+use crate::moby_runtime::{MobyId, MobyTable};
 use crate::moby_update::services::HitTemplate;
 use crate::pad::{button, fast_arctan, fast_diff_rots};
 use crate::ps2v::Pf;
@@ -55,10 +55,15 @@ const YAW_SENTINEL: Pf = Pf::b(0x47c3_4f80);
 const AIM_TURN: Pf = Pf::b(0x4170_2845);
 /// Wrench class (moby +0xa6).
 pub const WRENCH_CLASS: i16 = 0x47;
-/// The wrench's hit sound, `FUN_002bda88()`: class sound 1 when the moby of the last line hit (0x1742d8) has mode
-/// bit 0x20 and the record its first pvar word points to has +9 = 1, else 0. The port has no pointer records in
-/// the pvars, so it always plays 0 (**L**: the targets of the ported classes do not set mode 0x20).
-pub const WRENCH_HIT_SOUND: i32 = 0;
+/// The wrench's hit sound, `FUN_002bda88()`: class sound 1 when the moby hit (0x1742d8: the line's moby, or the
+/// sphere's first listed moby, `coll_sphere_mobys` stores it there too) has mode bit 0x20 and the record its first
+/// pvar word points to (`FUN_002711f8`, the creatures' damage record) has +9 = 1, else 0 (crates, props). The same
+/// rule for the swing, the jump attack and the thrown wrench.
+pub fn wrench_hit_sound(table: &MobyTable, hit: Option<MobyId>) -> i32 {
+    let Some(m) = hit.and_then(|id| table.mobys.get(id)) else { return 0 };
+    let rec = crate::moby_update::triggers::pvar_record(m);
+    (rec.and_then(|o| m.pvars.get(o + 9)) == Some(&1)) as i32
+}
 
 /// The melee fields of the hero block (0x13fd40..0x13fdcc).
 #[derive(Clone, Copy, Debug, Default)]
@@ -573,11 +578,11 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         }
         t = t + k;
     }
-    if let Some(Some(_)) = swept {
+    if let Some(Some(m)) = swept {
         if hero.melee.hit == 0 {
             hero.melee.hit = 1;
             hero.items.hit_sounds += 1;
-            hero.fx.item_sounds.push(WRENCH_HIT_SOUND);
+            hero.fx.item_sounds.push(wrench_hit_sound(table, Some(m)));
         }
     }
     let mut v2 = vsub(tip, hand);
@@ -587,10 +592,11 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     let mut r = Pf::b(0x3eb3_3333);
     if hero.group == 0xf { r = Pf::b(0x3f33_3333); }
     if jump { r = Pf::b(0x3ef0_a3d7); }
-    if hits.sphere(table, r, c, 0, ignore, &tmpl).is_some() && hero.melee.hit == 0 {
+    let sphere = hits.sphere(table, r, c, 0, ignore, &tmpl);
+    if sphere.is_some() && hero.melee.hit == 0 {
         hero.melee.hit = 1;
         hero.items.hit_sounds += 1;
-        hero.fx.item_sounds.push(WRENCH_HIT_SOUND);
+        hero.fx.item_sounds.push(wrench_hit_sound(table, sphere));
     }
 }
 

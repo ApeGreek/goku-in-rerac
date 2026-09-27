@@ -2,6 +2,7 @@
 //! ported classes (bolts 13–16, crates 500/501/502/505/511, grass 724/725, Blarg flyers 660, teleporter pads 1135,
 //! gold-weapon offers 304/1456–1465). Spec: `docs/plan/moby_update_catalogue.md` §1, §4, §7 and the "In the port"
 //! sections.
+pub mod anim_sound;
 pub mod classes;
 pub mod creature;
 pub mod interact;

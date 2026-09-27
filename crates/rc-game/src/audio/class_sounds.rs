@@ -74,6 +74,39 @@ impl AudioSystem {
     }
 }
 
+/// `g_footstep_level_base` (level01 0x1bdca0, one byte per level; the same 19 bytes in every level overlay, at a
+/// per-overlay address: checked by `tests/sound_conformance.rs`): the first footstep level def of the level, before
+/// the moby-attached defs are added.
+pub const FOOTSTEP_LEVEL_BASE: [u8; 19] = [0, 2, 6, 1, 0, 2, 2, 0, 2, 2, 1, 7, 0, 0, 4, 0, 0, 0, 0];
+/// `0x15f574`: the level defs played at a moby (`PlayLevelSoundAtMoby` 0x2a1770 takes indices below it; 2 in every
+/// overlay); the footsteps follow them.
+pub const MOBY_LEVEL_DEFS: usize = 2;
+
+/// The level def `PlayFootstepSound(class, foot, variant, …)` (0x2a1898) plays on `level`: `tbl[level] + class·4 +
+/// foot·2 + variant + 0x15f574`. None for a level outside the table.
+pub fn footstep_def(level: i32, class: u8, foot: u8, variant: u8) -> Option<usize> {
+    let base = *FOOTSTEP_LEVEL_BASE.get(usize::try_from(level).ok()?)? as usize;
+    Some(base + class as usize * 4 + foot as usize * 2 + variant as usize + MOBY_LEVEL_DEFS)
+}
+
+impl AudioSystem {
+    /// `PlayFootstepSound(class, foot, variant, flags, owner)` (0x2a1898): level def [`footstep_def`] (refused when it
+    /// is not below the level def count 0x15f5f0), `SoundSlotAlloc(def, flags, owner, 0, 0x400)`; the slot remembers
+    /// the def index (+0xe). The owner is Ratchet (privileged). Draws the def's pitch bend when it gets a slot.
+    #[allow(clippy::too_many_arguments)]
+    pub fn play_footstep(&mut self, level: i32, class: u8, foot: u8, variant: u8, flags: u32, owner: MobyId, pos: [f32; 3], listener: &Listener, rng: &mut Rng, tick: u64) -> i32 {
+        let Some(idx) = footstep_def(level, class, foot, variant) else { return -1 };
+        let Some(def) = self.data.sounds.level_defs.get(idx).copied() else { return -1 };
+        let k = self.slots.play(&def, flags as u8, Some(Owner { id: owner as u32, privileged: true }), Some(pos), None, 0x400, listener, rng);
+        if k >= 0 { self.slots.slots[k as usize].class_index = idx as u16; }
+        if let Some(log) = self.play_log.as_mut() { log.push((tick, FOOTSTEP_LOG_CLASS, idx as i32, flags, k)); }
+        k
+    }
+}
+
+/// The play log's "class" for a footstep (its index is the level def).
+pub const FOOTSTEP_LOG_CLASS: i16 = -1;
+
 /// The moby loop's [`SoundSink`]: class sounds into `audio` with the listener of the tick (the previous tick's
 /// camera).
 pub struct ClassSoundSink<'a> {
@@ -92,6 +125,11 @@ impl SoundSink for ClassSoundSink<'_> {
     /// `release_voice_slot(slot)` when the slot still plays `moby`'s sound.
     fn release(&mut self, slot: i32, moby: MobyId) {
         if self.alive(slot, moby) { self.audio.slots.release(slot); }
+    }
+    /// The slot's owner (+0x18) and class-sound index (+0xe), whatever its state (a freed slot has no owner).
+    fn slot_owner(&self, slot: i32) -> Option<(MobyId, u16)> {
+        let s = self.audio.slots.slots.get(usize::try_from(slot).ok()?)?;
+        s.owner.map(|o| (o.id as MobyId, s.class_index))
     }
 }
 
@@ -161,6 +199,12 @@ where
         // the sound follows him), privileged like the game's 0x1403e0 owner; the defs are the item class's.
         let ev = SoundEvent { index, flags, moby: self.hero, o_class, sound_class: o_class, pos, tick: self.counter };
         a.play_class_sound(&ev, Some(self.hero), &self.listener, rng)
+    }
+
+    fn footstep(&mut self, moby: &crate::moby_runtime::Moby, level: i32, class: u8, foot: u8, variant: u8, rng: &mut Rng) -> i32 {
+        let Some(mut a) = (self.audio)() else { return -1 };
+        let pos = [moby.position[0], moby.position[1], moby.position[2]];
+        a.play_footstep(level, class, foot, variant, 0, self.hero, pos, &self.listener, rng, self.counter)
     }
 
     fn release(&mut self, _moby: &crate::moby_runtime::Moby, slot: i32) {

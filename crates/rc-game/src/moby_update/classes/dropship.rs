@@ -125,16 +125,14 @@ fn carry(w: &mut World, id: MobyId) {
         let Some(ch) = usize::try_from(c::pi32(w, id, P_LOAD + 4 * k)).ok().filter(|&m| m < w.table.mobys.len()) else { continue };
         if flying { w.mm(ch).mode &= !0x41; }
         let off: [f32; 4] = std::array::from_fn(|l| if l == 3 { 0.0 } else { rows[0][l] * s[0] + rows[1][l] * s[1] + rows[2][l] * s[2] });
-        let o_class = w.m(ch).o_class;
         {
             let m = w.mm(ch);
             m.position = c::add(pos, off);
             m.rotation = rot;
             m.rotation[2] = c::add_rot(rot[2], std::f32::consts::PI);
         }
-        if let Some(class) = w.classes.anim(o_class) {
-            rc_formats::moby_anim::advance(&mut w.table.mobys[ch].anim, class);
-        }
+        // MobyAnimAdvance(child), its sound triggers and loop included (crate::moby_update::anim_sound).
+        crate::moby_update::anim_sound::advance(w, ch);
         w.build_matrix(ch);
         w.mm(ch).mode |= 6;
     }
