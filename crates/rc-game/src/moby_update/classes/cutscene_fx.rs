@@ -15,7 +15,7 @@
 //!   p)` (+0x23 = 0x70) and 16 type-35 drops (angle, `randf(0, 3·dt)`, `randf(3·dt, 6.5·dt)`, `rand_range(90, 120)`,
 //!   `randi(2)`): `crate::particles::type46` / `type35` and the splash class 775 (`super::splash`).
 //! * scene 4, actor 4 of class 531 (the courier ship): `RegisterDrawCallback(0x2a70a8, ship)` (the canopy
-//!   glass's shine: `Callback::ShipGlass` with the ship's joint-0 matrix, drawn by `rc-engine`'s fx_draw) and, ticks `ticks(850)..=ticks(1160)`, two type-23 thruster puffs at each
+//!   glass's shine: `Callback::ShipGlass` with the matrix of the ship's joint list 0 (the canopy joint), drawn by `rc-engine`'s fx_draw) and, ticks `ticks(850)..=ticks(1160)`, two type-23 thruster puffs at each
 //!   of its joint lists 1..6 (`PartType23Spawn(0.1, 1, 0.9, 200000, p, ±randi(16), dt, 0x7f204080)`, life
 //!   `ticks(6)` (`ticks(30)` from `ticks(1100)` on)).
 //! * scene 5 (the arrival), ticks < `ticks(120)`, actor 2 (the ship 530): the point of its joint list 5, the step
@@ -170,7 +170,7 @@ fn drop35(w: &mut World, p: [f32; 4], vel: [f32; 4], kind: i32, life: i32) {
     if crate::particles::type35::spawn(sys, w.rng, p, vel, kind, life).is_none() { w.svc.fx.part_failed += 1; }
 }
 
-/// `FUN_00278450(infobot)` 0x278450: the infobot's two thrusters, from its root joint (`0x264508(m, 0, M)`): f =
+/// `FUN_00278450(infobot)` 0x278450: the infobot's two thrusters, from the last joint of its joint list 0 (`0x264508(m, 0, M)`): f =
 /// min(|M.r0| / 1.026, 1) (the flame joint's animated scale), then 2 glow puffs `PartType23Spawn(0.01 + 0.02·f, 1,
 /// 0.75, 6000 + 44000·f, M.r3 − unit(M.r2)·(0.025 + 0.025·f), ±randi(16), 0, 0x503030ff)` (life `ticks(6)`, phase 2
 /// from 0x50) and 5 white cores `PartType23Spawn(0.01 + 0.015·f, 1, 1, 5000 + 25000·f, M.r3 − unit(M.r2)·(0.01 +

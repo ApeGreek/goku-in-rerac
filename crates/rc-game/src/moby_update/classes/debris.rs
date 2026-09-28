@@ -352,13 +352,10 @@ mod tests {
     fn level_table_lists_the_shared_classes() {
         let path = rc_formats::test_data::level_dir(1).join("overlay.bin");
         let Ok(ov) = std::fs::read(path) else { eprintln!("skipped: no extracted/levels/01/overlay.bin"); return };
-        let sections = rc_formats::font::parse_overlay_sections(&ov).unwrap();
-        let t = rc_formats::font::read_overlay(&sections, 0x20bb00, 0x924).expect("level class table in the overlay");
         let (mut d, mut f) = (Vec::new(), Vec::new());
-        for e in t.as_chunks::<12>().0 {
-            let oc = i32::from_le_bytes(e[0..4].try_into().unwrap());
-            if oc == -1 { break; }
-            match u32::from_le_bytes(e[4..8].try_into().unwrap()) {
+        for e in rc_formats::level_overlay::LevelOverlay::parse(&ov).unwrap().vtbl() {
+            let oc = e.o_class;
+            match e.update {
                 UPDATE_FN => d.push(oc as i16),
                 FLASH_UPDATE_FN => f.push(oc as i16),
                 _ => {}

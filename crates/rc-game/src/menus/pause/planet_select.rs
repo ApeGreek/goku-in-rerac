@@ -8,7 +8,7 @@
 //! 0x293398 / 0x293670), the 3D globe 0x294258, the gold-bolt panel 0x292980 and the missions list.
 
 use super::super::{sprite, text, text_plain, MenuAssets, MenuDraw, MenuInput, MenuSound};
-use super::{list_font, lf, page, Data, Item, List, MenuEnv, MenuOut, PageMenu, DISABLED, DISABLED_SELECTED, LIGHT_BLUE, YELLOW};
+use super::{list_font, lf, Data, Item, List, MenuEnv, MenuOut, PageMenu, DISABLED, DISABLED_SELECTED, LIGHT_BLUE, YELLOW};
 use crate::game_state::GameState;
 use crate::hud::{text as wtext, Draw};
 use crate::pad::button;
@@ -178,10 +178,10 @@ pub fn map_update(m: &mut PageMenu, w: u32, inp: &MenuInput, gs: &mut GameState,
             return -1;
         }
     }
-    if inp.pressed_u & button::CROSS != 0 { m.target = page::MAP_MISSIONS; }
+    if inp.pressed_u & button::CROSS != 0 { m.target = m.addrs.map_missions; }
     if inp.pressed_u & button::CIRCLE != 0 && m.dest != 0 {
         m.arg = m.dest as u32;
-        m.return_page = page::MAP;
+        m.return_page = m.addrs.map;
         m.return_kind = 0xb;
         m.post = 3;
         out.sounds.push(MenuSound::Confirm);

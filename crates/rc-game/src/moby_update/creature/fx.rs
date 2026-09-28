@@ -108,6 +108,28 @@ pub fn in_view(w: &World, far: f32, p: V, r: f32) -> bool {
 /// `0x273f50(size, light, moby, pos, sound)`: the death explosion (module doc). Draws: per spark pair
 /// `randf(8, 10)`, `randi(6)` ×2, two `rand_range`s, then the type-11 spawn's own; 3 per flash; the light's.
 pub fn death_explosion(w: &mut World, size: f32, light: f32, moby: Option<MobyId>, p: V, sound: i32) {
+    sparks_and_flashes(w, size, 400000.0, moby, p);
+    if in_view(w, 10.0, p, 2.0) {
+        let t = w.ticks(20);
+        w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp: size * 0.1, ticks: t });
+    }
+    if let Some(m) = moby {
+        if !w.m(m).is_deleted() && sound != -1 { w.play_sound(sound, 0, m); }
+    }
+    explosion_light(w, light, p);
+}
+
+/// `0x2742a8(size, light, moby, pos, −1)`: the quiet explosion of a broken prop's flag-2 pieces
+/// (`crate::moby_update::classes::breakables`): the death explosion's three spark pairs (sprites 500000·size instead
+/// of 400000·size) and two flashes, no camera shake and no sound; the light when `light ≠ 0`. The gold-glove colour
+/// shifts it passes the colours through (`0x270fa8`, `0x270f48`) are the identity here, as in `bomb.rs`.
+pub fn piece_explosion(w: &mut World, size: f32, light: f32, moby: Option<MobyId>, p: V) {
+    sparks_and_flashes(w, size, 500000.0, moby, p);
+    explosion_light(w, light, p);
+}
+
+/// The spark pairs and flashes 0x273f50 and 0x2742a8 share (`sprite` = the type-11 size per unit of `size`).
+fn sparks_and_flashes(w: &mut World, size: f32, sprite: f32, moby: Option<MobyId>, p: V) {
     for _ in 0..3 {
         let sp = w.rng.randf(8.0, 10.0) * super::DT;
         let a = w.rng.randi(6) as usize;
@@ -116,7 +138,7 @@ pub fn death_explosion(w: &mut World, size: f32, light: f32, moby: Option<MobyId
         let life = w.rng.rand_range(t15, t20);
         let (t25, t30) = (w.ticks(25), w.ticks(30));
         let t1 = w.rng.rand_range(t25, t30);
-        w.part11(to_pf(size * 400000.0), to_pf(sp * size), pv(p), [Pf::ZERO; 4], SPARK_A[a], SPARK_B[b], life, t1, 0, 0);
+        w.part11(to_pf(size * sprite), to_pf(sp * size), pv(p), [Pf::ZERO; 4], SPARK_A[a], SPARK_B[b], life, t1, 0, 0);
     }
     if let Some(m) = moby {
         let t = w.ticks(20);
@@ -124,13 +146,10 @@ pub fn death_explosion(w: &mut World, size: f32, light: f32, moby: Option<MobyId
         let t = w.ticks(0x1d);
         flash_spawn(w, size * 3.0, m, p, [0.0; 4], t, 0x60, 0x20, 0, 0x20);
     }
-    if in_view(w, 10.0, p, 2.0) {
-        let t = w.ticks(20);
-        w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp: size * 0.1, ticks: t });
-    }
-    if let Some(m) = moby {
-        if !w.m(m).is_deleted() && sound != -1 { w.play_sound(sound, 0, m); }
-    }
+}
+
+/// The explosion light of 0x273f50 / 0x2742a8: none for 0, radius 13 for a negative size.
+fn explosion_light(w: &mut World, light: f32, p: V) {
     if light != 0.0 {
         let l = if light <= 0.0 { 13.0 } else { light };
         let mut t = LIGHT_DEATH;
@@ -417,7 +436,7 @@ pub fn piece_update(w: &mut World, id: MobyId) {
             let c = add(apply(&rows, super::pv4(w, id, 0x20)), super::pos(w, id));
             let r = super::pf(w, id, 0x2c);
             if pvar::u32(&w.m(id).pvars, 0x34) & 2 != 0 {
-                w.svc.unported("creature fx: piece explosion 0x2742a8");
+                piece_explosion(w, r * 0.5, 0.0, Some(id), c);
             } else {
                 let b = Beam { damage_r: 0.0, damage: 0.0, flash: r, flash2: r * 0.5, flash_dist: 9.0, scale: r * 0.5, light: 0.0, streaks: 5, sparks: 3, puffs: 5, debris: 0, sound: -1, shake: false };
                 beam_explosion(w, &b, Some(id), c);

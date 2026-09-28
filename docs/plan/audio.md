@@ -357,7 +357,7 @@ first frame, emitters, `sound_update` with the previous frame's replies applied 
 fills (50 ms prefill, 0.25 s cap). Listener = the main camera (the follow camera when gameplay runs); hero =
 Ratchet's 0x13f3d0 from crate::gameplay, else the camera. `RC_AUDIO=0`, `RC_AUDIO_WAV=path` (10 s WAV),
 `RC_AUDIO_MUSIC` / `RC_AUDIO_SFX` (option volumes 0..1024; defaults 716 / 1024 from the boot data).
-The underwater flag is not wired yet (crate::fog_state keeps it private).
+The underwater flag was wired on 2026-09-28 (below).
 
 **Novalis start, measured** (10 s, offline test at the spawn and `cargo dev` frame-exact): music from sample 82
 (the VAG's zero frame), per-second RMS 550–960 (music at 0x400 in group 1 = 716 → voice level ≈ 0.244); the
@@ -501,8 +501,8 @@ shared engine code that had not been ported. Addresses level01 (boot equivalents
 | 4 | **Sequence loop sounds** (engines, jetpacks, hums) | `MobyAnimAdvance` → `FUN_002637d8`; set by `update_moby_animation_state` 0x263718 (`hard_cut` 0x26c5a8, `InitMobyInstance` 0x263488) and `MobyAnimBlend` 0x26c660 | sequence header +0x11 → moby +0x7c (class sound), +0x7d (voice slot) | **not ported → now general**: the Blarg flyers' (660) and gunship's (688) engines, the troopers' jetpack (459 seq 8), spinners 705, amoeboid 572/865/866 loops. Pitch / volume / pan / doppler by distance and speed are `sound_update`'s (§3.2, already ported), since the slot follows its owner moby |
 | 5 | Hit / damage sounds | none in the shared hit resolver (`MobyGetHitMessage` 0x26f320, the damage records 0x26f378): the **victim** sounds through its hit-reaction sequences (path 3); the **attacker** plays its own: the wrench `FUN_002bda88` picks class sound 1 when the hit moby's damage record (`FUN_002711f8`, pvar +0 pointer) has +9 = 1, else 0 | the creature pvar header | victim: via path 3 (now); wrench selection **was a constant 0 → now read from the hit moby** (`melee::wrench_hit_sound`; Novalis troopers and critters have +9 = 0, so they get sound 0, as in the game) |
 | 6 | **Footsteps by surface** | `HeroFootstepSound` 0x227e48 → `PlayFootstepSound` 0x2a1898; callers `FUN_00227e90` (in `0x228870` after `HeroItemsUpdate`: walk seq 3 at key times 49.5 / 17.0, run seq 4 at 12.5 / 1.0, the 22nd tick of state 2) and the landing of the fall (`HeroStateTransitions` case 6 / 0x2d) | level def `tbl[level] + class·4 + foot·2 + variant + 0x15f574` (table `g_footstep_level_base` 0x1bdca0 = `[0,2,6,1,0,2,2,0,2,2,1,7,0,0,4,0,0,0,0]`, identical in all 19 overlays; 0x15f574 = 2), class = collision type bits 5–6 of the ground (`CollSoundClass` 0x215208 via the ground probe → 0x14063d), variant 1 with the Magneboots model on the feet | **never ported → now** (`hero::fx::walk_footsteps`, `fx::footstep`, `AudioSystem::play_footstep`). Ratchet's walk / run sequences carry no triggers: path 6 is the only source of steps |
-| 7 | Level defs at a moby / at the listener | `PlayLevelSoundAtMoby` 0x2a1770 (defs < 0x15f574) | level defs 0–1 | not ported: the skill-point jingle of the flyer / gunship kills (skill points are not ported) and the menu / help beeps |
-| 8 | Sound instances | `SoundInstanceUpdate` 0x2a19a8, table 0x20c580 `{0 sphere 0x3197a0, 1 box volume 0x319928, 2 box one-shot 0x319cc8, 3 reverb box 0x319f18, 5 underwater 0x31a078, 6 music box 0x31a128}` | gameplay section 0x0c + pvars | 0, 5, 6 worked; **1 and 2 now ported** (Novalis has 2 and 8 of them, most levels use them); 3 needs reverb (not modelled) |
+| 7 | Level defs at a moby / at the listener | `PlayLevelSoundAtMoby` 0x2a1770 (defs < 0x15f574) | level defs 0–1 | **ported 2026-09-28** ("Reverb zones and level sounds"): the help box's opening sound (def 0) wired; the skill point jingle (def 1) is callable from class code (`World::play_level_sound`), its callers (kills, weapon `0x2d2450`, cheat entry) are not ported |
+| 8 | Sound instances | `SoundInstanceUpdate` 0x2a19a8, table 0x20c580 `{0 sphere 0x3197a0, 1 box volume 0x319928, 2 box one-shot 0x319cc8, 3 reverb box 0x319f18, 5 underwater 0x31a078, 6 music box 0x31a128}` | gameplay section 0x0c + pvars | 0, 5, 6 worked; **1 and 2 now ported** (Novalis has 2 and 8 of them, most levels use them); 3 ported 2026-09-28 with the reverb |
 | 9 | Music and scene streams | `music_Update` 0x27a688, scene speech | level header music table, scene sounds | worked (§4, "Scene audio on the game tick") |
 
 **Now general** (one implementation each, data-driven, every class, every level):
@@ -550,6 +550,83 @@ identical runs give identical WAV and PNG. The arrival scene: the music / speech
 player state, resume) is line-for-line identical to before; the mix differs only by the added engine loops during the
 first 2 s (correlation ≥ 0.98 through the speech).
 
-**Not done:** the hand items' own loop sounds (gadgets 168 Blaster seq 4, 185 seq 3; weapons not ported), path 7
-(skill points), reverb boxes (class 3, no reverb), the class-specific flyer sounds of `FlyerPathDriver` for classes 0x33,
-0x46a, 0x473, 0x474 (not on Novalis; not dispatched to the port yet), the underwater flag in the engine.
+**Not done:** the hand items' own loop sounds (gadgets 168 Blaster seq 4, 185 seq 3; weapons not ported), the skill point
+callers of path 7, the class-specific flyer sounds of `FlyerPathDriver` for classes 0x33, 0x46a, 0x473, 0x474 (not on
+Novalis; not dispatched to the port yet). Reverb boxes, path 7 and the underwater flag: next section.
+
+## Reverb zones and level sounds (2026-09-28)
+
+Addresses level01; the same code sits in every overlay (the reverb box and `FUN_002a1a90` in 13 identical copies, the
+others differ only in absolute addresses). Code: `rc_game::audio::reverb` (zones + effect), `AudioSystem::{hero_teleported,
+checkpoint_saved, checkpoint_restored, play_level_sound_at_moby}`, `class_sounds::{listener_with_water, level_sound}`.
+
+**What the game does (H, disassembled where marked).**
+* **Request state** 0x13e5b0 owner, 0x13e5b4 s32 depth, 0x13e5b8 type, 0x13e5b9 delay, 0x13e5ba feedback, 0x13e5bb dirty.
+  `FUN_002a1a90(owner, type, depth, delay, fb)` marks only what changed: 1 type, 4 depth, 2 delay/feedback.
+* **Reverb box** (sound instance class 3, `SndInstReverbBoxUpdate` 0x319f18), pvars `{u8 type, u8 delay, u8 feedback, u8
+  inside, s32 depth}`. The **hero** position 0x13f3d0 (not the camera) minus +0x40, through the inverse rows +0x50: inside
+  `|x|,|y|,|z| ≤ 1` → depth `trunc(depth·(x+1)·0.5)` (≤ depth), inside = 1. On leaving: `x > 0` → the box's full depth
+  (owner 0); else type 0 depth 0 (off). The boxes sit in pairs at cave mouths with +x pointing in (Novalis 29 / 30 studio B
+  6000 at the two mouths of the `L01_Cave` music boxes 46 / 47; 36 studio C 5000; 38 / 39 pipe 3072).
+* **Env sample points** (section 0x88): `EnvNearestSamplePoint` 0x264e98 (disassembled), called only by `HeroTeleport`
+  0x2368e0 (the level start's `HeroTeleport(0x13e090)` in `GameStateUpdate`, vendor exit, ship, camera triggers): the
+  nearest point with `d ≤ 8` (strictly nearer wins) sets depth / type / delay / feedback directly with dirty |= 7 when its
+  +0x27 is set, and 0x151708 = +0x28 when that is ≥ 0, the main player idle (0x15170e = 0) and 0x1516f0..f2 = (0, 0, −1).
+  The Novalis point (249.3, 131.3, 56.1; studio C 1500) is 87 units from the spawn, so it never applies at the start.
+* **Commands** at the head of `sound_update`: dirty & 8 → `snd_SetReverbEx(2, 0, 0, 0, 0)`; else & 0x13 →
+  `SetReverbEx(2, type, depth, delay, fb)`; else & 4 → `snd_AutoReverb(2, depth, 12, 3)`; dirty = 0. Bit 8: `StartPssMovie`,
+  the level unload (`fun_00231608`, boot `0x1e9488`); bit 0x10: `MovieExitToGameplay`, the load's end. Core 2 = `SND_CORE_1`.
+  The checkpoint record `0x29ac10` copies depth / type / delay / fb to 0x1bb6ec.., the death reload `0x29adc8` restores them
+  with dirty |= 7.
+* **libsd types** used on the disc (98 boxes, 15 env points): 1 room 3, 2 studio A 19, 3 studio B 49, 4 studio C 18,
+  9 pipe 9 (boxes); points studio B / C and one type 0. Delay / feedback are 0 except level 5 box 14 (127 / 127 on studio C,
+  ignored by libsd for that type). No echo / delay type is used.
+* **Level sounds** `PlayLevelSoundAtMoby(i, flags, moby)` 0x2a1770: `i < 0x15f574 (= 2)` → `SoundSlotAlloc(level def i,
+  flags, moby, 0, 0x400)`, +0xe = i, +0x18 = moby. **Every call site** in the 19 overlays (102, found by the function's
+  body and `jal`; test below) is `(0, 1, 0)` = `Help_ComputeSize` 0x225a98 when the help text or voice option is on (19),
+  or `(1, 0, 0)` = a skill point (`if !0x13d408[k] { set; PlayLevelSoundAtMoby(1, 0, 0); ShowBanner(0x53d6) }`: Blarg flyer
+  and gunship kills on Novalis, weapon update `0x2d2450`, the other levels' classes, and `MenuInput`'s cheat entry) (83).
+  Defs 0 and 1 are the same on every level (far 90, vol 1638, no pitch bend, flags 14 / 2): moby 0 → 2-D, fixed volume, no
+  `rand` draw. The "menu beeps" are not level sounds.
+* **Underwater** 0x167494: `UnderwaterTest` 0x20e9f0 in the camera update (ported in `fog_zones::UnderwaterState`, run
+  by crate::fog_state); `sound_update` reads it with the water level 0x13f640 (§3.2).
+
+**In the port.**
+* EE: `ReverbRequest` (set / env point / command / checkpoint), `ReverbBox` updated after the emitters with
+  `FrameInput::hero_pos`, the command queued before the slots' commands. Level start: `hero_teleported(hero_pos)` on the
+  first frame; class teleports: `cinematic::hero_teleport` → `SoundSink::hero_teleported`; checkpoint:
+  `checkpoint::record` → `SoundSink::checkpoint_saved`, the engine's death respawn → `checkpoint_restored`. Movies keep the
+  request and the boxes' pvars (bit 8 at the stop, 0x10 at the exit). [L] The game keeps the request across a level change
+  (0x10 at the load's end resends the previous level's values when no `sound_update` ran between); the port starts each
+  level with the reverb off.
+* IOP: `SndCommand::{SetReverb, AutoReverb}` → `ReverbFx::{set, auto}`. A new type rebuilds the effect (tail cut, [M] as
+  libsd re-inits the work area); the depth is set at once; `AutoReverb` glides linearly over 12 × 200 samples [M: the unit].
+* Mix: 989snd sets the voice's reverb send for tone flag 1 (all level-bank tones; global-bank tones and VAG streams are
+  dry). [M] The SPU2's per-core routing is not modelled: the send takes reverb-flagged voices whatever core their voice is
+  on. Wet = `depth / 0x8000` × the effect, added before the master volume; nothing runs while the type is 0.
+* Effect (native, not the SPU engine; hardware_fidelity_layers.md "Result-level reproductions"): per channel four damped
+  feedback combs (the preset's same-side and cross-side loop times, and two in between; gains from the preset's decay
+  time) into two all-passes (the preset's times and gains), input low-passed at ≈ 11 kHz; the right side detuned by 23
+  samples. Character per type, derived from libsd's table: room 0.78 s, studio A 0.93 s, studio B 0.88 s, studio C 2.17 s,
+  hall 1.69 s, space 2.91 s, pipe 0.72 s with a 4.2 ms loop (a metallic ring); echo / delay a delay line of
+  `(delay + 1)·256` samples with feedback `fb / 128` [M, unused on the disc].
+* Underwater: `audio_out::sync_underwater` copies `FogState::underwater_flag()` into `AudioSystem::underwater` before the
+  tick; `class_sounds::sound_step` builds the listener with it and the hero's `water_level` (0x13f640). The flag is the
+  previous frame's camera update's (crate::fog_state runs after the tick): one tick late [L].
+* Level sounds: `AudioSystem::play_level_sound_at_moby` (log class −2), `SoundSink::play_level_sound`,
+  `World::play_level_sound`; the HUD's help box queues `(0, 1)` in `HudState::level_sounds`, crate::hud_render plays it.
+* `RC_AUDIO_TRACE=1` logs every reverb command and level sound; `RC_REVERB=0` (developer switch) mutes the wet output.
+
+**Evidence** (engine, frame-exact, `RC_SCENE=0`, scratch `reverb/`): Novalis, Ratchet placed in box 30
+(`RC_HERO_AT=152.16,134.53,62.8,-2.4426`) walking into the cave (jump, wrench): frame 1 `SetReverbEx type 3 depth 5125`,
+the glide to 6000 by frame 36 (out through +x, into the cave); the mix differs from `RC_REVERB=0` by −10…−19 dB (wet)
+around every level-bank sound, tails after the steps; two runs identical (WAV and PNG), PNGs identical to `RC_REVERB=0`.
+Open ground (`RC_HERO_AT=166,140`): no reverb command, WAV identical with and without the switch. Level 16 box 12 (studio
+C): `SetReverbEx type 4 depth 2497`, wet −17…−28 dB. Arrival scene: no reverb at the spawn; WAV identical with / without the
+switch and across two runs; music held until the resume as before. `RC_UNDERWATER=1`: underwater loop, pitch drop and the
+music at 3/5.
+
+**Tests**: `audio::reverb::tests` (box ramp / exits, dirty priorities, checkpoint, env radius, preset decay, glide, echo
+delay); `tests/reverb_conformance.rs` on all 19 levels: 98 boxes parse and behave, the wet signal in the mix (13 levels with
+boxes) and none away from them, deterministic; 13 enabled / 2 disabled env points; defs 0 / 1 play with a live handle and
+no draw; the 102 call sites.

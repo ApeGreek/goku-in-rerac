@@ -20,8 +20,8 @@
 //! | 10 | z = landing z |
 //!
 //! Not ported: the big-head cheat (`FUN_002fac80`), the bridge halves' visit-state persistence `FUN_0029b0a0` (the
-//! bridge lowers again from the mission byte on a reload), `UnlockPlanet` / `ShowPlanetBanner` / the save (engine
-//! requests, logged).
+//! bridge lowers again from the mission byte on a reload). `UnlockPlanet` / `ShowPlanetBanner` go through
+//! `crate::cinematic` (the saved game's planet bits, the HUD banner); the save is logged.
 
 use super::checkpoint::{self, Record};
 use crate::cinematic::{self, EngineRequest};
@@ -200,7 +200,8 @@ pub fn update(w: &mut World, id: MobyId) {
 /// State 8 (module doc).
 fn mission_done(w: &mut World, id: MobyId) {
     let level = w.svc.level;
-    w.svc.cinematic.requests.push(EngineRequest::UnlockPlanet { planet: PLANET });
+    crate::cinematic::unlock_planet(w, PLANET);
+    crate::cinematic::show_planet_banner(w, PLANET);
     let m = w.mm(id);
     m.mode &= !(mode::HIDDEN | mode::NO_ANIM);
     // The drop-in trigger's spawn id: killed this visit (mission + 2); spent at once without a mission of its own.

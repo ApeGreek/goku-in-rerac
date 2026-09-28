@@ -24,9 +24,12 @@
 //! the port), `HeroScanTargets` 0x22c080 (look target 0x1415c4: no target in range at the Novalis spawn, 0 in
 //! both savestates), the walk lean `HeroLean` 0x235638 (state 2) and the other writers of the joint records,
 //! the options 0x15edb1 / 0x15edb3 / 0x15edb5, Clank hidden (0x141628, 0 on Novalis), the hit flash 0x13f53e
-//! in the glow, the manipulators themselves (`AttachManipulator` and the quaternions of `0x26ee30`: the joint
-//! angles are computed, not applied to the pose), and the sound triggers of the advances (`PlayClassSound`
-//! pitch draws, the sound layer).
+//! in the glow, and the sound triggers of the advances (`PlayClassSound` pitch draws, the sound layer).
+//!
+//! **The joint modifiers** (Ratchet's moby +0x64, docs/plan/hero_gameplay.md §7): the records the springs update are
+//! linked into [`Idle::manips`] while active (`AttachManipulator` / `DetachManipulator`), with the eyelid nodes of the
+//! blink ([`BLINK_NODES`]); [`Idle::modifiers`] is the list as the evaluator reads it (written to his moby by the
+//! write-back). The walk / air lean `HeroLean` 0x235638 is [`Hero::lean`].
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // compare semantics spelled out as in the game.
 
 use super::physics::{fast_sin, ticks, turn_spring};
@@ -34,7 +37,7 @@ use super::states::Ctx;
 use super::Hero;
 use crate::ps2v::Pf;
 use crate::rng::Rng;
-use rc_formats::moby_anim::{self, AnimState, MobyAnimClass, MobyFrame};
+use rc_formats::moby_anim::{self, AnimState, JointModifier, MobyAnimClass, MobyFrame};
 use std::sync::Arc;
 
 /// A fidget record (0x179d10 + k·0x70, the fields from +0x44; level01 data, the same on every level).
@@ -93,12 +96,15 @@ pub fn dec_timer_s16(t: &mut i16) -> i32 {
     if 0 < *t { 0 } else { 2 }
 }
 
-/// One joint-manipulator record of the block at 0x17ab00 (stride 0xb0), the rotation part.
+/// One joint-manipulator record of the block at 0x17ab00 (stride 0xb0), the rotation part. Its first 0x40 bytes are
+/// the joint-modifier node `FUN_00227050` links into Ratchet's moby `+0x64` list while the record is active
+/// ([`JointRec::modifier`], [`Manip`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JointRec {
     /// Record index (address 0x17ab00 + 0xb0·rec).
     pub rec: u8,
-    /// +0xa0: Ratchet's joint.
+    /// +0xa0: Ratchet's class joint list the node is attached for (its target joint: the list's second byte list's
+    /// first entry, `rc_formats::moby_anim::list_target`).
     pub joint: i16,
     /// +0x01: manipulator attached.
     pub attached: bool,
@@ -112,11 +118,21 @@ pub struct JointRec {
     pub d: f32,
     /// +0xac: scale (reset to 1 after the spring).
     pub scale: f32,
+    /// Node +0x20..+0x28: the scale of the last active update (`+0xac` before its reset).
+    pub node_scale: f32,
 }
 
 impl JointRec {
     const fn new(rec: u8, joint: i16, k: u32, d: u32) -> JointRec {
-        JointRec { rec, joint, attached: false, cur: [0.0; 3], vel: [0.0; 3], target: [0.0; 3], k: f(k), d: f(d), scale: 1.0 }
+        JointRec { rec, joint, attached: false, cur: [0.0; 3], vel: [0.0; 3], target: [0.0; 3], k: f(k), d: f(d), scale: 1.0, node_scale: 1.0 }
+    }
+
+    /// The record's joint-modifier node (mode 0, composing): the quaternion `FUN_0026ee30(+0x10, +0x40)` builds from
+    /// the angles, [`euler_quat`], and the scale `+0xac` of the update that attached or refreshed it (no translation:
+    /// the translation springs +0x70.. have no writer in the port). `target` = the joint of the record's list.
+    pub fn modifier(&self, target: u8) -> JointModifier {
+        let s = self.node_scale;
+        JointModifier { quat: euler_quat(self.cur), scale: [s, s, s], ..JointModifier::compose(target) }
     }
 
     /// `0x227050` for a kind-0 record in mode 0 (Ratchet): when anything is set or still moving
@@ -134,6 +150,7 @@ impl JointRec {
                 self.vel[i] = v.to_f32();
             }
             self.attached = true;
+            self.node_scale = self.scale;
         } else {
             self.attached = false;
         }
@@ -142,18 +159,62 @@ impl JointRec {
     }
 }
 
-/// Indices into [`Idle::joints`].
+/// Indices into [`Idle::joints`] (in record order: the springs `0x2273d0` update the block in that order).
 pub mod joint {
-    /// Record 1 (joint 10): follows the head look (×0.55 / ×0.52).
-    pub const NECK: usize = 0;
-    /// Record 3 (joint 4): the head look (0x17ad54 / 0x17ad58 = its y / z angles).
-    pub const HEAD: usize = 1;
-    /// Record 12 (joint 21): follows the head look (/2.8, ×0.25).
-    pub const REC12: usize = 2;
-    /// Records 13..16 (joints 25..28): the idle secondaries.
-    pub const SECONDARY: usize = 3;
-    /// Record 17 (joint 24): scale from 0x15ee14.
-    pub const REC17: usize = 7;
+    /// Record 0 (list 9): the walk lean's x (`HeroLean` 0x235638).
+    pub const REC0: usize = 0;
+    /// Record 1 (list 10): follows the head look (×0.55 / ×0.52); the lean's z.
+    pub const NECK: usize = 1;
+    /// Record 2 (list 11): the lean's x.
+    pub const REC2: usize = 2;
+    /// Record 3 (list 4): the head look (0x17ad54 / 0x17ad58 = its y / z angles); the lean's x, y, z.
+    pub const HEAD: usize = 3;
+    /// Record 12 (list 21): follows the head look (/2.8, ×0.25).
+    pub const REC12: usize = 4;
+    /// Records 13..16 (lists 25..28): the idle secondaries; the lean's y / z.
+    pub const SECONDARY: usize = 5;
+    /// Record 17 (list 24): scale from 0x15ee14.
+    pub const REC17: usize = 9;
+}
+
+/// A node of Ratchet's joint-modifier list (moby `+0x64`) in the order the game links them (`AttachManipulator`
+/// 0x264370 puts a node in front; `DetachManipulator` 0x2643e8 unlinks it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Manip {
+    /// A joint record of the block 0x17ab00, by index into [`Idle::joints`].
+    Rec(u8),
+    /// Eyelid node k (0..7) of Ratchet's blink, 0x140080 + 0x40·k.
+    Blink(u8),
+}
+
+/// Ratchet's eyelid nodes (`0x227590`): the joint lists 0x17c640 and the blended poses (quaternion 0x17c4c0, scale
+/// 0x17c530, translation 0x17c5a0, 16 bytes each; level01 data), mode 1 with the weight `BLINK[frame]`.
+pub const BLINK_NODES: [(u8, [f32; 3], [f32; 3]); 7] = [
+    (15, [1.0, 1.0, 1.0], [f(0x4352_e1c0), f(0x42ab_40c7), f(0x4423_1d6f)]),
+    (16, [1.0, 1.0, 1.0], [f(0x4352_e1c0), f(0xc2ab_40c7), f(0x4423_1d6f)]),
+    (17, [1.0, 1.0, f(0x3f68_f5c3)], [f(0x4443_aacf), f(0x4401_8053), f(0xc402_357c)]),
+    (18, [1.0, 1.0, f(0x3f68_f5c3)], [f(0x4443_aacf), f(0xc400_7095), f(0xc402_357c)]),
+    (19, [1.0, 1.0, 1.0], [f(0x4476_43c3), f(0x440d_2d78), f(0x429d_1993)]),
+    (20, [1.0, 1.0, 1.0], [f(0x4476_43c3), f(0xc40c_1dba), f(0x429d_1993)]),
+    (21, [f(0x3f7a_e148), 1.0, 1.0], [f(0x439c_646a), f(0x4007_dec4), f(0x43f3_148a)]),
+];
+
+/// `FUN_00221e38(a, out, axis)`: the rotation quaternion about axis 0 / 1 / 2 by `−a` as the game builds it from the
+/// full angle: `c = 2·cos a`, `s = −sin a`, `k = sqrt(|c| + 2)`; `c ≥ 0`: `w = k/2`, `v = s/k`; `c < 0`: `v = k/2`,
+/// `w = s/k` (so `v ≥ 0` there); `v` on the axis.
+pub fn axis_quat(a: f32, axis: usize) -> [f32; 4] {
+    let (c, s) = (2.0 * a.cos(), -a.sin());
+    let k = (c.abs() + 2.0).sqrt();
+    let (v, w) = if c < 0.0 { (0.5 * k, s / k) } else { (s / k, 0.5 * k) };
+    let mut q = [0.0, 0.0, 0.0, w];
+    q[axis] = v;
+    q
+}
+
+/// `FUN_0026ee30(out, e)`: Euler angles → quaternion `(q_x(e.x) ⊗ q_y(e.y)) ⊗ q_z(e.z)` ([`axis_quat`]).
+pub fn euler_quat(e: [f32; 3]) -> [f32; 4] {
+    use rc_formats::moby_anim::quat_product;
+    quat_product(quat_product(axis_quat(e[0], 0), axis_quat(e[1], 1)), axis_quat(e[2], 2))
 }
 
 /// The idle fields of the hero block and the globals the idle routines keep.
@@ -193,8 +254,10 @@ pub struct Idle {
     pub clank_fidget_timer: i32,
     /// 0x15ee14: record 17's scale source (approaches 0.92 by ≤ 0.05 per tick).
     pub rec17_scale: f32,
-    /// Records 1, 3, 12..17 of the joint block 0x17ab00.
-    pub joints: [JointRec; 8],
+    /// Records 0..3, 12..17 of the joint block 0x17ab00.
+    pub joints: [JointRec; 10],
+    /// Ratchet's joint-modifier list (moby `+0x64`), head first: the attached joint records and eyelid nodes.
+    pub manips: Vec<Manip>,
 }
 
 impl Default for Idle {
@@ -225,7 +288,9 @@ impl Idle {
             clank_fidget_timer: 0,
             rec17_scale: f(0x3f6b_851f),
             joints: [
+                JointRec::new(0, 9, 0, 0),
                 JointRec::new(1, 10, 0x3c03_126f, 0x3e99_999a),
+                JointRec::new(2, 11, 0, 0),
                 JointRec::new(3, 4, 0x3be5_6042, 0x3e99_999a),
                 JointRec::new(12, 21, 0x3df5_c28f, 0x3e99_999a),
                 JointRec::new(13, 25, 0x3c75_c28f, 0x3e99_999a),
@@ -234,6 +299,7 @@ impl Idle {
                 JointRec::new(16, 28, 0x3c8b_4396, 0x3e57_0a3d),
                 JointRec::new(17, 24, 0x3cf5_c28f, 0x3e4c_cccd),
             ],
+            manips: Vec::new(),
         }
     }
 
@@ -252,6 +318,31 @@ impl Idle {
 
     /// Ratchet's eyelid value this tick (`BLINK[frame]`, 0 when not blinking).
     pub fn blink_value(&self) -> f32 { if self.blink == 0 { 0.0 } else { BLINK[self.blink as usize % 12] } }
+
+    /// `AttachManipulator`: link `m` in front of the list (a node already linked stays where it is).
+    fn attach(&mut self, m: Manip) {
+        if !self.manips.contains(&m) { self.manips.insert(0, m); }
+    }
+
+    /// `DetachManipulator`: unlink `m`.
+    fn detach(&mut self, m: Manip) { self.manips.retain(|&x| x != m); }
+
+    /// Ratchet's joint-modifier list (moby `+0x64`) as the evaluator reads it, head first, each node's joint list
+    /// resolved through `targets` (per class joint list, its target joint; 0xff or missing: the node is dropped).
+    pub fn modifiers(&self, targets: &[u8]) -> Vec<JointModifier> {
+        let target = |list: i16| targets.get(list as usize).copied().filter(|&t| t != 0xff);
+        self.manips.iter().filter_map(|&m| match m {
+            Manip::Rec(i) => {
+                let r = &self.joints[i as usize];
+                Some(r.modifier(target(r.joint)?))
+            }
+            Manip::Blink(k) => {
+                let (list, scale, trans) = BLINK_NODES[k as usize];
+                let joint = target(list as i16)?;
+                Some(JointModifier { joint, mode: 1, weight: self.blink_value(), quat: [0.0, 0.0, 0.0, 1.0], scale, trans })
+            }
+        }).collect()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -409,6 +500,14 @@ impl Back {
 }
 
 // ------------------------------------------------------------------------------------------------
+
+/// `fast_add_rotations` / `fast_subtract_rotations`: an angle wrapped into [−π, π].
+fn wrap_angle(a: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let mut a = a % TAU;
+    if PI < a { a -= TAU } else if a < -PI { a += TAU }
+    a
+}
 
 /// `0x2705a8(a, b, t)`: `a + (b − a)·t`.
 fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
@@ -646,8 +745,8 @@ impl Hero {
                 }
             }
         } else if v.flags & 2 != 0 {
-            // Weapon-in-hand idle (0x1413f8 / 0x1413fa with 0x1415e4, 0x140058): never set on foot here.
-            let keep = self.f13f8 != 0 && self.f13fa != 0;
+            // A weapon with the arm raised keeps its stance (0x1413f8 / 0x1413fa with 0x1415e4, 0x140058).
+            let keep = super::weapons::stance_kept(self, v.seq_b);
             if !keep {
                 self.f13f8 = 0;
                 if idle == 0x54 {
@@ -670,6 +769,8 @@ impl Hero {
             self.idle.clank_fidget_timer = c.rng.rand_range(ticks(110), ticks(270));
             self.clank_fidget(c.rng);
         }
+        // The weapon's standing stance while it is out with the arm raised (super::weapons).
+        super::weapons::idle_stance(self, c);
     }
 
     /// `0x241e00`: the fidget chance. Returns the record picked, or None. Draws one `randf(0, 1)` whenever a
@@ -733,7 +834,86 @@ impl Hero {
         self.idle_secondaries(seq_b, rng);
         self.blink_update(seq_b, counter, rng);
         self.clank_glow_blink(counter, rng);
-        for j in &mut self.idle.joints { j.update(); }
+        // 0x2273d0: each record in order; an active one is (re)attached, an idle one detached.
+        let i = &mut self.idle;
+        for k in 0..i.joints.len() {
+            i.joints[k].update();
+            let m = Manip::Rec(k as u8);
+            if i.joints[k].attached { i.attach(m) } else { i.detach(m) }
+        }
+    }
+
+    /// `HeroLean` 0x235638 (called by the physics of 2 / 0x73, 6 / 0x2d, the jump group and 0x65 on foot, 8 and 0x81):
+    /// the body lean from the turn residual 0x13f4d8 as joint-record targets (records 0..3 and 13..16, their springs
+    /// run in [`Hero::idle_updates`]) and the spring constants of records 0..3. State 2: substate 1 (running) leans by
+    /// the clamped residual (±1.4) and, for record 0, by the speed `|eff.xy| / (5.7·dt)`; otherwise by
+    /// `1.25·r·|r|` of half the residual (±0.8). 8 / 0x81 (pack glide / Thruster hover): softer springs and bigger
+    /// angles (0x81: record 0 also from the drift of the displacement against the facing). Groups 2 / 4 (falling,
+    /// jumping): as running, without record 0. Native `f32`.
+    pub(super) fn lean(&mut self) {
+        use joint::{HEAD, NECK, REC0, REC2, SECONDARY};
+        let r = self.yaw_residual.to_f32();
+        let dt = super::physics::DT.to_f32();
+        let (state, substate, group) = (self.state, self.substate, self.group);
+        let (speed, disp, yaw) = (self.eff_len_xy.to_f32(), self.disp, self.rot[2].to_f32());
+        let j = &mut self.idle.joints;
+        let springs = |j: &mut [JointRec; 10], kd: [(u32, u32); 4]| {
+            for (i, (k, d)) in [REC0, NECK, REC2, HEAD].into_iter().zip(kd) { (j[i].k, j[i].d) = (f(k), f(d)); }
+        };
+        let body = |j: &mut [JointRec; 10], z13: f32, z14: f32| {
+            j[SECONDARY].target[2] = z13;
+            for k in 1..4 { j[SECONDARY + k].target[2] = z14; }
+        };
+        let walk_kd = [(0x3d23_d70a, 0x3e4c_cccd), (0x3d23_d70a, 0x3e4c_cccd), (0x3d23_d70a, 0x3e4c_cccd), (0x3ca3_d70a, 0x3e4c_cccd)];
+        if state == 2 {
+            springs(j, walk_kd);
+            if substate == 1 {
+                let v = r.clamp(-1.4, 1.4);
+                let sp = (speed / (dt * 5.7)).clamp(0.0, 1.0);
+                j[REC0].target[0] = -v * 0.14 * sp;
+                j[NECK].target[2] = v * 0.16;
+                j[REC2].target[0] = v * -0.12;
+                j[HEAD].target = [v.abs() * 0.16, v.abs() * -0.15, v * 0.65];
+                body(j, -v * 0.35, -v * 0.3);
+                j[SECONDARY].target[1] = v.abs() * 0.35;
+                j[SECONDARY + 1].target[1] = v.abs() * 0.2;
+            } else {
+                let h = (r * 0.5).clamp(-0.8, 0.8);
+                let v = h * h.abs() * 1.25;
+                j[NECK].target[2] = v;
+                j[HEAD].target[2] = v;
+                j[HEAD].target[1] = v.abs() * 0.25;
+                body(j, -v * 0.35, -v * 0.3);
+            }
+        } else if state == 8 || state == 0x81 {
+            springs(j, [(0x3c03_126f, 0x3da3_d70a), (0x3c75_c28f, 0x3da3_d70a), (0x3c75_c28f, 0x3da3_d70a), (0x3c03_126f, 0x3dcc_cccd)]);
+            let v = if state == 0x81 { (r * 0.8).clamp(-1.1, 1.1) } else { (r * 1.6).clamp(-1.25, 1.25) };
+            j[REC0].target[0] = (-v * 0.52).clamp(-0.28, 0.28);
+            j[HEAD].target[2] = (v * 1.2).clamp(-0.6, 0.6);
+            j[NECK].target[2] = v * 0.58;
+            j[REC2].target[0] = v * -0.28;
+            j[HEAD].target[1] = (v.abs() * 0.2).clamp(-0.2, 0.2);
+            j[HEAD].target[0] = v.abs() * 0.16;
+            if state == 0x81 {
+                if dt * 0.5 < speed {
+                    let a = wrap_angle(disp[1].to_f32().atan2(disp[0].to_f32()) - yaw);
+                    let k = speed * 3.0;
+                    let lim = f(0x3edf_66f3);
+                    j[REC0].target[0] = (-a.sin() * k).clamp(-lim, lim);
+                    j[REC0].target[1] = (a.cos() * k).clamp(-lim, lim);
+                }
+                j[REC0].target[1] = wrap_angle(j[REC0].target[1] + f(0xbdfa_35dd));
+            }
+            body(j, -v * 0.35, -v * 0.3);
+        } else if group == 2 || group == 4 {
+            springs(j, walk_kd);
+            let v = r.clamp(-1.4, 1.4);
+            j[SECONDARY].target[2] = -v * 0.35;
+            j[NECK].target[2] = v * 0.29;
+            j[REC2].target[0] = v * -0.27;
+            j[HEAD].target[2] = v * 0.87;
+            for k in 1..4 { j[SECONDARY + k].target[2] = -v * 0.3; }
+        }
     }
 
     /// `0x22b928`: record 17's scale; in state 0 on sequence 0..2 or 0x3a with no look target, the head-look
@@ -860,6 +1040,10 @@ impl Hero {
         if i.blink != 0 {
             i.blink += 1;
             if 12 <= i.blink { i.blink = 0; }
+            // The eyelid nodes: all detached at the end, else each attached (in front, node 0 first) if it is not.
+            for k in 0..BLINK_NODES.len() as u8 {
+                if i.blink == 0 { i.detach(Manip::Blink(k)) } else { i.attach(Manip::Blink(k)) }
+            }
         }
     }
 
@@ -928,6 +1112,73 @@ mod tests {
         fn frame_count(&self, s: u8) -> u8 { self.rec.frame_count(s) }
         fn set_loop(&mut self, a: i32, b: i32) { self.rec.set_loop(a, b); }
         fn clear_loop(&mut self) { self.rec.clear_loop(); }
+    }
+
+    /// The joint-modifier list: a blink links the seven eyelid nodes in front (node 6 first, as `AttachManipulator`
+    /// prepends in the order 0..6), weighted by `BLINK[frame]`, and unlinks them at its end; active joint records are
+    /// linked (and sent to Ratchet's moby by the write-back), idle ones unlinked.
+    #[test]
+    fn modifier_list_order_and_blink() {
+        let mut t = Idler::new(99, 150);
+        t.hero.fidget_timer = 100_000;
+        t.hero.idle.sec_timer = [100_000; 4];
+        t.hero.idle.cooldown = 1000;
+        t.hero.idle.blink_period = 0x68;
+        t.hero.idle.blink_next = -1;
+        t.hero.idle.counter = 500;
+        let targets: Vec<Vec<u8>> = (0..32u8).map(|l| vec![l + 100]).collect();
+        t.hero.set_joint_targets(&targets);
+        t.tick();
+        // The springs run after the blink: record 17 (its scale approaching 0.92) is linked in front of the eyelids.
+        let m = &t.hero.idle.manips;
+        let mut want = vec![Manip::Rec(joint::REC17 as u8)];
+        want.extend((0..7u8).rev().map(Manip::Blink));
+        assert_eq!(&m[..8], &want[..], "{m:?}");
+        let mods = t.hero.idle.modifiers(&t.hero.joint_targets);
+        assert_eq!((mods[1].joint, mods[1].mode, mods[1].weight), (121, 1, 0.5));
+        assert_eq!(t.moby.joint_mods, mods, "the write-back carries the list");
+        for _ in 3..=12 { t.tick(); }
+        assert_eq!(t.hero.idle.blink, 0);
+        assert!(!t.hero.idle.manips.iter().any(|x| matches!(x, Manip::Blink(_))));
+        // A record at rest with nothing set is unlinked; a scale ≠ 1 links it again, in front.
+        let rec17 = t.hero.idle.joints[joint::REC17];
+        assert!(rec17.attached, "record 17 approaches 0.92");
+        assert_eq!(t.hero.idle.modifiers(&t.hero.joint_targets).iter().find(|m| m.joint == 124).map(|m| m.scale[0]), Some(rec17.node_scale));
+    }
+
+    /// `FUN_00221e38` turns by −a about its axis; `FUN_0026ee30` composes x, then y, then z.
+    #[test]
+    fn euler_node_quaternions() {
+        let q = axis_quat(0.3, 2);
+        assert!((q[2] + (0.15f32).sin()).abs() < 1e-7 && (q[3] - (0.15f32).cos()).abs() < 1e-7);
+        // Past 90° the game's other branch: the same rotation with the vector part ≥ 0.
+        let q = axis_quat(-2.5, 0);
+        assert!(q[0] >= 0.0 && ((q[0] * q[0] + q[3] * q[3]) - 1.0).abs() < 1e-6);
+        assert!((q[0] - (1.25f32).sin()).abs() < 1e-6 && (q[3] - (1.25f32).cos()).abs() < 1e-6);
+        // Record 1 at the Novalis idle savestate: angles (0, −0.004922, 0.186369) → RAM (−0.000229, 0.00245, −0.09305, 0.995658).
+        let q = euler_quat([0.0, -0.004_922_098, 0.186_369_34]);
+        let ram = [-0.000_229_000_01, 0.002_450_368_8, -0.093_049_56, 0.995_658_3];
+        assert!(q.iter().zip(ram).all(|(a, b)| (a - b).abs() < 1e-6), "{q:?}");
+    }
+
+    /// `HeroLean` while running (state 2, substate 1): the targets of records 0..3 and 13..16 from the residual.
+    #[test]
+    fn running_lean_targets() {
+        let mut h = Hero::new();
+        (h.state, h.substate) = (2, 1);
+        h.yaw_residual = Pf::f(0.5);
+        h.eff_len_xy = super::super::physics::DT * Pf::f(5.7);
+        h.lean();
+        let j = &h.idle.joints;
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+        assert!(near(j[joint::REC0].target[0], -0.07) && near(j[joint::NECK].target[2], 0.08) && near(j[joint::REC2].target[0], -0.06));
+        assert!(near(j[joint::HEAD].target[0], 0.08) && near(j[joint::HEAD].target[1], -0.075) && near(j[joint::HEAD].target[2], 0.325));
+        assert!(near(j[joint::SECONDARY].target[2], -0.175) && near(j[joint::SECONDARY + 3].target[2], -0.15));
+        assert!(near(j[joint::HEAD].k, 0.02) && near(j[joint::REC0].k, 0.04));
+        // Clamped at ±1.4.
+        h.yaw_residual = Pf::f(3.0);
+        h.lean();
+        assert!(near(h.idle.joints[joint::HEAD].target[2], 1.4 * 0.65));
     }
 
     struct Idler {

@@ -19,7 +19,8 @@
 //!
 //! Ported rows: the wrench (item 8, fire in [`super::melee`] ahead of the table, update `melee::wrench_update`, its
 //! thrown flight [`super::comet`]), the Swingshot (item 12, [`super::swingshot`]) and the Bomb Glove (item 10, the
-//! throw gloves' fire case and the glove's update: [`super::weapons`]). The game's other cases, not ported yet (their rows hold `None`):
+//! throw gloves' fire case and the glove's update: [`super::weapons`]) and the Pyrocitor (item 16, no fire case: its
+//! update fires it, [`super::pyrocitor`]). The game's other cases, not ported yet (their rows hold `None`):
 //! the throw weapons 10 / 0x11 / 0x14 / 0x18 / 0x19 (→ 0x23 / `0x22ee08`), 0xf, 0x12 (→ 0x20), 0x15, the Hologuise
 //! 0x1f (the 18-tick timer 0x14162e), the PDA 0x20 (`OpenVendorMenu`); the holster check 0x2405f8.
 
@@ -51,11 +52,13 @@ pub struct HandItemKind {
 }
 
 /// The hand items the port knows (see the module doc).
-pub static HAND_ITEMS: [HandItemKind; 3] = [
+pub static HAND_ITEMS: [HandItemKind; 4] = [
     HandItemKind { id: super::items::item::WRENCH, name: "wrench", fire: None, update: ItemUpdate::Slot(super::melee::wrench_update) },
     HandItemKind { id: super::swingshot::SWINGSHOT, name: "Swingshot", fire: Some(super::swingshot::fire), update: ItemUpdate::Hero(super::swingshot::item_update) },
     // The throw gloves' case of the weapon check (0x23 / the arm) and the Bomb Glove's update 0x2d8330 (super::weapons).
     HandItemKind { id: super::items::item::BOMB_GLOVE, name: "Bomb Glove", fire: Some(super::weapons::fire), update: ItemUpdate::Slot(super::weapons::glove_update) },
+    // No weapon-check case: the Pyrocitor's update 0x2cd458 fires it (super::pyrocitor).
+    HandItemKind { id: super::pyrocitor::PYROCITOR, name: "Pyrocitor", fire: None, update: ItemUpdate::Slot(super::pyrocitor::update) },
 ];
 
 /// The row of item `id`.
@@ -116,11 +119,22 @@ pub fn flush_item_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sounds:
         let (o_class, pos) = (item.o_class, item.position);
         for index in list { sounds.item_sound(o_class, pos, index, 0, rng); }
     }
+    let item = h.items.slot.item.as_ref().map(|it| (it.o_class, it.position));
     for cmd in std::mem::take(&mut h.fx.item_voices) {
         match cmd {
             super::packs::SoundCmd::Loop { n, sound } => h.packs.loops[n] = sounds.voice(moby, sound, 4, rng),
             super::packs::SoundCmd::Voice { index, flags } => { sounds.voice(moby, index, flags, rng); }
             super::packs::SoundCmd::Release { slot } => sounds.release(moby, slot),
+            super::packs::SoundCmd::ItemLoop { n, index, flags } => {
+                let alive = h.fx.item_loops[n].is_some_and(|s| sounds.alive(s));
+                if let (false, Some((o_class, pos))) = (alive, item) {
+                    let s = sounds.item_sound(o_class, pos, index, flags, rng);
+                    h.fx.item_loops[n] = (s >= 0).then_some(s);
+                }
+            }
+            super::packs::SoundCmd::ItemRelease { n } => {
+                if let Some(s) = h.fx.item_loops[n].take() { sounds.release(moby, s); }
+            }
         }
     }
 }

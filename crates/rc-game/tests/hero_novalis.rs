@@ -372,6 +372,9 @@ fn novalis_hero_digest() {
             text = text.replace(&format!(", script: {:?}", rc_game::follow_camera::script::ScriptCamera::default()), "");
             // The hand slot's hand point 0x1403c0 (the thrown wrench's target; no hand item in these runs).
             text = text.replace(", hand_point: [0.0, 0.0, 0.0]", "");
+            // RC_HERO_DIGEST_NO_IDLE=1: without the idle block (the cosmetic joint records, blink and back items),
+            // to show that a change to Ratchet's joint modifiers leaves everything else as it was.
+            if std::env::var("RC_HERO_DIGEST_NO_IDLE").is_ok_and(|v| v == "1") { text = cut_block(&text, ", idle: Idle {"); }
             text.hash(&mut h);
             let _ = writeln!(out, "{name} {t} state {:#x} timer {} pos {:?} {:016x}", g.hero.state, g.hero.timer, g.hero.position(), h.finish());
         }
@@ -380,6 +383,23 @@ fn novalis_hero_digest() {
         std::fs::write(&path, &out).unwrap();
         eprintln!("hero digest: {} lines -> {path}", out.lines().count());
     }
+}
+
+/// `text` without the Debug block that starts with `start` (up to its matching closing brace).
+fn cut_block(text: &str, start: &str) -> String {
+    let Some(i) = text.find(start) else { return text.to_string() };
+    let mut depth = 0;
+    for (k, c) in text[i..].char_indices() {
+        match c {
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => {
+                depth -= 1;
+                if depth == 0 { return format!("{}{}", &text[..i], &text[i + k + 1..]); }
+            }
+            _ => {}
+        }
+    }
+    text.to_string()
 }
 
 /// Hero-block fields added after a digest baseline, with their default 0 (dropped from the hashed text so an old

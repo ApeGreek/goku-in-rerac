@@ -134,11 +134,12 @@ impl PageMenu {
     /// label's id table. False (nothing changed) when the Options page, its list or a model page is missing.
     pub fn install_port_page(&mut self, ov: &Overlay) -> bool {
         if self.pages.contains_key(&PAGE) { return true; }
-        let model = if ENTRIES.len() <= 2 { MODEL_FEW } else { MODEL_MANY };
-        let (Some(model), true) = (self.pages.get(&model).cloned(), self.pages.contains_key(&OPTIONS)) else { return false };
-        let Some(Data::List(opts)) = self.widgets.get(&OPTIONS_LIST).map(|w| &w.data) else { return false };
+        let ad = self.addrs.clone();
+        let model = if ENTRIES.len() <= 2 { ad.port_model_few } else { ad.port_model_many };
+        let (Some(model), true) = (self.pages.get(&model).cloned(), self.pages.contains_key(&ad.port_options)) else { return false };
+        let Some(Data::List(opts)) = self.widgets.get(&ad.port_options_list).map(|w| &w.data) else { return false };
         let n = opts.items.len();
-        let at = opts.items.iter().position(|it| it.action == 3 && it.arg == QUIT_PAGE).unwrap_or(n);
+        let at = opts.items.iter().position(|it| it.action == 3 && it.arg == ad.port_quit).unwrap_or(n);
         // The title: the model's title label (flags 0xf, large, centred) with the port title.
         let Some(mut title) = self.widgets.get(&model.widgets[0]).cloned() else { return false };
         let Data::Label(l) = &mut title.data else { return false };
@@ -159,14 +160,14 @@ impl PageMenu {
         let mut widgets = model.widgets;
         widgets[0] = TITLE_W;
         widgets[3] = LIST_W;
-        let page = Page { addr: PAGE, seqs: model.seqs, parent: OPTIONS, kind: KIND, focus: LIST_W, widgets, pending: 0 };
+        let page = Page { addr: PAGE, seqs: model.seqs, parent: ad.port_options, kind: KIND, focus: LIST_W, widgets, pending: 0 };
         // The Options description label: the disc table (one id per item, variant 0) with ours inserted.
-        if let Some(Data::Label(l)) = self.widgets.get_mut(&OPTIONS_LABEL).map(|w| &mut w.data) {
+        if let Some(Data::Label(l)) = self.widgets.get_mut(&ad.port_options_label).map(|w| &mut w.data) {
             let mut t: Vec<u32> = (0..n as u32).map(|k| ov.u32(l.id.wrapping_add(k.wrapping_mul(l.stride) & !3)).unwrap_or(0)).collect();
             t.insert(at, text::DESCRIPTION as u32);
             l.table = Some(t);
         }
-        if let Some(Data::List(opts)) = self.widgets.get_mut(&OPTIONS_LIST).map(|w| &mut w.data) {
+        if let Some(Data::List(opts)) = self.widgets.get_mut(&ad.port_options_list).map(|w| &mut w.data) {
             opts.items.insert(at, Item { label: text::ENTRY as i16, action: 3, arg: PAGE, sublabel: 0, hl: 0 });
         }
         self.widgets.insert(TITLE_W, title);

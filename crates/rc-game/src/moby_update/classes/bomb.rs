@@ -24,10 +24,10 @@
 //! [`smoke`]) and the explosion light (class 0x27f, template 0x20a930) are ported with their draws at the game's point,
 //! so a dry explosion leaves the one `rand` stream where the game leaves it (`tests/explosion_novalis.rs`).
 //!
-//! Native `f32`. **Not ported** (their draws are not made: the stream still diverges after a bomb **in water**;
-//! counted in `Services::fx.unported`): the under-water bubbles and splash (`0x2840e0`, `0x2b82a8`, `0x2ff768`,
-//! `0x2845a8`), the under-water scorch / sparks (`0x288d90`, `0x280bd0`; the game spawns them only when the bomb was in
-//! water, +0x68 ≠ 0), the aim-preview `0x2c2be0`, the pass-through classes of the hit test (update `0x160770`), the
+//! The water branch (entry splash, ripple and drops, the sinking bubbles, the deep burst and its sound, the
+//! shallow-water scorch and sparks) is [`super::bomb_water`], with the game's draws.
+//!
+//! Native `f32`. **Not ported** (counted in `Services::fx.unported`): the aim-preview `0x2c2be0`, the pass-through classes of the hit test (update `0x160770`), the
 //! gold-glove colour shifts (`0x270fa8`, `0x270f48`: identity without the gold glove).
 
 use crate::moby_runtime::MobyId;
@@ -204,7 +204,7 @@ fn fly(w: &mut World, id: MobyId) {
         life = p::i16(&m.pvars, pv::LIFE);
         if wt != 0 { p::set_i16(&mut m.pvars, pv::WATER, wt.wrapping_add(1)); }
     }
-    if water != 0 { w.svc.unported("bomb bubbles 0x2840e0"); }
+    if water != 0 { super::bomb_water::sink_bubble(w, id, vel); }
     let tmpl = template(id, vel, life);
     let pos = w.m(id).position;
     let hit = sv::line_hit_in(w.table, w.svc, w.classes, w.coll, pv4(old), pv4(pos), 0x10, Some(id), &tmpl);
@@ -223,11 +223,11 @@ fn fly(w: &mut World, id: MobyId) {
         Some(h) => {
             let water_face = h.moby.is_none() && h.surface_id() == 0;
             if water == 0 && water_face && vel[2] < 0.0 {
-                // Into water: the splash, sink slowly (the ripple and the splash particles are not ported).
-                w.svc.unported("bomb splash 0x2b82a8 / 0x2845a8");
+                // Into water: sink slowly; the ripple, splash and drops (`bomb_water::entry`).
                 let m = w.mm(id);
                 p::set_i16(&mut m.pvars, pv::WATER, 1);
                 p::set_v4f(&mut m.pvars, pv::VEL, [0.0, 0.0, dt() * -1.5, 0.0]);
+                super::bomb_water::entry(w, id, h.point[2]);
             } else if !(water == 0 && water_face) {
                 let young = (life as i32) >= 300 - 10;
                 let own = h.moby.is_some() && (h.moby == w.hero_moby);
@@ -300,7 +300,7 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
     let to_cam = sub3(cam, pos);
     let dcam = len3(to_cam);
     let water = p::i16(&w.m(id).pvars, pv::WATER);
-    let dry = water < 20;
+    let dry = (water as i32) < w.ticks(20);
     if dry {
         // The sphere lists the mobys; 0x26f8f8 hits them (damage 2, flags 0x830000).
         let tmpl = HitTemplate { dir: [Pf::ZERO, Pf::ZERO, Pf::ONE, Pf::b(0x45af_df66)], attacker: Some(id), flags: 0x83_0000, b18: 2, b19: 1, h1a: BOMB_CLASS as u16, damage: Pf::f(2.0), w20: 1 };
@@ -364,7 +364,7 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
         let m = w.mm(id);
         p::set_ff(&mut m.pvars, pv::VEL, 0.0);
     } else {
-        w.svc.unported("bomb under-water debris 0x2840e0");
+        super::bomb_water::deep_burst(w, id, k);
         let m = w.mm(id);
         p::set_ff(&mut m.pvars, pv::VEL, 0.0);
     }
@@ -372,9 +372,9 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
     if dry {
         w.play_sound(0, 0, id);
     } else {
-        w.svc.unported("bomb under-water sound 0x2a16c0(0x16)");
+        w.play_sound_as(0x16, 0, id, 0);
     }
-    if water != 0 { w.svc.unported("bomb ground scorch 0x288d90 / 0x280bd0"); }
+    if water != 0 { super::bomb_water::shallow_scorch(w, id); }
     // The camera shake along up (0x167260) for 25 ticks.
     let amp = if dcam < 20.0 { 0.4 - dcam * 0.0175 } else { f32::from_bits(0x3d4c_ccd0) };
     let t = w.ticks(25);

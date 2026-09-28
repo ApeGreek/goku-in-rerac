@@ -529,7 +529,7 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     let wp = moby_anim::evaluate_chains(&class.anim, &it.anim, it.snapshot.as_ref(), &[wchain.as_slice()]);
     let tip = list_point(&wp[0], &it.rows, it.position, it.scale);
     let Some(hchain) = env.data.hero_chains.first().filter(|c| !c.is_empty()) else { return };
-    let Some(hp) = anim.eval_chains_with(&[hchain.as_slice()], &hero.weapons.layers).into_iter().next() else { return };
+    let Some(hp) = anim.eval_chains_with(&[hchain.as_slice()], &hero.weapons.layers, &table.mobys[env.hero_moby].joint_mods).into_iter().next() else { return };
     let r = &table.mobys[env.hero_moby];
     let rrows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| r.rows[i].map(f32::to_bits));
     let hand = list_point(&hp, &rrows, [r.position[0], r.position[1], r.position[2]], r.scale);
@@ -799,7 +799,7 @@ mod tests {
         let mut frame = 100;
         let mut hand = Vec::new();
         for _ in 0..8 {
-            let env = ItemEnv { data: &data, pad: &pad, frame, hero_moby: 0, coll: None, camera: None };
+            let env = ItemEnv { data: &data, pad: &pad, frame, hero_moby: 0, coll: None, camera: None, camera_up: None };
             items::items_update(&mut r.hero, &mut g, &mut table, &anim, &mut rng, &env, &mut items::NoHits);
             hand.push((r.hero.items.slot.id, r.hero.items.slot.state, r.hero.items.slot.item.as_ref().map(|m| m.o_class)));
             frame += 1;
@@ -816,7 +816,7 @@ mod tests {
         // □ with the glove in hand swaps back to the wrench.
         let mut p = crate::pad::PadState::default();
         p.update(Some(&PadInput::neutral().press(button::SQUARE).bytes()), false);
-        let env = ItemEnv { data: &data, pad: &p, frame, hero_moby: 0, coll: None, camera: None };
+        let env = ItemEnv { data: &data, pad: &p, frame, hero_moby: 0, coll: None, camera: None, camera_up: None };
         items::items_update(&mut r.hero, &mut g, &mut table, &anim, &mut rng, &env, &mut items::NoHits);
         assert_eq!((r.hero.items.target, r.hero.items.slot.state, g.wrench_flag), (8, 3, 1));
     }

@@ -732,6 +732,88 @@ fn layer_local(class: &MobyAnimClass, l: &PoseLayer, j: usize) -> Option<(V4, Op
 /// for each joint a layer covers, `q = nlerp_flip(q, q_layer, 1 − w, w)`, the translation lerped by `w` toward the
 /// layer's, and the inherited scale where the layer's keys carry one.
 pub fn evaluate_layered(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, layers: &[PoseLayer]) -> Vec<Rows> {
+    evaluate_posed(class, s, snap, layers, &[])
+}
+
+/// A node of a moby's runtime **joint-modifier list** (moby `+0x64`, §6.4): what `AttachManipulator` 0x264370 links
+/// in front of the list for one of the class's joint lists, and what the owner rewrites every tick (Ratchet's head
+/// look and idle joint records 0x17ab00, his eyelids 0x140080, an NPC's head turn, …). `joint` is the joint the node
+/// acts on: the first entry of the second byte list of that joint list (`pb[pb[0] + 4]`, [`list_target`]).
+///
+/// | node | field |
+/// |---|---|
+/// | +0x03 | `mode`: 0 composes (`q ← q ⊗ quat`, inherited scale `∘ scale`, translation `+ trans`), else blends toward the node by `weight` |
+/// | +0x04 | target joint record |
+/// | +0x0c | `weight` (mode ≠ 0) |
+/// | +0x10 / +0x20 / +0x30 | `quat`, `scale`, `trans` |
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JointModifier {
+    pub joint: u8,
+    pub mode: u8,
+    pub weight: f32,
+    pub quat: [f32; 4],
+    pub scale: [f32; 3],
+    pub trans: [f32; 3],
+}
+
+impl JointModifier {
+    /// A composing node (mode 0) with the identity rotation, unit scale and no translation: what `AttachManipulator`
+    /// leaves before the owner writes its values.
+    pub fn compose(joint: u8) -> JointModifier { JointModifier { joint, mode: 0, weight: 0.0, quat: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], trans: [0.0; 3] } }
+}
+
+/// The joint a joint-modifier (or pose-layer) node made for a class joint list acts on: the first entry of the list's
+/// second byte list (`AttachManipulator` 0x264370: `pb[pb[0] + 4]`, `pb` = the list, `pb[0]` = the low byte of its
+/// first count). `second` = [`crate::gadget::joint_list`]`(..).1`.
+pub fn list_target(second: &[u8]) -> Option<u8> { second.first().copied() }
+
+/// The Hamilton product `a ⊗ b` (`fun_001fa3c0` 0x221d78 and the evaluator's composing modifier): xyz =
+/// `a.w·b + b.w·a + a × b`, w = `a.w·b.w − a·b`.
+pub fn quat_product(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [
+        a[3] * b[0] + b[3] * a[0] + (a[1] * b[2] - a[2] * b[1]),
+        a[3] * b[1] + b[3] * a[1] + (a[2] * b[0] - a[0] * b[2]),
+        a[3] * b[2] + b[3] * a[2] + (a[0] * b[1] - a[1] * b[0]),
+        a[3] * b[3] - (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]),
+    ]
+}
+
+/// The joint-modifier list (§6.4) on the local records `[q, inherited scale, translation, _]`, in list order (head
+/// first), after the pose layers and before the matrices (`MobyProc` 0x267fc0 at 0x268b00, `MobyAnimEvalChain`
+/// 0x268ee8). Native `f32` arithmetic on the record values (the game's rules, not its VU0 rounding):
+/// * a node whose joint is not below `limit` is skipped (`MobyProc`: the class's joint count);
+/// * mode 0: `q ← q ⊗ q_m` (not normalised), scale xyz `← s ∘ s_m`, translation xyz `← t + t_m`; the scale's
+///   presence word is kept (a joint without an inherited scale ignores `s_m`);
+/// * mode ≠ 0, `w` = the node's weight: `a = q·(1 − w)`, `b = q_m·w`, `q ← normalise(a ± b)` (− when `a·b < 0`),
+///   scale and translation xyz `← x·(1 − w) + x_m·w`;
+/// * `mark_scale` (the chain evaluator): the scale's presence word is set afterwards (`sw 1, +0x1c`).
+fn apply_modifiers(mods: &[JointModifier], rec: &mut [[V4; 4]], limit: usize, mark_scale: bool) {
+    let f = |v: V4| v.map(f32::from_bits);
+    for m in mods {
+        let j = m.joint as usize;
+        if j >= limit.min(rec.len()) { continue; }
+        let (q, s, t) = (f(rec[j][0]), f(rec[j][1]), f(rec[j][2]));
+        let (nq, ns, nt) = if m.mode == 0 {
+            (quat_product(q, m.quat), [0, 1, 2].map(|k| s[k] * m.scale[k]), [0, 1, 2].map(|k| t[k] + m.trans[k]))
+        } else {
+            let (w, u) = (m.weight, 1.0 - m.weight);
+            let a = q.map(|x| x * u);
+            let b = m.quat.map(|x| x * w);
+            let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+            let v: [f32; 4] = std::array::from_fn(|k| if d < 0.0 { a[k] - b[k] } else { a[k] + b[k] });
+            let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3]).sqrt();
+            (v.map(|x| x / n), [0, 1, 2].map(|k| s[k] * u + m.scale[k] * w), [0, 1, 2].map(|k| t[k] * u + m.trans[k] * w))
+        };
+        rec[j][0] = nq.map(f32::to_bits);
+        let sw = if mark_scale { 1 } else { rec[j][1][3] };
+        rec[j][1] = [ns[0].to_bits(), ns[1].to_bits(), ns[2].to_bits(), sw];
+        rec[j][2] = [nt[0].to_bits(), nt[1].to_bits(), nt[2].to_bits(), rec[j][2][3]];
+    }
+}
+
+/// [`evaluate_layered`] with the moby's runtime joint-modifier list (`+0x64`, [`JointModifier`], head first) applied
+/// after the pose layers (`MobyProc` 0x267fc0): the full pose of a moby with both runtime lists.
+pub fn evaluate_posed(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, layers: &[PoseLayer], mods: &[JointModifier]) -> Vec<Rows> {
     let jc = class.joint_count;
     if jc == 0 { return vec![IDENTITY]; }
     let t = s.t.to_bits();
@@ -836,6 +918,7 @@ pub fn evaluate_layered(class: &MobyAnimClass, s: &AnimState, snap: Option<&Moby
     }
 
     apply_layers(class, layers, &mut rec[..jc.min(SPR_RECORDS)]);
+    apply_modifiers(mods, &mut rec[..jc.min(SPR_RECORDS)], jc, false);
 
     // Local matrices and the chain (§6.5), joints in index order.
     for j in 0..jc.min(SPR_RECORDS) {
@@ -1231,7 +1314,7 @@ fn rec_flag_word(r: u64) -> u32 { ((r >> 62) as u32).wrapping_sub(1) }
 ///
 /// `snap` is key A when `seq_a` is [`SNAPSHOT_SEQ`], as in [`evaluate_with_snapshot`]. Identity rows for
 /// a class without joints, a missing key or an empty chain. The +0x60 pose layers: [`evaluate_chains_layered`];
-/// the +0x64 modifiers are not modelled (no ported class uses them).
+/// with the +0x64 joint modifiers as well: [`evaluate_chains_posed`].
 pub fn evaluate_chains(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, chains: &[&[u8]]) -> Vec<Rows> {
     evaluate_chains_layered(class, s, snap, chains, &[])
 }
@@ -1239,6 +1322,13 @@ pub fn evaluate_chains(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyF
 /// [`evaluate_chains`] with the moby's +0x60 pose layers blended in after the interpolation (`MobyAnimEvalChain`
 /// 0x268ee8 walks the list like `MobyProc`), e.g. Ratchet's hand under the weapon arm.
 pub fn evaluate_chains_layered(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, chains: &[&[u8]], layers: &[PoseLayer]) -> Vec<Rows> {
+    evaluate_chains_posed(class, s, snap, chains, layers, &[])
+}
+
+/// [`evaluate_chains_layered`] with the moby's joint-modifier list (`+0x64`) after the layers, as
+/// `MobyAnimEvalChain` 0x268ee8 applies it: every node (no joint-count test), and the modified joint's inherited
+/// scale is marked present afterwards.
+pub fn evaluate_chains_posed(class: &MobyAnimClass, s: &AnimState, snap: Option<&MobyFrame>, chains: &[&[u8]], layers: &[PoseLayer], mods: &[JointModifier]) -> Vec<Rows> {
     let fail = || vec![IDENTITY; chains.len()];
     let jc = class.joint_count;
     if jc == 0 || chains.iter().any(|c| c.is_empty()) { return fail(); }
@@ -1361,6 +1451,7 @@ pub fn evaluate_chains_layered(class: &MobyAnimClass, s: &AnimState, snap: Optio
     }
 
     apply_layers(class, layers, &mut rec[..jc.min(CHAIN_RECORDS)]);
+    apply_modifiers(mods, &mut rec[..jc.min(CHAIN_RECORDS)], CHAIN_RECORDS, true);
 
     // The chain over the marked joints below the count (0x2112d4).
     for j in (0..count).filter(|&j| mark[j]) {
@@ -1569,5 +1660,79 @@ mod chain_tests {
         let (f, p) = (evaluate(&ac, &s0), evaluate_chain(&ac, &s0, None, &chain));
         assert_eq!(p, evaluate(&bare, &s0)[56]);
         assert_ne!(p[3], f[56][3]);
+    }
+}
+
+#[cfg(test)]
+mod modifier_tests {
+    use super::*;
+
+    fn rec(q: [f32; 4], s: Option<[f32; 3]>, t: [f32; 3]) -> [V4; 4] {
+        let sw = if s.is_some() { ONE } else { 0 };
+        let s = s.unwrap_or([1.0; 3]);
+        [q.map(f32::to_bits), bits3w(s, sw), bits3w(t, 0x7000_0040), [0; 4]]
+    }
+    fn q_of(r: &[V4; 4]) -> [f32; 4] { r[0].map(f32::from_bits) }
+    fn v3(v: V4) -> [f32; 3] { [0, 1, 2].map(|k| f32::from_bits(v[k])) }
+    fn close(a: &[f32], b: &[f32]) -> bool { a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6) }
+
+    /// Mode 0 composes: `q ⊗ q_m` (the node's rotation in the joint's own frame), scale ∘ (only where the joint has
+    /// an inherited scale, unless the chain evaluator marks it), translation added; the parent word is kept.
+    #[test]
+    fn compose_mode() {
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        let rz = [0.0, 0.0, h, h]; // 90° about z
+        let rx = [h, 0.0, 0.0, h]; // 90° about x
+        let mut r = [rec(rz, None, [1.0, 2.0, 3.0])];
+        let m = JointModifier { quat: rx, scale: [0.5; 3], trans: [1.0, 0.0, -1.0], ..JointModifier::compose(0) };
+        apply_modifiers(&[m], &mut r, 1, false);
+        assert!(close(&q_of(&r[0]), &quat_product(rz, rx)));
+        assert!(close(&q_of(&r[0]), &[0.5, 0.5, 0.5, 0.5]));
+        assert_eq!(r[0][1][3], 0, "no inherited scale: still absent");
+        assert!(close(&v3(r[0][2]), &[2.0, 2.0, 2.0]));
+        assert_eq!(r[0][2][3], 0x7000_0040, "parent word kept");
+        // With an inherited scale it multiplies; the chain evaluator marks the scale present either way.
+        let mut r = [rec(rz, Some([2.0, 2.0, 2.0]), [0.0; 3]), rec(rz, None, [0.0; 3])];
+        let m1 = JointModifier { joint: 1, ..m };
+        apply_modifiers(&[m, m1], &mut r, 2, true);
+        assert!(close(&v3(r[0][1]), &[1.0; 3]) && r[0][1][3] != 0);
+        assert!(close(&v3(r[1][1]), &[0.5; 3]) && r[1][1][3] != 0);
+        // Identity node: nothing moves.
+        let mut r = [rec(rz, None, [1.0, 2.0, 3.0])];
+        let before = r;
+        apply_modifiers(&[JointModifier::compose(0)], &mut r, 1, false);
+        assert!(close(&q_of(&r[0]), &q_of(&before[0])) && r[0][2] == before[0][2]);
+    }
+
+    /// Mode 1 blends by the weight: 0 keeps the pose, 1 takes the node's, the hemisphere of the node is flipped to
+    /// the pose's; a joint at or past the limit (MobyProc's joint count) is left alone.
+    #[test]
+    fn blend_mode_and_limit() {
+        let h = std::f32::consts::FRAC_1_SQRT_2;
+        let q = [0.0, 0.0, h, h];
+        let node = |w: f32, nq: [f32; 4]| JointModifier { joint: 0, mode: 1, weight: w, quat: nq, scale: [0.5, 1.0, 1.0], trans: [10.0, 0.0, 0.0] };
+        let mut r = [rec(q, Some([1.0; 3]), [0.0; 3])];
+        apply_modifiers(&[node(0.0, [0.0, 0.0, 0.0, 1.0])], &mut r, 1, false);
+        assert!(close(&q_of(&r[0]), &q));
+        let mut r = [rec(q, Some([1.0; 3]), [0.0; 3])];
+        apply_modifiers(&[node(1.0, [0.0, 0.0, 0.0, -1.0])], &mut r, 1, false);
+        assert!(close(&q_of(&r[0]), &[0.0, 0.0, 0.0, -1.0]));
+        let mut r = [rec(q, Some([1.0; 3]), [0.0; 3])];
+        apply_modifiers(&[node(0.5, [0.0, 0.0, 0.0, -1.0])], &mut r, 1, false);
+        // a = q/2, b = −id/2, a·b < 0 → a − b: the short way from q to the identity.
+        let e = [0.0, 0.0, h, h + 1.0];
+        let n = (e[2] * e[2] + e[3] * e[3]).sqrt();
+        assert!(close(&q_of(&r[0]), &e.map(|x| x / n)));
+        assert!(close(&v3(r[0][1]), &[0.75, 1.0, 1.0]) && close(&v3(r[0][2]), &[5.0, 0.0, 0.0]));
+        let mut r = [rec(q, None, [0.0; 3])];
+        let before = r;
+        apply_modifiers(&[node(1.0, [0.0, 0.0, 0.0, 1.0])], &mut r, 0, false);
+        assert_eq!(r, before);
+    }
+
+    #[test]
+    fn list_target_is_the_second_lists_first_joint() {
+        assert_eq!(list_target(&[18, 19]), Some(18));
+        assert_eq!(list_target(&[]), None);
     }
 }

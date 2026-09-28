@@ -114,4 +114,6 @@ pub(crate) fn record(w: &mut World, r: Record) {
         }
     }
     w.svc.save.checkpoint = Some(r);
+    // 0x1bb6ec..0x1bb6f2: the reverb request saved with the record (crate::audio::reverb).
+    if let Some(s) = w.sound.as_deref_mut() { s.checkpoint_saved(); }
 }

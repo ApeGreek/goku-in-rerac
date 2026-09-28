@@ -18,6 +18,8 @@ impl Hero {
     pub(super) fn walk_entry(&mut self, c: &mut Ctx, id: i32, play: bool) -> Option<bool> {
         self.group = 1;
         self.f15d4 = 0;
+        // 0x242858: a weapon out with the arm raised keeps Ratchet in its stance (super::weapons).
+        if !(self.f063a != 0 && self.f65c == 0) && super::weapons::gun_stance(self, c) { return Some(false); }
         if self.prev_group != 4 && self.prev_prev_group != 4 { self.speed = len2(self.eff); }
         if DT * Pf::b(0x40e0_0000) < self.speed { self.speed = DT * Pf::b(0x40e0_0000); }
         self.stick_target(c.env, Pf::ONE);
@@ -88,6 +90,7 @@ impl Hero {
                 self.turn_to((SCALE64 * Pf::b(0x3ba3_d70a)) * s, SCALE64 * Pf::b(0x3dcc_cccd), (DT * Pf::b(0x4096_cbe4)) * s);
             }
         }
+        self.lean(); // HeroLean 0x235638 after the turn: super::idle.
         let acc = (DT2 * Pf::b(0x40f0_0000)) * f;
         let mut dec = DT2 * Pf::b(0x4108_0000);
         if self.sharp_turn != 0 {
@@ -176,7 +179,7 @@ impl Hero {
             if self.health == 1 { self.set_anim(c.anim, c.rng, blend(18), 0x54, 0); } else { self.set_anim(c.anim, c.rng, blend(9), 0x14, 7); }
         } else {
             if !(ticks(25) < self.timer) { return; }
-            if !self.set_state(c, 0, false) { return; }
+            if super::weapons::gun_stance(self, c) || !self.set_state(c, 0, false) { return; }
             if self.health == 1 { self.set_anim(c.anim, c.rng, blend(18), 0x54, 0); } else { self.set_anim(c.anim, c.rng, Pf::b(0xbf80_0000), 0, 0); }
         }
     }

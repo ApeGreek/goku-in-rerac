@@ -46,6 +46,12 @@ pub fn listener_of(cam: &CameraView) -> Listener {
     Listener { pos: cam.pos_f32(), rows: cam.rows_f32(), underwater: false, water_height: 0.0 }
 }
 
+/// [`listener_of`] with the underwater flag 0x167494 ([`AudioSystem::underwater`]) and the water level 0x13f640 (the
+/// hero's `water_level`), as `sound_update` reads them.
+pub fn listener_with_water(cam: &CameraView, underwater: bool, hero: &Hero) -> Listener {
+    Listener { underwater, water_height: hero.water_level.to_f32(), ..listener_of(cam) }
+}
+
 /// A slot owner's position (moby +0x10) from the moby table; None when the moby is deleted (state 0xfd /
 /// 0xfe) or gone.
 pub fn owner_position(table: &MobyTable, id: u32) -> Option<[f32; 3]> {
@@ -106,6 +112,40 @@ impl AudioSystem {
 
 /// The play log's "class" for a footstep (its index is the level def).
 pub const FOOTSTEP_LOG_CLASS: i16 = -1;
+/// The play log's "class" for a level sound (`PlayLevelSoundAtMoby`; its index is the level def).
+pub const LEVEL_SOUND_LOG_CLASS: i16 = -2;
+
+/// The level defs [`AudioSystem::play_level_sound_at_moby`] plays, by index (the same on every level: the callers in the
+/// 19 overlays pass only these two).
+pub mod level_sound {
+    /// `Help_ComputeSize` 0x225a98: the help box opening (flags 1 = 2-D), when the help text or voice option is on.
+    pub const HELP_OPEN: i32 = 0;
+    /// The skill point jingle (flags 0): every "skill point earned" site (`if !0x13d408[k] { 0x13d408[k] = 1;
+    /// PlayLevelSoundAtMoby(1, 0, 0); ShowBanner(0x53d6, −1) }`: the Blarg flyers' and the gunship's kills on Novalis,
+    /// the weapon update `FUN_002d2450`, the classes of the other levels) and the debug cheat entry of `MenuInput`.
+    pub const SKILL_POINT: i32 = 1;
+}
+
+impl AudioSystem {
+    /// `PlayLevelSoundAtMoby(index, flags, moby)` 0x2a1770: level def `index` when it is below 0x15f574 (= 2: the
+    /// defs before the footsteps), `SoundSlotAlloc(def, flags, moby, 0, 0x400)`; the slot remembers the index (+0xe) and
+    /// the owner (+0x18). Every caller on the disc passes moby 0: no owner and no position, so the sound plays 2-D at
+    /// fixed volume at the listener (`SoundSlotAlloc` adds flags 0x11). With a moby (`at` = its id and position +0x10)
+    /// the sound follows it like a class sound (privileged for Ratchet `hero`). Draws the def's pitch bend from `rng`
+    /// when it gets a slot (defs 0 and 1 have none on any level, so these plays draw nothing). A negative index (the
+    /// game would read before the defs; no caller passes one) is refused.
+    #[allow(clippy::too_many_arguments)]
+    pub fn play_level_sound_at_moby(&mut self, index: i32, flags: u32, at: Option<(MobyId, [f32; 3])>, hero: Option<MobyId>, listener: &Listener, rng: &mut Rng, tick: u64) -> i32 {
+        let Ok(idx) = usize::try_from(index) else { return -1 };
+        if idx >= MOBY_LEVEL_DEFS { return -1; }
+        let Some(def) = self.data.sounds.level_defs.get(idx).copied() else { return -1 };
+        let owner = at.map(|(id, _)| Owner { id: id as u32, privileged: Some(id) == hero });
+        let k = self.slots.play(&def, flags as u8, owner, at.map(|(_, p)| p), None, 0x400, listener, rng);
+        if k >= 0 { self.slots.slots[k as usize].class_index = idx as u16; }
+        if let Some(log) = self.play_log.as_mut() { log.push((tick, LEVEL_SOUND_LOG_CLASS, index, flags, k)); }
+        k
+    }
+}
 
 /// The moby loop's [`SoundSink`]: class sounds into `audio` with the listener of the tick (the previous tick's
 /// camera).
@@ -131,6 +171,14 @@ impl SoundSink for ClassSoundSink<'_> {
         let s = self.audio.slots.slots.get(usize::try_from(slot).ok()?)?;
         s.owner.map(|o| (o.id as MobyId, s.class_index))
     }
+    /// `PlayLevelSoundAtMoby(index, flags, moby)` ([`AudioSystem::play_level_sound_at_moby`]).
+    fn play_level_sound(&mut self, index: i32, flags: u32, at: Option<(MobyId, [f32; 3])>, tick: u64, rng: &mut Rng) -> i32 {
+        self.audio.play_level_sound_at_moby(index, flags, at, self.hero, &self.listener, rng, tick)
+    }
+    /// `HeroTeleport`'s env sample point ([`AudioSystem::hero_teleported`]).
+    fn hero_teleported(&mut self, pos: [f32; 3]) { self.audio.hero_teleported(pos); }
+    /// The checkpoint record's reverb copy ([`AudioSystem::checkpoint_saved`]).
+    fn checkpoint_saved(&mut self) { self.audio.checkpoint_saved(); }
 }
 
 /// The trigger check at the end of `RatchetAnimAdvance` (0x247d48): when key A and key B were the same
@@ -207,6 +255,12 @@ where
         a.play_footstep(level, class, foot, variant, 0, self.hero, pos, &self.listener, rng, self.counter)
     }
 
+    /// `SoundIsAlive(item, slot)` on a slot the hero took (owner: Ratchet's moby, the hand item's stand-in).
+    fn alive(&mut self, slot: i32) -> bool {
+        let Some(a) = (self.audio)() else { return false };
+        usize::try_from(slot).ok().and_then(|i| a.slots.slots.get(i)).is_some_and(|s| s.state != crate::audio::voices::state::FREE && s.owner.is_some_and(|o| o.id == self.hero as u32))
+    }
+
     fn release(&mut self, _moby: &crate::moby_runtime::Moby, slot: i32) {
         let Some(mut a) = (self.audio)() else { return };
         // Only a slot that still plays Ratchet's sound (the game checks the slot's owner and state).
@@ -228,7 +282,7 @@ pub fn sound_step(
     counter: u64,
     out: &mut Vec<[i16; 2]>,
 ) {
-    let listener = listener_of(cam);
+    let listener = listener_with_water(cam, audio.underwater, hero);
     let input = FrameInput { listener, hero_pos: [hero.pos[0].to_f32(), hero.pos[1].to_f32(), hero.pos[2].to_f32()] };
     audio.tick_with(&input, counter as u32, rng, &|id| owner_position(table, id), out);
 }

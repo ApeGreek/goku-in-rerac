@@ -304,6 +304,9 @@ pub struct HudState {
     pub help: Help,
     /// △ pressed this tick (pad 0x13cae4 bit 0x10): skips the help box.
     pub triangle: bool,
+    /// `PlayLevelSoundAtMoby(index, flags, 0)` calls of the HUD code since the owner last drained them (the help box's
+    /// opening sound: crate::audio::class_sounds::level_sound).
+    pub level_sounds: Vec<(i32, u32)>,
     inputs: Inputs,
     last: Option<(i32, i32)>,
 }
@@ -325,6 +328,7 @@ impl HudState {
             banner: Banner { y: 100, ..Default::default() },
             help: Help::default(),
             triangle: false,
+            level_sounds: Vec::new(),
             inputs: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: 0 },
             last: None,
         }
@@ -437,6 +441,13 @@ impl HudState {
     pub fn show_banner(&mut self, text: &[u8], ticks: Option<i32>) {
         self.banner.text = text.to_vec();
         self.banner.countdown = ticks.unwrap_or_else(|| scale_ticks(180));
+    }
+
+    /// `ShowBanner(id, ticks)` 0x2789e0: the level message `id` (`msg_string`) for `ticks` (the gold bolt's "Gold Bolt
+    /// Acquired", `ShowPlanetBanner`'s planet messages).
+    pub fn show_banner_msg(&mut self, id: i32, ticks: i32) {
+        let t = strings::lookup(&self.assets.messages, id).to_vec();
+        self.show_banner(&t, Some(ticks));
     }
 
     /// `ShowBannerf(id, n, −1)` 0x278a50: the level message `id` with its `%d` replaced by `n` (`sprintf` into
@@ -664,8 +675,10 @@ impl HudState {
 
     fn help_text(&self) -> &[u8] { self.help.index.and_then(|i| self.assets.messages.get(i)).map_or(&[][..], |m| &m.text) }
 
-    /// 0x225a98: measure the text (small font, window flags 7) and size the box.
+    /// 0x225a98: the opening sound `PlayLevelSoundAtMoby(0, 1, 0)` (the help text or voice option 0x15ee1d / 0x15ee1c
+    /// is on: the port has the text on), measure the text (small font, window flags 7) and size the box.
     fn help_size(&mut self) {
+        self.level_sounds.push((crate::audio::class_sounds::level_sound::HELP_OPEN, 1));
         let mut win = help_window(0x168, 7);
         text::layout(&mut win, self.help_text(), -1, self.assets.glyphs(Font::Small), true);
         let h = &mut self.help;

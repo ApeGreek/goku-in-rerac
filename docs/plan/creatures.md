@@ -26,10 +26,10 @@ column.
 | 613 | 4 | 0x2f3120 | other | water current | not ported |
 | 730 / 790 | 1 / 1 | 0x2fad68 | other | mission NPCs | not ported |
 | 737 | 5 | 0x2fb5b0 | other | camera trigger | not ported |
-| 750 | 1 | 0x2fbf80 | other | infobot | not ported |
+| 750 | 1 | 0x2fbf80 | other | infobot | **ported** (hero_gameplay.md §6; inert on Novalis) |
 | 774 | 1 | 0x2ff118 | other | talking NPC | not ported |
 | 832 | 1 | 0x302648 | other | RC-vehicle range limiter | not ported |
-| 1134 | 3 | 0x307ca0 | other (pickup) | gold bolt | not ported |
+| 1134 | 3 | 0x307ca0 | other (pickup) | gold bolt | **ported** (hero_gameplay.md §6) |
 | 1341 | 1 | 0x30acb8 | other | help-hint director | not ported |
 | 280 | 2 | 0x2e0c68 | prop | bolt crank | not ported |
 | 641 / 665 | 1 / 4 | 0x2f4348 / 0x2f4710 | prop | crank-driven rotator / slider | not ported |

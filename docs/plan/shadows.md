@@ -430,8 +430,9 @@ frame's. Checked: every frame of Novalis scene 5 (240..560) and level 2 scene 1 
   0xc00 (e.g. Ratchet without 0x400 on the water surface is drawn early there). Only visible where another caster's
   shadow would fall on such a moby.
 * Risk 5 stays: the RGB-only halves of world alpha tests and billboard pass 2 are drawn after the resolve (not darkened).
-* The joint-modifier list (+0x60 / +0x64: head look, idle joint records) is not in the port's pose, so head, ears and
-  arms of Ratchet's shadow differ from the game's by up to 0.18 units, exactly as his drawn model does.
+* ~~The joint-modifier list (+0x64) is not in the port's pose~~: ported 2026-09-28 (hero_gameplay.md §7); all 21
+  records of Ratchet's posed list match RAM to 3.05e-5, and the shadows pose every caster with its `Moby::joint_mods`
+  (Ratchet also with his weapon arm layers).
 * `HeroEnvLighting` 0x26be04 (Ratchet's light cross-fade in covered zones; it also turns direction 0 / 1 with his
   light word) is not ported: decision 6's separate package.
 * Pixel comparison against a PCSX2 screenshot (S6) not done.

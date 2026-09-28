@@ -5,6 +5,60 @@ assumes Novalis (level 01), as a checklist for a later generalisation pass. Noth
 The evidence comes from grep, from byte comparisons of the level overlays (then the C++ `overlay.elf` copies, now `extracted/levels/NN/overlay.bin`), from the per-level
 `lvl.vtbl` class tables, and from `tools/ghidra/names/clusters.tsv`.
 
+## Status after the Gemlik pass (2026-09-28)
+
+The generalisation pass ran level 13 (Gemlik Base) headless and in the engine, fixed what was Novalis-only in
+general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re-run) were out of scope.
+
+**The two mechanisms** (`crates/rc-formats/src/level_overlay.rs`, X1 + X2):
+- `LevelOverlay`: the seven sections (the same order on all 19), `lvl.vtbl` (section 3), code reads, function extents
+  (next known start: `jal` targets, class-table updates, `lui`/`%lo` code addresses, a frame set-up after `jr ra`).
+- `Relocation::new(level 01, level N)`: **same code** = equal masked words over the reference extent. The mask hides
+  `j`/`jal` targets, `lui` of main-RAM addresses (0x0010..0x003f only, so float `lui`s are compared), the `%lo` that
+  completes such a `lui` (tracked per register, through `move`, and into forward branch targets: a `lui` in a delay
+  slot) and every `$gp`-relative immediate (`$gp` = 0x166c00 on every level). This fixes the cluster hash's `%lo`
+  misses (the bomb 0x2c3300, the splash 0x2ff810, the explosion light 0x2f3748, the talking NPC 0x2ff118 now match
+  their copies). `func(a)` finds the level's copy; `data(a)` finds a data address through a reference function
+  that forms it (`lui`/`%lo` or `$gp`), reading the same instruction in the copy (fallback: the code up to 16 words
+  past the reference, found once). Level 01 against itself is the identity. Checked against `clusters.tsv`
+  (levels 0/5/13: ~1400–1570 functions agree, 0–1 disagree, the rest are extent misses).
+
+| # | Status | Where / how |
+|---|---|---|
+| X1, X2 | **fixed (product)** | `rc_formats::level_overlay` (above); `overlay_diff.py` not re-run |
+| C1 | **fixed** | `rc_game::moby_update::classes::LevelPorts`: a class runs a port when its `lvl.vtbl` entry is the same code as the port's reference function (level 01; level 03 for the swing target). Class-number lists remain the fallback for classes not in the table. Engine: `gameplay::level_ports()` (class table, joint lists, `moby_spawn`). Novalis: identical for every placed class (only the unplaced 731 gains `MissionNpcUpdate`, as the game) |
+| C1 found | fixed by C1 | `FxGroupUpdate` runs other body-piece classes on **every** level (Gemlik 1733–1735, 1801–1804); grass on 00/02/08; `PathPlatformUpdate` 1141 on 10; the ember update on 10 (1806/1807) and 15 (200…210) |
+| C2 | open (N/A) | the flyer update exists only on 01; the shared path driver is called from other levels' own updates |
+| C3 | **fixed** | the emitter / ripple externals come from the table (`LevelPorts::external`); only 01 has them |
+| C4 | open | `moby_spawn::initial_state` is still keyed by class number (rules transfer where the vtbl says so; not rechecked) |
+| C5 | open | `MISSION_NPC_CLASSES` [730, 790] (01-only code) |
+| C6 | ok | the engine and the smoke test set `Services::level` |
+| C7 | **fixed** | the Novalis scheduler test and the debris test read `LevelOverlay::vtbl` |
+| P1 | **fixed** | emitter owners = instances whose class runs 0x2bd100 (still 01 only); the `level == 1` cull in `type06` is the game's own branch (kept) |
+| M1, M2 | **fixed** | `menus::Overlay::relocated(level, level 01)`: the page roots through `Relocation::data`, then the page tree walked in step with 01's (every page, widget, item list and callback paired). `PageMenu::addrs` holds the level's page / wiring / Port-Options records; widgets dispatch on the callbacks' level-01 labels. All 19 levels load the same 26 pages / 109 widgets and install the Port Options page |
+| M3, M7 | **fixed** | `MenuConsts`, the frame light and the corner lists go through `Overlay::at` (0x161fe0 → 0x161e08 on 13; the old read gave joint list 1045220557 and no frame mobys) |
+| M4 | **fixed** | names `at(0x1c22c0)`; points `at(0x1c23a8) + 0x10` (the code forms 0x1c23a8, the map reads from level 1) |
+| M5, M6 | **fixed** | quick-select gp block `at(0x15f718)` (+0x10 on 05 / 16, from the `$gp` operands), page table at +0x20, d-pad `at(0x17e098)` (0x17df18 on 13) |
+| W1–W4 | open (N/A on 13) | Gemlik has no water, ripples or strips: the Novalis paths stay off |
+| K1 | open (N/A on 13) | 13 uses the generic star dispatch (120 twinkle + 8 moving) |
+| H1 | partly open | the level-13 branches (below) are in unported code; the footstep branch belongs to the hero agent |
+| H2 | open | not diffed |
+| G1 | open | Gemlik's arrival is scene 0 from its own director class 1353 (`0x30b628`, Gemlik-only: content). `RC_SCENE=+0` forces scene 0 (it plays: 868 ticks, actors 0 / 10 / 1289, speech, subtitles) |
+| A1 | ok as is | `entry` pauses the music on 13; the landing sequence (not ported) unpauses it: a direct boot plays unpaused, the post-landing state |
+| A2 | open | reverb (another agent) |
+| T1–T4 | open | tooling |
+
+**Level-13 branches in engine code** (L01 decomp, `0x15ed84 == 0xd`): `InitLevelRenderGlobals` adopts the placed
+ship 533 (`*0x160550`) instead of creating one when ship index 2 and runtime flag `0x160540` (set by the Gemlik
+story) — not reachable in a direct boot (ship 1); `PauseAllSounds` sets `0x1ba2a4` (marks grid icons in the
+Weapons / Gadgets pages, which are stubs); `GameStateUpdate` creates class 0x509 on the landing (landing not ported);
+`FUN_002a2360` sets the landing position. All open, listed for the landing / pause-grid ports.
+
+**Guards.** `rc-formats/tests/level_overlay_disc.rs` (sections, vtbl, relocation on 13), `rc-game/tests/level_ports.rs`
+(Novalis registry unchanged; per-level ports and externals), `rc-game/tests/gemlik_generalisation.rs` (menus on 13 and
+all levels, body pieces, `gemlik_content_gap` report), `rc-game/tests/all_levels_smoke.rs` (19 levels: load, spawn,
+load pass, N ticks of the full tick with a scripted pad; Gemlik 3,000 ticks).
+
 ## Background: what moves between levels
 
 - **Overlay layout.** Every level overlay loads at 0x15ef00, with the sections `.lit` 0x15ef00 (fixed start,

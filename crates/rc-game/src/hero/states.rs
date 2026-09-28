@@ -53,6 +53,7 @@ impl Hero {
         if self.mode == 0 {
             self.frozen = 0;
             self.items.f13f7 = 0;
+            self.f13ff = 0;
         }
         let ok = self.set_state_body(c, id, play, old_sub);
         if ok && f7 != 0 && self.items.f13f7 == 0 { self.items.restore_pending = 1; }
@@ -62,6 +63,8 @@ impl Hero {
     /// The per-state part of SetState: Ratchet's blink period is reset (0 unless the entry sets 0x68), then the
     /// entry of the state's module ([`Hero::dispatch_entry`]), then the epilogue.
     fn set_state_body(&mut self, c: &mut Ctx, id: i32, play: bool, old_sub: i32) -> bool {
+        // 0x22eca0(previous, new): the arm layers of a raised weapon when leaving the idle state (super::weapons).
+        super::weapons::arm_on_state_change(self, c, self.prev_state, id);
         // 0x140348: Ratchet's blink period, 0 unless the state sets 0x68 (0, 2, 4, 6 here).
         self.idle.blink_period = 0;
         if let Some(r) = self.dispatch_entry(c, id, play, old_sub) { return r; }

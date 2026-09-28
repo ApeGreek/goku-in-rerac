@@ -198,6 +198,17 @@ pub trait HitSink {
     fn create_moby(&mut self, _table: &mut MobyTable, _o_class: i16, _counter: u64) -> Option<MobyId> { None }
     /// `DeleteMoby` 0x2636c0 from the hero's code (and its grid removal where the sink has a grid).
     fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) { table.delete(id, counter); }
+    /// `CollLine_Fix(a, b, flags, ignore, 0)`: the hit point of the line against the world and the mobys, no hit
+    /// record (`Some(None)`: no hit). None: the sink has no collision (the caller tests the world mesh alone).
+    fn probe(&mut self, _table: &mut MobyTable, _a: V4, _b: V4, _flags: u32, _ignore: Option<MobyId>) -> Option<Option<[f32; 3]>> { None }
+    /// `WritePointLight_A` 0x2525f8: the first free point light of the bank (−1: none, or the frame load is above 0.8).
+    fn light_alloc(&mut self, _l: crate::point_lights::PointLight) -> i32 { -1 }
+    /// A point light of the bank (None: not taken).
+    fn light_get(&mut self, _slot: i32) -> Option<crate::point_lights::PointLight> { None }
+    /// The owner's rewrite of its slot.
+    fn light_set(&mut self, _slot: i32, _l: crate::point_lights::PointLight) {}
+    /// `FreePointLight` 0x252850.
+    fn light_free(&mut self, _slot: i32) {}
 }
 
 /// A sink that hits nothing (tests, no moby system).
@@ -221,6 +232,8 @@ pub struct ItemEnv<'a> {
     pub coll: Option<&'a rc_formats::collision::Collision>,    /// The camera as the previous tick's update left it: position 0x167240 and forward 0x167450 (the Bomb Glove's
     /// first-person aim). None: no camera.
     pub camera: Option<([f32; 3], [f32; 3])>,
+    /// The camera's up row 0x167470 (the Pyrocitor's first-person flame starts one unit below the eye).
+    pub camera_up: Option<[f32; 3]>,
 }
 
 /// `FUN_0022de10(slot)` for the hand: gloves (10, 17, 20, 25) take Ratchet's hand pose instead of an
@@ -371,7 +384,8 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
     let def = env.data.def(id);
     let list = (def.attach.max(0) as usize).min(HERO_LISTS.len() - 1);
     let Some(chain) = env.data.hero_chains.get(list).filter(|c| !c.is_empty()) else { return };
-    let Some(p) = anim.eval_chains_with(&[chain.as_slice()], &hero.weapons.layers).into_iter().next() else { return };
+    let mods = &table.mobys[env.hero_moby].joint_mods;
+    let Some(p) = anim.eval_chains_with(&[chain.as_slice()], &hero.weapons.layers, mods).into_iter().next() else { return };
     let r = &table.mobys[env.hero_moby];
     let host_rows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| r.rows[i].map(f32::to_bits));
     let w = moby_anim::attach_matrix(&p, &host_rows, [r.position[0], r.position[1], r.position[2]], r.scale);
@@ -405,6 +419,9 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
 
 /// The slot loop `0x231088` for slot 0.
 fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: &dyn AnimCtl, rng: &mut Rng, env: &ItemEnv, hits: &mut dyn HitSink) {
+    // The Pyrocitor's pilot flame, light and loop go with its moby (the game deletes them in its update or when the
+    // moby goes): an item swapped or taken away without its put-away update (death reload, vendor) drops them here.
+    if hero.items.slot.id != super::pyrocitor::PYROCITOR { super::pyrocitor::item_gone(hero, table, env, hits); }
     if hero.items.slot.item.is_none() {
         update_hand_selected(hero, g, rng, env);
         return;

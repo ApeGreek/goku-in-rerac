@@ -36,6 +36,8 @@ impl Hero {
                 // A slippery floor (0x140632) → 0x2f (level00; super::surface).
                 if let Some(r) = super::surface::stop_entry(self, c) { return Some(r); }
                 if self.f063a != 0 && self.f65c == 0 { return Some(self.set_state(c, 0x79, true) && false); }
+                // 0x242858: a weapon out with the arm raised: its stance instead (super::weapons).
+                if super::weapons::gun_stance(self, c) { return Some(false); }
                 if self.idle_seq() == 0x54 {
                     if self.set_state(c, 0, false) { self.set_anim(c.anim, c.rng, blend(18), 0x54, 0); }
                     return Some(false);
@@ -76,7 +78,6 @@ impl Hero {
         self.stick_target(env, Pf::ONE);
         // The look stances under the first-person camera (0x1413f5): face the camera (super::stance).
         if (self.state == 1 || self.state == 0x1e) && self.f13f5 != 0 { super::stance::first_person_turn(self, env); }
-        // State 3: 0x242858 (weapon draw from a stop) needs a weapon in hand; never on foot here.
         if self.state == state::CROUCH {
             let seq = anim.view().seq_b;
             if Pf::b(0x3e4c_cccd) < self.stick_mag || seq == 0xe || seq == 0xf {

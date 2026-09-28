@@ -137,6 +137,10 @@ pub enum SndCommand {
     Stop { handle: i32 },
     /// `SoundIsStillPlaying_CB(handle)` (0x19), liveness callback 0x2a1c10.
     Poll { slot: usize, handle: i32 },
+    /// `SetReverbEx(2, type, depth, delay, feedback)` (0x50; `super::reverb`).
+    SetReverb { kind: u8, depth: i32, delay: u8, feedback: u8 },
+    /// `snd_AutoReverb(2, depth, delta, channels)` (0x10): the depth glides to `depth`.
+    AutoReverb { depth: i32, delta: u16, channels: u8 },
 }
 
 /// A reply: the handle 989snd returned (0 = not playing).
@@ -530,7 +534,7 @@ pub struct EmitterPvars {
 pub struct Emitters {
     pub instances: Vec<SoundInstance>,
     pub pvars: Vec<EmitterPvars>,
-    /// Classes met whose update is not ported (3 reverb box: the port has no reverb), counted once.
+    /// Classes met whose update is not ported, counted once (none since the reverb boxes, `super::reverb`).
     pub unported: Vec<(usize, i16)>,
 }
 
@@ -552,14 +556,13 @@ impl Emitters {
                 EmitterPvars { def: w(0), min_s: w(1), max_s: w(2), timer: w(3), slot: w(4) }
             })
             .collect();
-        let unported = instances.iter().enumerate().filter(|(_, s)| s.o_class == 3).map(|(i, s)| (i, s.o_class)).collect();
-        Emitters { instances, pvars, unported }
+        Emitters { instances, pvars, unported: Vec::new() }
     }
 
     /// The per-frame sound-instance update (0x2a19a8 dispatch) for class 0 (sphere, `0x3197a0`), class 1 (box with
     /// the volume by depth, `0x319928`), class 2 (box one-shots at random points, `0x319cc8`) and class 5 (underwater
-    /// loop at the camera, `0x31a078`: flags 0x15 while `underwater`). Class 3 (reverb box) has no sound of its own;
-    /// class 6 (music box) is `music::MusicBox`.
+    /// loop at the camera, `0x31a078`: flags 0x15 while `underwater`). Class 3 (reverb box) has no sound of its own
+    /// (`super::reverb::ReverbBox`); class 6 (music box) is `music::MusicBox`.
     pub fn update(&mut self, slots: &mut SoundSlots, sounds: &LevelSounds, l: &Listener, rng: &mut Rng) {
         for (i, inst) in self.instances.iter().enumerate() {
             let pv = &mut self.pvars[i];

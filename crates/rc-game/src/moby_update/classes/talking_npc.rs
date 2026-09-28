@@ -13,7 +13,8 @@
 //!   in front of the NPC, facing it: [`Interact::scene_end_place`]) and state 2.
 //! * **2**: waits while game mode 2 (a scene) runs; then the NPC's mission (+0xb0) → `SetMissionDone` (and the
 //!   checkpoint +0x4c, not ported: counted); state 1; when the node that played last (talk +0x04) is 4 (Novalis:
-//!   the Infobot sold): `UnlockPlanet(2)`, the planet banner (not ported), state 3, a save (counted).
+//!   the Infobot sold): `UnlockPlanet(2)` and `ShowPlanetBanner(2)` (`crate::cinematic`: the saved game's planet
+//!   bits and the HUD banner "Infobot for Planet Aridia acquired"), state 3, a save (logged).
 //! * **3**: `DeleteMoby`.
 //! * **4 / 5** (Batalia's turret guy; state 5 moves Ratchet to a fixed point): not ported (counted).
 //!
@@ -74,8 +75,9 @@ pub fn update(w: &mut World, id: MobyId) {
             }
             w.mm(id).state = 1;
             if p::i16(&w.m(id).pvars, talk::LAST) == 4 {
-                w.svc.interact.writes.push(GameWrite::UnlockPlanet(2));
-                w.svc.unported("talking npc: planet banner");
+                // `UnlockPlanet(2)` (its own banner unless on level 2), `ShowPlanetBanner(2)`, the save.
+                crate::cinematic::unlock_planet(w, 2);
+                crate::cinematic::show_planet_banner(w, 2);
                 w.mm(id).state = 3;
                 w.svc.interact.writes.push(GameWrite::Save);
             }

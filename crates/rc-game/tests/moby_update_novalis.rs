@@ -211,20 +211,13 @@ fn run(lv: &Level, ticks: u64, verbose: bool, hero_at: Option<[f32; 3]>) -> Run 
 fn novalis_scheduler_300_ticks() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return; };
     // The level table maps the ported classes to the ported addresses (read from the level overlay).
-    let ov = rc_formats::font::parse_overlay_sections(&std::fs::read(rc_formats::test_data::level_dir(1).join("overlay.bin")).unwrap()).unwrap();
+    let ov = rc_formats::level_overlay::LevelOverlay::parse(&std::fs::read(rc_formats::test_data::level_dir(1).join("overlay.bin")).unwrap()).unwrap();
     {
-        if let Some(t) = rc_formats::font::read_overlay(&ov, 0x20bb00, 0x924) {
-            let mut map = BTreeMap::new();
-            for e in t.as_chunks::<12>().0 {
-                let oc = i32::from_le_bytes(e[0..4].try_into().unwrap());
-                if oc == -1 { break; }
-                map.insert(oc as i16, u32::from_le_bytes(e[4..8].try_into().unwrap()));
-            }
-            for oc in [13i16, 14, 15, 16, 500, 501, 502, 505, 511, 724, 725] {
-                assert_eq!(map.get(&oc).copied(), scheduler::port_update_fn(oc), "class {oc}");
-            }
-            eprintln!("level table: {} entries, ported classes match", map.len());
+        let map: BTreeMap<i16, u32> = ov.vtbl().iter().map(|e| (e.o_class as i16, e.update)).collect();
+        for oc in [13i16, 14, 15, 16, 500, 501, 502, 505, 511, 724, 725] {
+            assert_eq!(map.get(&oc).copied(), scheduler::port_update_fn(oc), "class {oc}");
         }
+        eprintln!("level table: {} entries, ported classes match", map.len());
     }
     let a = run(&lv, 300, true, None);
     // Placed bolts within the pickup range were collected: the counter is the sum of their values.

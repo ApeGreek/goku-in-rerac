@@ -375,7 +375,11 @@ fn novalis_ammo_crate_fills_the_glove_up_to_max() {
     assert!(rows[..30].iter().all(|r| r.ammo == 38));
     assert!(rows.iter().any(|r| r.pickups.iter().any(|p| p.0 == 226)), "no Bomb Glove pickup (class 226) dropped");
     assert_eq!(rows.last().unwrap().ammo, 40, "3 bombs a pickup, capped at 40");
-    assert!(!rows.last().unwrap().pickups.iter().any(|p| p.0 == 226), "the pickups were collected");
+    // The crate drops 1 (4 in 5) or 2 pickups (its `randi(5)` on the level's shared RNG stream, which every class
+    // draws from: the count changes with the classes ported); the first fills the glove, a second stays at max.
+    let dropped = rows.iter().map(|r| r.pickups.iter().filter(|p| p.0 == 226).count()).max().unwrap();
+    let left = rows.last().unwrap().pickups.iter().filter(|p| p.0 == 226).count();
+    assert!(left < dropped && left <= 1, "the pickups were collected ({dropped} dropped, {left} left at full ammo)");
     // Full: the pickups stay on the ground (dim while he stands in them), the ammo stays at max.
     let full = Setup { ammo: 40, ..s };
     let (rows, _) = run(&lv, &full, &|_| PadInput::neutral(), 240);

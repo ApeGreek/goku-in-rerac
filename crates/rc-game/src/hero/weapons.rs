@@ -42,9 +42,13 @@
 //! Not ported: the auto-aim target search over the targetable list 0x1abe80 (mode 0x20 records: no ported class has
 //! one; the melee aim-assist `0x22e238` likewise), the gold glove (0x13e52a: 0), the throw stats record 0x1416d0
 //! (counted in [`Weapons::throws`]), the other gloves' own item updates (their rows are not in `HAND_ITEMS`: only the
-//! Bomb Glove's is ported), the persistent-arm weapons' rules (item +0x30 ≠ 0: `0x22eca0` re-creating the layer,
-//! `0x242858`, the idle's standing weapon pose; no ported item has one), `0x22efd8`'s standing `SetAnim(−2, idle)`
-//! when no layer is out (unreachable for the throw gloves: they only draw the arm while moving), 0x141618.
+//! Bomb Glove's is ported), 0x141618.
+//!
+//! **Weapons that keep the arm raised** (item def +0x30 → 0x1413fa; the Pyrocitor, the Blaster, …): [`gun_stance`]
+//! (`0x242858`: a walk / stop SetState or the walk's stop becomes the idle state in the weapon's standing sequence),
+//! [`arm_on_state_change`] (`0x22eca0`: the arm layers when leaving idle), [`stance_kept`] / [`idle_stance`] (the idle
+//! transitions keep the stance), [`put_away`]'s return to the idle sequence (made by [`apply_pending`] where the item
+//! update asked for it).
 
 use super::anim::{AnimCtl, AnimLayer};
 use super::items::{HitSink, ItemEnv};
@@ -111,11 +115,22 @@ pub struct Weapons {
     /// The item definitions' weapon fields (`0x22ee08`: the arm's sequences), by item id, from the level's item
     /// table (the engine sets them; none: no arm sequences).
     pub defs: Vec<super::items::WeaponDef>,
+    /// 0x13e520 + id: the gold weapons (the Pyrocitor reads its own, 0x13e530). Not mirrored yet: 0.
+    pub gold: [u8; N],
+    /// The Pyrocitor's pvars ([`super::pyrocitor`]).
+    pub pyro: super::pyrocitor::Pyro,
+    /// `0x22ee08` / `0x22efd8`'s standing `SetAnim` asked for by an item update (which has no mutable animation in
+    /// the port), made right after the slot loop by [`after_items`].
+    pub pending_draw: bool,
+    pub pending_idle: bool,
 }
 
 impl Default for Weapons {
     fn default() -> Self {
-        Weapons { ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 2], layer_fade: 0, layer_seq: 0, arm_item: 0, deferred: None, throws: 0, defs: Vec::new() }
+        Weapons {
+            ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 2], layer_fade: 0, layer_seq: 0,
+            arm_item: 0, deferred: None, throws: 0, defs: Vec::new(), gold: [0; N], pyro: Default::default(), pending_draw: false, pending_idle: false,
+        }
     }
 }
 
@@ -204,12 +219,85 @@ pub fn draw_weapon(h: &mut Hero, c: &mut Ctx) {
     }
 }
 
-/// `0x22efd8`: the weapon put away (0x1413fa = 0, 0x1413f8 = 0); an arm layer out fades (0x140064 = 1).
+/// `0x22efd8`: the weapon put away (0x1413fa = 0, 0x1413f8 = 0); an arm layer out fades (0x140064 = 1); without one,
+/// standing in the weapon's stance (state 0, key B on 0x1415e4), Ratchet blends back to his idle sequence
+/// (`SetAnim(−2, idle)`: made by [`after_items`] / [`apply_pending`], where the animation can be changed).
 pub fn put_away(h: &mut Hero) {
     if h.f13f8 == 0 { return; }
-    if h.weapons.layers[0].is_some() { h.weapons.layer_fade = 1; }
+    if h.weapons.layers[0].is_some() { h.weapons.layer_fade = 1; } else if h.state == 0 { h.weapons.pending_idle = true; }
     h.f13fa = 0;
     h.f13f8 = 0;
+}
+
+/// The standing `SetAnim`s an item update asked for ([`Weapons::pending_draw`], [`Weapons::pending_idle`]).
+pub(super) fn apply_pending(h: &mut Hero, c: &mut Ctx) {
+    if std::mem::take(&mut h.weapons.pending_idle) && h.state == 0 && c.anim.view().seq_b as i32 == h.weapons.layer_seq {
+        let seq = h.idle_seq();
+        h.set_anim(c.anim, c.rng, Pf::b(0xc000_0000), seq, 0);
+    }
+    if std::mem::take(&mut h.weapons.pending_draw) { draw_weapon(h, c); }
+}
+
+/// `0x242858`: a weapon that keeps the arm raised (0x1413fa, item def +0x30) is out on foot (0x141618 clear):
+/// the item in hand is the one drawn → `SetState(0, 0)` and, when it took, the weapon's standing sequence
+/// (`def +0x24`) over 11 ticks (an arm layer out fades), true: the caller (the walk / stop entries, the walk's stop)
+/// gives up its own state; another item in hand → the weapon put away, false.
+pub(super) fn gun_stance(h: &mut Hero, c: &mut Ctx) -> bool {
+    if h.f13f8 == 0 || h.f13fa == 0 { return false; }
+    let id = h.held_item();
+    if id != h.weapons.arm_item {
+        put_away(h);
+        return false;
+    }
+    let s = h.weapons_def(id).anims[0];
+    if !h.set_state(c, 0, false) { return false; }
+    if s >= 0 { h.set_anim(c.anim, c.rng, Pf::from_i32(ticks(11)), s as u8, 0); }
+    if h.weapons.layers[0].is_some() { h.weapons.layer_fade = 1; }
+    h.weapons.layer_seq = s;
+    true
+}
+
+/// `0x22eca0(prev, new)` (every SetState, before its switch): leaving the idle state (0) for another with a weapon
+/// that keeps the arm raised out, the arm layers over the weapon's moving sequence (`def +0x28`; none: −1) are made
+/// (weight 0, from Ratchet's key over 15 ticks, one step at once), layer 1 only with 0x1413fb = 2.
+pub(super) fn arm_on_state_change(h: &mut Hero, c: &mut Ctx, prev: i32, new: i32) {
+    if h.mode != 0 || h.f13f8 == 0 || h.f13fa == 0 || prev != 0 || new == 0 { return; }
+    let seq = h.weapons_def(h.held_item()).anims[1];
+    if seq == -1 { return; }
+    for (i, &list) in ARM_LISTS.iter().enumerate() {
+        if i == 1 && h.items.f13fb != 2 { break; }
+        if h.weapons.layers[i].is_some() { continue; }
+        let mut l = AnimLayer::new(list);
+        h.weapons.layer_fade = 0;
+        l.weight = 0.0;
+        l.start(&*c.anim, seq.max(0) as u8, 0, ticks(15), true);
+        l.speed = 1.0;
+        h.weapons.layers[i] = Some(l);
+    }
+}
+
+/// The idle transitions' weapon rules (0x242930 state 0): whether a sequence's wrap keeps the weapon's stance (the
+/// weapon is out with the arm raised and Ratchet is in its sequence or an arm layer is out).
+pub(super) fn stance_kept(h: &Hero, seq_b: u8) -> bool {
+    h.f13f8 != 0 && h.f13fa != 0 && (seq_b as i32 == h.weapons.layer_seq || h.weapons.layers[0].is_some())
+}
+
+/// The idle transitions' weapon stance (0x242930 state 0, after Clank's fidget): with the arm raised, out of a blend
+/// (0x13fdec clear), the item drawn in hand → its standing sequence (`def +0x24`) over 11 ticks when Ratchet is not
+/// in it (an arm layer out fades); another item → put away.
+pub(super) fn idle_stance(h: &mut Hero, c: &mut Ctx) {
+    if h.f13f8 == 0 || c.anim.view().blending() || h.f13fa == 0 { return; }
+    let id = h.held_item();
+    if id != h.weapons.arm_item {
+        put_away(h);
+        return;
+    }
+    let s = h.weapons_def(id).anims[0];
+    if c.anim.view().seq_b as i32 != s {
+        if h.weapons.layers[0].is_some() { h.weapons.layer_fade = 1; }
+        h.weapons.layer_seq = s;
+        if s >= 0 { h.set_anim(c.anim, c.rng, Pf::from_i32(ticks(11)), s as u8, 0); }
+    }
 }
 
 /// `0x22f068`'s upkeep of the arm (from the hero's item update): out of ammo with 0x1413fa set → put away; each
@@ -493,11 +581,13 @@ fn create_bomb(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut
     }
 }
 
-/// Right after the slot loop (`super::gadgets::after_items`): the SetState the glove's update made.
+/// Right after the slot loop (`super::gadgets::after_items`): the SetState the glove's update made, the draw / put-away
+/// animations an item update asked for.
 pub(super) fn after_items(h: &mut Hero, c: &mut Ctx) {
     if let Some(s) = h.weapons.deferred.take() {
         if h.state == 1 && s == 0x1e { h.set_state(c, 0x1e, true); }
     }
+    apply_pending(h, c);
 }
 
 #[cfg(test)]

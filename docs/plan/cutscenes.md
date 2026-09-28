@@ -97,8 +97,9 @@ Start once on the trigger tick with the cuboid 23 centre / Euler and hero state 
 out; the flag set / cleared with them. Instance 694 (P+0x170 = −1) is an ambient gunship with no cutscene.
 
 ### 3.4 Other in-level cinematics (not on the Novalis critical path)
-* **Gold bolt 1134** `GoldBoltUpdate` 0x307ca0: pickup cutaway, `CameraScript(orbit point, 1, …)`, the targets
-  re-set each tick, `HeroTeleport` + `CameraScript2(0)` at the end, flag 0x15f404 [M]. Not ported (no owner yet).
+* **Gold bolt 1134** `GoldBoltUpdate` 0x307ca0: pickup cutaway, `FadeToBlack(ticks(10))`, `CameraScript(beside
+  it, 1 = snap, …)`, the targets re-set each tick (an orbit about Ratchet or a move between two cuboids),
+  `HeroTeleport` + `CameraScript2(0)` at the end, flag 0x15f404 [H]. Ported 2026-09-28 (hero_gameplay.md §6).
 * **Bolt crank 280** 0x2e0c68: `CameraScript(…, 3, ticks(180))` + `0x316e88`: the swing to the door / rotator it
   drives, with `0x316e88(pvar+0x28, +0x2c)` (`cinematic::camera_curve`); `CameraScript2(4)` on leaving. The class is
   the crank agent's; it calls `rc_game::cinematic`. Engine check (the crank agent's `engine_script_stop180.txt`,
@@ -239,9 +240,10 @@ cutaway ≈ 3215–3395 (frame 3290: the halves mid-swing under the bars).
 previous scene capture); drop-in / bridge / gunship frames show the bars, no HUD, the camera placements; two runs give
 identical PNGs and WAVs.
 
-**Not yet:** kind C between-level / menu movies (§5); gold bolt 1134's pickup cutaway; mode-2 scenes of other talkers (the interaction
-agent's `Handoff::Scene` is consumed here, untested in the engine for want of a talker scene on the path);
-`UnlockPlanet` / banner / memcard save (logged); the collapsing platform's stray release; the script camera's collision
+**Not yet:** kind C between-level / menu movies (§5); memcard save (logged; the in-memory game state holds every
+write). Done since (hero_gameplay.md §6): the gold bolt cutaway, `UnlockPlanet` + `ShowPlanetBanner` into the game
+state and the HUD, a gameplay class's `FadeToBlack` (`scene_render::FadeHold`), the talker scene → movie → scene
+chain in the engine (the Water Pump Worker's Infobot); the collapsing platform's stray release; the script camera's collision
 push; `CameraScript2` kinds 1 / 4 pose copy details. (The FX driver 1546 and the rest of the mode-2 world: §7.)
 
 ## 7. The scene pass (2026-09-27): data coverage, what runs in mode 2, the one general player
@@ -351,5 +353,5 @@ state differs because it ran). Headless: rc-formats conformance, rc-game (digest
 **Left** (effects hand-off `scratchpad/scene_pass/effects_handoff.md`): type-23 orbs render dim; the explosion light
 does not relight the world (tfrag / tie / shrub point lights: `LightTfrags` 0x2a8e40, `LightTies` 0x2ab218,
 `LightShrubs` 0x29e7e8); particle types 46 / 35, the splash 0x2ff768, the infobot thrusters 0x278450, the ship draw
-callback 0x2a70a8; the hero's state 100 body; the infobot's projection screen in scene 4 draws black [L: an effect of
+callback 0x2a70a8; ~~the hero's state 100 body~~ (ported 2026-09-28, hero_gameplay.md §7); the infobot's projection screen in scene 4 draws black [L: an effect of
 its own]; the actors' collision; mode-6 space scenes (parsed and checked, not played).

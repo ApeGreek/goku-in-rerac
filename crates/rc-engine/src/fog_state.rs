@@ -111,6 +111,9 @@ impl FogState {
             last_t: 0.0,
         }
     }
+
+    /// The underwater flag 0x167494 as the last camera update left it (the sound layer reads it: crate::audio_out).
+    pub fn underwater_flag(&self) -> bool { self.underwater.flag }
 }
 
 /// The underwater full-screen tint (`DrawDebugProfiler`, 0x161200..03): GS RGBA bytes, A = 0x80 → 1.0.

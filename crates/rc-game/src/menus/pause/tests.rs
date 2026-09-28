@@ -29,6 +29,7 @@ fn pg(addr: u32, kind: i32, parent: u32, focus: u32, widgets: &[(usize, u32)], s
 fn menu() -> PageMenu {
     let mut m = PageMenu {
         consts: MenuConsts::default(),
+        addrs: Addrs::default(),
         pages: BTreeMap::new(),
         widgets: BTreeMap::new(),
         kind: 0,

@@ -35,6 +35,7 @@ impl Hero {
     pub(super) fn phys_fall(&mut self, env: &Env) {
         self.stick_target_table(env);
         if self.lockout == 0 { self.air_control(env); }
+        self.lean(); // HeroLean 0x235638: super::idle.
         self.drag(Pf::b(0x3f33_3333), DT * Pf::ZERO);
         let z = self.vel[2];
         self.gravity_from(z, self.group_gravity);

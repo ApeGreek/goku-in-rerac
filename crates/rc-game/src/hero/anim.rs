@@ -90,7 +90,8 @@ pub trait AnimCtl {
     fn eval_chains(&self, _chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> { Vec::new() }
     /// [`AnimCtl::eval_chains`] with Ratchet's weapon-arm pose layers blended in (`MobyAnimEvalChain` 0x268ee8 walks
     /// the moby's +0x60 list): the hand under the arm. Without layer joints the same as `eval_chains`.
-    fn eval_chains_with(&self, chains: &[&[u8]], _layers: &[Option<AnimLayer>; 2]) -> Vec<rc_formats::moby_anim::Rows> { self.eval_chains(chains) }
+    /// `mods` = the moby's joint-modifier list (+0x64, the chain evaluator applies it after the layers).
+    fn eval_chains_with(&self, chains: &[&[u8]], _layers: &[Option<AnimLayer>; 2], _mods: &[rc_formats::moby_anim::JointModifier]) -> Vec<rc_formats::moby_anim::Rows> { self.eval_chains(chains) }
     /// Ratchet's current local pose as one keyframe (the decode `MobyAnimDecodeLocalPose` 0x269938 does, in
     /// the frame encoding of the pose snapshot, `rc_formats::moby_anim::snapshot`). None without class data.
     fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> { None }
@@ -467,9 +468,9 @@ impl AnimCtl for RatchetAnimCtl<'_> {
         rc_formats::moby_anim::evaluate_chains(self.class, &self.a.state, self.a.snapshot.as_ref(), chains)
     }
 
-    fn eval_chains_with(&self, chains: &[&[u8]], layers: &[Option<AnimLayer>; 2]) -> Vec<rc_formats::moby_anim::Rows> {
+    fn eval_chains_with(&self, chains: &[&[u8]], layers: &[Option<AnimLayer>; 2], mods: &[rc_formats::moby_anim::JointModifier]) -> Vec<rc_formats::moby_anim::Rows> {
         let pl = pose_layers(layers, &self.a.arm_joints);
-        rc_formats::moby_anim::evaluate_chains_layered(self.class, &self.a.state, self.a.snapshot.as_ref(), chains, &pl)
+        rc_formats::moby_anim::evaluate_chains_posed(self.class, &self.a.state, self.a.snapshot.as_ref(), chains, &pl, mods)
     }
 
     fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> {

@@ -159,7 +159,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x5a idle, 0x5b walk, 0x5c fall, 0x5d hurt, 0x5e jump (h 4.2), 0x5f..0x61 attacks, 0x62 death | Giant Clank (body 2, **L**; levels 0, 4, 7, 9, 10, 13, 15, 18) | | Bodies (later) |
 | 0x53 idle, 0x54 walk, 0x55 fall, 0x56 hurt, 0x57 death, 0x58 pit fall, 0x59 ○ action | Hologuise disguise (body 3; every level) | | Bodies (later) |
 | 0x6b ride, 0x6c, 0x6d, 0x6e into water, 0x6f; 0x3e (group 0x15, level 16) | Hoverboard (levels 5, 16) | 0x16 | Hoverboard (later) |
-| 0x63 / 0x64 | cutscene control; 100 is the only state group 0x14 accepts (respawn) | 0x18 | Scripted (later) |
+| 0x63 / 0x64 | cutscene control / the scene body (mode-2 scenes, the vendor); 100 is the only state group 0x14 accepts (respawn) | 0x18 | scripted.rs: ported 2026-09-28 (hero_gameplay.md §7) |
 | 0x05, 0x7e | no SetState case (0x7e: a walk-case label only) | — | Unused |
 
 ### 1.4 Counts

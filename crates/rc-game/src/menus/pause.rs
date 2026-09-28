@@ -6,7 +6,8 @@
 //! Page, widget and item records are read from the overlay ([`PageMenu::load`] follows the page tree from the
 //! roots); their run-time fields (focus, cursor, highlight timers, label cross-fade, patched wiring) live in
 //! the loaded copies, shared between pages exactly as the game shares the structs. Widgets are recognised by
-//! their callback addresses (level-01 code addresses; other overlays need their own map).
+//! their callbacks' level-01 addresses: on another level the records sit elsewhere and [`Overlay::relocated`]
+//! pairs them with level 01's (the pages the code names are in [`PageMenu::addrs`], the callbacks read as labels).
 //!
 //! The 14 class-0x472 frame mobys ([`frame`]) are spawned, animated and freed here; their corner joints give
 //! the panel rects exactly as `PageMenuDraw` projects them (the engine draws the mobys themselves).
@@ -43,6 +44,106 @@ pub mod page {
     pub const KIND2D: u32 = 0x1b8b48;
     /// Self-transitions to these play forward (0x28c990).
     pub const FORWARD_ON_SELF: [u32; 6] = [0x1b7670, 0x1b8250, 0x1b8560, 0x1b6878, 0x1b7d70, 0x1b6ca0];
+    /// The pages the code forms (the page walk's starting points on another level, `menus::Overlay::relocated`).
+    pub const ROOTS: [u32; 12] = [ROOT, MAP, MAP_MISSIONS, PLANET_SELECT, PLANET_CONFIRM, KIND22, KIND23, KIND2D, 0x1b8250, 0x1b8560, 0x1b7d70, 0x1b6ca0];
+}
+
+/// `0x1c23a8`: the galaxy-map point table the planet map forms (16 bytes per level; the map reads level 1.. at +0x10).
+pub const PLANET_POINTS_BASE: u32 = 0x1c23a8;
+
+/// This level's addresses of the pages and widgets the code names by address ([`page`], [`wiring`] and the
+/// records [`port`] attaches to; level-01 labels resolved through [`Overlay::at`]). `Default`: level 01.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Addrs {
+    pub root: u32,
+    pub map: u32,
+    pub map_missions: u32,
+    pub planet_select: u32,
+    pub planet_confirm: u32,
+    pub kind22: u32,
+    pub kind23: u32,
+    pub kind2d: u32,
+    pub forward_on_self: [u32; 6],
+    pub weapons: u32,
+    pub options: u32,
+    pub goodies: u32,
+    pub port_options: u32,
+    pub port_options_list: u32,
+    pub port_options_label: u32,
+    pub port_quit: u32,
+    pub port_model_few: u32,
+    pub port_model_many: u32,
+}
+
+impl Addrs {
+    pub fn resolve(ov: &Overlay) -> Addrs {
+        let a = |l: u32| ov.at(l);
+        Addrs {
+            root: a(page::ROOT),
+            map: a(page::MAP),
+            map_missions: a(page::MAP_MISSIONS),
+            planet_select: a(page::PLANET_SELECT),
+            planet_confirm: a(page::PLANET_CONFIRM),
+            kind22: a(page::KIND22),
+            kind23: a(page::KIND23),
+            kind2d: a(page::KIND2D),
+            forward_on_self: page::FORWARD_ON_SELF.map(a),
+            weapons: a(wiring::WEAPONS),
+            options: a(wiring::OPTIONS),
+            goodies: a(wiring::GOODIES),
+            port_options: a(port::OPTIONS),
+            port_options_list: a(port::OPTIONS_LIST),
+            port_options_label: a(port::OPTIONS_LABEL),
+            port_quit: a(port::QUIT_PAGE),
+            port_model_few: a(port::MODEL_FEW),
+            port_model_many: a(port::MODEL_MANY),
+        }
+    }
+}
+
+impl Default for Addrs {
+    fn default() -> Addrs { Addrs::resolve(&Overlay::default()) }
+}
+
+/// The level-01 menu tree walked in step with another level's from `roots` (label, this level's address): the
+/// same records in the same shape on every level. Returns (label → this level's address) of every page, widget
+/// and item list reached, and (this level's callback → its label) of every widget callback. A pair whose page
+/// kinds or widget counts differ is not followed (the trees are the same on the 19 levels).
+pub fn correlate(reference: &Overlay, target: &Overlay, roots: &[(u32, u32)]) -> (std::collections::HashMap<u32, u32>, std::collections::HashMap<u32, u32>) {
+    let mut at = std::collections::HashMap::new();
+    let mut label = std::collections::HashMap::new();
+    let mut pages: Vec<(u32, u32)> = roots.to_vec();
+    let mut widgets: Vec<(u32, u32)> = Vec::new();
+    loop {
+        if let Some((r, t)) = pages.pop() {
+            if r == 0 || t == 0 || at.contains_key(&r) { continue; }
+            let (Some(rp), Some(tp)) = (read_page(reference, r), read_page(target, t)) else { continue };
+            if rp.kind != tp.kind || rp.widgets.map(|w| w != 0) != tp.widgets.map(|w| w != 0) { continue; }
+            at.insert(r, t);
+            pages.push((rp.parent, tp.parent));
+            widgets.extend(rp.widgets.iter().zip(&tp.widgets).map(|(&a, &b)| (a, b)));
+            continue;
+        }
+        let Some((r, t)) = widgets.pop() else { break };
+        if r == 0 || t == 0 || at.contains_key(&r) { continue; }
+        let u = |ov: &Overlay, a: u32, o: u32| ov.u32(a + o).unwrap_or(0);
+        at.insert(r, t);
+        for o in [0, 4, 8, 0xc] {
+            let (cr, ct) = (u(reference, r, o), u(target, t, o));
+            if cr != 0 && ct != 0 { label.insert(ct, cr); }
+        }
+        let (upd, draw) = (u(reference, r, 0), u(reference, r, 4));
+        if upd == func::LIST_UPDATE || (upd == 0 && draw == func::LIST_DRAW) {
+            let (ri, ti) = (read_items(reference, u(reference, r, 0x34)), read_items(target, u(target, t, 0x34)));
+            if ri.len() == ti.len() {
+                at.insert(u(reference, r, 0x34), u(target, t, 0x34));
+                pages.extend(ri.iter().zip(&ti).filter(|(a, b)| a.action == 3 && b.action == 3).map(|(a, b)| (a.arg, b.arg)));
+            }
+            widgets.push((u(reference, r, 0x38), u(target, t, 0x38)));
+            widgets.push((u(reference, r, 0x3c), u(target, t, 0x3c)));
+        }
+    }
+    (at, label)
 }
 
 /// The root wiring `EnterMenuMode` patches (0x1b2b70 = Weapons.above, 0x1b2d04 = Options.below).
@@ -102,11 +203,11 @@ pub struct MenuConsts {
 impl MenuConsts {
     pub fn load(ov: &Overlay) -> Option<MenuConsts> {
         Some(MenuConsts {
-            navy: ov.u32(0x160270)?,
-            hl_ticks: ov.i32(0x160274)?,
-            shadow: (ov.i32(0x160278)?, ov.i32(0x16027c)?),
-            margin: ov.i32(0x160318)?,
-            line_height: ov.i32(0x160328)?,
+            navy: ov.u32(ov.at(0x160270))?,
+            hl_ticks: ov.i32(ov.at(0x160274))?,
+            shadow: (ov.i32(ov.at(0x160278))?, ov.i32(ov.at(0x16027c))?),
+            margin: ov.i32(ov.at(0x160318))?,
+            line_height: ov.i32(ov.at(0x160328))?,
         })
     }
 }
@@ -272,6 +373,8 @@ pub struct MenuEnv {
 #[derive(Clone, Debug)]
 pub struct PageMenu {
     pub consts: MenuConsts,
+    /// This level's addresses of the pages and widgets the code names.
+    pub addrs: Addrs,
     pub pages: BTreeMap<u32, Page>,
     pub widgets: BTreeMap<u32, Widget>,
     /// 0x1ba170 kind, 0x1ba174 current page, 0x1ba178 target page, 0x1ba17c post-action, 0x1ba184
@@ -317,6 +420,7 @@ fn stub(m: &mut BTreeMap<&'static str, u64>, name: &'static str) { *m.entry(name
 impl PageMenu {
     /// Parses every page reachable from the roots and their widgets / items.
     pub fn load(ov: &Overlay) -> Option<PageMenu> {
+        let addrs = Addrs::resolve(ov);
         let mut m = PageMenu {
             consts: MenuConsts::load(ov)?,
             pages: BTreeMap::new(),
@@ -339,11 +443,13 @@ impl PageMenu {
             active: false,
             frames: None,
             enter_b13f4: 0,
-            level_names: (0..20u32).map(|l| (ov.u32(0x1c22c0 + 12 * l).unwrap_or(0), ov.u32(0x1c22c4 + 12 * l).unwrap_or(0))).collect(),
-            planet_points: (0..19u32).map(|k| std::array::from_fn(|j| ov.i32(0x1c23b8 + 16 * k + 4 * j as u32).unwrap_or(0))).collect(),
-            name_dy: ov.i32(0x15f650)?,
+            level_names: (0..20u32).map(|l| (ov.u32(ov.at(0x1c22c0) + 12 * l).unwrap_or(0), ov.u32(ov.at(0x1c22c0) + 4 + 12 * l).unwrap_or(0))).collect(),
+            planet_points: (0..19u32).map(|k| std::array::from_fn(|j| ov.i32(ov.at(PLANET_POINTS_BASE) + 0x10 + 16 * k + 4 * j as u32).unwrap_or(0))).collect(),
+            name_dy: ov.i32(ov.at(0x15f650))?,
+            addrs,
         };
-        let mut todo = vec![page::ROOT, page::MAP, page::MAP_MISSIONS, page::PLANET_SELECT, page::PLANET_CONFIRM];
+        let a = &m.addrs;
+        let mut todo = vec![a.root, a.map, a.map_missions, a.planet_select, a.planet_confirm];
         while let Some(p) = todo.pop() {
             if p == 0 || m.pages.contains_key(&p) { continue; }
             let Some(pg) = read_page(ov, p) else { continue };
@@ -360,7 +466,7 @@ impl PageMenu {
             }
             m.pages.insert(p, pg);
         }
-        m.pages.contains_key(&page::ROOT).then_some(m)
+        m.pages.contains_key(&m.addrs.root).then_some(m)
     }
 
     fn page(&self, p: u32) -> Option<&Page> { self.pages.get(&p) }
@@ -371,9 +477,11 @@ impl PageMenu {
     pub fn enter(&mut self, kind: i32, gs: &GameState) {
         let g = &gs.global;
         self.goodies = g.game_beaten != 0 || g.completes != 0;
-        let (a, b) = if self.goodies { (wiring::GOODIES, wiring::GOODIES) } else { (wiring::OPTIONS, wiring::WEAPONS) };
-        if let Some(Data::List(l)) = self.wm(wiring::WEAPONS).map(|w| &mut w.data) { l.above = a; }
-        if let Some(Data::List(l)) = self.wm(wiring::OPTIONS).map(|w| &mut w.data) { l.below = b; }
+        let ad = &self.addrs;
+        let (a, b) = if self.goodies { (ad.goodies, ad.goodies) } else { (ad.options, ad.weapons) };
+        let (weapons, options) = (ad.weapons, ad.options);
+        if let Some(Data::List(l)) = self.wm(weapons).map(|w| &mut w.data) { l.above = a; }
+        if let Some(Data::List(l)) = self.wm(options).map(|w| &mut w.data) { l.below = b; }
         self.kind = kind;
         self.ticks = 0;
         self.post = 0;
@@ -388,21 +496,21 @@ impl PageMenu {
         self.target = match self.kind {
             10 => {
                 self.kind = 0xb;
-                page::MAP
+                self.addrs.map
             }
             0xe => {
                 self.kind = 0xf;
-                page::PLANET_SELECT
+                self.addrs.planet_select
             }
             0x21 => {
                 self.no_close = true;
                 self.kind = 0x22;
-                page::KIND22
+                self.addrs.kind22
             }
-            0x23 => page::KIND23,
+            0x23 => self.addrs.kind23,
             k => {
                 self.kind = 2;
-                if k == 0x2d { page::KIND2D } else { page::ROOT }
+                if k == 0x2d { self.addrs.kind2d } else { self.addrs.root }
             }
         };
         if self.return_page != 0 {
@@ -463,7 +571,7 @@ impl PageMenu {
             for w in cur_ws.iter().filter(|&&w| w != 0) { self.call_leave(*w, &mut out, gs); }
             let parent = self.page(self.current).map_or(0, |p| p.parent);
             let mut back = self.target == parent;
-            if self.current == self.target && !page::FORWARD_ON_SELF.contains(&self.current) && self.kind != 0x23 { back = !back; }
+            if self.current == self.target && !self.addrs.forward_on_self.contains(&self.current) && self.kind != 0x23 { back = !back; }
             let (cur_seqs, tgt) = (self.page(self.current).map(|p| p.seqs), self.page(self.target).cloned());
             if let Some(tp) = &tgt {
                 for (i, &w) in tp.widgets.iter().enumerate() {
@@ -590,7 +698,7 @@ impl PageMenu {
             func::SOUND_UPDATE => options::sound_update(self, w, inp, gs, out),
             func::QUIT_UPDATE => options::quit_update(self, w, inp, gs, out),
             func::GALAXY_UPDATE => {
-                if inp.pressed_u & button::CROSS != 0 { self.target = page::PLANET_CONFIRM; }
+                if inp.pressed_u & button::CROSS != 0 { self.target = self.addrs.planet_confirm; }
                 0
             }
             func::MAP_UPDATE => planet_select::map_update(self, w, inp, gs, out),
@@ -1006,7 +1114,8 @@ fn read_items(ov: &Overlay, a: u32) -> Vec<Item> {
 fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
     let u = |o: u32| ov.u32(a + o);
     let raw: [u32; 8] = std::array::from_fn(|i| u(0x30 + 4 * i as u32).unwrap_or(0));
-    let (update, draw) = (u(0)?, u(4)?);
+    // The callbacks as their level-01 labels (widgets dispatch on them).
+    let (update, draw) = (ov.label(u(0)?), ov.label(u(4)?));
     let data = match (update, draw) {
         (func::LIST_UPDATE, _) | (0, func::LIST_DRAW) => Data::List(List {
             flags: raw[0],
@@ -1030,7 +1139,7 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
         (func::MISSIONS_UPDATE, _) => Data::Missions,
         _ => Data::Other,
     };
-    Some(Widget { addr: a, update, draw, enter: u(8)?, leave: u(0xc)?, dflags: u(0x10)?, moby: u(0x14)? as i32, rect: [0; 4], raw, data })
+    Some(Widget { addr: a, update, draw, enter: ov.label(u(8)?), leave: ov.label(u(0xc)?), dflags: u(0x10)?, moby: u(0x14)? as i32, rect: [0; 4], raw, data })
 }
 
 #[cfg(test)]

@@ -399,6 +399,8 @@ impl Hero {
         }
         // The Thruster long jump smashes the crates ahead: super::packs.
         super::packs::thruster_crates(self, env, key);
+        // HeroLean 0x235638 on foot (0x1413f4 = 0): super::idle.
+        if self.mode == 0 { self.lean(); }
         self.jump_vertical(env);
         // The wall / ledge probe 0x22c9a0 (sets 0x13f504 / 0x13f838): super::ledge.
         super::ledge::wall_ledge_probe_a(self, env);

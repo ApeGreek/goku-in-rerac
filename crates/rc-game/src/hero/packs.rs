@@ -88,6 +88,11 @@ pub enum SoundCmd {
     Voice { index: i32, flags: u32 },
     /// `release_voice_slot(slot)` when the slot still plays Ratchet's sound.
     Release { slot: i32 },
+    /// `if !SoundIsAlive(item, loop n) { loop n = PlayClassSound(index, flags, item) }` on the hand item (the
+    /// Pyrocitor's flame loop); the slot is kept in `super::fx::HeroFx::item_loops[n]`.
+    ItemLoop { n: usize, index: i32, flags: u32 },
+    /// The hand item's loop `n` released (`release_voice_slot` when still its sound) and forgotten.
+    ItemRelease { n: usize },
 }
 
 /// A hit for the moby hit path ([`deliver_hits`]).
@@ -168,6 +173,8 @@ pub(super) fn flush_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sound
             SoundCmd::Loop { n, sound } => h.packs.loops[n] = sounds.voice(moby, sound, 4, rng),
             SoundCmd::Voice { index, flags } => { sounds.voice(moby, index, flags, rng); }
             SoundCmd::Release { slot } => sounds.release(moby, slot),
+            // The hand item's loops are flushed with the item sounds (super::gadgets::flush_item_sounds).
+            SoundCmd::ItemLoop { .. } | SoundCmd::ItemRelease { .. } => {}
         }
     }
 }
@@ -288,6 +295,7 @@ fn glide_physics(h: &mut Hero, env: &Env) {
     let t = DT * p(k);
     h.stick_target(env, t);
     h.turn_to(SCALE64 * p(0.025), SCALE64 * p(0.3), DT * p(12.566_371));
+    h.lean(); // HeroLean 0x235638: super::idle.
     h.speed_step(DT2 * p(15.0), DT2 * p(7.0));
     h.set_planar_vel(Pf::b(0x47c3_4f80));
     h.vel[2] = Pf::ZERO;
@@ -362,6 +370,7 @@ fn hover_physics(h: &mut Hero, env: &Env) {
         h.turn_to(SCALE64 * p(0.017), SCALE64 * p(0.3), DT * p(4.712_389));
         h.target_yaw = keep;
     }
+    h.lean(); // HeroLean 0x235638: super::idle.
     let slow = h.stick_mag < p(0.2);
     let mut a = if slow { 3.5 } else { 7.0 };
     // Level00: on a slippery floor (0x140632) the hover brakes less (P1's open item).

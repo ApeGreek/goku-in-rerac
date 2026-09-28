@@ -30,7 +30,7 @@ use super::swim::SwimEvent;
 use super::{Hero, HeroSounds};
 use crate::follow_camera::{ShakeAxis, ShakeRequest};
 use crate::moby_runtime::Moby;
-use crate::particles::{type25, type34, type47, type53, Particles};
+use crate::particles::{type02, type12, type25, type34, type47, type53, Particles};
 use crate::rng::Rng;
 
 /// A particle spawn the hero code made this tick, with its spawner's random draws already made.
@@ -48,6 +48,11 @@ pub enum PartSpawn {
     /// `PartType53Spawn(s12, s13, s14, pos, life, rgba, a3, t0, vel)` 0x287328 with `a3` 0 / 1 (no draw): the
     /// sparkle (the cable grab's burst `0x2a7e20`).
     Sparkle { s12: f32, s13: f32, s14: f32, pos: [f32; 4], life: i32, rgba: u32, b8: u8, t0: i8, vel: [f32; 3] },
+    /// `PartType12Spawn(len, pos, vel, flags)` 0x280138: a Pyrocitor flame (or its glow puff), with its draws.
+    Flame { len: f32, pos: [f32; 4], vel: [f32; 4], flags: u8, draws: crate::particles::type12::Draws },
+    /// `PartType02Spawn` 0x27dc98: a trail blob (the Pyrocitor's embers); `rng` = the stream at its rotation draw
+    /// (made by the caller at the game's point).
+    Blob { spawn: crate::particles::type02::Spawn, rng: Rng },
 }
 
 /// One entry of the delayed-voice queue 0x141528 (8 bytes: s16 active, sound, timer, flags).
@@ -76,6 +81,8 @@ pub struct HeroFx {
     /// Ratchet's own sounds the hand item's update makes (`0x236738` voices, the thrown wrench's whoosh loop in slot
     /// 0x14156c and its release), played with the item sounds (`super::gadgets::flush_item_sounds`).
     pub item_voices: Vec<super::packs::SoundCmd>,
+    /// The hand item's looping class sounds' slots (the Pyrocitor's flame: +0x4a of its pvars), by channel.
+    pub item_loops: [Option<i32>; 2],
     /// Footsteps the transitions played this tick (`HeroFootstepSound(class, foot, 1)` of the landing), in order:
     /// `(class, foot)`, played by [`flush`] right after the transitions.
     pub footsteps: Vec<(u8, u8)>,
@@ -153,6 +160,8 @@ pub fn sparkle_burst(h: &mut Hero, rng: &mut Rng, point: &mut [f32; 3], n: i32) 
 /// The particle hook's part: create the hero's queued spawns of this tick, in order (before `UpdateParts`).
 pub fn create_particles(h: &Hero, sys: &mut Particles) {
     sys.hero = crate::hero::physics::to_f32x3(h.pos);
+    let gold = h.weapons.gold[super::pyrocitor::PYROCITOR as usize];
+    sys.gold = gold;
     for s in &h.fx.parts {
         match *s {
             PartSpawn::Spark { pos, vel, variant, size } => { type25::spawn(sys, pos, vel, variant, size); }
@@ -161,6 +170,8 @@ pub fn create_particles(h: &Hero, sys: &mut Particles) {
             PartSpawn::Sparkle { s12, s13, s14, pos, life, rgba, b8, t0, vel } => {
                 type53::spawn(sys, s12.to_bits(), s13.to_bits(), s14.to_bits(), pos.map(f32::to_bits), life, rgba, b8, t0, vel.map(f32::to_bits));
             }
+            PartSpawn::Flame { len, pos, vel, flags, draws } => { type12::spawn(sys, len, pos, vel, flags, gold, &draws); }
+            PartSpawn::Blob { spawn, mut rng } => { type02::spawn(sys, &mut rng, &spawn); }
         }
     }
 }

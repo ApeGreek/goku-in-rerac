@@ -11,7 +11,8 @@
 //!
 //! Not ported (counted in [`Snd989::unimplemented`], with the reason): XREF (2, 3), child sounds (5, 6),
 //! plugin messages (7), BRANCH (8), noise tones (flag 8), reverb-only tones (flag 0x10). None of them occur in
-//! the RAC1 banks except the tone flags, which are never set (grain types used: 1, 4, 20–43).
+//! the RAC1 banks (grain types used: 1, 4, 20–43; tone flags 8 and 0x10 are never set). Tone flag 1 ("to reverb",
+//! every level-bank tone) marks the voice's reverb send ([`super::reverb`]).
 //!
 //! Randomness: 989snd calls the IOP C library `rand()`; which generator the RAC1 IRX links is not reversed.
 //! [`IopRng`] is the newlib-style LCG seeded with 1 (inferred), so the output is deterministic.
@@ -316,6 +317,8 @@ impl Snd989 {
         let pitch = tone_pitch(&tone, h.cur_pb, h.cur_pm);
         spu.voices[i].key_on(VoiceData::Ram(Arc::clone(&spu.ram)), tone.sample_offset as usize, pitch, tone.adsr1, tone.adsr2);
         spu.voices[i].vol = self.vm.voice_registers(base, group);
+        // Tone flag 1: the voice also feeds the reverb (every level-bank tone; super::reverb).
+        spu.voices[i].reverb = tone.flags & 1 != 0;
         let gen = spu.voices[i].generation;
         self.vm.voices[i] = super::voices::VoiceSlot { owner: VoiceUse::Tone { handle: key }, priority: tone.priority, group: h.group, basevol: base, start_tick: self.tick, generation: gen };
         h.voices.push(VoiceRef { spu: i, tone, g_vol: vol, g_pan: pan });

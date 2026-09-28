@@ -172,7 +172,7 @@ pub struct LevelParticles {
     pub level: u32,
 }
 
-/// Reads the particle textures and, on Novalis, the class-27 emitters with their pvars.
+/// Reads the particle textures and the level's emitters (class 27 on Novalis) with their pvars.
 pub fn load(core: &rc_formats::level::LevelCore, index: &[u8], core_data: &[u8], gameplay: &[u8], level: u32) -> anyhow::Result<LevelParticles> {
     let textures = match rc_formats::particle_tex::parse_particle_textures(core, index, core_data) {
         Ok(t) => Some(t),
@@ -182,10 +182,13 @@ pub fn load(core: &rc_formats::level::LevelCore, index: &[u8], core_data: &[u8],
         }
     };
     let mut owners = Vec::new();
-    if level == 1 {
+    // The emitters: the instances whose class runs the emitter update 0x2bd100 in the level's class table
+    // (crate::gameplay::level_ports; class 27 on Novalis, no other level has the function).
+    let emitter = |oc: i32| crate::gameplay::level_ports().external(oc as i16) == Some(crate::gameplay::EMITTER_UPDATE);
+    {
         let instances = rc_formats::gameplay::parse_moby_instances(gameplay)?;
         let pvars = rc_formats::gameplay::parse_pvars(gameplay)?;
-        for (i, m) in instances.iter().enumerate().filter(|(_, m)| m.o_class == 27) {
+        for (i, m) in instances.iter().enumerate().filter(|(_, m)| emitter(m.o_class)) {
             let Some(p) = m.pvar(&pvars).filter(|p| p.len() >= 0xe0) else { continue };
             let pos = m.position;
             owners.push((Owner { instance: i, pos: [pos[0], pos[1], pos[2], 0.0], rot: m.rotation, pvars: p.to_vec() }, m.update_distance as u8));

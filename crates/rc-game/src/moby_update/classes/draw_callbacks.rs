@@ -27,7 +27,7 @@ pub enum Callback {
     /// The nanotech cluster 806's glow (level01 `0x301c00`, list 1; draw only): [`super::pickup::nanotech_glow`].
     NanotechGlow,
     /// The ships' canopy glass (level01 `0x2a70a8`, the boot's `0x2327a0`; draw only, apart from its cross-fade timer):
-    /// registered by the cutscene FX driver on list 1 with the ship's joint-0 matrix ([`DrawCallbacks::matrices`]).
+    /// registered by the cutscene FX driver on list 1 with the matrix of the ship's joint list 0 (its canopy joint) ([`DrawCallbacks::matrices`]).
     ShipGlass,
 }
 
@@ -49,7 +49,7 @@ impl DrawCallbacks {
         if self.list1.len() < LIST_LEN { self.list1.push((cb, id)); }
     }
 
-    /// [`Self::register`] with the moby's joint-0 matrix for the draw.
+    /// [`Self::register`] with the moby's joint-list-0 matrix (`0x264508(m, 0, M)`) for the draw.
     pub fn register_with_matrix(&mut self, cb: Callback, id: MobyId, m: [[f32; 4]; 4]) {
         if self.list1.len() < LIST_LEN {
             self.list1.push((cb, id));

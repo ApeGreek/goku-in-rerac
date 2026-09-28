@@ -138,19 +138,20 @@ pub struct QsTables {
 
 impl QsConsts {
     pub fn load(ov: &Overlay) -> Option<QsConsts> {
-        let g = |o: u32| ov.i32(GP_BASE + o);
-        let gu = |o: u32| ov.u32(GP_BASE + o);
-        let fmt_addr = GP_BASE + 0xb0;
+        let base = ov.at(GP_BASE);
+        let g = |o: u32| ov.i32(base + o);
+        let gu = |o: u32| ov.u32(base + o);
+        let fmt_addr = base + 0xb0;
         let fmt = ov.bytes(fmt_addr, 16)?;
         let fmt = fmt[..fmt.iter().position(|&c| c == 0).unwrap_or(fmt.len())].to_vec();
         Some(QsConsts {
             size: (g(0)?, g(4)?),
             centre: (g(8)?, g(0xc)?),
             steps: g(0x68)?,
-            edge: ov.pf(GP_BASE + 0x70)?,
-            radius: ov.pf(GP_BASE + 0x74)?,
-            x_scale: ov.pf(GP_BASE + 0xac)?,
-            dim: ov.pf(GP_BASE + 0xa8)?,
+            edge: ov.pf(base + 0x70)?,
+            radius: ov.pf(base + 0x74)?,
+            x_scale: ov.pf(base + 0xac)?,
+            dim: ov.pf(base + 0xa8)?,
             name_rgba: (gu(0x78)?, gu(0x7c)?),
             shadow_rgba: (gu(0x80)?, gu(0x84)?),
             ammo_empty_rgba: (gu(0x88)?, gu(0x8c)?),
@@ -164,14 +165,15 @@ impl QsConsts {
 
 impl QsTables {
     pub fn load(ov: &Overlay) -> Option<QsTables> {
-        let t = ov.u32(PAGE_TABLE)?;
+        let t = ov.u32(ov.at(GP_BASE) + (PAGE_TABLE - GP_BASE))?;
         let e = |k: u32, o: u32| ov.i32(t + k * ENTRY + o);
         let mut entries = [Entry::default(); SLOTS];
         for (k, en) in entries.iter_mut().enumerate() {
             let k = k as u32;
             *en = Entry { icon: 0, f4: e(k, 4)?, left: e(k, 8)?, right: e(k, 0xc)?, up: e(k, 0x10)?, down: e(k, 0x14)?, item: 0 };
         }
-        let d = |k: u32| ov.i32(DPAD_DEFAULTS + 4 * k);
+        let dpad = ov.at(DPAD_DEFAULTS);
+        let d = |k: u32| ov.i32(dpad + 4 * k);
         Some(QsTables { entries, defaults: [d(0)?, d(1)?, d(2)?, d(3)?], entry_m1_icon: ov.i32(t - ENTRY).unwrap_or(0), table_addr: t })
     }
 }

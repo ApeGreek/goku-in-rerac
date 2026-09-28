@@ -225,4 +225,8 @@ dropped. Headless: `crates/rc-game/tests/interaction_vendor.rs`. `novalis_hero_d
 * **Ship** (`ShipUpdate`): owner 2, within 4 of the hatch, △ → 0x15f630 → take-off (mode 6, menus.md §5). The
   `Handoff::ShipMenu` exists; the class is not ported.
 * **Teleporter** (1135): owner 4 standing on the pad; teleport states not ported.
-* **Movies** (node scene bit 0x4000): crate::scene_render's `play_movie` stub (no decoder), the dialogue continues.
+* **Movies** (node scene bit 0x4000): crate::scene_render's `play_movie` → crate::movie_render (native player); the
+  dialogue continues at `MovieExitToGameplay`.
+* **The Novalis Infobot** (2026-09-28, hero_gameplay.md §6): after the sale's scene 1 → movie 2 → scene 2 the worker's
+  `UnlockPlanet(2)` / `ShowPlanetBanner(2)` reach the game state and the HUD banner through `rc_game::cinematic`
+  (engine: the whole chain from △ to the banner, frames 2470 → 4420).

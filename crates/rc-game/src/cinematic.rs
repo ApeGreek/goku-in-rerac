@@ -13,6 +13,10 @@
 //! | `HeroTeleport(pos, euler, state, reset_cam)` 0x2368e0 | [`hero_teleport`] | Ratchet placed, motion cleared, state set |
 //! | `DialogStreamStart(k)` 0x2ac330 | [`start_scene`] | a mode-2 scene (the engine's scene player) |
 //! | `DialogStreamUpdate(n)` 0x2acf50 | [`start_movie`] | an in-level PSS movie (`StartPssMovie` 0x2ad0c0, mode 1) |
+//! | `FadeToBlack(n)` 0x21b438 | [`fade_to_black`] | n blocking black-quad frames over the last image |
+//! | `ShowBanner(msg, t)` 0x2789e0 / `ShowPlanetBanner(p)` 0x277c38 | [`show_banner`] / [`show_planet_banner`] | the HUD banner ([`Cinematic::banner`]) |
+//! | `UnlockPlanet(p)` 0x2756d0 | [`unlock_planet`] | the saved game's planet bits and map order (+ banner) |
+//! | `memcard_Save(0, −1)` | [`save`] | logged: the in-memory game state is the save |
 //!
 //! The camera calls are queued here and applied by the tick right after the moby loop ([`Cinematic::calls`],
 //! `crate::tick`); the hero calls go through the hero-block channel ([`crate::moby_update::services::HeroFields`]);
@@ -50,8 +54,10 @@ pub enum EngineRequest {
     StartMovie { movie: i32 },
     /// `SetMissionDone(m)` (`0x14c050 + level·16 + m = 0xff`).
     MissionDone { mission: u8 },
-    /// `UnlockPlanet(p)` + `ShowPlanetBanner(p)`.
-    UnlockPlanet { planet: i32 },
+    /// `FadeToBlack(n)` 0x21b438 called from a class in gameplay (the gold bolt's pickup: `ticks(10)`): the game draws
+    /// n black quads over the last image, one per vsync, inside the tick (blocking), then the tick goes on. The engine
+    /// holds the next `frames` frames (tick suspended, the last view) under the growing coverage.
+    FadeToBlack { frames: i32 },
     /// `FUN_002a2450` / `FUN_002a2480`: the ship moby 0x13e030 hidden (mode |= 3, no collision) / shown.
     ShipHidden(bool),
     /// `memcard_Save(0, −1)`.
@@ -76,7 +82,26 @@ pub struct Cinematic {
     pub scene: Option<crate::scene_player::SceneState>,
     /// 0x162070: the point the cutscene FX driver 1546 last read on the arrival ship (its trail's reference).
     pub fx_ship_point: [f32; 4],
+    /// The banner buffer's last `ShowBanner(msg, ticks)` of the moby loop (0x179598 / 0x15f640: one banner, the last
+    /// call wins), for the HUD; `seq` counts the calls.
+    pub banner: BannerCall,
 }
+
+/// `ShowBanner(msg, ticks)` 0x2789e0 as the HUD takes it (`HudState::show_banner_msg`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BannerCall {
+    pub seq: u32,
+    /// The level message id (`msg_string`).
+    pub msg: i32,
+    /// The countdown 0x15f640 (`ticks(180)` for `ShowBanner(msg, −1)`).
+    pub ticks: i32,
+}
+
+/// `ShowPlanetBanner(p)` 0x277c38: the message of planet `clamp(p, 0, 18)` from the table at level01 0x20a0c0 (the
+/// same ids in every overlay), shown `ticks(1180)`: "Infobot for Planet Aridia acquired" (1009), … .
+pub const PLANET_BANNERS: [i32; 19] = [0, 6, 1009, 1010, 3014, 6011, 4006, 5012, 7000, 8007, 8008, 10009, 10010, 12005, 13001, 14001, 15009, 15010, 17001];
+/// `ShowPlanetBanner`'s countdown (`ticks(0x49c)`).
+pub const PLANET_BANNER_TICKS: i32 = 0x49c;
 
 /// Entries kept in [`Cinematic::creature_log`].
 pub const LOG_LEN: usize = 64;
@@ -115,6 +140,8 @@ pub fn hero_teleport(w: &mut World, pos: [f32; 3], euler: [f32; 3], state: i32, 
     f.pose = Some(HeroPose { pos, yaw: euler[2], target_yaw: euler[2] });
     if state != -1 { f.call(HeroCall::SetState { id: state, play: true }); }
     if reset_cam { w.svc.cinematic.calls.push(CinematicCall::CameraResetBehindHero); }
+    // `EnvNearestSamplePoint(hero)`: the env sample point near the destination (reverb, music track; crate::audio).
+    if let Some(s) = w.sound.as_deref_mut() { s.hero_teleported(pos); }
 }
 
 /// `DialogStreamStart(k)`.
@@ -122,6 +149,39 @@ pub fn start_scene(w: &mut World, scene: usize, arrival: bool) { w.svc.cinematic
 
 /// `DialogStreamUpdate(n)`.
 pub fn start_movie(w: &mut World, movie: i32) { w.svc.cinematic.requests.push(EngineRequest::StartMovie { movie }); }
+
+/// `FadeToBlack(n)` from a class (see [`EngineRequest::FadeToBlack`]).
+pub fn fade_to_black(w: &mut World, frames: i32) { w.svc.cinematic.requests.push(EngineRequest::FadeToBlack { frames }); }
+
+/// `memcard_Save(0, −1)`: the in-memory game state already holds every write; the engine logs the request (no
+/// memory-card writer yet).
+pub fn save(w: &mut World) { w.svc.cinematic.requests.push(EngineRequest::Save); }
+
+/// `ShowBanner(msg, ticks)` 0x2789e0 (`ticks` already scaled; the caller passes `ticks(180)` for −1).
+pub fn show_banner(w: &mut World, msg: i32, ticks: i32) {
+    let b = &mut w.svc.cinematic.banner;
+    *b = BannerCall { seq: b.seq.wrapping_add(1), msg, ticks };
+}
+
+/// `ShowPlanetBanner(p)` 0x277c38.
+pub fn show_planet_banner(w: &mut World, planet: i32) {
+    let t = w.ticks(PLANET_BANNER_TICKS);
+    show_banner(w, PLANET_BANNERS[planet.clamp(0, 18) as usize], t);
+}
+
+/// `UnlockPlanet(p)` 0x2756d0: when planet `p` is still locked (0x13dd40[p], the moby loop's mirror of the saved
+/// game), it is unlocked and appended to the galaxy-map order 0x13d510 (`GameState::unlock_planet`, through the
+/// saved-game write channel), and its banner shown unless `p` is the current level.
+pub fn unlock_planet(w: &mut World, planet: i32) {
+    let Ok(p) = usize::try_from(planet) else { return };
+    if p >= 20 { return; }
+    let u = &mut w.svc.interact.game.planet_unlocked;
+    if u.len() < 20 { u.resize(20, 0); }
+    if u[p] != 0 { return; }
+    u[p] = 1;
+    w.svc.interact.writes.push(crate::moby_update::interact::GameWrite::UnlockPlanet(p));
+    if planet as u32 != w.svc.level { show_planet_banner(w, planet); }
+}
 
 /// A creature layer script request as the camera / hero calls the game makes for it (gunship 688:
 /// `SetState(0x72, 0)` then `CameraScript(centre, euler, 0, 0, 0)`; at the end `CameraScript2(0)` then

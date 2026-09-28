@@ -140,6 +140,9 @@ pub struct Moby {
     pub rows: [[f32; 4]; 4],
     /// u64 at +0x38 while deleted: the tick counter value from which the slot can be reused.
     pub delete_tick: u64,
+    /// +0x64: the runtime joint-modifier list, head first, with each node's target joint resolved
+    /// (`rc_formats::moby_anim::JointModifier`; written by the moby's owner, read by every pose evaluation).
+    pub joint_mods: Vec<rc_formats::moby_anim::JointModifier>,
 }
 
 impl Default for Moby {
@@ -157,6 +160,7 @@ impl Moby {
             b71: 0, b72: 0, b73: 0, update_fn: None, pvars: Vec::new(), b7c: 0, b7d: 0, b7f: 0, shadow_lo: 0.0, shadow_hi: 0.0, glow: 0,
             has_collision: false, coll_disable: 0, ba0: [0; 4], hit_slot: 0, o_class: 0, uid_hi: 0, index: 0,
             mission: 0, spawn_flag: 0, spawn_id: 0, b4: 0, b6: 0, parent: None, cmd: 0, bbd: 0, rows: [[0.0; 4]; 4], delete_tick: 0,
+            joint_mods: Vec::new(),
         }
     }
 

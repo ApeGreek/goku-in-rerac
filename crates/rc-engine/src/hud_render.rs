@@ -333,6 +333,8 @@ struct HudRuntime {
     game: Inputs,
     /// The last pickup banner shown (`rc_game::moby_update::classes::pickup::Banner::seq`).
     banner_seq: u32,
+    /// The last `rc_game::cinematic::Cinematic::banner` call shown.
+    cine_banner_seq: u32,
 }
 
 #[derive(Component)]
@@ -466,6 +468,7 @@ fn setup(
         // Until the first frame reads the game state (Persistent / Session / HeldWeapon): 4/4, no bolts, no slot.
         game: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: lh.lang },
         banner_seq: 0,
+        cine_banner_seq: 0,
     });
 }
 
@@ -489,6 +492,7 @@ fn tick_and_build(
     (state, session, held): GameInputs,
     feed: Res<HudFeed>,
     play: Option<Res<crate::gameplay::Play>>,
+    mut audio: Option<ResMut<crate::audio_out::AudioOut>>,
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
@@ -496,6 +500,11 @@ fn tick_and_build(
     if let Some(b) = play.as_ref().map(|p| p.svc.pickups_banner).filter(|b| b.seq != rt.banner_seq) {
         rt.banner_seq = b.seq;
         rt.state.show_bannerf(b.text, b.arg);
+    }
+    // `ShowBanner(msg, ticks)` of the moby loop (the gold bolt, the planet banners: rc_game::cinematic::show_banner).
+    if let Some(b) = play.as_ref().map(|p| p.svc.cinematic.banner).filter(|b| b.seq != rt.cine_banner_seq) {
+        rt.cine_banner_seq = b.seq;
+        rt.state.show_banner_msg(b.msg, b.ticks);
     }
     // The game's values (bolts 0x15ed98, max HP 0x15eda0, HP 0x1415f8, the held item's ammo slot), unless the
     // RC_HUD_DEMO values drive it.
@@ -526,6 +535,7 @@ fn tick_and_build(
             if t == 180 { rt.game.hp = 3; }
         }
         rt.draws = rt.state.tick(rt.game);
+        play_level_sounds(&mut rt.state, audio.as_deref_mut(), play.as_deref(), t);
         if let Some(text) = rt.env.text.clone().filter(|_| rt.env.text_window) { window_text_demo(&rt.state, &rt.glyphs, &text, &mut rt.draws); }
     }
     rt.hud2d.clear();
@@ -534,6 +544,17 @@ fn tick_and_build(
     rt.hud2d.prims.extend(hook.prims.iter().copied());
     rt.hud2d.prims.extend(scene.prims.iter().copied());
     let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d, &rt.atlas_frames, &rt.atlas_fx));
+}
+
+/// The HUD's `PlayLevelSoundAtMoby(index, flags, 0)` calls (the help box's opening sound) into the audio system: 2-D at
+/// the play camera. Level defs 0 and 1 have no pitch-bend range on any level (rc-game `tests/reverb_conformance.rs`), so
+/// these plays draw nothing from the game's stream and a local stream stands in for it.
+fn play_level_sounds(state: &mut HudState, audio: Option<&mut crate::audio_out::AudioOut>, play: Option<&crate::gameplay::Play>, tick: u64) {
+    let calls = std::mem::take(&mut state.level_sounds);
+    let Some(a) = audio else { return };
+    let listener = play.map(|p| rc_game::audio::class_sounds::listener_of(&p.game.camera.out)).unwrap_or_default();
+    let mut rng = rc_game::rng::Rng::new();
+    for (index, flags) in calls { a.system().play_level_sound_at_moby(index, flags, None, None, &listener, &mut rng, tick); }
 }
 
 /// `RC_HUD_TEXT_WINDOW=1`: the text in a `DrawUIFrame` sized from a `FontPrintWindow` measure (regular font,

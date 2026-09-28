@@ -521,6 +521,14 @@ pub trait SoundSink {
     /// Slot `slot`'s owner (+0x18, zeroed when the voice is freed) and class-sound index (+0xe), whatever its state:
     /// what the loop-sound refresh `FUN_002637d8` reads (`anim_sound`). None: no owner. Default: None.
     fn slot_owner(&self, _slot: i32) -> Option<(MobyId, u16)> { None }
+    /// `PlayLevelSoundAtMoby(index, flags, moby)` 0x2a1770: a level-bank def (0 help box, 1 skill point) at the moby
+    /// `at` (id, position), or 2-D at the listener for None (every caller on the disc). Default: −1.
+    fn play_level_sound(&mut self, _index: i32, _flags: u32, _at: Option<(MobyId, [f32; 3])>, _tick: u64, _rng: &mut Rng) -> i32 { -1 }
+    /// `HeroTeleport` 0x2368e0 moved Ratchet to `pos` (its `EnvNearestSamplePoint`: reverb and music track). Default:
+    /// nothing.
+    fn hero_teleported(&mut self, _pos: [f32; 3]) {}
+    /// The checkpoint record `0x29ac10` saves the sound layer's reverb request. Default: nothing.
+    fn checkpoint_saved(&mut self) {}
 }
 
 /// One glint (0x16eec0 + i·0x20): the sparkle drawn on idle bolts.
@@ -964,6 +972,8 @@ pub struct HeroFields {
     pub ammo: [i32; rc_formats::save_game::ITEM_COUNT],
     /// 0x13de08: ammo picked up (stat) added this tick, by item.
     pub ammo_picked: [i32; rc_formats::save_game::ITEM_COUNT],
+    /// `0x1413ff = 1`: the hand item hidden (the gold bolt's pickup; `SetState` clears it on foot).
+    pub hide_hand: bool,
 }
 
 /// Ratchet's pose as a class stores it (native `f32`): position 0x13f3d0 (x, y, z; w kept), yaw 0x13f3e8, target
@@ -1003,6 +1013,7 @@ impl HeroFields {
             health: h.health,
             ammo: h.weapons.ammo,
             ammo_picked: [0; rc_formats::save_game::ITEM_COUNT],
+            hide_hand: false,
         }
     }
 
@@ -1051,6 +1062,8 @@ impl HeroFields {
                 HeroCall::SetAnim { blend, seq, frame } => h.set_anim(c.anim, c.rng, pf(blend), seq, frame),
             }
         }
+        // After the calls: the gold bolt stores 0x1413ff after its HeroTeleport's SetState (which clears it).
+        if self.hide_hand { h.f13ff = 1; }
     }
 }
 
@@ -1110,6 +1123,11 @@ pub trait ExternalUpdates {
     /// `(*moby+0x74)(moby)` for an address [`update_fn`](Self::update_fn) returned. `particles` is the
     /// world's particle system (the class-27 emitters spawn into it).
     fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: V4, counter: u64, particles: Option<&mut Particles>);
+    /// `RippleDisturb(x, y, r, amp, patches, n, additive)` 0x2b82a8 on every ripple patch of the level's water
+    /// (the ripple manager 751's buffers); none: nothing (no draws either way).
+    fn ripple_disturb(&mut self, _x: f32, _y: f32, _r: f32, _amp: f32, _additive: bool) {}
+    /// `SetWaterLevel` 0x26ed38's ripple-patch surface height over `p` (`RippleHeightQuery`); None: no patch there.
+    fn water_height(&self, _p: [f32; 3]) -> Option<f32> { None }
 }
 
 /// A `CollLine_Fix` result with its moby (`CollOutput+0x18`).
@@ -1239,6 +1257,20 @@ impl<'a> World<'a> {
     pub fn play_sound(&mut self, index: i32, flags: u32, id: MobyId) -> i32 {
         let c = self.table.mobys[id].o_class;
         self.play_sound_as(index, flags, id, c)
+    }
+
+    /// `PlayLevelSoundAtMoby(index, flags, moby)` 0x2a1770 ([`SoundSink::play_level_sound`]): `id` None = moby 0 (2-D
+    /// at the listener), as every caller passes.
+    pub fn play_level_sound(&mut self, index: i32, flags: u32, id: Option<MobyId>) -> i32 {
+        let at = id.map(|i| {
+            let p = self.table.mobys[i].position;
+            (i, [p[0], p[1], p[2]])
+        });
+        let tick = self.counter;
+        match self.sound.as_deref_mut() {
+            Some(s) => s.play_level_sound(index, flags, at, tick, self.rng),
+            None => -1,
+        }
     }
 
     /// `SoundIsAlive(moby, slot)` 0x27e820 ([`SoundSink::alive`]; without a sink: any slot ≠ −1).
@@ -1595,6 +1627,27 @@ impl crate::hero::items::HitSink for ServiceHits<'_> {
 
     fn line(&mut self, table: &mut MobyTable, a: V4, b: V4, flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<Option<MobyId>> {
         line_hit_in(table, self.svc, self.classes, self.coll, a, b, flags, ignore, tmpl).map(|h| h.moby)
+    }
+
+    fn probe(&mut self, table: &mut MobyTable, a: V4, b: V4, flags: u32, ignore: Option<MobyId>) -> Option<Option<[f32; 3]>> {
+        let src = self.svc.scene_parts(table, self.classes);
+        let sc = self.svc.scene(&src);
+        Some(coll_line_m(self.coll.unwrap_or(no_mesh()), Some(&sc), ph::to_f32x3(a), ph::to_f32x3(b), QueryFlags(flags), ignore).map(|h| h.point))
+    }
+
+    fn light_alloc(&mut self, l: crate::point_lights::PointLight) -> i32 {
+        let load = f32::from_bits(self.svc.frame_load[1].0);
+        self.svc.point_lights.alloc(l, load).map_or(-1, |i| i as i32)
+    }
+
+    fn light_get(&mut self, slot: i32) -> Option<crate::point_lights::PointLight> { *self.svc.point_lights.slots.get(usize::try_from(slot).ok()?)? }
+
+    fn light_set(&mut self, slot: i32, l: crate::point_lights::PointLight) {
+        if let Ok(i) = usize::try_from(slot) { self.svc.point_lights.set(i, l); }
+    }
+
+    fn light_free(&mut self, slot: i32) {
+        if let Ok(i) = usize::try_from(slot) { self.svc.point_lights.free(i); }
     }
 }
 

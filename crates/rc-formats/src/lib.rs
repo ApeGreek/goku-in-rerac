@@ -32,6 +32,7 @@ pub mod occlusion;
 pub mod particle_tex;
 pub mod hud;
 pub mod font;
+pub mod level_overlay;
 pub mod strings;
 pub mod sound_bank;
 pub mod vag;

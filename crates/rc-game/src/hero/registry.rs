@@ -179,8 +179,8 @@ pub static STATES: [StateInfo; 0x83] = [
     s("Giant Clank attack 2", 6, Bodies, false),                  // 0x60
     s("Giant Clank attack 3", 6, Bodies, false),                  // 0x61
     s("Giant Clank death", 0x14, Bodies, false),                  // 0x62
-    s("cutscene control", 0x18, Scripted, false),                 // 0x63
-    s("cutscene control / respawn", 0x18, Scripted, false),       // 0x64
+    s("cutscene control", 0x18, Scripted, true),                  // 0x63
+    s("cutscene control / respawn (scene body)", 0x18, Scripted, true), // 0x64
     s("walk to point", 1, Stance, true),                          // 0x65
     s("walk to point: stop", 1, Stance, true),                    // 0x66
     s("walk to point: turn", 0, Stance, true),                    // 0x67
@@ -350,8 +350,8 @@ mod tests {
         want.extend([0x15, 0x23]);
         // The bolt crank (crank.rs).
         want.push(0x3b);
-        // The scripted hold (scripted.rs, the cinematics).
-        want.push(0x72);
+        // The scripted hold (scripted.rs, the cinematics) and the scene body 99 / 100.
+        want.extend([0x72, 0x63, 0x64]);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));

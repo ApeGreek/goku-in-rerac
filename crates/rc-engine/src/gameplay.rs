@@ -134,7 +134,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Level-table address of the class-27 emitter update (Novalis only), crate::particle_render.
-const EMITTER_UPDATE: u32 = 0x2bd100;
+pub(crate) const EMITTER_UPDATE: u32 = 0x2bd100;
 /// Level-table address of the ripple manager 751's update, crate::water_render.
 const RIPPLE_UPDATE: u32 = 0x2fd0e8;
 
@@ -175,6 +175,15 @@ impl Plugin for GameplayPlugin {
                 }
                 if let Some(ids) = give_items() {
                     for &id in &ids { gs.global.owned[id] = 1; }
+                    // With the ammo `GiveItem` grants (the item record's +0x12), so a given weapon can fire.
+                    let tables = crate::disc_source::read_path(&root, &root.join("boot/SCUS_971.99")).ok()
+                        .zip(crate::disc_source::level_file(&root, index, "overlay.bin").ok())
+                        .and_then(|(elf, ov)| ItemTables::load(&elf, &ov).ok());
+                    if let Some(t) = tables {
+                        for &id in &ids {
+                            if t.records[id].has_ammo() { gs.global.ammo[id] = gs.global.ammo[id].max(t.records[id].grant_ammo() as i32); }
+                        }
+                    }
                     if let Some(&b) = ids.iter().rev().find(|&&i| matches!(i, 2..=4)) { gs.global.equipped[3] = b as i32; }
                     println!("game state: RC_GIVE_ITEMS: items {ids:?} owned, back item {}", gs.global.equipped[3]);
                 }
@@ -246,7 +255,7 @@ pub struct HeldWeapon(pub Option<(u16, i32, i32)>);
 struct AmmoTable(Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
 
 /// The hand-item data, the ammo table (uses ammo, max) and the weapon fields of the item definitions.
-type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, [Vec<u8>; 2]);
+type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, Vec<Vec<u8>>);
 
 /// The level's hand-item data (item definitions from the overlay, the gadget classes, Ratchet's joint lists)
 /// for `rc_game::hero::items`: the definitions at the overlay's item table (L01 0x179f40, found through
@@ -270,8 +279,9 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
     let (ratchet_blob, gadgets) = crate::moby_attach::load_blobs()?;
     let rc = lv.mobys.classes.iter().find(|c| c.o_class == gadget::RATCHET_O_CLASS).context("no class 0")?;
     let hero_chains = HERO_LISTS.iter().map(|&l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(a, _)| a).unwrap_or_default()).collect();
-    // The weapon arm layers' joints (`FUN_00263e08`: the second byte list of Ratchet's joint lists 12 / 13).
-    let arm_joints = rc_game::hero::weapons::ARM_LISTS.map(|l| gadget::joint_list(&ratchet_blob, &rc.class.header, l as usize).map(|(_, b)| b).unwrap_or_default());
+    // The second byte lists of Ratchet's joint lists: the weapon arm layers' joints (`FUN_00263e08`, lists 12 / 13)
+    // and the joint-modifier nodes' targets (`AttachManipulator`, their first entries).
+    let seconds: Vec<Vec<u8>> = (0..64).map(|l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(_, b)| b).unwrap_or_default()).collect();
     let mut classes = Vec::new();
     for g in &gadgets {
         let c = &g.moby.class;
@@ -280,7 +290,7 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
         classes.push(ItemClass { o_class: g.moby.o_class as i16, anim: rc_formats::moby_anim::MobyAnimClass::new(c, seqs), scale: c.header.scale, chains });
     }
     let ammo = tables.records.iter().map(|r| (r.has_ammo(), u16::from_le_bytes([r.0[0xe], r.0[0xf]]))).collect();
-    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, arm_joints))
+    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, seconds))
 }
 
 /// The level water tables the hero's ground probe reads (`0x26ed38`): the class-751 ripple patches of
@@ -340,6 +350,27 @@ impl HitSink for CellHits<'_, '_> {
     fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) {
         let mut s = self.svc.borrow_mut();
         rc_game::moby_update::classes::bomb::delete_from_hero(table, &mut s, id, counter);
+    }
+    // The line probe and the point lights of the hand items (the Pyrocitor): the services' own.
+    fn probe(&mut self, table: &mut MobyTable, a: [rc_game::ps2v::Pf; 4], b: [rc_game::ps2v::Pf; 4], flags: u32, ignore: Option<MobyId>) -> Option<Option<[f32; 3]>> {
+        let mut s = self.svc.borrow_mut();
+        ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.probe(table, a, b, flags, ignore)
+    }
+    fn light_alloc(&mut self, l: rc_game::point_lights::PointLight) -> i32 {
+        let mut s = self.svc.borrow_mut();
+        ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.light_alloc(l)
+    }
+    fn light_get(&mut self, slot: i32) -> Option<rc_game::point_lights::PointLight> {
+        let mut s = self.svc.borrow_mut();
+        ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.light_get(slot)
+    }
+    fn light_set(&mut self, slot: i32, l: rc_game::point_lights::PointLight) {
+        let mut s = self.svc.borrow_mut();
+        ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.light_set(slot, l)
+    }
+    fn light_free(&mut self, slot: i32) {
+        let mut s = self.svc.borrow_mut();
+        ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.light_free(slot)
     }
 }
 
@@ -464,12 +495,35 @@ impl Play {
     pub fn ship_moby(&self) -> Option<MobyId> { self.ship.map(|s| s.0) }
 }
 
+/// The loaded level's ported class updates (`rc_game::moby_update::classes::LevelPorts`, docs/plan/level_generalisation.md
+/// C1): the level's class table `lvl.vtbl` matched against the ports' reference functions (the level-01 overlay, level
+/// 03's for the swing target), with the engine's external updates (emitter, ripple manager). Built once per process;
+/// without the overlays, every class by number.
+pub fn level_ports() -> &'static rc_game::moby_update::classes::LevelPorts {
+    use rc_formats::level_overlay::LevelOverlay;
+    use rc_game::moby_update::classes::LevelPorts;
+    static PORTS: std::sync::OnceLock<LevelPorts> = std::sync::OnceLock::new();
+    PORTS.get_or_init(|| {
+        let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+        let overlay = |l: u32| -> Option<std::sync::Arc<LevelOverlay>> {
+            let b = crate::disc_source::level_file(&root, l, "overlay.bin").ok()?;
+            LevelOverlay::parse(&b).ok().map(std::sync::Arc::new)
+        };
+        let Some(target) = overlay(index) else {
+            eprintln!("gameplay: level {index:02} overlay not read: class ports by class number");
+            return LevelPorts::by_class_number();
+        };
+        LevelPorts::from_overlays(&target, &overlay, &[EMITTER_UPDATE, RIPPLE_UPDATE])
+    })
+}
+
 /// The external updates' level-table address for `o_class` (`ExternalUpdates::update_fn`, also used to build
-/// the class table before the externals exist).
-fn external_update_fn(level: u32, ripples: bool, o_class: i16) -> Option<u32> {
-    match o_class {
-        27 if level == 1 => Some(EMITTER_UPDATE),
-        751 if ripples => Some(RIPPLE_UPDATE),
+/// the class table before the externals exist): the class's table entry is the emitter 0x2bd100 or the ripple
+/// manager 0x2fd0e8 (the latter only with the level's ripple tables).
+fn external_update_fn(ripples: bool, o_class: i16) -> Option<u32> {
+    match level_ports().external(o_class) {
+        Some(EMITTER_UPDATE) => Some(EMITTER_UPDATE),
+        Some(RIPPLE_UPDATE) if ripples => Some(RIPPLE_UPDATE),
         _ => None,
     }
 }
@@ -487,7 +541,19 @@ struct Externals<'a> {
 }
 
 impl ExternalUpdates for Externals<'_> {
-    fn update_fn(&self, o_class: i16) -> Option<u32> { external_update_fn(self.level, self.water.as_ref().is_some_and(|w| w.has_ripples()), o_class) }
+    fn update_fn(&self, o_class: i16) -> Option<u32> { external_update_fn(self.water.as_ref().is_some_and(|w| w.has_ripples()), o_class) }
+
+    /// `RippleDisturb` 0x2b82a8 on every ripple patch (the Bomb Glove bomb's water entry, `bomb_water::entry`).
+    fn ripple_disturb(&mut self, x: f32, y: f32, r: f32, amp: f32, additive: bool) {
+        use rc_game::ps2v::Pf;
+        if let Some(sim) = self.water.as_deref_mut().and_then(|w| w.ripple.as_mut()) {
+            let n = sim.patches.len();
+            sim.disturb(Pf::f(x), Pf::f(y), Pf::f(r), Pf::f(amp), 0..n, additive);
+        }
+    }
+
+    /// `SetWaterLevel` 0x26ed38's ripple-patch height (the bomb's bubbles pop there).
+    fn water_height(&self, p: [f32; 3]) -> Option<f32> { self.water.as_deref()?.ripple.as_ref()?.patch_height(p[0], p[1], p[2]) }
 
     fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [rc_game::ps2v::Pf; 4], counter: u64, particles: Option<&mut Particles>) {
         match addr {
@@ -525,7 +591,7 @@ fn class_table(lv: &crate::level_load::LoadedLevel, ext: &dyn Fn(i16) -> Option<
     for (c, a) in m.classes.iter().zip(&m.anim) {
         let slot = *slot_of.entry(c.o_class).or_insert_with(|| { next += 1; next - 1 });
         let oc = c.o_class as i16;
-        let mut info = scheduler::class_info(&c.class, slot as u8, scheduler::port_update_fn(oc).or_else(|| ext(oc)));
+        let mut info = scheduler::class_info(&c.class, slot as u8, level_ports().update_fn(oc).or_else(|| ext(oc)));
         info.seq0 = a.sequence(0).map(|q| Seq0Info { frame_count: q.header.frame_count, loop_sound_bit7: q.header.loop_sound & 0x80 != 0 });
         t.classes.insert(oc, (info, Some(a.clone())));
     }
@@ -534,7 +600,7 @@ fn class_table(lv: &crate::level_load::LoadedLevel, ext: &dyn Fn(i16) -> Option<
     for (slot, &o) in lv.moby_class_order.iter().enumerate() {
         let oc = o as i16;
         t.classes.entry(oc).or_insert_with(|| {
-            let info = rc_game::moby_runtime::ClassInfo { slot: slot as u8, no_header: true, update_fn: scheduler::port_update_fn(oc).or_else(|| ext(oc)), ..Default::default() };
+            let info = rc_game::moby_runtime::ClassInfo { slot: slot as u8, no_header: true, update_fn: level_ports().update_fn(oc).or_else(|| ext(oc)), ..Default::default() };
             (info, None)
         });
     }
@@ -546,7 +612,7 @@ fn class_table(lv: &crate::level_load::LoadedLevel, ext: &dyn Fn(i16) -> Option<
 fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
     use anyhow::{anyhow, Context};
     let wanted: Vec<&rc_formats::moby::LevelMobyClass> =
-        lv.mobys.classes.iter().filter(|c| rc_game::moby_update::classes::needs_joint_lists(c.o_class as i16)).collect();
+        lv.mobys.classes.iter().filter(|c| level_ports().get(c.o_class as i16).is_some_and(|u| u.needs_joint_lists())).collect();
     let mut out = HashMap::new();
     if wanted.is_empty() { return Ok(out); }
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
@@ -692,7 +758,7 @@ fn setup(
 
     // The loader: class table, static mobys, dynamic slots, the ship.
     let ripples = water.as_ref().is_some_and(|w| w.has_ripples());
-    let mut classes = class_table(lv, &|oc| external_update_fn(level_index, ripples, oc));
+    let mut classes = class_table(lv, &|oc| external_update_fn(ripples, oc));
     let ship_ii = spawn.as_ref().and_then(|s| s.ship);
     let (mut table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state.as_ref().map(|s| &s.0), level_index) {
         Ok(t) => t,
@@ -724,8 +790,9 @@ fn setup(
     // The hand items (wrench, bomb glove, …): created by the hero update from the first tick on.
     let mut arm_joints: [Vec<u8>; 2] = Default::default();
     let item_data = match item_data(lv) {
-        Ok((d, ammo, weapon_defs, arm)) => {
-            arm_joints = arm;
+        Ok((d, ammo, weapon_defs, seconds)) => {
+            arm_joints = rc_game::hero::weapons::ARM_LISTS.map(|l| seconds.get(l as usize).cloned().unwrap_or_default());
+            game.hero.set_joint_targets(&seconds);
             println!(
                 "gameplay: hand items: {} item definitions, {} gadget classes (wrench 71: {}, bomb glove def {:?})",
                 d.defs.len(), d.classes.len(), d.class(71).is_some(), d.defs.get(10)
@@ -1021,6 +1088,7 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
     g.item_data = p.item_data.clone();
     g.grind_paths = p.game.grind_paths.clone();
     hero_level_setup(&mut g.hero, p.back_classes.as_ref(), p.level);
+    g.hero.joint_targets = p.game.hero.joint_targets.clone();
     // Hero init 0x226b70: the hero block is cleared, HP = max HP.
     if let (Some(gs), Some(s)) = (state, session) {
         s.hero_init(gs.global.max_hp);
@@ -1317,6 +1385,10 @@ fn tick(
         let (at, st) = (p.game.hero.position(), p.game.hero.state);
         budget.0 = 0;
         respawn(p, coll, class, lv.death_z, state.as_deref().map(|s| &s.0), session.as_deref_mut().map(|s| &mut s.0));
+        // 0x29adc8 also puts the checkpoint's reverb back (rc_game::audio::reverb).
+        if p.svc.save.checkpoint.is_some() {
+            if let Some(a) = audio_cell.borrow_mut().as_deref_mut() { a.system().checkpoint_restored(); }
+        }
         let from = if p.svc.save.checkpoint.is_some() { "the checkpoint" } else { "the uid-0 moby" };
         println!("gameplay: tick {}: death flag 0x141401 (state {st:#x} at {at:.2?}); respawned at {from}", p.game.counter);
     }
@@ -1359,11 +1431,12 @@ fn upload(
     let lv = &level.0;
     let class = &lv.mobys.anim[p.class];
     let mut palette = crate::moby_anim::identity_palette(p.slots);
-    // His pose with the weapon arm's pose layers over it (rc_game::hero::weapons, the moby +0x60 list).
-    let layers = rc_game::hero::anim::pose_layers(&p.game.hero.weapons.layers, &p.arm_joints);
-    let f = moby_anim::evaluate_layered(class, &p.ratchet.state, p.ratchet.snapshot.as_ref(), &layers);
-    for (k, b) in f.iter().take(p.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[k] = b; }
+    // His pose with the weapon arm's pose layers (rc_game::hero::weapons, the moby +0x60 list) and his joint
+    // modifiers (head look, lean, eyelids: the moby +0x64 list, rc_game::hero::idle) over it.
     let hm = &p.game.mobys.mobys[p.hero_id];
+    let layers = rc_game::hero::anim::pose_layers(&p.game.hero.weapons.layers, &p.arm_joints);
+    let f = moby_anim::evaluate_posed(class, &p.ratchet.state, p.ratchet.snapshot.as_ref(), &layers, &hm.joint_mods);
+    for (k, b) in f.iter().take(p.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[k] = b; }
     let rows = rows_bits(&hm.rows);
     let lights = lv.mobys.lighting.as_ref().map(|l| light::moby_lights(&rows, &l.bank, p.light_word, p.ambient, 0x80));
     let model = moby_render::extra_model(rows3(&hm.rows), p.scale, [hm.position[0], hm.position[1], hm.position[2]]);
@@ -1462,7 +1535,7 @@ fn upload_dynamic(
             rec_changed = true;
         }
         let snap = p.svc.snapshots.get(id).and_then(|s| s.as_ref());
-        let f = moby_anim::evaluate_with_snapshot(&m.anim[ci], &mo.anim, snap);
+        let f = moby_anim::evaluate_posed(&m.anim[ci], &mo.anim, snap, &[], &mo.joint_mods);
         let bytes: Vec<u8> = f.iter().take(d.pal_slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).collect();
         let at = slot * pal_bytes;
         if d.palette[at..at + bytes.len()] != bytes[..] {

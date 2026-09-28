@@ -19,16 +19,55 @@ use crate::ps2v::Pf;
 use rc_formats::font::{measure_text_width, parse_overlay_sections, read_overlay, Font, OverlaySection};
 use rc_formats::strings::{self, Message};
 
-/// The level overlay as the EE sees it (loaded sections; `.bss` reads as absent).
+/// The level overlay as the EE sees it (loaded sections; `.bss` reads as absent), with the level-01 → this level
+/// address map of the menu data (docs/plan/level_generalisation.md M1–M7).
+///
+/// The menu code names its records, tables and callbacks by their level-01 addresses (labels). On another level
+/// they sit elsewhere: [`Overlay::relocated`] finds them (`rc_formats::level_overlay::Relocation`: the code that
+/// forms each root address, `lui`/`%lo` or `$gp`-relative, matched in this level's overlay; then the page tree
+/// walked in step with level 01's, record by record, which also pairs every widget callback with its label).
+/// [`Overlay::at`] gives this level's address of a label (records and tables are then read at it), and
+/// [`Overlay::label`] the label of one of this level's callbacks (widgets dispatch on labels). Level 01 itself,
+/// and an overlay made by [`Overlay::parse`], map every address to itself.
 #[derive(Clone, Debug, Default)]
 pub struct Overlay {
     sections: Vec<OverlaySection>,
+    /// Label → this level's address (data).
+    at: std::collections::HashMap<u32, u32>,
+    /// This level's callback address → its label.
+    label: std::collections::HashMap<u32, u32>,
 }
 
 impl Overlay {
-    /// From the raw overlay lump (`LevelFiles::overlay`, `levels/NN/overlay.bin`).
-    pub fn parse(bytes: &[u8]) -> rc_formats::buf::Result<Overlay> { Ok(Overlay { sections: parse_overlay_sections(bytes)? }) }
-    pub fn from_sections(sections: Vec<OverlaySection>) -> Overlay { Overlay { sections } }
+    /// From the raw overlay lump (`LevelFiles::overlay`, `levels/NN/overlay.bin`), addresses as they are (level 01).
+    pub fn parse(bytes: &[u8]) -> rc_formats::buf::Result<Overlay> { Ok(Overlay::from_sections(parse_overlay_sections(bytes)?)) }
+    pub fn from_sections(sections: Vec<OverlaySection>) -> Overlay { Overlay { sections, ..Default::default() } }
+
+    /// This level's overlay `bytes` with its address map against the level-01 overlay `reference` (type doc).
+    pub fn relocated(bytes: &[u8], reference: &[u8]) -> rc_formats::buf::Result<Overlay> {
+        use rc_formats::level_overlay::{LevelOverlay, Relocation};
+        let mut ov = Overlay::parse(bytes)?;
+        let (target, refo) = (LevelOverlay::parse(bytes)?, LevelOverlay::parse(reference)?);
+        let rel = Relocation::new(&refo, &target);
+        if rel.is_identity() { return Ok(ov); }
+        let reference_ov = Overlay::parse(reference)?;
+        for &a in DATA_LABELS {
+            if let Some(b) = rel.data(a) { ov.at.insert(a, b); }
+        }
+        let roots: Vec<(u32, u32)> = pause::page::ROOTS.iter().filter_map(|&a| Some((a, rel.data(a)?))).collect();
+        let (records, callbacks) = pause::correlate(&reference_ov, &ov, &roots);
+        ov.at.extend(records);
+        ov.label = callbacks;
+        Ok(ov)
+    }
+
+    /// This level's address of the level-01 address `label` (itself when unmapped).
+    pub fn at(&self, label: u32) -> u32 { self.at.get(&label).copied().unwrap_or(label) }
+    /// Whether `label` was mapped (always true on level 01).
+    pub fn maps(&self, label: u32) -> bool { self.at.is_empty() || self.at.contains_key(&label) }
+    /// The level-01 label of this level's callback `addr` (itself when unmapped).
+    pub fn label(&self, addr: u32) -> u32 { self.label.get(&addr).copied().unwrap_or(addr) }
+
     pub fn bytes(&self, addr: u32, n: usize) -> Option<&[u8]> { read_overlay(&self.sections, addr, n) }
     /// The loaded sections (code pattern searches).
     pub fn sections(&self) -> &[OverlaySection] { &self.sections }
@@ -40,6 +79,15 @@ impl Overlay {
     /// A float constant as its PS2 bit pattern.
     pub fn pf(&self, a: u32) -> Option<Pf> { self.u32(a).map(Pf::b) }
 }
+
+/// The level-01 data addresses the menus read that code forms directly (the page records are found by the
+/// page walk): the level / planet name table 0x1c22c0 and the galaxy points 0x1c23a8, the planet name offset
+/// 0x15f650, the quick-select gp block 0x15f718 and d-pad defaults 0x17e098, the frame's corner lists 0x161fe0
+/// and light 0x160280 / 0x160290, the menu constants 0x160270..0x160328.
+pub const DATA_LABELS: &[u32] = &[
+    0x1c22c0, pause::PLANET_POINTS_BASE, 0x15f650, quick_select::GP_BASE, quick_select::DPAD_DEFAULTS, pause::frame::CORNER_LISTS_ADDR,
+    pause::frame::LIGHT_DIR_ADDR, pause::frame::LIGHT_COLOR_ADDR, 0x160270, 0x160274, 0x160278, 0x16027c, 0x160318, 0x160328,
+];
 
 /// The pad fields the menus read (the `PAD` record at 0x13c940 after this frame's `UpdatePad`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

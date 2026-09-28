@@ -220,7 +220,13 @@ fn setup(
         return;
     };
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
-    let overlay = match crate::disc_source::level_file(&root, index, "overlay.bin").and_then(|b| Ok(Overlay::parse(&b)?)) {
+    // The level's overlay with its menu address map against level 01's (the code names the records by their
+    // level-01 addresses: rc_game::menus::Overlay::relocated).
+    let reference = crate::disc_source::level_file(&root, 1, "overlay.bin");
+    let overlay = match crate::disc_source::level_file(&root, index, "overlay.bin").and_then(|b| Ok(match &reference {
+        Ok(r) => Overlay::relocated(&b, r)?,
+        Err(_) => Overlay::parse(&b)?,
+    })) {
         Ok(o) => o,
         Err(e) => {
             eprintln!("menus: overlay not read ({e:#}): no menus");
@@ -338,7 +344,7 @@ fn load_frame_class(level: &crate::level_load::LoadedLevel, ov: &Overlay) -> any
     let header = &m.classes[ci].class.header;
     let mut chains: [Vec<u8>; 4] = Default::default();
     for (k, c) in chains.iter_mut().enumerate() {
-        let id = ov.i32(frame::CORNER_LISTS_ADDR + 4 * k as u32).ok_or_else(|| anyhow!("0x161fe0 not in the overlay"))?;
+        let id = ov.i32(ov.at(frame::CORNER_LISTS_ADDR) + 4 * k as u32).ok_or_else(|| anyhow!("0x161fe0 not in the overlay"))?;
         *c = rc_formats::gadget::joint_list(blob, header, usize::try_from(id)?).with_context(|| format!("joint list {id}"))?.0;
     }
     Ok((FrameClass { anim: m.anim[ci].clone(), chains, scale: header.scale }, ci))
@@ -371,7 +377,7 @@ fn frame_render(
         .collect();
     let rows = moby_light::rotation_rows([0.0; 3]);
     // FUN_0028c128: light set 14 (0x1806c0) = { colour A = *0x160290, direction A = VecScale(1.0, *0x160280), 0, 0 }.
-    let q = |a: u32| -> [f32; 4] { std::array::from_fn(|k| f32::from_bits(ov.u32(a + 4 * k as u32).unwrap_or(0))) };
+    let q = |a: u32| -> [f32; 4] { std::array::from_fn(|k| f32::from_bits(ov.u32(ov.at(a) + 4 * k as u32).unwrap_or(0))) };
     let dir = q(frame::LIGHT_DIR_ADDR);
     let set = DirLightSet {
         color_a: q(frame::LIGHT_COLOR_ADDR),

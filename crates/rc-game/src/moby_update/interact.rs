@@ -169,6 +169,8 @@ pub enum GameWrite {
     Talked(usize, u32),
     /// `memcard_Save(0, −1)` (not ported: counted).
     Save,
+    /// `*(0x14bec0 + level·4 + index) = 1`: gold bolt `index` of `level` collected (class 1134).
+    GoldBolt { level: usize, index: usize },
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -463,6 +465,9 @@ pub struct TalkGame {
     pub talked: Vec<u32>,
     /// 0x13dd40: planets unlocked.
     pub planet_unlocked: Vec<u8>,
+    /// 0x14bec0 + level·4 (save chunk 3003 of each level slot): the gold bolts collected, by level and index (the
+    /// gold bolt class 1134 reads its level's at init and sets its byte at the pickup).
+    pub gold_bolt_bits: Vec<[u8; 4]>,
 }
 
 impl TalkGame {
@@ -513,6 +518,7 @@ impl Interact {
         self.game.flags = g.flags.to_vec();
         self.game.gold_weapons = g.gold_weapons.to_vec();
         self.game.gold_bolts = gs.levels.iter().take(20).map(|l| l.gold_bolts.iter().filter(|&&b| b != 0).count() as i32).sum();
+        self.game.gold_bolt_bits = gs.levels.iter().map(|l| l.gold_bolts).collect();
         self.game.talked = g.landmarks.iter().map(|l| l.flags).collect();
         self.game.planet_unlocked = g.planet_unlocked.to_vec();
     }
@@ -531,6 +537,9 @@ impl Interact {
                 }
                 GameWrite::Talked(i, v) => { if let Some(l) = gs.global.landmarks.get_mut(i) { l.flags = v; } }
                 GameWrite::Save => {}
+                GameWrite::GoldBolt { level, index } => {
+                    if let Some(b) = gs.levels.get_mut(level).and_then(|l| l.gold_bolts.get_mut(index)) { *b = 1; }
+                }
             }
         }
         w

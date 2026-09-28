@@ -40,7 +40,7 @@ pub fn unpack(w: u32) -> [f32; 3] {
 }
 
 /// The spawner's arguments.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spawn {
     pub pos: [f32; 4],
     /// Velocity 1 (xyz) and size 1 (w).

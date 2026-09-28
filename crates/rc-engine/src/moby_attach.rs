@@ -247,6 +247,13 @@ fn build(
             specs.push((name, c, ac, host(slot, list)));
         }
     }
+    // Every other gadget class of the level can be the hand item when the game ticks (the Pyrocitor, …): drawn where
+    // the game's item update places it (the attach list below only matters without the game tick, where they hide).
+    for g in &gadgets {
+        if specs.iter().any(|s| s.1.o_class == g.moby.o_class) { continue; }
+        let Ok(seqs) = moby_anim::parse_sequences(&g.blob, &g.moby.class) else { continue };
+        specs.push(("hand item", g.moby.clone(), MobyAnimClass::new(&g.moby.class, seqs), host(Slot::Hand, WRENCH_ATTACH)));
+    }
     for s in &specs {
         if !chains.iter().any(|c| c.0 == s.3.joint_list) { return Err(anyhow!("Ratchet's class has no joint list {}", HERO_LISTS[s.3.joint_list])); }
     }
@@ -261,7 +268,7 @@ fn build(
         let mut snapshot = None;
         if attach.slot == Slot::Hand { moby_anim::set_sequence(&mut state, &ac, 1, 0, 1, &mut snapshot); }
         // Without the game tick only the wrench, the Heli-Pack and Clank show (the old viewer behaviour).
-        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook");
+        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook" | "hand item");
         items.push(Item {
             name, o_class: class.o_class as i16, visible, shown: None, attach, anim: ac, state, snapshot, scale: class.class.header.scale,
             base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(),
@@ -279,7 +286,7 @@ fn build(
     };
     // Placement before the first tick (the game creates the items in the first hero update).
     let host = &anim.instances[host_k];
-    place(&mut a, &level.mobys.anim[placed.class], &host.state, anim.snapshots[host_k].as_ref(), false, false);
+    place(&mut a, &level.mobys.anim[placed.class], &host.state, anim.snapshots[host_k].as_ref(), false, false, &[]);
     for (slot, (item, class)) in a.items.iter_mut().zip(&geometry).enumerate() {
         let t = Transform::from_matrix(model_of(item));
         item.entities = a.extra.spawn(commands, level, class, slot as u32, t, item.name, meshes, images, materials);
@@ -309,9 +316,10 @@ fn model_of(item: &Item) -> Mat4 { moby_render::extra_model(rows_f32(&item.rows)
 
 /// Steps 2–3 of the tick (module docs): attach matrices from Ratchet's current state, then every item's
 /// position, (optionally) advance, rows, column normalisation.
-fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap: Option<&MobyFrame>, advance_back: bool, advance_hand: bool) {
+/// `mods`: the host's joint-modifier list (moby +0x64; Ratchet's head look / lean when the game ticks).
+fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap: Option<&MobyFrame>, advance_back: bool, advance_hand: bool, mods: &[moby_anim::JointModifier]) {
     let chains: Vec<&[u8]> = a.chains.iter().map(|c| c.1.as_slice()).collect();
-    let ps = moby_anim::evaluate_chains(host_class, host, snap, &chains);
+    let ps = moby_anim::evaluate_chains_posed(host_class, host, snap, &chains, &[], mods);
     let ws: Vec<(usize, Rows)> = a.chains.iter().zip(&ps).map(|(c, p)| (c.0, moby_anim::attach_matrix(p, &a.host_rows, a.host_pos, a.host_scale))).collect();
     for item in &mut a.items {
         if item.attach.slot == Slot::Hook { continue; }
@@ -334,6 +342,8 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
     let hand = play.as_ref().map(|p| p.game.hero.items.slot.item.clone());
     // First person (0x1413f5): `0x2486c0` hides Ratchet's items, the thrown wrench excepted.
     let fp = play.as_ref().is_some_and(|p| p.game.hero.f13f5 != 0);
+    // 0x1413ff (the gold bolt's pickup): `FUN_002487a8` hides the hand item.
+    let hand_off = play.as_ref().is_some_and(|p| p.game.hero.f13ff != 0);
     // The Swingshot's hook (a moby of its own in the game: advanced every tick, placed by the item's update).
     let hook = play.as_ref().and_then(|p| p.game.hero.swing.item.hook.filter(|_| p.game.hero.swing.item.alive));
     // The back mobys' animation state and pose snapshot as the hero update left them (item slot 3: pack
@@ -358,12 +368,13 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
         }
     }
     let (k, class) = (a.host_k, &level.0.mobys.anim[a.host_class]);
-    place(&mut a, class, &anim.instances[k].state, anim.snapshots[k].as_ref(), back.is_none(), hand.is_none());
+    let mods = play.as_ref().map(|p| p.game.mobys.mobys[p.game.hero_moby].joint_mods.clone()).unwrap_or_default();
+    place(&mut a, class, &anim.instances[k].state, anim.snapshots[k].as_ref(), back.is_none(), hand.is_none(), &mods);
     if let Some(h) = hand {
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
             match h.as_ref().filter(|m| m.o_class == item.o_class) {
                 Some(m) => {
-                    item.visible = !fp || m.mstate != 0;
+                    item.visible = (!fp || m.mstate != 0) && !hand_off;
                     item.state = m.anim;
                     item.snapshot = m.snapshot.clone();
                     item.rows = m.rows;

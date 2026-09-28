@@ -282,7 +282,10 @@ pub fn collect(
         let top = block.prims.iter().flat_map(|p| p.joints()).max().unwrap_or(0) as usize + 1;
         let chains: Vec<Vec<u8>> = (0..top.min(anim.joint_count).max(1)).map(|j| (0..=j as u8).collect()).collect();
         let refs: Vec<&[u8]> = chains.iter().map(Vec::as_slice).collect();
-        let joints = moby_anim::evaluate_chains(anim, &m.anim, snap, &refs);
+        // With the runtime lists as the game poses them: the joint modifiers (+0x64; Ratchet's head look, lean and
+        // eyelids) and, for Ratchet, his weapon arm (+0x60).
+        let layers = if c.id == play.game.hero_moby { rc_game::hero::anim::pose_layers(&play.game.hero.weapons.layers, &play.ratchet.arm_joints) } else { Vec::new() };
+        let joints = moby_anim::evaluate_chains_posed(anim, &m.anim, snap, &refs, &layers, &m.joint_mods);
         let r3 = |k: usize| [m.rows[k][0], m.rows[k][1], m.rows[k][2]];
         let pose = volume::CasterPose { joints: &joints, rows: [r3(0), r3(1), r3(2)], position: [m.position[0], m.position[1], m.position[2]], scale: m.scale, size: c.size };
         let prims = volume::pose_prims(block, &pose);

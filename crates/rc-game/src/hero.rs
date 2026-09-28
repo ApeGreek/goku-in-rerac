@@ -50,6 +50,7 @@ pub mod surface;
 pub mod swingshot;
 pub mod comet;
 pub mod weapons;
+pub mod pyrocitor;
 pub mod crank;
 pub mod scripted;
 
@@ -417,6 +418,9 @@ pub struct Hero {
     /// is over, `crate::follow_camera`; every SetState clears it): the look stances turn Ratchet to the camera
     /// and `HeroSyncMoby` 0x229f20 hides him and his items ([`Hero::write_back`]).
     pub f13f5: u8,
+    /// 0x1413ff: the hand item hidden (`FUN_002487a8` hides the hand moby while it is set: the gold bolt 1134's
+    /// pickup); cleared by `SetState` on foot.
+    pub f13ff: u8,
     /// The weapons: the ammo mirror, the weapon-out arm (0x1413f8), the bomb glove's pvars ([`weapons`]).
     pub weapons: weapons::Weapons,
     /// The Comet-Strike's catch request ([`comet`]).
@@ -425,6 +429,10 @@ pub struct Hero {
     /// Euler, Ratchet's anim fields), filled by the tick right before the moby loop
     /// ([`crate::moby_update::services::LoopGlobals`]). Not part of the game's hero block.
     pub loop_in: crate::moby_update::services::LoopGlobals,
+    /// Per joint list of Ratchet's class, the joint a joint-modifier node made for it acts on
+    /// (`rc_formats::moby_anim::list_target`; 0xff: none), set by the loader ([`Hero::set_joint_targets`]). Empty:
+    /// his joint-modifier list is not written to his moby. Not part of the game's hero block.
+    pub joint_targets: std::sync::Arc<Vec<u8>>,
 }
 
 /// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
@@ -490,7 +498,8 @@ impl Hero {
             carry: platform::Carry::default(), surf: surface::Surf::default(),
             owned: Owned::default(), back_slot: idle::BackSlot::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
-            f13f5: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
+            f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
+            joint_targets: Default::default(),
         }
     }
 
@@ -621,6 +630,14 @@ impl Hero {
         self.moby_rot = self.rot;
         // 0x1413f5 (first person): `0x2486c0` hides Ratchet (and his items: the engine), else `0x2487a8` shows him.
         if self.f13f5 != 0 { moby.mode |= crate::moby_runtime::mode::HIDDEN; } else { moby.mode &= !crate::moby_runtime::mode::HIDDEN; }
+        // His joint-modifier list (moby +0x64: the idle / lean joint records and the eyelids, idle::Manip).
+        if !self.joint_targets.is_empty() { moby.joint_mods = self.idle.modifiers(&self.joint_targets); }
+    }
+
+    /// Ratchet's class joint lists' modifier targets ([`Hero::joint_targets`]): for each list, the second byte list
+    /// (`rc_formats::gadget::joint_list(..).1`).
+    pub fn set_joint_targets(&mut self, second_lists: &[Vec<u8>]) {
+        self.joint_targets = std::sync::Arc::new(second_lists.iter().map(|b| rc_formats::moby_anim::list_target(b).unwrap_or(0xff)).collect());
     }
 }
 
@@ -645,6 +662,8 @@ pub trait HeroSounds {
     /// `PlayFootstepSound(class, foot, variant, 0, Ratchet)` (0x2a1898) on level `level` (0x15ed84): a level def
     /// ([`fx::footstep`], [`fx::walk_footsteps`]); returns the sound slot (−1: none).
     fn footstep(&mut self, _moby: &crate::moby_runtime::Moby, _level: i32, _class: u8, _foot: u8, _variant: u8, _rng: &mut crate::rng::Rng) -> i32 { -1 }
+    /// `SoundIsAlive(owner, slot)` 0x2a12f0 for a slot the hero's sounds took (the hand item's loops).
+    fn alive(&mut self, _slot: i32) -> bool { false }
 }
 
 /// No sound layer: [`hero_update`].

@@ -22,8 +22,11 @@
 //! * The samples go to a ring buffer read by [`MixerDecoder`], a `rodio::Source` behind the `Decodable` asset
 //!   [`MixerStream`] (bevy_audio 0.19, `add_audio_source`). The reader waits for 50 ms of audio before it
 //!   starts (and again after an underrun, outputting silence meanwhile); the ring is capped at 0.25 s.
-//! * Not connected yet: the underwater flag (crate::fog_state keeps it private), reverb, the flag-0x40
-//!   rotated owner offsets.
+//! * The underwater flag 0x167494 comes from crate::fog_state (`UnderwaterTest` 0x20e9f0 in its camera update, which
+//!   runs after the frame's ticks: the sound step reads the flag of the previous frame's camera, one tick late
+//!   [L]); [`sync_underwater`] copies it into the audio system before the tick. The reverb (zones and effect:
+//!   `rc_game::audio::reverb`) runs inside the audio system.
+//! * Not connected yet: the flag-0x40 rotated owner offsets.
 //!
 //! Environment:
 //! - `RC_AUDIO=0`: no audio (nothing is loaded).
@@ -31,7 +34,9 @@
 //!   10 s, or whatever was rendered when the app exits earlier); `RC_AUDIO_WAV_SECONDS=n` changes the length.
 //! - `RC_AUDIO_TRACE=1`: one line per 60 output frames: music stream voices playing / held, speech, the main
 //!   music player's state and track, the cutscene volumes, the pending resume; and one line per class sound played
-//!   (tick, class, index, flags, the slot it got or −1).
+//!   (tick, class, index, flags, the slot it got or −1), footstep and level sound (`PlayLevelSoundAtMoby`), and one
+//!   line per reverb command (`SetReverbEx` / `snd_AutoReverb`: type, depth).
+//! - `RC_REVERB=0`: no reverb output (a developer switch for A/B captures; the zones still run).
 //! - `RC_AUDIO_MUSIC` / `RC_AUDIO_SFX`: the options menu volumes 0..=1024 (0x15edec / 0x15edf0; defaults 716 and
 //!   1024 from the boot data), e.g. `RC_AUDIO_MUSIC=0` to hear or record the effects alone.
 
@@ -229,8 +234,24 @@ impl AudioOut {
                     println!("audio trace: tick {tick}: footstep, level def {index}, flags {flags:#x} -> slot {slot}");
                     continue;
                 }
+                if class == audio::class_sounds::LEVEL_SOUND_LOG_CLASS {
+                    println!("audio trace: tick {tick}: level sound {index}, flags {flags:#x} -> slot {slot}");
+                    continue;
+                }
                 let who = match class { 0 => "Ratchet", 0x47 => "wrench", 0xd0 => "Swingshot", _ => "moby" };
                 println!("audio trace: tick {tick}: class sound {index} of class {class} ({who}), flags {flags:#x} -> slot {slot}");
+            }
+        }
+        if self.trace {
+            for (frame, c) in self.system.reverb_log.as_mut().map(std::mem::take).unwrap_or_default() {
+                let name = |k: u8| audio::reverb::mode::NAMES.get(k as usize).copied().unwrap_or("?");
+                match c {
+                    audio::voices::SndCommand::SetReverb { kind, depth, delay, feedback } => {
+                        println!("audio trace: frame {frame}: SetReverbEx type {kind} ({}), depth {depth}, delay {delay}, feedback {feedback}", name(kind))
+                    }
+                    audio::voices::SndCommand::AutoReverb { depth, delta, .. } => println!("audio trace: frame {frame}: AutoReverb depth {depth} over {delta}"),
+                    _ => {}
+                }
             }
         }
         if self.trace && self.done.is_multiple_of(60) {
@@ -263,14 +284,28 @@ impl Plugin for AudioOutPlugin {
         let limit = wav_frames();
         let wav = std::env::var_os("RC_AUDIO_WAV").filter(|v| !v.is_empty()).map(|p| WavCapture { path: p.into(), frames: Vec::with_capacity(limit), limit, written: false });
         let trace = std::env::var("RC_AUDIO_TRACE").is_ok_and(|v| v.trim() == "1");
-        if trace { system.play_log = Some(Vec::new()); }
+        if trace {
+            system.play_log = Some(Vec::new());
+            system.reverb_log = Some(Vec::new());
+        }
+        if std::env::var("RC_REVERB").is_ok_and(|v| v.trim() == "0") {
+            system.spu.reverb.enabled = false;
+            println!("audio: RC_REVERB=0: no reverb output");
+        }
         app.add_audio_source::<MixerStream>()
             .insert_resource(AudioOut { system, ring, wav, done: 0, buf: Vec::new(), last_report: 0, trace })
             .add_systems(Startup, start_output)
             // After the scene frame (which runs before the tick) and the tick, which a running scene suspends.
             .add_systems(FixedUpdate, scene_sound.after(crate::gameplay::GameTick))
+            .add_systems(FixedUpdate, sync_underwater.before(crate::gameplay::GameTick))
             .add_systems(PostUpdate, run_audio);
     }
+}
+
+/// The underwater flag 0x167494 into the audio system (the sound step's listener; module docs).
+fn sync_underwater(mut out: ResMut<AudioOut>, fog: Option<Res<crate::fog_state::FogState>>) {
+    let flag = fog.is_some_and(|f| f.underwater_flag());
+    if out.system.underwater != flag { out.system.underwater = flag; }
 }
 
 fn start_output(mut commands: Commands, out: Res<AudioOut>, mut streams: ResMut<Assets<MixerStream>>) {
@@ -297,7 +332,7 @@ fn scene_sound(
     if tick_ran && scene.world_runs { return; }
     let (Some(mut play), Some(last)) = (play, scene.last.as_ref()) else { return };
     let game = &mut play.game;
-    let mut listener = rc_game::audio::class_sounds::listener_of(&game.camera.out);
+    let mut listener = rc_game::audio::class_sounds::listener_with_water(&game.camera.out, out.system.underwater, &game.hero);
     if let Some(c) = &last.camera { (listener.pos, listener.rows) = (c.eye, c.rows); }
     let h = game.hero.pos;
     let input = FrameInput { listener, hero_pos: [h[0].to_f32(), h[1].to_f32(), h[2].to_f32()] };
@@ -318,7 +353,7 @@ fn run_audio(
     let Some(cam) = cams.iter().next() else { return };
     let eye = crate::game_camera::game_eye(cam);
     let rows = crate::game_camera::game_rows(cam);
-    let listener = audio::voices::Listener { pos: eye.to_array(), rows: rows.map(|r| r.to_array()), underwater: false, water_height: 0.0 };
+    let listener = audio::voices::Listener { pos: eye.to_array(), rows: rows.map(|r| r.to_array()), underwater: out.system.underwater, water_height: 0.0 };
     let input = FrameInput { listener, hero_pos: listener.pos };
     let out = &mut *out;
     // With the game tick the EE frames ran in its sound step; fill the ticks it did not run with IOP-only frames.

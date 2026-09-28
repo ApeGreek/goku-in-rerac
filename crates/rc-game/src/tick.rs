@@ -273,11 +273,11 @@ impl Game {
         // HeroItemsUpdate 0x231268 (hand slot): create, attach, the swap, the item's update (the wrench's hit).
         if hero_tick == HeroTick::Ran {
             if let Some(data) = self.item_data.as_ref() {
-                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])) };
+                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])), camera_up: Some(self.camera.out.rows_f32()[2]) };
                 items_update(&mut self.hero, &mut self.item_globals, &mut self.mobys, &*anim, &mut self.rng, &ienv, hits);
                 // The slot loop's item update that needs the hero's context (the Swingshot's hook: SetState, the
                 // collision lines), at the same point of the frame (hero::gadgets).
-                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() {
+                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() || self.hero.weapons.pending_draw || self.hero.weapons.pending_idle {
                     let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
                     let mobys = scene.as_ref().map(OwnedScene::scene);
                     let view = self.camera.out;

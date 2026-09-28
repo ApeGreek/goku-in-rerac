@@ -559,8 +559,7 @@ drawn then (drawn since 2026-09-27, see "Display-space blending").
 `tests::dry_explosion_rand_stream_matches_the_game_ledger` checks every tick of a flight and explosion against a ledger
 of the per-call draw counts above (11 per trail tick, 80 + 28 + 6 + 10·rings + 3·flashes at the explosion, 5 per high
 fireball update, 1 per light update), with nothing left in `FxStats::unported`. Before this pass the trail, smoke and
-light draws were skipped, so the stream diverged after every explosion. **Still diverging**: a bomb in water (splash,
-bubbles, scorch, types 34/35/64), the creature knockback's burn sparks (`0x271258`) and water splash (`0x2ff768`), the beam explosion's debris burst (`0x2c4c20` from `SpawnBeamExplosion`).
+light draws were skipped, so the stream diverged after every explosion. **Still diverging**: the creature knockback's burn sparks (`0x271258`) and water splash (`0x2ff768`), the beam explosion's debris burst (`0x2c4c20` from `SpawnBeamExplosion`).
 
 **Checked on screen**: `RC_SCENE=0 RC_GIVE_ITEMS=10 RC_HERO_AT=143.42,125.81,57.0,0 RC_PLAY_SCRIPT='20-21:press CIRCLE'`,
 frames 30–70 (docs/plan/moby_render_notes.md §8 has the before/after).
@@ -647,16 +646,15 @@ pass (`World::refresh_particle_anchors`). Callers wired with their real argument
 704 / 729 / 778 / 779 (22), the gunship's shells and embers (26, 22), the path enemies' shots and jet exhaust (26, 22),
 the fire fields' smoke (23, level 00), the cutscene driver's scene-1 rings / drops (46, 35) and the splash class 775
 (`classes/splash.rs`, `FUN_002ff768` / update `0x2ff810`), the infobot's thrusters `0x278450` (23, from its root joint:
-`SceneActorState::joint_matrix`). **Not wired**: the bomb's water entry and underwater burst (`0x2bfe40`: types 34 / 35 /
-64 / 16 there), the Comet-Strike's hit ribbons (`0x2bdd20`, type 19) and `0x2c72c8`, the joint ribbon's caller
+`SceneActorState::joint_matrix`). The bomb's water entry and underwater burst are wired since 2026-09-28 (`bomb_water.rs`, docs/plan/breakables.md
+§5; `0x2bfe40` is the Mine Glove's mine, class 74, with the same calls). **Not wired**: the Comet-Strike's hit ribbons (`0x2bdd20`, type 19) and `0x2c72c8`, the joint ribbon's caller
 `0x2e8dd8` (type 55).
 
 **Renderer kinds 2 / 3**: see "In the port (2026-09-27)" § Pass 1 / `particle_render.rs` module doc; checked with a
 temporary test spawn (a line and type-19 streaks over the nanotech crate), then removed; no ported caller spawns them yet.
 
-**The ship glass (`0x2a70a8`)**: registered by the cutscene driver (list 1, `Callback::ShipGlass` with the ship's
-joint-0 matrix); **not drawn**: with the port's joint-0 pose of the arrival ship 530 its tables (gp arrays per class
-530..533) put a glass bowl under the hull, which the PCSX2 frames do not show (the frame the game uses is not settled).
+**The ship glass (`0x2a70a8`)**: drawn since 2026-09-28 in the frame of the ship's **joint list 0** (the canopy
+joint; `0x264508`'s argument is a list index), docs/plan/breakables.md §4.
 
 **Checked** (engine, frame-exact, scratch `effects/shots/`): `cmp_trail.png` (the crash frame 132: before / after /
 PCSX2 crop), `cmp_nanotech.png` (before / after / `images/37.webp`), `cmp_flyer.png`, `cmp_bomb.png` (frames 40 / 50 / 65

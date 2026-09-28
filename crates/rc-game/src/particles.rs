@@ -16,7 +16,8 @@
 //!   the pass above the old hw wait a tick; ones created in a hole ahead of the cursor run this tick.
 //! * **Type table** (`RegisterPartTypes` 0x27d4e0 → 0x1b2300, 81 entries): [`Particles::table`]. Ported: type 2
 //!   ([`type02`], bomb trail / amoeboid goo), 4 ([`type04`], fireball smoke), 6
-//!   ([`type06`], class-27 emitters), 8 ([`type08`], explosion puffs), 11 ([`type11`], TNT sparks, smoke rings), 13
+//!   ([`type06`], class-27 emitters), 8 ([`type08`], explosion puffs), 11 ([`type11`], TNT sparks, smoke rings), 12
+//!   ([`type12`], the Pyrocitor's flames), 13
 //!   ([`type13`], crate-break dust), 15 ([`type15`], explosion streaks), 52 ([`type52`], goo drips, flat), 25
 //!   ([`type25`], grind / cable sparks), 34 ([`type34`], bubbles), 47 ([`type47`], dust / sand puffs), 53 ([`type53`], bolt-pickup and cable
 //!   sparkles), 59 ([`type59`], hero sparkles), 60 ([`type60`], glints), 62 ([`type62`], the nanotech orbs and their
@@ -48,6 +49,7 @@ pub mod type04;
 pub mod type06;
 pub mod type08;
 pub mod type11;
+pub mod type12;
 pub mod type13;
 pub mod type15;
 pub mod type16;
@@ -348,6 +350,8 @@ pub struct Particles {
     pub water_z: f32,
     /// 0x15ed84: the level number (type 64 adds rings and smoke on level 10).
     pub level: u32,
+    /// 0x13e530: the Pyrocitor's gold flag (type 12's weapon flames grow and last longer when gold).
+    pub gold: u8,
 }
 
 impl Particles {
@@ -359,6 +363,7 @@ impl Particles {
         table[6] = Some(type06::update as UpdateFn);
         table[8] = Some(type08::update as UpdateFn);
         table[11] = Some(type11::update as UpdateFn);
+        table[12] = Some(type12::update as UpdateFn);
         table[13] = Some(type13::update as UpdateFn);
         table[15] = Some(type15::update as UpdateFn);
         table[16] = Some(type16::update as UpdateFn);
@@ -382,7 +387,7 @@ impl Particles {
         table[62] = Some(type62::update as UpdateFn);
         table[64] = Some(type64::update as UpdateFn);
         table[66] = Some(type45::update66 as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0 }
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0 }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {

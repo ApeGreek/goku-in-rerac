@@ -17,14 +17,16 @@
 //!   [`play_movie`] hands them to crate::movie_render, which plays them natively (decision U10) and at the end
 //!   (`MovieExitToGameplay` 0x2ad2b8) restores mode 0 and refreshes the talker's dialogue.
 //! * **The other requests** of the moby loop: `SetMissionDone` (the level's mission bytes and the saved game), the
-//!   ship hidden / shown (`FUN_002a2450` / `0x2a2480`), `UnlockPlanet` and the save (logged, not ported).
+//!   ship hidden / shown (`FUN_002a2450` / `0x2a2480`), the save (logged: the in-memory game state is the save;
+//!   `UnlockPlanet` and the banners reach the game state and the HUD through `rc_game::cinematic`), and a class's
+//!   `FadeToBlack(n)` ([`FadeHold`]: the n frames after the asking tick fade the last view to black, tick held).
 //! * **While it runs** the world keeps running as in `CutsceneModeUpdate` 0x2aca80 (docs/plan/cutscenes.md §7): on
 //!   every frame whose scene update runs ([`ActiveScene::world_runs`]: the scene ticks, not the blocking fades and
 //!   waits) the gameplay tick runs in its mode-2 form (`Game::camera_paused`: moby loop, level callbacks, hero,
 //!   particles, sound step, counter; no follow camera, no free-slot pass, no glints) with game mode 2 for the classes
 //!   (`Services::game_mode`), the moby loop's camera 0x167240 / rows = the last scene camera record, and the scene
 //!   (id, tick, actors) published to the classes ([`rc_game::scene_player::SceneState`]: the cutscene FX driver 1546).
-//!   Ratchet `SetState(100, 2)` (not ported: frozen) and hidden with his items (`FUN_002486c0`), the talker 0x179588
+//!   Ratchet `SetState(100, 2)` (the scene body, rc_game::hero::scripted) and hidden with his items (`FUN_002486c0`), the talker 0x179588
 //!   hidden (mode |= 1), classes 74 / 203 hidden (mode |= 0x80), the HUD hidden (draw mask 0x7f,
 //!   [`crate::hud_render::SceneLayer`]); all undone at the end.
 //! * **Actors**: `CreateMoby(class)` per chunk-0 actor record: a table moby (0x16ce58[k], mode |= 6; the port adds
@@ -228,6 +230,11 @@ impl Plugin for SceneRenderPlugin {
             // While a scene runs the gameplay tick runs only on the frames whose CutsceneModeUpdate updates the world
             // (not during the blocking fades and waits), in its mode-2 form (enter_mode2).
             .configure_sets(FixedUpdate, GameTick.run_if(|a: Res<ActiveScene>| !a.running || a.world_runs))
+            // A class's FadeToBlack(n) holds the next n frames (fade_take / fade_step).
+            .init_resource::<FadeHold>()
+            .configure_sets(FixedUpdate, GameTick.run_if(|h: Res<FadeHold>| h.frames == 0))
+            .add_systems(FixedUpdate, (fade_step.before(GameTick), fade_take.after(GameTick)))
+            .add_systems(RunFixedMainLoop, hold_camera.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop).after(crate::play_camera::apply))
             .add_systems(FixedUpdate, (scene_frame.before(GameTick), actor_mobys.after(GameTick)))
             .add_systems(RunFixedMainLoop, apply_camera.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop).after(crate::play_camera::apply))
             .add_systems(Update, subtitle_layer.before(crate::hud_render::HudBuild))
@@ -305,8 +312,9 @@ fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Pers
                 if let Some(b) = state.as_deref_mut().and_then(|s| s.0.levels.get_mut(level)).and_then(|l| l.missions.get_mut(mission as usize)) { *b = 0xff; }
                 println!("scene: SetMissionDone({mission}) on level {level}");
             }
-            R::UnlockPlanet { planet } => println!("scene: UnlockPlanet({planet}) + ShowPlanetBanner({planet}) (not ported)"),
-            R::Save => println!("scene: memcard_Save (not ported)"),
+            // Taken right after its tick by fade_take (a request left here was already applied).
+            R::FadeToBlack { .. } => {}
+            R::Save => println!("scene: memcard_Save (the in-memory game state holds every write; no card writer yet)"),
             R::ShipHidden(h) => {
                 if let Some(id) = play.ship_moby() {
                     let m = &mut play.game.mobys.mobys[id];
@@ -792,10 +800,72 @@ fn apply_camera(active: Res<ActiveScene>, source: Option<Res<CameraSource>>, mut
     }
 }
 
+/// `FadeToBlack(n)` 0x21b438 called by a class in gameplay (`rc_game::cinematic::EngineRequest::FadeToBlack`, the
+/// gold bolt's pickup): the game draws n black quads over the last image inside the tick, one per vsync, then the
+/// tick goes on. The port holds the n frames after the asking tick: the tick suspended, the view the last frame
+/// showed (the asking tick's world under it: its hero teleport and camera cut are not shown until the hold ends),
+/// the coverage of `scene_player::fade_to_black_coverage(n, k)` drawn by the fade pass, the HUD and letterbox as they
+/// were.
+#[derive(Resource, Default)]
+pub struct FadeHold {
+    /// n (0: no hold).
+    pub frames: u32,
+    /// The step drawn this frame (0..n).
+    pub k: u32,
+    /// The view the last frame showed (before the asking tick) and the one before each tick.
+    view: Option<crate::play_camera::PlayView>,
+    before: Option<crate::play_camera::PlayView>,
+}
+
+impl FadeHold {
+    /// Black coverage of this frame (0 without a hold).
+    pub fn coverage(&self) -> f32 { if self.frames == 0 { 0.0 } else { rc_game::scene_player::fade_to_black_coverage(self.frames, self.k.min(self.frames - 1)) } }
+}
+
+/// Before each tick: the next step of a running hold (the tick stays suspended until n steps were drawn), and the
+/// view the last frame showed.
+fn fade_step(mut hold: ResMut<FadeHold>, view: Option<Res<crate::play_camera::PlayView>>) {
+    if hold.frames > 0 {
+        hold.k += 1;
+        if hold.k >= hold.frames {
+            println!("scene: FadeToBlack({}) done: the tick resumes", hold.frames);
+            *hold = FadeHold::default();
+        }
+    }
+    if hold.frames == 0 { hold.before = view.map(|v| *v); }
+}
+
+/// After each tick: a class's `FadeToBlack(n)` starts a hold (step 0 drawn this frame).
+fn fade_take(mut hold: ResMut<FadeHold>, play: Option<ResMut<Play>>, frame: Res<crate::determinism::FrameNumber>) {
+    use rc_game::cinematic::EngineRequest as R;
+    let Some(mut p) = play else { return };
+    let mut n = None;
+    p.svc.cinematic.requests.retain(|r| match *r {
+        R::FadeToBlack { frames } => {
+            n = Some(frames.max(1) as u32);
+            false
+        }
+        _ => true,
+    });
+    let Some(n) = n else { return };
+    println!("scene: app frame {}: FadeToBlack({n}) after gameplay tick {}: the next {n} frames fade the last view to black", frame.0, ticks_since_load(p.game.counter));
+    let view = hold.before;
+    *hold = FadeHold { frames: n, k: 0, view, before: view };
+}
+
+/// The held view over the play camera while a hold runs.
+fn hold_camera(hold: Res<FadeHold>, source: Option<Res<CameraSource>>, mut cams: Query<&mut Transform, With<FlyCam>>) {
+    let Some(v) = hold.view.filter(|_| hold.frames > 0) else { return };
+    if source.is_some_and(|s| *s != CameraSource::Play) { return; }
+    let t = crate::play_camera::view_transform(&v.view);
+    for mut tf in &mut cams { if *tf != t { *tf = t; } }
+}
+
 /// The fade quad component on the main camera.
-fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, cams: Query<(Entity, Option<&SceneFade>), With<FlyCam>>) {
-    let alpha = (active.black.clamp(0.0, 1.0) * 128.0) as u32;
-    let want = (active.running && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
+fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, hold: Res<FadeHold>, cams: Query<(Entity, Option<&SceneFade>), With<FlyCam>>) {
+    let black = if active.running { active.black } else { hold.coverage() };
+    let alpha = (black.clamp(0.0, 1.0) * 128.0) as u32;
+    let want = ((active.running || hold.frames > 0) && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
     for (e, have) in &cams {
         match (want, have) {
             (Some(w), Some(h)) if *h == w => {}
@@ -807,7 +877,9 @@ fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, cams: Query<(Enti
 }
 
 /// HUD hidden and the subtitle box (module docs) into the 2D pass; in gameplay, the letterbox of `0x15f404`.
-fn subtitle_layer(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, play: Option<Res<Play>>, mut layer: ResMut<SceneLayer>) {
+fn subtitle_layer(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, hold: Res<FadeHold>, play: Option<Res<Play>>, mut layer: ResMut<SceneLayer>) {
+    // FadeToBlack blocks inside the tick: the last image (its bars, its HUD) stays under the fade.
+    if hold.frames > 0 { return; }
     let flag = !active.running && play.as_ref().is_some_and(|p| p.svc.creatures.cutscene);
     // DrawScreenFade 0x21b7d8 (part of the HUD layer, so never in mode 2): the bars grow while 0x15f404 is set.
     if !active.running {

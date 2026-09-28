@@ -24,11 +24,20 @@
 //! The tables are the overlay's (read per level through the function's relocations, [`NanotechTables::parse`]); the
 //! glowing dotted rings around the ball are not this callback: they are the orbs' type-62 trail particles.
 //!
-//! **The ship glass** (`0x2a70a8`, the boot's `0x2327a0`) is registered (the cutscene FX driver, list 1, with the
-//! ship's joint-0 matrix) but **not drawn**: its tables (gp arrays per class 530..533: points and normals in joint-0
-//! space, quads, colour 0x50807060 / 0x30807060; FX 0x15 sphere-mapped, ALPHA 0x44) put the glass of the arrival
-//! ship 530 as a bowl under the hull with the port's joint-0 pose, which the PCSX2 frames do not show; the frame
-//! the game uses is not settled (docs/plan/particles.md "Draw callbacks").
+//! **The ship glass** (`0x2a70a8`, the boot's `0x2327a0`; [`ship_glass_prims`]): the canopy of the ships 530..533,
+//! registered by the cutscene FX driver on list 1 with `MobyAttachToJoint(ship, 0, M)` = the world matrix of the
+//! last joint of the class's **joint list 0** (the ship's cockpit joint: list `[0, 1, 2, 3, 6]` on 530; the second
+//! argument is a joint-list index, `MobyMarkJointChain` 0x268d80 reads class header +0x1c). Per class `class −
+//! 0x212` the gp arrays (level01 gp −0x6620 colour, −0x6610 point count, −0x6600 quad count, −0x65f0 normals,
+//! −0x65e0 points, −0x65d0 quads; [`ShipGlassTables::parse`]) give points and normals `(x, y, z, 1)` in that joint's
+//! frame and quads of four point indices (16-byte records, a short every 4 bytes). Each point goes through the full
+//! matrix (`M·(x, y, z, w)`, `0x221608`); so does its normal, **w = 1 included** (the joint's translation is added
+//! to it: a quirk kept), then scaled to length 0.1; with `e` = unit(point − camera) the reflection `r = unit(e −
+//! 2(n·e)n)` gives the sphere map `s = r.x/m + ½`, `t = r.y/m + ½`, `m = 2·√(2(r.z + 1))`. Drawn as `FastDrawQuadReal`
+//! quads, FX 0x15 (the nanotech crate glass's texture), the class colour on all four corners (530: 0x50807060),
+//! TEX1 bilinear, ALPHA 0x44. Not modelled: the 60-tick cross-fade of the ST when the ship switches between the
+//! near (live ST) and far (frozen ST) states outside scenes (in a scene, game mode ≠ 0, the ST is always live), and
+//! FX 1 instead of 0x15 in the mode-6 space scenes with `0x13e050 == 4`.
 
 use crate::game_camera::{game_eye, GameFog, TfragFog};
 use anyhow::Result;
@@ -103,7 +112,9 @@ impl Material for FxPrimMaterial {
 }
 
 /// An FX texture (`GetEffectTex`) as an image of raw GS bytes; TEX1 0xff9000000260 (bilinear, no mips), CLAMP 0
-/// (repeat).
+/// (repeat). The decoded texture's alpha is scaled to 0..0xff (`rc_formats::texture::scale_alpha`); it goes back to
+/// GS units (0x80 = 1.0) here, as for the particle textures (`particle_render`), since `fx_prim.wgsl` multiplies the
+/// texel alpha by the vertex alpha like the GS (`At·Av >> 7`).
 pub fn fx_image(images: &mut Assets<Image>, t: &rc_formats::texture::Texture) -> Handle<Image> {
     let mut img = Image::new_uninit(
         Extent3d { width: t.width, height: t.height, depth_or_array_layers: 1 },
@@ -111,7 +122,9 @@ pub fn fx_image(images: &mut Assets<Image>, t: &rc_formats::texture::Texture) ->
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::RENDER_WORLD,
     );
-    img.data = Some(t.rgba.clone());
+    let mut rgba = t.rgba.clone();
+    for a in rgba.iter_mut().skip(3).step_by(4) { *a = if *a == 0xff { 0x80 } else { *a / 2 }; }
+    img.data = Some(rgba);
     img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: ImageAddressMode::Repeat,
         address_mode_v: ImageAddressMode::Repeat,
@@ -266,6 +279,7 @@ fn set_visible(vis: &mut Query<&mut Visibility>, s: &mut Option<FxSlot>, show: b
 #[derive(Clone, Debug, Default)]
 pub struct LevelFx {
     pub nanotech: Option<NanotechTables>,
+    pub ship_glass: Option<ShipGlassTables>,
 }
 
 impl LevelFx {
@@ -274,8 +288,76 @@ impl LevelFx {
             eprintln!("fx: nanotech glow tables: {e}");
             None
         });
-        LevelFx { nanotech }
+        let ship_glass = ShipGlassTables::parse(ov, level).unwrap_or_else(|e| {
+            eprintln!("fx: ship glass tables: {e}");
+            None
+        });
+        LevelFx { nanotech, ship_glass }
     }
+}
+
+/// `0x2a70a8` per level (the one function on all 19 levels; `tools/ghidra/names/clusters.tsv`, the boot's `0x2327a0`).
+const SHIP_GLASS_FN: [(u32, u32); 19] = [
+    (0, 0x29_35b8), (1, 0x2a_70a8), (2, 0x29_2d28), (3, 0x27_ff00), (4, 0x28_44b0), (5, 0x2b_bd08), (6, 0x2a_06b0),
+    (7, 0x2b_a260), (8, 0x29_b940), (9, 0x2a_ff08), (10, 0x28_40b8), (11, 0x2b_64b0), (12, 0x2a_9e40), (13, 0x29_d9c8),
+    (14, 0x29_9960), (15, 0x28_1500), (16, 0x28_c490), (17, 0x28_b818), (18, 0x29_3160),
+];
+/// Its size in bytes.
+const SHIP_GLASS_SIZE: u32 = 1344;
+/// The first ship class (`class − 0x212` indexes the tables) and the number of ships.
+const SHIP_GLASS_CLASS0: i16 = 0x212;
+const SHIP_GLASS_SHIPS: usize = 4;
+/// `GetEffectTex(0x15)`.
+const SHIP_GLASS_FX: usize = 0x15;
+
+/// One ship's canopy (module doc).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShipGlass {
+    pub rgba: u32,
+    pub pts: Vec<[f32; 4]>,
+    pub normals: Vec<[f32; 4]>,
+    pub quads: Vec<[u16; 4]>,
+}
+
+/// The ship glass tables of a level, by `class − 0x212`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShipGlassTables {
+    pub ships: Vec<Option<ShipGlass>>,
+}
+
+impl ShipGlassTables {
+    /// Reads the six gp arrays through the function's `addiu r, gp, imm` references, in code order (quads,
+    /// points, normals, point counts, quad counts, colours on level 01).
+    pub fn parse(ov: &wf::Overlay, level: u32) -> Result<Option<ShipGlassTables>> {
+        let Some(&(_, f)) = SHIP_GLASS_FN.iter().find(|t| t.0 == level) else { return Ok(None) };
+        let mut gp_refs = Vec::new();
+        for a in (f..f + SHIP_GLASS_SIZE).step_by(4) {
+            let w = ov.u32(a)?;
+            if w >> 26 == 0x09 && (w >> 21 & 31) == 28 { gp_refs.push(GP.wrapping_add_signed((w & 0xffff) as u16 as i16 as i32)); }
+        }
+        if gp_refs.len() < 6 { anyhow::bail!("0x{f:x}: {} gp address references, expected 6", gp_refs.len()); }
+        let (quads_a, pts_a, nrm_a, npts_a, nq_a, col_a) = (gp_refs[0], gp_refs[1], gp_refs[2], gp_refs[3], gp_refs[4], gp_refs[5]);
+        let v4 = |a: u32| -> Result<[f32; 4]> { Ok([ov.f32(a)?, ov.f32(a + 4)?, ov.f32(a + 8)?, ov.f32(a + 12)?]) };
+        let one = |i: u32| -> Result<ShipGlass> {
+            let (np, nq) = (ov.i32(npts_a + 4 * i)?, ov.i32(nq_a + 4 * i)?);
+            if !(0..=256).contains(&np) || !(0..=256).contains(&nq) { anyhow::bail!("ship {i}: {np} points, {nq} quads"); }
+            let (pa, na, qa) = (ov.u32(pts_a + 4 * i)?, ov.u32(nrm_a + 4 * i)?, ov.u32(quads_a + 4 * i)?);
+            let pts = (0..np as u32).map(|k| v4(pa + 16 * k)).collect::<Result<Vec<_>>>()?;
+            let normals = (0..np as u32).map(|k| v4(na + 16 * k)).collect::<Result<Vec<_>>>()?;
+            let quads = (0..nq as u32)
+                .map(|q| -> Result<[u16; 4]> {
+                    let b = ov.read(qa + 16 * q, 16)?;
+                    Ok(std::array::from_fn(|k| u16::from_le_bytes([b[4 * k], b[4 * k + 1]])))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if quads.iter().flatten().any(|&k| k as i32 >= np) { anyhow::bail!("ship {i}: a quad index past {np} points"); }
+            Ok(ShipGlass { rgba: ov.u32(col_a + 4 * i)?, pts, normals, quads })
+        };
+        Ok(Some(ShipGlassTables { ships: (0..SHIP_GLASS_SHIPS as u32).map(|i| one(i).ok()).collect() }))
+    }
+
+    /// The glass of `o_class` (None: not a ship with glass tables on this level).
+    pub fn of(&self, o_class: i16) -> Option<&ShipGlass> { usize::try_from(o_class - SHIP_GLASS_CLASS0).ok().and_then(|i| self.ships.get(i)?.as_ref()) }
 }
 
 /// `0x301c00` per level (the one function, hash-identical in the 19 overlays; `tools/ghidra/names/clusters.tsv`).
@@ -476,6 +558,31 @@ pub fn nanotech_prims(t: &NanotechTables, g: &rc_game::moby_update::classes::pic
     out
 }
 
+/// `M·(x, y, z, w)`: rows 0..2 the axes, row 3 the point (`0x221608`).
+fn apply4(m: &[[f32; 4]; 4], v: [f32; 4]) -> [f32; 3] { std::array::from_fn(|k| m[0][k] * v[0] + m[1][k] * v[1] + m[2][k] * v[2] + m[3][k] * v[3]) }
+
+/// The sphere-map ST of the ship glass at world point `w` with the transformed normal `n` (module doc).
+fn ship_glass_st(w: [f32; 3], n: [f32; 3], cam: [f32; 3]) -> [f32; 2] {
+    let e = unit3(sub3(w, cam));
+    let n = scale3(unit3(n), 0.1);
+    let d = n[0] * e[0] + n[1] * e[1] + n[2] * e[2];
+    let r = unit3(sub3(e, scale3(n, d + d)));
+    let m = ((r[2] + 1.0) * 2.0).sqrt() * 2.0;
+    [r[0] / m + 0.5, r[1] / m + 0.5]
+}
+
+/// The draw of callback `0x2a70a8` for one ship (module doc): `m` = the matrix of its joint list 0.
+pub fn ship_glass_prims(g: &ShipGlass, m: &[[f32; 4]; 4], cam: [f32; 3]) -> FxGroup {
+    let world: Vec<[f32; 3]> = g.pts.iter().map(|&p| apply4(m, p)).collect();
+    let st: Vec<[f32; 2]> = world.iter().zip(&g.normals).map(|(&w, &n)| ship_glass_st(w, apply4(m, n), cam)).collect();
+    let mut prims = PrimBuf::default();
+    for q in &g.quads {
+        let k = q.map(|i| i as usize);
+        prims.quad(k.map(|i| world[i]), k.map(|i| st[i]), [g.rgba; 4]);
+    }
+    FxGroup { fx: SHIP_GLASS_FX, additive: false, prims }
+}
+
 // ---------------------------------------------------------------------------------------------------
 // Plugin
 
@@ -530,8 +637,11 @@ fn draw_list1(
                         let (Some(t), Some(g)) = (level.0.water.fx.nanotech.as_ref(), rc_game::moby_update::classes::pickup::nanotech_glow(&p.game.mobys, id)) else { continue };
                         out.extend(nanotech_prims(t, &g, cam));
                     }
-                    // Not drawn (module doc): the glass's joint-0 frame is unverified.
-                    Callback::ShipGlass => {}
+                    Callback::ShipGlass => {
+                        let (Some(t), Some(m), Some(mo)) = (level.0.water.fx.ship_glass.as_ref(), cbs.matrices.get(&id), p.game.mobys.mobys.get(id)) else { continue };
+                        let Some(g) = t.of(mo.o_class) else { continue };
+                        out.push(ship_glass_prims(g, m, cam));
+                    }
                     // Drawn by crate::water_render.
                     Callback::FireField760 => {}
                 }

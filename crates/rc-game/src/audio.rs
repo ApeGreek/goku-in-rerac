@@ -15,12 +15,16 @@
 //! at the start of frame N+1, like the RPC round trip. Everything is integer or fixed-order float arithmetic,
 //! so the output is a pure function of the per-frame inputs (listener, hero position).
 //!
-//! Not modelled: reverb (the level tones are flagged for it; STUDIO_C depth 1500 on Novalis), the two SPU2
-//! cores' separate mixing stages, noise voices, voice pitch modulation (PMON), the 989snd RPC layer itself.
+//! * [`reverb`]: the reverb zones (reverb boxes, env sample points, the checkpoint copy, `sound_update`'s reverb
+//!   commands) and the native reverb effect the mix sends the "to reverb" tones through.
+//!
+//! Not modelled: the two SPU2 cores' separate mixing stages (the reverb takes the reverb-flagged voices of every
+//! core), noise voices, voice pitch modulation (PMON), the 989snd RPC layer itself.
 
 pub mod class_sounds;
 pub mod grain_vm;
 pub mod music;
+pub mod reverb;
 pub mod scene;
 pub mod voices;
 
@@ -269,6 +273,8 @@ pub struct SpuVoice {
     counter: u32,
     /// Frames played in the current stream part (for the time remaining).
     part_frame: usize,
+    /// The voice's output also goes to the reverb (989snd sets it for a tone with flag 1; cleared at key-on).
+    pub reverb: bool,
 }
 
 impl SpuVoice {
@@ -305,6 +311,7 @@ impl SpuVoice {
         self.adsr.adsr1 = adsr1;
         self.adsr.adsr2 = adsr2;
         self.generation = self.generation.wrapping_add(1);
+        self.reverb = false;
         self.load_block();
         self.adsr.attack();
     }
@@ -383,7 +390,8 @@ impl SpuVoice {
     }
 }
 
-/// The SPU2: 48 voices summed, then the master volume (0x3fff, as 989snd leaves it) and a clamp to 16 bits.
+/// The SPU2: 48 voices summed, the reverb-flagged ones also into the reverb effect whose wet output joins the sum
+/// ([`reverb::ReverbFx`]), then the master volume (0x3fff, as 989snd leaves it) and a clamp to 16 bits.
 /// The hardware saturates at each core's mix stage; here the sum is exact and clamped once (inferred;
 /// only matters when the mix clips).
 #[derive(Clone, Debug)]
@@ -392,17 +400,28 @@ pub struct Spu {
     pub master: [u16; 2],
     /// Sound RAM: the level bank's sample chunk.
     pub ram: Arc<[u8]>,
+    pub reverb: reverb::ReverbFx,
 }
 
 impl Spu {
-    pub fn new(ram: Arc<[u8]>) -> Self { Spu { voices: vec![SpuVoice::default(); SPU_VOICES], master: [0x3fff; 2], ram } }
+    pub fn new(ram: Arc<[u8]>) -> Self { Spu { voices: vec![SpuVoice::default(); SPU_VOICES], master: [0x3fff; 2], ram, reverb: reverb::ReverbFx::default() } }
 
     pub fn mix(&mut self) -> [i16; 2] {
         let (mut l, mut r) = (0i32, 0i32);
+        let mut send = [0i32; 2];
         for v in &mut self.voices {
             let (a, b) = v.run();
             l += a;
             r += b;
+            if v.reverb {
+                send[0] += a;
+                send[1] += b;
+            }
+        }
+        if self.reverb.active() {
+            let [wl, wr] = self.reverb.run(send);
+            l += wl;
+            r += wr;
         }
         let m = |x: i32, reg: u16| ((x * (reg << 1) as i16 as i32) >> 15).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
         [m(l, self.master[0]), m(r, self.master[1])]
@@ -514,6 +533,16 @@ pub struct AudioSystem {
     /// The class sounds played since the caller last drained it, when logging (the engine's `RC_AUDIO_TRACE`):
     /// `(tick, sound class, class sound index, flags, slot)`; None: not logged.
     pub play_log: Option<Vec<ClassPlay>>,
+    /// The EE's reverb request 0x13e5b0.. ([`reverb`]).
+    pub reverb: reverb::ReverbRequest,
+    /// The level's reverb boxes (sound instance class 3), in instance order.
+    pub reverb_boxes: Vec<reverb::ReverbBox>,
+    /// The reverb commands sent, when logging (`RC_AUDIO_TRACE`): `(frame, command)`.
+    pub reverb_log: Option<Vec<(u64, SndCommand)>>,
+    /// The underwater flag 0x167494 as the camera update last left it (the engine's `UnderwaterTest` 0x20e9f0,
+    /// crate::fog_zones::UnderwaterState): the tick's sound step puts it into the listener
+    /// ([`class_sounds::sound_step`]).
+    pub underwater: bool,
     started: bool,
     snd_cmds: Vec<SndCommand>,
     stream_cmds: Vec<StreamCommand>,
@@ -531,6 +560,12 @@ impl AudioSystem {
             .filter_map(|(i, s)| MusicBox::from_instance(i, s, data.instance_pvars.get(i)?.as_deref()?))
             .collect();
         let music = Music::new(std::array::from_fn(|k| data.music[k].is_some()));
+        let reverb_boxes = data
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| reverb::ReverbBox::from_instance(i, s, data.instance_pvars.get(i)?.as_deref()?))
+            .collect();
         let spu = Spu::new(Arc::from(data.bank.samples.as_slice()));
         let mut rng = crate::rng::Rng::new();
         rng.srand(crate::rng::LEVEL_SEED);
@@ -549,6 +584,10 @@ impl AudioSystem {
             stats: AudioStats::default(),
             scene: scene::SceneAudio::default(),
             play_log: None,
+            reverb: reverb::ReverbRequest::default(),
+            reverb_boxes,
+            reverb_log: None,
+            underwater: false,
             started: false,
             snd_cmds: Vec::new(),
             stream_cmds: Vec::new(),
@@ -591,9 +630,13 @@ impl AudioSystem {
         if !self.started {
             self.started = true;
             self.music.start_track(0, 1, 0x400, &mut self.stream_cmds);
+            // `GameStateUpdate`'s level-start `HeroTeleport(0x13e090, …)`: the env sample point near the spawn.
+            self.hero_teleported(input.hero_pos);
         }
         self.scene_frame();
         self.emitters.update(&mut self.slots, &self.data.sounds, &l, rng);
+        // The reverb boxes (sound instance class 3) test the hero position 0x13f3d0.
+        for b in &mut self.reverb_boxes { b.update(input.hero_pos, &mut self.reverb); }
         for r in self.snd_replies.drain(..) { self.slots.apply_reply(r); }
         for r in self.stream_replies.drain(..) { self.music.reply(r); }
         let collision = self.data.collision.clone();
@@ -607,6 +650,11 @@ impl AudioSystem {
             music_option: self.music_option,
             cutscene: self.scene.cutscene,
         };
+        // The head of `sound_update`: the reverb command of this frame's changes, before the slots' commands.
+        if let Some(c) = self.reverb.command() {
+            if let Some(log) = self.reverb_log.as_mut() { log.push((self.stats.frames, c)); }
+            self.snd_cmds.push(c);
+        }
         let cmds = self.slots.update(&mut ctx);
         self.stats.plays += cmds.iter().filter(|c| matches!(c, SndCommand::Play { .. })).count() as u64;
         self.snd_cmds.extend(cmds);
@@ -632,6 +680,8 @@ impl AudioSystem {
                 }
                 SndCommand::Stop { handle } => self.snd.stop_sound(&mut self.spu, handle),
                 SndCommand::Poll { slot, handle } => self.snd_replies.push(SndReply { slot, handle: self.snd.still_playing(handle), play: false }),
+                SndCommand::SetReverb { kind, depth, delay, feedback } => self.spu.reverb.set(kind, depth, delay, feedback),
+                SndCommand::AutoReverb { depth, delta, .. } => self.spu.reverb.auto(depth, delta),
             }
         }
         for c in std::mem::take(&mut self.stream_cmds) {
@@ -665,16 +715,42 @@ impl AudioSystem {
         fresh.snd.tick = self.snd.tick;
         fresh.snd.vm.mono = self.snd.vm.mono;
         fresh.play_log = self.play_log.take();
+        fresh.reverb_log = self.reverb_log.take();
+        fresh.underwater = self.underwater;
+        fresh.spu.reverb.enabled = self.spu.reverb.enabled;
+        // The reverb request and the boxes' pvars are the game's (kept); the effect is switched off (dirty bit 8).
+        fresh.reverb = self.reverb;
+        fresh.reverb.dirty |= reverb::dirty::OFF;
+        fresh.reverb_boxes = std::mem::take(&mut self.reverb_boxes);
         fresh.started = true;
         fresh.music.main.track = track;
         *self = fresh;
     }
 
-    /// `MovieExitToGameplay` 0x2ad2b8: `music_start_track(0x151708, 1, 0x400)`, the current track from the start.
+    /// `MovieExitToGameplay` 0x2ad2b8: `music_start_track(0x151708, 1, 0x400)`, the current track from the start, and
+    /// the reverb resent (dirty bit 0x10).
     pub fn movie_exit(&mut self) {
         let track = self.music.main.track;
         self.music.start_track(track, 1, 0x400, &mut self.stream_cmds);
+        self.reverb.dirty |= reverb::dirty::RESEND;
     }
+
+    /// `HeroTeleport` 0x2368e0's `EnvNearestSamplePoint(hero)` 0x264e98, audio part: the env sample point nearest to
+    /// `pos` within 8 units sets the reverb (when its +0x27 is set) and, while the music is idle (main player state 0,
+    /// phase 0, no pending track), the track the music starts next (+0x28 when ≥ 0). Nothing without such a point.
+    pub fn hero_teleported(&mut self, pos: [f32; 3]) {
+        let Some(i) = reverb::nearest_env_point(&self.data.env_points, pos) else { return };
+        let p = self.data.env_points[i];
+        self.reverb.apply_env_point(&p);
+        let m = &mut self.music;
+        if p.music_track >= 0 && m.main.state == 0 && m.phase == 0 && m.pending_track == -1 { m.main.track = p.music_track as i16; }
+    }
+
+    /// The checkpoint record (`0x29ac10`): the reverb request saved.
+    pub fn checkpoint_saved(&mut self) { self.reverb.checkpoint(); }
+
+    /// The death reload's placement (`0x29adc8`): the saved reverb back (resent at the next `sound_update`).
+    pub fn checkpoint_restored(&mut self) { self.reverb.restore(); }
 
     /// The movie sound as the SPU outputs it: 989snd's movie player (`snd_init_movie_sound(…, vol 0x400, pan 0,
     /// group 5, …)`) plays the left and right channels on two voices; each gets the stream-voice volume law
