@@ -54,12 +54,15 @@ pub mod type13;
 pub mod type15;
 pub mod type16;
 pub mod type19;
+pub mod type21;
 pub mod type22;
 pub mod type23;
 pub mod type25;
 pub mod type26;
+pub mod type27;
 pub mod type34;
 pub mod type35;
+pub mod type44;
 pub mod type45;
 pub mod type46;
 pub mod type47;
@@ -71,6 +74,7 @@ pub mod type59;
 pub mod type60;
 pub mod type62;
 pub mod type64;
+pub mod type72;
 
 use crate::ps2v::{self, F};
 use crate::rng::Rng;
@@ -352,6 +356,12 @@ pub struct Particles {
     pub level: u32,
     /// 0x13e530: the Pyrocitor's gold flag (type 12's weapon flames grow and last longer when gold).
     pub gold: u8,
+    /// Records a moby owns by pointer in its pvars (the Blaster shot's trail, type 72: `(moby, slot) → record`),
+    /// written where the hero code's queued spawns are created (`crate::hero::fx::create_particles`); the owner
+    /// reads and forgets them.
+    pub links: std::collections::HashMap<(usize, u8), usize>,
+    /// 0x13f490: Ratchet's platform motion this tick (type 44's puffs ride it), set by the particle hook.
+    pub hero_plat: [f32; 3],
 }
 
 impl Particles {
@@ -368,12 +378,15 @@ impl Particles {
         table[15] = Some(type15::update as UpdateFn);
         table[16] = Some(type16::update as UpdateFn);
         table[19] = Some(type19::update19 as UpdateFn);
+        table[21] = Some(type21::update as UpdateFn);
         table[22] = Some(type22::update as UpdateFn);
         table[23] = Some(type23::update as UpdateFn);
         table[25] = Some(type25::update as UpdateFn);
         table[26] = Some(type26::update as UpdateFn);
+        table[27] = Some(type27::update as UpdateFn);
         table[34] = Some(type34::update as UpdateFn);
         table[35] = Some(type35::update as UpdateFn);
+        table[44] = Some(type44::update as UpdateFn);
         table[45] = Some(type45::update45 as UpdateFn);
         table[46] = Some(type46::update as UpdateFn);
         table[47] = Some(type47::update as UpdateFn);
@@ -387,7 +400,8 @@ impl Particles {
         table[62] = Some(type62::update as UpdateFn);
         table[64] = Some(type64::update as UpdateFn);
         table[66] = Some(type45::update66 as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0 }
+        table[72] = Some(type72::update as UpdateFn);
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3] }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {

@@ -16,7 +16,9 @@
 //! **Pixel pipeline** (`assets/shaders/hud.wgsl`). Texture: TEX1 bilinear + CLAMP inherited from the AA blit's
 //! A+D block (the HUD packets set neither), done by hand on an atlas of every HUD frame and FX texture (raw GS
 //! bytes, alpha 0x80 = 1.0): sample position quantised to 1/16 texel (UV is 12.4 fixed point), four texels
-//! clamped to the texture's own rectangle, weights `k/16`, result truncated [M]. MODULATE: `C = Ct·Cf >> 7`,
+//! clamped to the texture's own rectangle, weights `k/16`, result truncated [M]; a primitive drawn after
+//! `CLAMP_1 = 0` ([`Prim::repeat`]) wraps them at the texture's size instead (REPEAT); one drawn under TEX1_1 = 1
+//! ([`Prim::nearest`]) takes the single texel `floor(U, V)` (point sampling). MODULATE: `C = Ct·Cf >> 7`,
 //! `A = At·Af >> 7` (clamped to 0xff), so RGB 0x7f gives `tex × 127/128`. Blend ALPHA_1 0x44
 //! `(Cs − Cd)·As/128 + Cd` ([`GsPass::Hud`]: TEST_1 0x5380b passes RGB either way and Z is constant, so one
 //! blended draw is exact). Untextured rectangles use the vertex RGBA. Scissor (`FontPrintWindow`) per
@@ -35,6 +37,14 @@
 //! The composite mixes in linear light on the sRGB target (exact where the HUD coverage is 0 or 1; the GS
 //! mixes display bytes), the difference the world passes also accept (gs_state.rs).
 //!
+//! **Static layer** ([`Hud2dHook::statics`]): the screens' and menu panels' noise, scan lines, vignette and glass
+//! (rc_game::menus::screen_static) go to a second 512×416 target (camera order −9, [`STATIC_LAYER`]) in three
+//! meshes drawn in order: pass 0 and 2 with the GS blend, pass 1 (the noise) with ALPHA_1 0x68 (`Cd + Cs·FIX`,
+//! [`HudMaterial::additive`]). Its node ([`HudStaticComposite`]) is a child of the HUD composite over the canvases
+//! composed over the HUD, because the game draws the effect after the page's 3D views and inside the vendor's
+//! monitor targets; it adds the layer's display-space premultiplied colour in linear light and keeps
+//! 1 − coverage of what is under it, exact over black (the monitors, the navy panels).
+//!
 //! Environment: `RC_HUD=0` disables the HUD; `RC_HUD_DEMO=1` sets bolts to 1234 at tick 60 and drops HP to
 //! 3 at tick 180; `RC_HUD_TEXT="…"` shows it as a banner (`ShowBanner` path, 180 ticks) from tick 1, or with
 //! `RC_HUD_TEXT_WINDOW=1` as `FontPrintWindow` text (regular font) centred in a `DrawUIFrame` at y = 100;
@@ -49,7 +59,9 @@ use bevy::camera::{ClearColorConfig, Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::mesh::{Indices, MeshVertexAttribute, MeshVertexBufferLayoutRef, PrimitiveTopology, VertexAttributeValues, VertexFormat};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat};
+use bevy::render::render_resource::{
+    AsBindGroup, BlendComponent, BlendFactor, BlendOperation, BlendState, Extent3d, RenderPipelineDescriptor, SpecializedMeshPipelineError, TextureDimension, TextureFormat,
+};
 use bevy::render::view::Msaa;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dKey, Material2dPlugin, MeshMaterial2d};
@@ -65,6 +77,8 @@ use std::path::Path;
 const SHADER_PATH: &str = "shaders/hud.wgsl";
 /// Render layer of the offscreen HUD camera and its mesh.
 pub const HUD_LAYER: usize = 29;
+/// Render layer of the static layer's camera and meshes ([`Hud2dHook::statics`]).
+pub const STATIC_LAYER: usize = 30;
 /// The GS draw buffer (NTSC).
 pub const W: i32 = 512;
 pub const H: i32 = 416;
@@ -75,7 +89,7 @@ const ATLAS_W: u32 = 1024;
 pub const ATTRIBUTE_UV: MeshVertexAttribute = MeshVertexAttribute::new("HudUv", 0x4855_4401, VertexFormat::Float32x2);
 /// Per vertex: RGBA bytes (R low).
 pub const ATTRIBUTE_RGBA: MeshVertexAttribute = MeshVertexAttribute::new("HudRgba", 0x4855_4402, VertexFormat::Uint32);
-/// Per vertex: atlas x | y << 16, texture w | h << 16, flags (1 = textured), 0.
+/// Per vertex: atlas x | y << 16, texture w | h << 16, flags (1 = textured, 2 = REPEAT, 4 = NEAREST), 0.
 pub const ATTRIBUTE_TEX: MeshVertexAttribute = MeshVertexAttribute::new("HudTex", 0x4855_4403, VertexFormat::Uint32x4);
 /// Per vertex: scissor x0, x1, y0, y1 (inclusive pixels).
 pub const ATTRIBUTE_SCISSOR: MeshVertexAttribute = MeshVertexAttribute::new("HudScissor", 0x4855_4404, VertexFormat::Uint32x4);
@@ -99,6 +113,13 @@ pub struct Prim {
     pub rgba: u32,
     /// x0, x1, y0, y1, inclusive.
     pub scissor: [i32; 4],
+    /// CLAMP_1 WMS = WMT = REPEAT (`CLAMP_1 = 0`): texel coordinates wrap at the texture's size instead of clamping to
+    /// its edge (the CLAMP the 2D pass inherits from the AA blit). The screens' static sets it
+    /// (rc_game::menus::screen_static; [`Hud2dHook::statics`]).
+    pub repeat: bool,
+    /// TEX1_1 MMAG = MMIN = NEAREST (point sampling) instead of the bilinear the 2D pass inherits: the vendor's ticker,
+    /// drawn right after the hologram cone's `FastDrawQuadReal` wrote TEX1_1 = 1 (crate::vendor_render).
+    pub nearest: bool,
 }
 
 impl Prim {
@@ -137,7 +158,7 @@ impl Hud2d {
     pub fn reset_scissor(&mut self) { self.scissor = FULL_SCISSOR; }
 
     fn push(&mut self, tex: Tex, pos: [[i32; 2]; 4], uv: [[i32; 2]; 4], rgba: u32) {
-        self.prims.push(Prim { tex, pos, uv, rgba, scissor: self.scissor });
+        self.prims.push(Prim { tex, pos, uv, rgba, scissor: self.scissor, repeat: false, nearest: false });
     }
 
     /// `HudSprite(frame, x, y, w, h, alpha)` and its rotated variants.
@@ -251,11 +272,30 @@ fn build_atlas(frames: &[Texture], fx: &[Option<Texture>]) -> Atlas {
     Atlas { rgba, height, frames: rects, fx: fx_rects }
 }
 
-/// The 2D primitives' material: the atlas.
+/// Pipeline key of [`HudMaterial`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct HudMaterialKey {
+    additive: bool,
+}
+
+impl From<&HudMaterial> for HudMaterialKey {
+    fn from(m: &HudMaterial) -> Self { HudMaterialKey { additive: m.additive } }
+}
+
+/// ALPHA_1 0x68 with FIX: `Cd + Cs·FIX/128` (the fragment outputs `Cs·FIX/128` and coverage 0, so the target's
+/// premultiplied colour grows and its coverage stays).
+const ADD_FIX_BLEND: BlendState = BlendState {
+    color: BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::Add },
+    alpha: BlendComponent { src_factor: BlendFactor::Zero, dst_factor: BlendFactor::One, operation: BlendOperation::Add },
+};
+
+/// The 2D primitives' material: the atlas; `additive` = ALPHA_1 0x68 (FIX = the vertex alpha) instead of 0x44.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+#[bind_group_data(HudMaterialKey)]
 pub struct HudMaterial {
     #[texture(0)]
     pub atlas: Handle<Image>,
+    pub additive: bool,
 }
 
 impl Material2d for HudMaterial {
@@ -263,7 +303,7 @@ impl Material2d for HudMaterial {
     fn fragment_shader() -> ShaderRef { SHADER_PATH.into() }
     fn alpha_mode(&self) -> AlphaMode2d { AlphaMode2d::Blend }
 
-    fn specialize(descriptor: &mut RenderPipelineDescriptor, layout: &MeshVertexBufferLayoutRef, _key: Material2dKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
+    fn specialize(descriptor: &mut RenderPipelineDescriptor, layout: &MeshVertexBufferLayoutRef, key: Material2dKey<Self>) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             ATTRIBUTE_UV.at_shader_location(1),
@@ -275,6 +315,12 @@ impl Material2d for HudMaterial {
         if let Some(f) = descriptor.fragment.as_mut() { f.shader_defs.push(ShaderDefVal::Bool("HUD_PRIMS".into(), true)); }
         descriptor.primitive.cull_mode = None;
         GsPass::Hud.specialize(descriptor);
+        if key.bind_group_data.additive {
+            if let Some(f) = descriptor.fragment.as_mut() {
+                f.shader_defs.push("HUD_ADD".into());
+                for t in f.targets.iter_mut().flatten() { t.blend = Some(ADD_FIX_BLEND); }
+            }
+        }
         Ok(())
     }
 }
@@ -293,6 +339,29 @@ impl UiMaterial for HudComposite {
         if let Some(f) = descriptor.fragment.as_mut() {
             f.entry_point = Some("composite".into());
             f.shader_defs.push(ShaderDefVal::Bool("HUD_COMPOSITE".into(), true));
+        }
+        descriptor.vertex.shader_defs.push(ShaderDefVal::Bool("HUD_COMPOSITE".into(), true));
+    }
+}
+
+/// The static layer's UI node (a child of the HUD composite, over the canvases composed over the HUD): its image holds
+/// display-space premultiplied colour and coverage; the node adds the colour in linear light over what is under it,
+/// scaled by 1 − coverage (`(Cs − Cd)·As + Cd` exactly where the effect lies on black — the monitors, the navy
+/// panels — and `Cd + Cs·FIX` for the noise wherever its coverage is 0).
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+pub struct HudStaticComposite {
+    #[texture(0)]
+    pub image: Handle<Image>,
+}
+
+impl UiMaterial for HudStaticComposite {
+    fn fragment_shader() -> ShaderRef { SHADER_PATH.into() }
+
+    fn specialize(descriptor: &mut RenderPipelineDescriptor, _key: UiMaterialKey<Self>) {
+        if let Some(f) = descriptor.fragment.as_mut() {
+            f.entry_point = Some("composite_static".into());
+            f.shader_defs.push(ShaderDefVal::Bool("HUD_COMPOSITE".into(), true));
+            for t in f.targets.iter_mut().flatten() { t.blend = Some(BlendState::PREMULTIPLIED_ALPHA_BLENDING); }
         }
         descriptor.vertex.shader_defs.push(ShaderDefVal::Bool("HUD_COMPOSITE".into(), true));
     }
@@ -327,6 +396,8 @@ struct HudRuntime {
     atlas_frames: Vec<[u32; 4]>,
     atlas_fx: Vec<Option<[u32; 4]>>,
     mesh: Handle<Mesh>,
+    /// The static layer's three passes ([`Hud2dHook::statics`]).
+    static_meshes: [Handle<Mesh>; 3],
     ticks_done: u64,
     draws: Vec<Draw>,
     hud2d: Hud2d,
@@ -367,6 +438,11 @@ pub struct HudFeed {
 pub struct Hud2dHook {
     /// Appended after the HUD's own primitives.
     pub prims: Vec<Prim>,
+    /// The screens' and panels' static (rc_game::menus::screen_static): its own layer over everything 2D and the
+    /// canvases (the game draws it after the page's 3D views and inside the monitors' targets), in three passes:
+    /// 0 under the noise, 1 the noise (ALPHA_1 0x68, added), 2 over it. Set by crate::menu_render and
+    /// crate::vendor_render each frame.
+    pub statics: [Vec<Prim>; 3],
     /// The HUD's own calls are not drawn (mode 3 draws no HUD).
     pub replace_hud: bool,
     /// The HUD update loop does not run (it is part of the mode-0 render only).
@@ -390,7 +466,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Hud2dHook>().init_resource::<SceneLayer>().init_resource::<HudFeed>();
         if std::env::var("RC_HUD").is_ok_and(|v| v.trim() == "0") { return; }
-        app.add_plugins((Material2dPlugin::<HudMaterial>::default(), UiMaterialPlugin::<HudComposite>::default()))
+        app.add_plugins((Material2dPlugin::<HudMaterial>::default(), UiMaterialPlugin::<HudComposite>::default(), UiMaterialPlugin::<HudStaticComposite>::default()))
             .add_systems(Startup, setup)
             .add_systems(Update, (target_main_camera, tick_and_build).chain().in_set(HudBuild));
     }
@@ -403,6 +479,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<HudMaterial>>,
     mut composites: ResMut<Assets<HudComposite>>,
+    mut static_composites: ResMut<Assets<HudStaticComposite>>,
 ) {
     let Some(lh) = level.0.hud.as_ref() else {
         eprintln!("hud: no HUD data for this level");
@@ -434,20 +511,43 @@ fn setup(
     let mesh = meshes.add(empty_mesh());
     commands.spawn((
         Mesh2d(mesh.clone()),
-        MeshMaterial2d(materials.add(HudMaterial { atlas: atlas_handle })),
+        MeshMaterial2d(materials.add(HudMaterial { atlas: atlas_handle.clone(), additive: false })),
         Transform::IDENTITY,
         NoFrustumCulling,
         RenderLayers::layer(HUD_LAYER),
         HudMesh,
         Name::new("hud primitives"),
     ));
+    let full = || Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
+    let hud_node = commands.spawn((full(), MaterialNode(composites.add(HudComposite { image: target })), GlobalZIndex(i32::MAX), HudCompositeNode, Name::new("hud composite"))).id();
+    // The static layer: its own 512×416 target, three meshes in pass order (Transparent2d sorts by z), a node over
+    // the HUD composite's other children (the canvases composed over the HUD).
+    let static_target = images.add(Image::new_target_texture(W as u32, H as u32, TextureFormat::Rgba16Float, None));
     commands.spawn((
-        Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
-        MaterialNode(composites.add(HudComposite { image: target })),
-        GlobalZIndex(i32::MAX),
-        HudCompositeNode,
-        Name::new("hud composite"),
+        Camera2d,
+        Camera { order: -9, clear_color: ClearColorConfig::Custom(Color::NONE), ..default() },
+        RenderTarget::Image(static_target.clone().into()),
+        Hdr,
+        Msaa::Off,
+        Tonemapping::None,
+        DebandDither::Disabled,
+        RenderLayers::layer(STATIC_LAYER),
+        Name::new("hud static camera (512x416 offscreen)"),
     ));
+    let (mix, add) = (materials.add(HudMaterial { atlas: atlas_handle.clone(), additive: false }), materials.add(HudMaterial { atlas: atlas_handle, additive: true }));
+    let static_meshes = [0usize, 1, 2].map(|k| {
+        let m = meshes.add(empty_mesh());
+        commands.spawn((
+            Mesh2d(m.clone()),
+            MeshMaterial2d(if k == 1 { add.clone() } else { mix.clone() }),
+            Transform::from_xyz(0.0, 0.0, k as f32),
+            NoFrustumCulling,
+            RenderLayers::layer(STATIC_LAYER),
+            Name::new(format!("hud static pass {k}")),
+        ));
+        m
+    });
+    commands.spawn((full(), MaterialNode(static_composites.add(HudStaticComposite { image: static_target })), ZIndex(1), ChildOf(hud_node), Name::new("hud static composite")));
 
     let assets = HudAssets::new(&lh.hud, lh.glyphs, lh.messages.clone());
     let frame_sizes = assets.frame_sizes.clone();
@@ -467,6 +567,7 @@ fn setup(
         atlas_frames: atlas.frames,
         atlas_fx: atlas.fx,
         mesh,
+        static_meshes,
         ticks_done: 0,
         draws: Vec::new(),
         hud2d: Hud2d { frame_sizes, ..default() },
@@ -549,11 +650,14 @@ fn tick_and_build(
         if let Some(text) = rt.env.text.clone().filter(|_| rt.env.text_window) { window_text_demo(&rt.state, &rt.glyphs, &text, &mut rt.draws); }
     }
     rt.hud2d.clear();
+    // The guns' screen markers (`DrawWorld`'s 2D overlay before the HUD: crate::marker_render).
+    if let Some(p) = play.as_deref().filter(|_| !hook.replace_hud && !scene.hide_hud) { rt.hud2d.prims.extend(crate::marker_render::prims(p)); }
     let mut st = crate::text_render::TextState::default();
     if !hook.replace_hud && !scene.hide_hud { crate::text_render::execute(&mut rt.hud2d, &mut st, &rt.glyphs, &rt.draws); }
     rt.hud2d.prims.extend(hook.prims.iter().copied());
     rt.hud2d.prims.extend(scene.prims.iter().copied());
-    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d, &rt.atlas_frames, &rt.atlas_fx));
+    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.atlas_frames, &rt.atlas_fx));
+    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &rt.atlas_frames, &rt.atlas_fx)); }
 }
 
 /// The HUD's `PlayLevelSoundAtMoby(index, flags, 0)` calls (the help box's opening sound) into the audio system: 2-D at
@@ -593,19 +697,19 @@ fn empty_mesh() -> Mesh {
 }
 
 /// The primitives as one triangle list in submission order (the GPU blends triangles of one draw in order).
-fn build_mesh(h: &Hud2d, frames: &[[u32; 4]], fx: &[Option<[u32; 4]>]) -> Mesh {
-    if h.prims.is_empty() { return empty_mesh(); }
-    let n = h.prims.len() * 4;
+fn build_mesh(prims: &[Prim], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>]) -> Mesh {
+    if prims.is_empty() { return empty_mesh(); }
+    let n = prims.len() * 4;
     let (mut pos, mut uv, mut rgba, mut tex, mut sc, mut idx) =
         (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n / 4 * 6));
-    for p in &h.prims {
+    for p in prims {
         let rect = match p.tex {
             Tex::None => None,
             Tex::Frame(i) => frames.get(i).copied(),
             Tex::Fx(i) => fx.get(i).copied().flatten(),
         };
         let t = match rect {
-            Some([x, y, w, hh]) => [x | y << 16, w | hh << 16, 1, 0],
+            Some([x, y, w, hh]) => [x | y << 16, w | hh << 16, 1 | if p.repeat { 2 } else { 0 } | if p.nearest { 4 } else { 0 }, 0],
             None => [0, 0x0001_0001, 0, 0],
         };
         let s = p.scissor.map(|v| v.clamp(-1, 0xffff) as u32);
@@ -647,6 +751,24 @@ mod tests {
         assert_eq!(p[2].rgba, 0xff7f_7f7f);
         h.rect(5, 9, 1, 3, 0x6004_0404);
         assert_eq!(h.prims[3].rect(), [1, 5, 2, 4]);
+    }
+
+    #[test]
+    fn repeat_and_nearest_reach_the_vertex_flags() {
+        // CLAMP + bilinear (the 2D pass' default), a REPEAT noise quad (CLAMP_1 = 0), a point-sampled one (TEX1_1 = 1),
+        // an untextured rect.
+        let mut h = Hud2d::default();
+        h.strip_glyph(26, 0, 0, 8, 8, 0, 0, 8, 8, 0x8080_8080);
+        h.strip_glyph(26, 0, 0, 120, 40, 150, 90, 270, 130, 0x8080_8080);
+        h.prims[1].repeat = true;
+        h.strip_glyph(26, 0, 0, 120, 40, 150, 90, 270, 130, 0x8080_8080);
+        h.prims[2].repeat = true;
+        h.prims[2].nearest = true;
+        h.rect(0, 4, 0, 4, 0x8000_0000);
+        let fx = vec![None; 26].into_iter().chain([Some([64u32, 0, 32, 32])]).collect::<Vec<_>>();
+        let m = build_mesh(&h.prims, &[], &fx);
+        let Some(VertexAttributeValues::Uint32x4(t)) = m.attribute(ATTRIBUTE_TEX) else { panic!("no tex attribute") };
+        assert_eq!([t[0][2], t[4][2], t[8][2], t[12][2]], [1, 3, 7, 0]);
     }
 
     #[test]

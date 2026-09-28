@@ -90,6 +90,11 @@ pub struct ScreenDraw {
     pub placed: Placed,
     pub content: Vec<MenuDraw>,
     pub fx: Vec<FxDraw>,
+    /// Drawn with TEX1_1 = 1 (point sampling): the ticker, the first screen after the hologram cone
+    /// (`DrawWorld_Mode5` 0x2b4020: cone 0x2b3cc8 → `FastDrawQuadReal` TEX1_1 = its quad's +0x80 = 1; screens 1..5
+    /// follow the item's and the salesman's moby draws, whose packets set bilinear TEX1). No cone on the PDA's remote
+    /// vendor (0x1ca980): then the vendor moby's TEX1 holds.
+    pub nearest: bool,
 }
 
 /// What mode 5 draws this frame (written by [`vendor_frame`], drawn by crate::vendor_render).
@@ -426,11 +431,12 @@ pub fn vendor_frame(
                 for (s, p) in placed.iter().enumerate() {
                     let Some(p) = p else { continue };
                     let (w, h) = p.texel_size();
-                    d.screens.push(ScreenDraw { s, placed: *p, content: v.screen_content(s, (w, h), assets, gs, frame as u32), fx: fx[s].clone() });
+                    let nearest = s == screens::TICKER && !v.remote;
+                    d.screens.push(ScreenDraw { s, placed: *p, content: v.screen_content(s, (w, h), assets, gs, frame as u32), fx: fx[s].clone(), nearest });
                 }
                 if let Some(p) = popup_place {
                     let (w, h) = p.texel_size();
-                    d.screens.push(ScreenDraw { s: screens::POPUP, placed: p, content: v.screen_content(screens::POPUP, (w, h), assets, gs, frame as u32), fx: fx[6].clone() });
+                    d.screens.push(ScreenDraw { s: screens::POPUP, placed: p, content: v.screen_content(screens::POPUP, (w, h), assets, gs, frame as u32), fx: fx[6].clone(), nearest: false });
                 }
                 // The cone's V scroll (+0.01 per draw).
                 vr.cone_scroll += 0.01;

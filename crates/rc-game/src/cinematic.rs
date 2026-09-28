@@ -17,6 +17,7 @@
 //! | `ShowBanner(msg, t)` 0x2789e0 / `ShowPlanetBanner(p)` 0x277c38 | [`show_banner`] / [`show_planet_banner`] | the HUD banner ([`Cinematic::banner`]) |
 //! | `UnlockPlanet(p)` 0x2756d0 | [`unlock_planet`] | the saved game's planet bits and map order (+ banner) |
 //! | `memcard_Save(0, −1)` | [`save`] | logged: the in-memory game state is the save |
+//! | `SetMissionDone(m)` 0x265080 | [`set_mission_done`] | the level's mission byte done (the live bytes and the saved game) |
 //!
 //! The camera calls are queued here and applied by the tick right after the moby loop ([`Cinematic::calls`],
 //! `crate::tick`); the hero calls go through the hero-block channel ([`crate::moby_update::services::HeroFields`]);
@@ -156,6 +157,16 @@ pub fn fade_to_black(w: &mut World, frames: i32) { w.svc.cinematic.requests.push
 /// `memcard_Save(0, −1)`: the in-memory game state already holds every write; the engine logs the request (no
 /// memory-card writer yet).
 pub fn save(w: &mut World) { w.svc.cinematic.requests.push(EngineRequest::Save); }
+
+/// `SetMissionDone(m)` 0x265080: `*(0x14c050 + level·16 + m) = 0xff` unless `m` is 0xff (no other effect). The one
+/// writer of the mission bytes for every class (checkpoint 805, talker 774, mission NPC 730 / 790, infobot 750, bolt
+/// crank 280; the per-level classes of docs/plan/level_scripting.md): the engine applies it after the tick to the live
+/// bytes the classes read ([`crate::moby_update::services::LevelMissions::done`]) and to the saved game, so a class
+/// later in the same moby loop still reads the old byte (one tick later than the game's direct store) [L: no reader
+/// of the same tick depends on it on the ported levels].
+pub fn set_mission_done(w: &mut World, mission: u8) {
+    if mission != 0xff { w.svc.cinematic.requests.push(EngineRequest::MissionDone { mission }); }
+}
 
 /// `ShowBanner(msg, ticks)` 0x2789e0 (`ticks` already scaled; the caller passes `ticks(180)` for −1).
 pub fn show_banner(w: &mut World, msg: i32, ticks: i32) {

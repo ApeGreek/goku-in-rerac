@@ -60,7 +60,8 @@ struct MobyInst {
 
 // Per instance, rewritten per frame by MobyProc's replay (crate::moby_lod): x = vertex alpha (the ambient α
 // lane: distance fade × moby+0x23 >> 7), y = flags (1 = tint red: low LOD with RC_MOBY_LOD_TINT=1),
-// z = shine alpha, w = 0; e = the metal pass's sphere-map basis (read by moby_metal.wgsl).
+// z = shine alpha, w = glow word (bit 24: on the glow list, mode 0x10; bits 0..23: moby+0x90 RGB); e = the metal
+// pass's sphere-map basis (read by moby_metal.wgsl).
 struct MobyLod {
     misc: vec4<u32>,
     e: array<vec4<f32>, 3>,
@@ -72,7 +73,8 @@ struct MobyVertex {
     // Packed model position (s16 as f32), game axes.
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
-    // x = azimuth | elevation << 8 | joint count << 16; y = joints; z = weights (10 bits each); w = multiplier RGBA.
+    // x = azimuth | elevation << 8 | joint count << 16 | glow packet << 24; y = joints; z = weights (10 bits each);
+    // w = multiplier RGBA.
     @location(2) skin: vec4<u32>,
     // Index of the vertex in the class's high-LOD list (CPU colour table).
     @location(3) vid: u32,
@@ -141,6 +143,12 @@ fn vertex(v: MobyVertex) -> MobyVertexOutput {
         let h = vec4<i32>(s16(i32(c.x)), s16(i32(c.y)), s16(i32(c.z)), s16(i32(c.w)));
         let p = clamp(h * mult, vec4<i32>(-32768), vec4<i32>(32767)) >> vec4<u32>(7u);
         out.color = vec4<f32>(p & vec4<i32>(0xff)) / 128.0;
+    }
+    // The glow list (MobyProc level01 0x26b890, fun_002116b8 0x26a650; crate::moby_lod): after the skin/light pass
+    // every vertex colour of a glow packet is replaced by the moby's glow word, its byte 3 by the vertex alpha.
+    let glow = (*lod).misc.w;
+    if ((v.skin.x & 0x1000000u) != 0u && (glow & 0x1000000u) != 0u) {
+        out.color = vec4<f32>(f32(glow & 0xffu), f32((glow >> 8u) & 0xffu), f32((glow >> 16u) & 0xffu), alpha) / 128.0;
     }
     if (((*lod).misc.y & 1u) != 0u) {
         out.color = vec4<f32>(out.color.r * 0.5 + 1.0, out.color.gb * 0.3, out.color.a);

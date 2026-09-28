@@ -8,6 +8,7 @@
 //! * reads the user's personal material from `~/PS2/ratchet1/` ([`personal_dir`]): savestates in `savestates/`,
 //!   recordings in `traces/` (`record` writes new recordings there, the one personal write).
 
+pub mod class_census;
 pub mod ee;
 pub mod hero_analysis;
 pub mod hero_record;

@@ -249,6 +249,13 @@ where
         a.play_class_sound(&ev, Some(self.hero), &self.listener, rng)
     }
 
+    fn moby_sound(&mut self, id: MobyId, o_class: i16, pos: [f32; 3], index: i32, flags: u32, rng: &mut Rng) -> i32 {
+        let Some(mut a) = (self.audio)() else { return -1 };
+        // A moby of the table the hand item created (the R.Y.N.O.'s missiles): its own sound, owned by it.
+        let ev = SoundEvent { index, flags, moby: id, o_class, sound_class: o_class, pos, tick: self.counter };
+        a.play_class_sound(&ev, Some(id), &self.listener, rng)
+    }
+
     fn footstep(&mut self, moby: &crate::moby_runtime::Moby, level: i32, class: u8, foot: u8, variant: u8, rng: &mut Rng) -> i32 {
         let Some(mut a) = (self.audio)() else { return -1 };
         let pos = [moby.position[0], moby.position[1], moby.position[2]];

@@ -180,7 +180,7 @@ Per-vertex input (relative to TOPS, index i 1-based): position at 0x00+(i−1), 
 4. **Per-moby uniforms:** M_vu1 (or model = [s·R | p] with camera-relative 1024 scaling), L_0..2 (model space), C_0..2, K_0..1, ambient RGB, alpha. Compute the bank cross-fade and the point-light merge on the CPU once per moby per frame.
 5. **Vertex lighting** exactly as §5: unnormalised n' and the |n'| normalisation after the colour sum; `floor(128·c)`; multiplier; `min(255, ·)`; then GS MODULATE (0x80 = 1.0) as for tfrags. Duplicates copy their source vertex's colour.
 6. **Metal pass:** a second draw with the sphere-map ST, colour rule, alpha and depth bias from §6.
-7. Still to reverse: the keyframe decode in `fun_0020e0e0`; the glow (mode 0x10) and deferred/shadow (0x400/0x800) paths in MobyProc; the exact cull sign conventions; and whether anything writes the multiplier blob at runtime.
+7. Still to reverse: the keyframe decode in `fun_0020e0e0`; the deferred/shadow (0x400/0x800) path in MobyProc (the glow path: §10); the exact cull sign conventions; and whether anything writes the multiplier blob at runtime.
 
 ## 9. LOD, culls, fade and the metal pass, pinned (2026-09-27)
 
@@ -259,3 +259,48 @@ path, same GS state). (0x182c70, from core[0xc0]/[0xc4], is a third 128×128 map
 
 Confidence: verified in the disassembly except where marked; the port's camera is Bevy's, so thresholds agree with the
 game to float noise, not bit for bit.
+
+## 10. The glow list (mode 0x10), pinned (2026-09-28)
+
+Level01 addresses (MobyProc 0x26a7a0; the boot copy is byte-identical). Port: `crates/rc-engine/src/moby_lod.rs`
+(`glow_word`), `moby_render.rs` (`SKIN_GLOW`, `glow_from`, `MobyLook`), `assets/shaders/moby.wgsl`.
+
+* **Set-up.** `InitMobyInstance` (0x263488): class header +0x40 ≠ 0 → mode |= 0x10 and moby+0x90 = that word. Updates
+  rewrite +0x90: the vendor 11 `(sin t·48 + 96)·0x010101 | 0x80000000`, the floor switch 830 (grey pulse, green
+  0x80208020 when pressed), Clank's moby (0x2278c0), the ship 531 (0x2a1c40), amoeboids, the bomb.
+* **MobyProc** (0x26b2a0 `bne t5, zero` with t5 = moby+0x34 & 0x10, 0x26aef4): after the moby's job, at 0x26b890..0x26b8f8,
+  n = class byte `0xa + lod` (0x26b8b0; lod = 0 high, 1 low, the upper half of t6 set at 0x26adfc / 0x26ae34); when the
+  LOD list has more than n packets, a 16-byte record is appended at SPR 0x3400..0x3800 (64 records): word 0 = +0x90 with
+  byte 3 = the job's ambient α byte (`lbu a3, −4(t8)` = job +0xbc: the vertex alpha `fade·+0x23 >> 7`), word 1 = the
+  packet entries from n on, word 2 = the job's chain slots of those packets (job +0xc0 + 8n), word 3 = their count.
+  At the end (0x26b4c8) the records are copied to 0x1ac680 and their byte length to 0x15fff8 (gp −0x6c08).
+* **Draw** (`DrawMobysCleanUp` 0x264d68 → `fun_002116b8` 0x26a650, after `ProcessMobyAnimData` has skinned and lit):
+  for every record and packet, the first `transfer_vertex_count` (packet byte 0xf) colour words of the packet's
+  output are overwritten with word 0. So a glow packet is drawn **unlit, in the moby's glow RGB, at the moby's vertex
+  alpha** (no multiplier, no saturation), with the moby's own GS state (ALPHA 0x44, TEST 0x5360b, the texture of its
+  ad-gifs). Confidence: verified in the disassembly.
+* **The disc** (all 19 levels): 547 (level, class) pairs with a glow word, 175 distinct classes, 2568 placed instances;
+  532 pairs / 163 classes / 2387 instances have glow packets in their high LOD (the vendor's balls, lamps, eyes,
+  Ratchet's class 0 packet 62, Clank's 601 packet 21, the logo 1143's ring text). No class sets mode 0x10 through
+  +0x44 without a glow word.
+
+**In the port.** Mesh build: the vertices of packets ≥ class byte 0xa (0xb for the low LOD) carry `SKIN_GLOW` (bit 24
+of the skin word) and are their own parts. Per frame every moby's `MobyLod.misc.w` holds `GLOW_ON | RGB` when its mode
+has 0x10 (statics: `MobyOcclusion::look` from the moby table, class default for undriven ones; dynamic slots:
+`SlotLook.glow`; extras: the class default from `ExtraMobys::spawn`). moby.wgsl replaces a flagged vertex's colour
+with (RGB, vertex alpha) / 128 after lighting. A glow part's TEST_1 fail half (its soft edge, As < 0x60) is drawn as
+`GsPass::EffectLowAlpha`: the same blend on display bytes (crate::display_blend), like every other glow. No class is
+special-cased. `RC_MOBY_GLOW=0` turns the list off.
+
+**One overwrite per batch.** Each `MobyProc` call restarts the list (SPR 0x3400, 0x26a8ac) and at its end rewrites
+0x1ac680 and the length 0x15fff8 (the store is in a delay slot: 0 when it has no records); `DrawMobysCleanUp` runs the
+overwrite once. So in a `DrawMobyList` batch (mode 5's vendor screens `DrawWorld_Mode5` 0x2b4020, `PageMenuDraw`
+0x28d080) only the **last** list's glow packets are recoloured. In the vendor's mode 5 the last list is the salesman
+(class 12) or the popup (0x471), neither with glow packets: the item model (e.g. the Pyrocitor's lens), the hologram
+item and the vendor itself are drawn lit. Port: `ExtraMobys::clear_glow` for the vendor's screen slots; the vendor's
+own static instance still glows in mode 5 (not modelled). The page menus' widget mobys (Weapons / Gadgets: the 3D
+Ratchet, his items, the preview) are off the list for another reason: the widgets set their +0x34 to 0 (0x297ad0,
+0x291c38) or 4 (`LoadHandGadget` 0x297d70) after creating them; `crate::menu_models` clears their glow too.
+
+**Not the halos.** The soft blue halos around the vendor's antenna balls are not this list: they are the glow quads of
+the vendor's draw callback (docs/plan/interaction.md §9.1, `crate::fx_draw` "glow quad").

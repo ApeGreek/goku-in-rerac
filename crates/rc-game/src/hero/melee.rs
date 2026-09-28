@@ -202,8 +202,12 @@ impl Hero {
                 let n = if st == 0xb || st == 0xe { ticks(0x12) } else { ticks(10) };
                 if pad.pressed_within(mask, n).is_none() { break 'pick None; }
                 let h = if self.jump.descending == 0 { Pf::b(0x3dcc_cccd) } else { Pf::b(0x3f11_eb85) };
-                if h < self.height { break 'pick Some(0x14); }
-                if st == 8 && Pf::b(0x3f11_eb85) < self.height { break 'pick Some(0x14); }
+                if h < self.height || (st == 8 && Pf::b(0x3f11_eb85) < self.height) {
+                    // The cable overlays (level00 0x227fa0, Kerwan 0x21aac8): □ at a cable (0x13f94c) is the
+                    // wrench's grab, not the jump attack (super::boots; the flag stays 0 elsewhere).
+                    if super::boots::cable_contact(self) { break 'pick None; }
+                    break 'pick Some(0x14);
+                }
                 if self.f063a != 0 { break 'pick None; }
                 break 'pick Some(0x13);
             }

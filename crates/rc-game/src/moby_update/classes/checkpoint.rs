@@ -18,9 +18,11 @@
 //! becomes collected (`0x1bbb04`) with both death bits set; the record goes to [`SaveBits::checkpoint`]
 //! (0x1bb6b0.., [`Record`]).
 //!
-//! **Not ported**: `SetMissionDone` (the port has no mission writer yet: counted), the record's copy of the
-//! visit state 0x1baaa0 → 0x1bb700 and the hero's light word / ambient / control mode / music (the death reload
-//! restores them; the engine's respawn only places the hero).
+//! `SetMissionDone(+0xb0)` is [`crate::cinematic::set_mission_done`] (the engine applies it after the tick, so the
+//! state 0 → 1 step below sees it on the next tick; nothing reads that state).
+//!
+//! **Not ported**: the record's copy of the visit state 0x1baaa0 → 0x1bb700 and the hero's light word / ambient /
+//! control mode / music (the death reload restores them; the engine's respawn only places the hero).
 //!
 //! [`SaveBits::checkpoint`]: crate::moby_update::services::SaveBits::checkpoint
 
@@ -83,8 +85,8 @@ pub fn update(w: &mut World, id: MobyId) {
         let pv = &w.m(id).pvars;
         if !(p::i32(pv, 0xc) != 0 && p::i32(pv, 0x10) == 0) {
             p::set_i32(&mut w.mm(id).pvars, 0xc, 1);
-            // SetMissionDone(+0xb0): no mission writer in the port.
-            w.svc.unported("checkpoint 805 SetMissionDone");
+            let mission = w.m(id).mission;
+            crate::cinematic::set_mission_done(w, mission);
             let m = w.m(id);
             let (pos, rot) = ([m.position[0], m.position[1], m.position[2]], [m.rotation[0], m.rotation[1], m.rotation[2]]);
             let g = w.ground_height(Pf::b(0x3f00_0000), [Pf::f(pos[0]), Pf::f(pos[1]), Pf::f(pos[2]), Pf::f(m.position[3])], 0).to_f32();
@@ -116,4 +118,45 @@ pub(crate) fn record(w: &mut World, r: Record) {
     w.svc.save.checkpoint = Some(r);
     // 0x1bb6ec..0x1bb6f2: the reverb request saved with the record (crate::audio::reverb).
     if let Some(s) = w.sound.as_deref_mut() { s.checkpoint_saved(); }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::cinematic::EngineRequest;
+    use crate::moby_runtime::{Moby, MobyTable};
+
+    /// A cuboid of half-size 2 about `c`.
+    pub(crate) fn cube(c: [f32; 3], euler: [f32; 3]) -> rc_formats::volumes::Shape {
+        rc_formats::volumes::Shape {
+            matrix: [[2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0], [c[0], c[1], c[2], 1.0]],
+            inverse: [[0.5, 0.0, 0.0, 0.0], [0.0, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, 0.0]],
+            euler,
+            ..Default::default()
+        }
+    }
+
+    /// Entering the cuboid takes the checkpoint once: `SetMissionDone(+0xb0)` (the one mission writer,
+    /// `crate::cinematic::set_mission_done`) and the record; staying inside does not take it again.
+    #[test]
+    fn taking_sets_its_mission_once() {
+        let at = [10.0, 20.0, 5.0];
+        let mut m = Moby { o_class: 805, mission: 3, spawn_id: 9, position: [at[0], at[1], at[2], 1.0], pvars: vec![0; 0x1c], ..Moby::default() };
+        p::set_i32(&mut m.pvars, 0x18, -1);
+        let mut t = MobyTable::new(vec![m], 4);
+        let mut hero = crate::hero::Hero::new();
+        hero.pos = [Pf::f(at[0]), Pf::f(at[1]), Pf::f(at[2]), Pf::ONE];
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = crate::moby_update::Services::new();
+        svc.volumes = std::sync::Arc::new(rc_formats::volumes::Volumes { cuboids: vec![cube(at, [0.0; 3])], ..Default::default() });
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
+        update(&mut w, 0);
+        assert!(w.svc.cinematic.requests.is_empty() && w.svc.save.checkpoint.is_none(), "the first update only arms it");
+        for _ in 0..3 { update(&mut w, 0); }
+        let done: Vec<_> = w.svc.cinematic.requests.iter().filter(|r| matches!(r, EngineRequest::MissionDone { .. })).collect();
+        assert_eq!(done, [&EngineRequest::MissionDone { mission: 3 }]);
+        assert!(w.svc.save.checkpoint.is_some());
+        assert_eq!(w.svc.fx.unported.get("checkpoint 805 SetMissionDone"), None);
+    }
 }

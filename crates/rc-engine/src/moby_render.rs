@@ -46,6 +46,11 @@
 //! without depth write, one with mode bit 0x200 additive; their entity groups are spawned on first use, and entities
 //! carry the moby's translation (the blended phase's sort key). The point lights in range of a moby become its third
 //! light ([`point_light_merge`], from [`PointLightFrame`]).
+//!
+//! Glow list (docs/plan/moby_skinning_lighting.md §10): the packets from class byte 0xa (high) / 0xb (low) on are glow
+//! packets ([`SKIN_GLOW`], their own parts); a moby with mode bit 0x10 draws them in its +0x90 RGB at its vertex alpha
+//! (`MobyLod.misc.w`, [`MobyLook`], `SlotLook::glow`), their soft edge on display bytes (`GsPass::EffectLowAlpha`).
+//! Dynamic slots get the metal pass too, gated by their own +0x73 ([`ExtraMobys::show_slot`]).
 
 use crate::gs_state::{self, AlphaRange, GsPass};
 use crate::level_load::LoadedLevel;
@@ -80,9 +85,12 @@ use std::time::{Duration, Instant};
 const SHADER_PATH: &str = "shaders/moby.wgsl";
 const METAL_SHADER_PATH: &str = "shaders/moby_metal.wgsl";
 
-/// Per vertex: azimuth | elevation << 8 | skin count << 16; joints j0 | j1 << 8 | j2 << 16;
+/// Per vertex: azimuth | elevation << 8 | skin count << 16 | [`SKIN_GLOW`]; joints j0 | j1 << 8 | j2 << 16;
 /// weights w0 | w1 << 10 | w2 << 20 (/256); RGBA multiplier bytes (0x80 = 1.0).
 pub const ATTRIBUTE_MOBY_SKIN: MeshVertexAttribute = MeshVertexAttribute::new("MobySkin", 0x4d4f_4231, VertexFormat::Uint32x4);
+/// Skin word x bit: the vertex is in a glow packet (index ≥ class byte 0xa for the high LOD, 0xb for the low one), whose
+/// colour MobyProc's glow list replaces with the moby's glow word (crate::moby_lod module doc, moby.wgsl).
+pub const SKIN_GLOW: u32 = 1 << 24;
 /// Per vertex: index of the (packet, vertex) in the class's high-LOD list (CPU colour table index).
 pub const ATTRIBUTE_MOBY_VID: MeshVertexAttribute = MeshVertexAttribute::new("MobyVid", 0x4d4f_4232, VertexFormat::Uint32);
 
@@ -243,6 +251,16 @@ pub fn caster_pass(p: GsPass) -> GsPass {
     match p {
         GsPass::Opaque => GsPass::LateOpaque,
         GsPass::OpaqueTested { aref } => GsPass::LateTested { aref },
+        p => p,
+    }
+}
+
+/// The draw of `part` for GS pass `p`: a caster's Z-writing draws move late ([`caster_pass`]); a glow part's
+/// colour-only half (its soft edge, As < AREF) blends on display bytes like the other glows (crate::display_blend).
+fn part_pass(part: &Part, p: GsPass) -> GsPass {
+    match p {
+        GsPass::ColorOnlyLowAlpha { aref } if part.glow => GsPass::EffectLowAlpha { aref },
+        p if part.caster => caster_pass(p),
         p => p,
     }
 }
@@ -428,7 +446,7 @@ impl MatCache {
         let mut out = Vec::new();
         for part in parts {
             let (image, texel) = self.images.entry(part.texture).or_insert_with(|| moby_image(level, part.texture, images)).clone();
-            for pass in blend.passes(texel, part.mult_alpha).into_iter().map(|p| if part.caster { caster_pass(p) } else { p }) {
+            for pass in blend.passes(texel, part.mult_alpha).into_iter().map(|p| part_pass(part, p)) {
                 let proto = &self.proto;
                 let mat = self
                     .mats
@@ -465,14 +483,14 @@ impl MatCache {
     }
 }
 
-/// Writes the vertex alpha (misc.x) of `MobyLod` record `slot` in `buf`, keeping the other fields; true when it
-/// changed.
-fn set_lod_alpha(buffers: &mut Assets<ShaderBuffer>, buf: &Handle<ShaderBuffer>, slot: usize, alpha: u8) -> bool {
-    let at = slot * moby_lod::LOD_RECORD_SIZE;
-    let want = (alpha as u32).to_le_bytes();
-    if buffers.get(buf).and_then(|b| b.data.as_ref()).and_then(|d| d.get(at..at + 4)).is_none_or(|d| d == want) { return false; }
+/// Writes bytes `range` of `MobyLod` record `slot` in `buf` (the whole record: `0..LOD_RECORD_SIZE`), keeping the other
+/// fields; true when it changed.
+fn set_lod_bytes(buffers: &mut Assets<ShaderBuffer>, buf: &Handle<ShaderBuffer>, slot: usize, from: usize, want: &[u8]) -> bool {
+    let at = slot * moby_lod::LOD_RECORD_SIZE + from;
+    let range = at..at + want.len();
+    if buffers.get(buf).and_then(|b| b.data.as_ref()).and_then(|d| d.get(range.clone())).is_none_or(|d| d == want) { return false; }
     let Some(mut b) = buffers.get_mut(buf) else { return false };
-    if let Some(d) = b.data.as_mut().and_then(|d| d.get_mut(at..at + 4)) { d.copy_from_slice(&want); }
+    if let Some(d) = b.data.as_mut().and_then(|d| d.get_mut(range)) { d.copy_from_slice(want); }
     true
 }
 
@@ -607,6 +625,8 @@ struct Stats {
 #[derive(Clone)]
 struct Part {
     texture: usize,
+    /// The mesh holds glow-packet triangles: its colour-only half blends on display bytes (`GsPass::EffectLowAlpha`).
+    glow: bool,
     mesh: Handle<Mesh>,
     /// The vertex alpha Af is ambient alpha (the `MobyLod` alpha) × multiplier alpha >> 7.
     mult_alpha: AlphaRange,
@@ -616,6 +636,7 @@ struct Part {
 }
 
 /// A metal mesh: its texture (−2 chrome / −3 glass) and triangle count.
+#[derive(Clone)]
 struct MetalPart {
     kind: i32,
     mesh: Handle<Mesh>,
@@ -633,23 +654,31 @@ fn part_texture(class: &LevelMobyClass, texture: i32) -> Option<usize> {
     }
 }
 
-/// Class meshes of one packet list (high or low LOD), one per texture, plus the highest joint index any vertex
-/// skins to. `identity`: the list is drawn with job joint count 0 (the low LOD of a class with class byte 9 =
+/// The first glow packet of a class's high or low packet list: class byte 0xa / 0xb (`lbu v1, 0xa(class + lod)`,
+/// level01 0x26b8b0); a value at or past the list's end means no glow packets (0xff on most classes).
+fn glow_from(class: &LevelMobyClass, low: bool) -> usize {
+    let h = &class.class.header;
+    (if low { h.rac1_byte_b } else { h.rac1_byte_a }) as usize
+}
+
+/// Class meshes of one packet list (high or low LOD), one per (texture, glow packet or not), plus the highest joint
+/// index any vertex skins to. Packets from index `glow_from` on are the list's glow packets ([`SKIN_GLOW`]). `identity`: the list is drawn with job joint count 0 (the low LOD of a class with class byte 9 =
 /// 0): `MobyAnimEval` then only writes the identity at palette slot 0, so every vertex gets joint count 0
 /// (moby.wgsl: the identity). The vertex id is the (packet, vertex) index in `lod` (the CPU colour table only
 /// covers the high LOD, and `RC_MOBY_CPU_LIGHT=1` keeps every instance on it).
-fn build_parts(class: &LevelMobyClass, lod: &[MobySubmesh], identity: bool, meshes: &mut Assets<Mesh>) -> (Vec<Part>, u8) {
+fn build_parts(class: &LevelMobyClass, lod: &[MobySubmesh], identity: bool, glow_from: usize, meshes: &mut Assets<Mesh>) -> (Vec<Part>, u8) {
     #[derive(Default)]
     struct B { pos: Vec<[f32; 3]>, uv: Vec<[f32; 2]>, skin: Vec<[u32; 4]>, vid: Vec<u32>, idx: Vec<u32>, remap: HashMap<(usize, u32), u32>, alpha: Option<AlphaRange>, tris: usize }
     let mults = moby_light::vertex_multipliers(lod);
     let mut base = 0u32;
     let vid_base: Vec<u32> = lod.iter().map(|s| { let b = base; base += s.vertices.len() as u32; b }).collect();
     let mut max_joint = 0u8;
-    let mut by_tex: BTreeMap<usize, B> = BTreeMap::new();
+    let mut by_tex: BTreeMap<(usize, bool), B> = BTreeMap::new();
     for (si, sub) in lod.iter().enumerate() {
+        let glow = si >= glow_from;
         for t in &sub.triangles {
             let Some(tex) = part_texture(class, t.texture) else { continue };
-            let b = by_tex.entry(tex).or_default();
+            let b = by_tex.entry((tex, glow)).or_default();
             b.tris += 1;
             for vi in [t.a, t.b, t.c] {
                 let v = *b.remap.entry((si, vi)).or_insert_with(|| {
@@ -664,7 +693,7 @@ fn build_parts(class: &LevelMobyClass, lod: &[MobySubmesh], identity: bool, mesh
                     b.alpha = Some(b.alpha.map_or(AlphaRange::of([m[3]]), |r| r.union(AlphaRange::of([m[3]]))));
                     let count = if identity { 0 } else { sk.count as u32 };
                     b.skin.push([
-                        vx.normal_azimuth as u32 | (vx.normal_elevation as u32) << 8 | count << 16,
+                        vx.normal_azimuth as u32 | (vx.normal_elevation as u32) << 8 | count << 16 | if glow { SKIN_GLOW } else { 0 },
                         sk.joints[0] as u32 | (sk.joints[1] as u32) << 8 | (sk.joints[2] as u32) << 16,
                         sk.weights[0] as u32 | (sk.weights[1] as u32) << 10 | (sk.weights[2] as u32) << 20,
                         u32::from_le_bytes(m),
@@ -678,14 +707,14 @@ fn build_parts(class: &LevelMobyClass, lod: &[MobySubmesh], identity: bool, mesh
     }
     let parts = by_tex
         .into_iter()
-        .map(|(texture, b)| {
+        .map(|((texture, glow), b)| {
             let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, b.pos)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, b.uv)
                 .with_inserted_attribute(ATTRIBUTE_MOBY_SKIN, VertexAttributeValues::Uint32x4(b.skin))
                 .with_inserted_attribute(ATTRIBUTE_MOBY_VID, VertexAttributeValues::Uint32(b.vid))
                 .with_inserted_indices(Indices::U32(b.idx));
-            Part { texture, mesh: meshes.add(mesh), mult_alpha: b.alpha.unwrap_or(AlphaRange::OPAQUE), triangles: b.tris, caster: class.class.header.shadow != 0 }
+            Part { texture, glow, mesh: meshes.add(mesh), mult_alpha: b.alpha.unwrap_or(AlphaRange::OPAQUE), triangles: b.tris, caster: class.class.header.shadow != 0 }
         })
         .collect();
     (parts, max_joint)
@@ -820,8 +849,8 @@ fn spawn_mobys(
     let mut parts: HashMap<usize, ClassDraws> = HashMap::new();
     for &ci in &used {
         let c = &m.classes[ci];
-        let high = build_parts(c, &c.class.high_lod, false, meshes);
-        let low = if lod_on && !c.class.low_lod.is_empty() { build_parts(c, &c.class.low_lod, c.class.header.low_lod_joint_count == 0, meshes).0 } else { Vec::new() };
+        let high = build_parts(c, &c.class.high_lod, false, glow_from(c, false), meshes);
+        let low = if lod_on && !c.class.low_lod.is_empty() { build_parts(c, &c.class.low_lod, c.class.header.low_lod_joint_count == 0, glow_from(c, true), meshes).0 } else { Vec::new() };
         let metal = build_metal_parts(c, meshes);
         st.meshes += high.0.len() + low.len() + metal.0.len();
         parts.insert(ci, (high, low, metal));
@@ -1000,7 +1029,7 @@ fn spawn_mobys(
         instances: inst_buffer.clone(),
         driven_hidden: vec![false; n_inst],
         records_dirty: false,
-        look: vec![(0x80, 0); n_inst],
+        look: m.placed.iter().map(|p| p.map_or(MobyLook { alpha: 0x80, mode: 0, glow: 0, shine_distance: 0 }, |p| MobyLook::of_class(&m.classes[p.class]))).collect(),
         moved: vec![false; n_inst],
         lit_by_point: vec![false; n_inst],
         class_parts: parts.into_iter().map(|(ci, (high, low, _))| (ci, [high.0, low])).collect(),
@@ -1050,6 +1079,32 @@ struct Shown {
     metal: bool,
 }
 
+/// What MobyProc reads from a moby besides its placement: +0x23 (alpha), +0x34 (mode bits: the blend, [`MobyBlend`], and
+/// the glow list, bit 0x10), +0x90 (glow colour) and +0x73 (the shine distance, 0 = no metal pass).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MobyLook {
+    pub alpha: u8,
+    pub mode: u16,
+    pub glow: u32,
+    pub shine_distance: u8,
+}
+
+impl MobyLook {
+    /// A fresh moby of `class` as `InitMobyInstance` (level01 0x263488) leaves it: alpha 0x80; mode 0x10 and +0x90 =
+    /// class +0x40 when that is non-zero; +0x73 = 0x18 when the class has metal packets. The other mode bits are not
+    /// taken (the undriven statics keep the blend they had).
+    pub fn of_class(class: &LevelMobyClass) -> Self {
+        let h = &class.class.header;
+        let glow = h.glow_rgba != 0;
+        MobyLook {
+            alpha: 0x80,
+            mode: if glow { 0x10 } else { 0 },
+            glow: h.glow_rgba as u32,
+            shine_distance: if h.metal_count > 0 { moby_lod::SHINE_DISTANCE } else { 0 },
+        }
+    }
+}
+
 /// Per static gameplay instance: its occlusion word, its entities, its animation slot and what it shows; the
 /// `MobyLod` buffer and the frame's pick statistics.
 #[derive(Resource)]
@@ -1059,8 +1114,9 @@ pub struct MobyOcclusion {
     instances: Handle<ShaderBuffer>,
     /// Per instance: hidden by the moby loop (deleted, or mode & 1): MobyProc skips it.
     driven_hidden: Vec<bool>,
-    /// Per instance: moby+0x23 and moby+0x34 (MobyProc's alpha and GS mode bits), set by [`MobyOcclusion::look`].
-    look: Vec<(u8, u16)>,
+    /// Per instance: what MobyProc reads from the moby's runtime struct besides its placement, set by
+    /// [`MobyOcclusion::look`].
+    look: Vec<MobyLook>,
     /// Per instance: the driven position moved since the entities' translation was last written.
     moved: Vec<bool>,
     /// Per instance: its record holds a merged point light (cleared when no light reaches it any more).
@@ -1115,9 +1171,11 @@ pub fn update_moby_occlusion(
     let mut hist = [0usize; 9];
     for (ii, d) in s.draws.iter_mut().enumerate() {
         let rec = &mut lod_bytes[ii * moby_lod::LOD_RECORD_SIZE..(ii + 1) * moby_lod::LOD_RECORD_SIZE];
-        let Some(mut inp) = d.input else { moby_lod::write_lod_record(rec, 0x80, 0, 0, &[[0.0; 3]; 3]); continue };
-        let (alpha_byte, mode) = s.look[ii];
-        inp.alpha = alpha_byte;
+        let Some(mut inp) = d.input else { moby_lod::write_lod_record(rec, 0x80, 0, 0, 0, &[[0.0; 3]; 3]); continue };
+        let look = s.look[ii];
+        let mode = look.mode;
+        inp.alpha = look.alpha;
+        inp.shine_distance = look.shine_distance;
         let k = s.anim_index[ii];
         let (want, pick, sphere) = if s.driven_hidden[ii] {
             (None, None, None)
@@ -1165,7 +1223,7 @@ pub fn update_moby_occlusion(
             (None, Some(_)) => (inp.alpha, 0, 0, [[0.0; 3]; 3]),
             _ => (0x80, 0, 0, [[0.0; 3]; 3]),
         };
-        moby_lod::write_lod_record(rec, alpha, flags, shine, &e);
+        moby_lod::write_lod_record(rec, alpha, flags, shine, moby_lod::glow_word(mode, look.glow), &e);
         // The point lights in range of the sphere centre become the third light (none: cleared).
         if !point_lights.0.is_empty() || s.lit_by_point[ii] {
             let merged = sphere.and_then(|(sp, _, _)| point_light_merge(&point_lights.0, [sp[0] / crate::game_camera::UNITS, sp[1] / crate::game_camera::UNITS, sp[2] / crate::game_camera::UNITS], &inp.rows));
@@ -1382,6 +1440,60 @@ mod tests {
         assert!(!write_point_light(&mut rec, Some(([1.0, 0.0, 0.0], [1.0, 0.5, 0.0]))));
     }
 
+    /// A glow part's soft edge (the TEST_1 fail half) blends on display bytes; its Z-writing half and every draw of a
+    /// plain part are unchanged; a caster's Z-writing draws still move late.
+    #[test]
+    fn glow_parts_blend_their_soft_edge_on_display_bytes() {
+        let part = |glow, caster| Part { texture: 0, glow, mesh: Handle::default(), mult_alpha: AlphaRange::OPAQUE, triangles: 1, caster };
+        let (lo, hi) = (GsPass::ColorOnlyLowAlpha { aref: 0x60 }, GsPass::OpaqueTested { aref: 0x60 });
+        assert_eq!(part_pass(&part(true, false), lo), GsPass::EffectLowAlpha { aref: 0x60 });
+        assert_eq!(part_pass(&part(true, false), hi), hi);
+        assert_eq!(part_pass(&part(false, false), lo), lo);
+        assert_eq!(part_pass(&part(true, true), hi), GsPass::LateTested { aref: 0x60 });
+        let s = GsPass::EffectLowAlpha { aref: 0x60 }.state();
+        assert!(s.display && s.blend && !s.additive && !s.depth_write && s.discard == gs_state::AlphaDiscard::AtOrAbove(0x60));
+    }
+
+    /// The record's placement comes back from its model, at the item's own scale (not its class's).
+    #[test]
+    fn record_placement_round_trips() {
+        let (c, s) = (0.6f32.cos(), 0.6f32.sin());
+        let rows = [[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]];
+        let rec = extra_record(&extra_model(rows, 0.034, [170.0, 140.4, 63.4]), None, 0);
+        let (r, p, k) = record_placement(&rec[..64]).unwrap();
+        assert!((k - 0.034).abs() < 1e-6, "{k}");
+        assert!(p.iter().zip([170.0, 140.4, 63.4]).all(|(a, b)| (a - b).abs() < 1e-4), "{p:?}");
+        assert!(r.iter().flatten().zip(rows.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-5), "{r:?}");
+        assert!(record_placement(&[0u8; 64]).is_none());
+    }
+
+    /// The glow packets (class byte 0xa on) of the vendor 11 and the floor switch 830 are their own parts with every
+    /// vertex flagged, the other parts none. Needs the disc data (levels 01 and 05); skipped without it.
+    #[test]
+    fn glow_packets_are_flagged() {
+        let root = crate::level_load::extracted_root();
+        for (level, o) in [(1u32, 11), (1, 0), (5, 830), (5, 79)] {
+            let (Ok(index), Ok(data)) = (crate::disc_source::level_file(&root, level, "core_index.bin"), crate::disc_source::level_file(&root, level, "core_data.bin")) else {
+                eprintln!("skipped: no level {level:02} data");
+                return;
+            };
+            let data = rc_formats::wad::decompress(&data).unwrap();
+            let core = rc_formats::level::parse_level_core(&index, data.len()).unwrap();
+            let classes = moby::parse_level_mobys(&core, &data).unwrap();
+            let c = classes.iter().find(|c| c.o_class == o).expect("class on the level");
+            let from = glow_from(c, false);
+            let want: usize = c.class.high_lod.iter().skip(from).map(|s| s.triangles.iter().filter(|t| part_texture(c, t.texture).is_some()).count()).sum();
+            let mut meshes = Assets::<Mesh>::default();
+            let (parts, _) = build_parts(c, &c.class.high_lod, false, from, &mut meshes);
+            assert!(want > 0 && c.class.header.glow_rgba != 0, "class {o}: glow packets from {from}");
+            assert_eq!(parts.iter().filter(|p| p.glow).map(|p| p.triangles).sum::<usize>(), want, "class {o}");
+            for p in &parts {
+                let Some(VertexAttributeValues::Uint32x4(v)) = meshes.get(&p.mesh).unwrap().attribute(ATTRIBUTE_MOBY_SKIN) else { panic!("skin") };
+                assert!(v.iter().all(|w| (w[0] & SKIN_GLOW != 0) == p.glow), "class {o}");
+            }
+        }
+    }
+
     /// Measurement for the within-class draw order question (gs_state.rs "Packet order"): how many
     /// coplanar, overlapping triangle pairs of Ratchet (class 0) and class 577 come from different texture
     /// batches. Needs the disc data; skipped without it.
@@ -1415,8 +1527,9 @@ mod tests {
 // Extra (runtime-created) moby instances — crate::moby_attach. Separate from the gameplay instances above:
 // the caller owns an instance-record buffer and a palette buffer of its own (both kept in the main world so
 // it can rewrite them), and every part entity carries `MeshTag(slot)` into that record buffer. Everything
-// else (meshes, textures, GS passes, shaders) is the gameplay path's. They are always drawn (high LOD, α 0x80);
-// a class with metal packets also gets its shine pass (update_extra_metal).
+// else (meshes, textures, GS passes, shaders) is the gameplay path's. They are always drawn (high LOD, α 0x80, the
+// class's glow colour); a class with metal packets also gets its shine pass (update_extra_metal; the dynamic slots'
+// from their own MobyProc pick in show_slot).
 
 /// Size of one `MobyInst` record (moby.wgsl).
 pub const EXTRA_RECORD_SIZE: usize = RECORD_SIZE;
@@ -1449,9 +1562,15 @@ pub struct ExtraMobys {
     metal_images: HashMap<i32, (Handle<Image>, AlphaRange)>,
     /// High-LOD parts per class (`o_class`), built on first use.
     parts: HashMap<i32, Vec<Part>>,
+    /// Metal parts per class (`o_class`), built on first use.
+    metal_parts: HashMap<i32, Vec<MetalPart>>,
     /// [`ExtraMobys::show_slot`]: entities per (slot, class, blend), spawned on first use, and what each slot shows.
     slot_ents: HashMap<(u32, i32, MobyBlend), Vec<Entity>>,
     slot_shown: HashMap<u32, ((i32, MobyBlend), Vec3)>,
+    /// [`ExtraMobys::show_slot`]: metal entities per (slot, class), spawned on first use, and the class whose metal a
+    /// slot shows.
+    slot_metal: HashMap<(u32, i32), Vec<Entity>>,
+    slot_metal_shown: HashMap<u32, i32>,
 }
 
 /// What a slot of an extra record set shows ([`ExtraMobys::show_slot`]).
@@ -1463,16 +1582,19 @@ pub struct SlotLook {
     pub alpha: u8,
     pub fading: bool,
     pub mode: u16,
+    /// moby+0x90, the glow colour (drawn when `mode` has the glow bit 0x10).
+    pub glow: u32,
+    /// MobyProc's shine alpha (0: no metal pass; crate::moby_lod, from moby+0x73) and the sphere-map basis E.
+    pub shine: u8,
+    pub e: [[f32; 3]; 3],
 }
 
 /// A metal entity of an extra instance: where update_extra_metal reads its placement and writes its shine.
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct ExtraMetal {
     slot: u32,
     records: Handle<ShaderBuffer>,
     lods: Handle<ShaderBuffer>,
-    /// moby+0x2c (the item's class scale).
-    scale: f32,
     /// Class header 0x30 (packed units): the sphere, as the item's sequence state is not visible here.
     sphere: [f32; 4],
 }
@@ -1502,8 +1624,11 @@ impl ExtraMobys {
             cache: MatCache::new(proto),
             metal_images: HashMap::new(),
             parts: HashMap::new(),
+            metal_parts: HashMap::new(),
             slot_ents: HashMap::new(),
             slot_shown: HashMap::new(),
+            slot_metal: HashMap::new(),
+            slot_metal_shown: HashMap::new(),
         }
     }
 
@@ -1527,52 +1652,98 @@ impl ExtraMobys {
         images: &mut Assets<Image>,
         materials: &mut Assets<MobyMaterial>,
     ) -> Vec<Entity> {
-        let parts = self.parts.entry(class.o_class).or_insert_with(|| build_parts(class, &class.class.high_lod, false, meshes).0).clone();
+        let parts = self.parts.entry(class.o_class).or_insert_with(|| build_parts(class, &class.class.high_lod, false, glow_from(class, false), meshes).0).clone();
         let mut out = self.cache.spawn(commands, level, &parts, MobyBlend::Plain, transform, slot, Visibility::Inherited, &format!("{name} class {}", class.o_class), images, materials);
-        // The shine pass. The caller only lends the regular material store, so the metal materials are added
-        // by a queued command.
+        // The shine pass, its gate and basis written each frame by update_extra_metal.
         if moby_lod::metal_enabled() {
-            let (metal, _) = build_metal_parts(class, meshes);
-            for part in &metal {
-                let (image, texel_alpha) = self.metal_images.entry(part.kind).or_insert_with(|| metal_image(level, part.kind, images)).clone();
-                for pass in metal_passes(texel_alpha) {
-                    let mat = MobyMetalMaterial {
-                        texture: image.clone(),
-                        fog: self.fog,
-                        instances: self.instances.clone(),
-                        palette: self.palette.clone(),
-                        normal_table: self.normal_table.clone(),
-                        lods: self.lods.clone(),
-                        pass,
-                        caster: part.caster,
-                    };
-                    let e = commands
-                        .spawn((
-                            Mesh3d(part.mesh.clone()),
-                            transform,
-                            MeshTag(slot),
-                            NoFrustumCulling,
-                            ExtraMetal { slot, records: self.instances.clone(), lods: self.lods.clone(), scale: class.class.header.scale, sphere: class.class.header.bsphere },
-                            Name::new(format!("{name} class {} metal {} {pass:?}", class.o_class, part.kind)),
-                        ))
-                        .id();
-                    commands.queue(move |world: &mut World| {
-                        let h = world.resource_mut::<Assets<MobyMetalMaterial>>().add(mat);
-                        if let Ok(mut ent) = world.get_entity_mut(e) { ent.insert(MeshMaterial3d(h)); }
-                    });
-                    out.push(e);
-                }
-            }
+            let tracked = ExtraMetal { slot, records: self.instances.clone(), lods: self.lods.clone(), sphere: class.class.header.bsphere };
+            out.extend(self.spawn_metal(commands, level, class, slot, transform, Visibility::Inherited, name, Some(tracked), meshes, images));
+        }
+        // The glow list: a fresh moby of the class glows in the class colour (`InitMobyInstance`, crate::moby_lod).
+        let glow = moby_lod::class_glow_word(class.class.header.glow_rgba);
+        if glow != 0 {
+            let h = self.lods.clone();
+            commands.queue(move |world: &mut World| {
+                set_lod_bytes(&mut world.resource_mut::<Assets<ShaderBuffer>>(), &h, slot as usize, 12, &glow.to_le_bytes());
+            });
         }
         out
     }
 }
 
 impl ExtraMobys {
+    /// Takes slot `slot` off the glow list (its glow packets drawn lit), for a moby the game's glow overwrite does not
+    /// reach (docs/plan/moby_skinning_lighting.md §10). Two ways, per caller:
+    /// * its mode bits lose 0x10 after `InitMobyInstance`: the page menus' widget mobys (+0x34 = 0 / 4, crate::menu_models);
+    /// * it is drawn in a `DrawMobyList` batch whose last list has no glow records: each `MobyProc` call restarts the list
+    ///   at SPR 0x3400 and rewrites 0x1ac680 and its length 0x15fff8 (level01 0x26a8ac, 0x26b4c8..0x26b4dc), and
+    ///   `DrawMobysCleanUp` (0x264d68 → `fun_002116b8`) runs once after the batch, so only the **last** list's glow
+    ///   packets are recoloured: the vendor's mode-5 screens (`DrawWorld_Mode5` 0x2b4020: the salesman or the popup
+    ///   last, neither with glow packets; crate::vendor_render).
+    pub fn clear_glow(&self, commands: &mut Commands, slot: u32) {
+        let h = self.lods.clone();
+        commands.queue(move |world: &mut World| {
+            set_lod_bytes(&mut world.resource_mut::<Assets<ShaderBuffer>>(), &h, slot as usize, 12, &0u32.to_le_bytes());
+        });
+    }
+
+    /// The metal entities of `class` for record `slot` (one per metal texture and GS pass), with `tracked` when
+    /// update_extra_metal owns their shine. The caller only lends the regular material store, so the metal materials
+    /// are added by a queued command.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_metal(
+        &mut self,
+        commands: &mut Commands,
+        level: &LoadedLevel,
+        class: &LevelMobyClass,
+        slot: u32,
+        transform: Transform,
+        visibility: Visibility,
+        name: &str,
+        tracked: Option<ExtraMetal>,
+        meshes: &mut Assets<Mesh>,
+        images: &mut Assets<Image>,
+    ) -> Vec<Entity> {
+        let metal = self.metal_parts.entry(class.o_class).or_insert_with(|| build_metal_parts(class, meshes).0).clone();
+        let mut out = Vec::new();
+        for part in &metal {
+            let (image, texel_alpha) = self.metal_images.entry(part.kind).or_insert_with(|| metal_image(level, part.kind, images)).clone();
+            for pass in metal_passes(texel_alpha) {
+                let mat = MobyMetalMaterial {
+                    texture: image.clone(),
+                    fog: self.fog,
+                    instances: self.instances.clone(),
+                    palette: self.palette.clone(),
+                    normal_table: self.normal_table.clone(),
+                    lods: self.lods.clone(),
+                    pass,
+                    caster: part.caster,
+                };
+                let mut ec = commands.spawn((
+                    Mesh3d(part.mesh.clone()),
+                    transform,
+                    MeshTag(slot),
+                    NoFrustumCulling,
+                    visibility,
+                    Name::new(format!("{name} class {} metal {} {pass:?}", class.o_class, part.kind)),
+                ));
+                if let Some(t) = &tracked { ec.insert(t.clone()); }
+                let e = ec.id();
+                commands.queue(move |world: &mut World| {
+                    let h = world.resource_mut::<Assets<MobyMetalMaterial>>().add(mat);
+                    if let Ok(mut ent) = world.get_entity_mut(e) { ent.insert(MeshMaterial3d(h)); }
+                });
+                out.push(e);
+            }
+        }
+        out
+    }
+
     /// Shows slot `slot` of this record set as `class` (None: nothing) with the blend its [`SlotLook`] asks for
-    /// ([`MobyBlend`]): the entities of that (class, blend) are spawned on first use (high LOD, no metal pass) and
-    /// shown, the slot's other entities hidden; the entities follow the model's translation (the blended phase's
-    /// sort key) and the slot's `MobyLod` vertex alpha is written. The record and palette are the caller's.
+    /// ([`MobyBlend`]): the entities of that (class, blend) are spawned on first use (high LOD) and shown, the slot's
+    /// other entities hidden; the class's metal entities are shown while the look's shine alpha is above 0 (spawned on
+    /// first use); the entities follow the model's translation (the blended phase's sort key) and the slot's `MobyLod`
+    /// record (vertex alpha, shine alpha and basis, glow word) is written. The record and palette are the caller's.
     #[allow(clippy::too_many_arguments)]
     pub fn show_slot(
         &mut self,
@@ -1593,7 +1764,19 @@ impl ExtraMobys {
                 for &e in self.slot_ents.get(&(slot, k.0, k.1)).into_iter().flatten() { commands.entity(e).insert(Visibility::Hidden); }
             }
         }
-        let Some(((oc, blend), at)) = want else { self.slot_shown.remove(&slot); return };
+        // The metal pass: MobyProc's shine gate (moby+0x73; crate::moby_lod).
+        let want_metal = view.filter(|(c, l)| l.shine > 0 && c.class.header.metal_count > 0 && moby_lod::metal_enabled()).map(|(c, _)| c.o_class);
+        let was_metal = self.slot_metal_shown.get(&slot).copied();
+        if want_metal != was_metal {
+            if let Some(k) = was_metal {
+                for &e in self.slot_metal.get(&(slot, k)).into_iter().flatten() { commands.entity(e).insert(Visibility::Hidden); }
+            }
+        }
+        let Some(((oc, blend), at)) = want else {
+            self.slot_shown.remove(&slot);
+            self.slot_metal_shown.remove(&slot);
+            return;
+        };
         let (class, look) = view.unwrap();
         let t = Transform::from_translation(at);
         let key = (slot, oc, blend);
@@ -1602,14 +1785,44 @@ impl ExtraMobys {
                 for &e in ents { commands.entity(e).insert((Visibility::Inherited, t)); }
             }
         } else {
-            let parts = self.parts.entry(oc).or_insert_with(|| build_parts(class, &class.class.high_lod, false, meshes).0).clone();
+            let parts = self.parts.entry(oc).or_insert_with(|| build_parts(class, &class.class.high_lod, false, glow_from(class, false), meshes).0).clone();
             let name = format!("dynamic moby slot {slot} class {oc} {blend:?}");
             let ents = self.cache.spawn(commands, level, &parts, blend, t, slot, Visibility::Inherited, &name, images, materials);
             self.slot_ents.insert(key, ents);
         }
+        if want_metal.is_some() {
+            if let Some(ents) = self.slot_metal.get(&(slot, oc)) {
+                if want_metal != was_metal || was.is_none_or(|w| w.1 != at) {
+                    for &e in ents { commands.entity(e).insert((Visibility::Inherited, t)); }
+                }
+            } else {
+                let name = format!("dynamic moby slot {slot}");
+                let ents = self.spawn_metal(commands, level, class, slot, t, Visibility::Inherited, &name, None, meshes, images);
+                self.slot_metal.insert((slot, oc), ents);
+            }
+            self.slot_metal_shown.insert(slot, oc);
+        } else {
+            self.slot_metal_shown.remove(&slot);
+        }
         self.slot_shown.insert(slot, ((oc, blend), at));
-        set_lod_alpha(buffers, &self.lods, slot as usize, look.alpha);
+        let mut rec = [0u8; moby_lod::LOD_RECORD_SIZE];
+        let shine = if want_metal.is_some() { look.shine } else { 0 };
+        moby_lod::write_lod_record(&mut rec, look.alpha, 0, shine, moby_lod::glow_word(look.mode, look.glow), &look.e);
+        set_lod_bytes(buffers, &self.lods, slot as usize, 0, &rec);
     }
+}
+
+/// The placement a `MobyInst` record's model (its first 64 bytes, `game_to_bevy · [s/1024 · R | p]`, [`extra_model`])
+/// stands for: the unit rotation rows R (moby+0xc0..), the position p and the scale s (moby+0x2c); None for a zero
+/// model. Taken from the record rather than the class, so an item drawn at another scale than its class's (the vendor's
+/// logo grows to 2.5× its class scale) gets unit rows for the shine basis E and its own sphere.
+fn record_placement(bytes: &[u8]) -> Option<([[f32; 3]; 3], [f32; 3], f32)> {
+    let f: [f32; 16] = std::array::from_fn(|i| f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()));
+    let to_game = |v: [f32; 3]| [v[0], -v[2], v[1]];
+    let k = Vec3::new(f[0], f[1], f[2]).length();
+    if k == 0.0 { return None; }
+    let rows = [0, 1, 2].map(|c| to_game([f[c * 4], f[c * 4 + 1], f[c * 4 + 2]]).map(|v| v / k));
+    Some((rows, to_game([f[12], f[13], f[14]]), k * 1024.0))
 }
 
 /// The shine gate and basis of every extra instance with metal entities, from its record's model matrix
@@ -1629,16 +1842,11 @@ fn update_extra_metal(
         if !done.insert((x.lods.id(), x.slot)) { continue; }
         let Some(data) = buffers.get(&x.records).and_then(|b| b.data.as_ref()) else { continue };
         let at = x.slot as usize * RECORD_SIZE;
-        let Some(bytes) = data.get(at..at + 64) else { continue };
-        let f: [f32; 16] = std::array::from_fn(|i| f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap()));
-        let k = x.scale / 1024.0;
-        if k == 0.0 { continue; }
-        let to_game = |v: [f32; 3]| [v[0], -v[2], v[1]];
-        let rows = [0, 1, 2].map(|c| to_game([f[c * 4], f[c * 4 + 1], f[c * 4 + 2]]).map(|v| v / k));
+        let Some((rows, position, scale)) = data.get(at..at + 64).and_then(record_placement) else { continue };
         let inp = ProcInput {
-            position: to_game([f[12], f[13], f[14]]),
+            position,
             rows,
-            scale: x.scale,
+            scale,
             draw_distance: moby_lod::DRAW_DISTANCE_CAP,
             lod_trans: 0xff,
             shine_distance: moby_lod::SHINE_DISTANCE,
@@ -1649,10 +1857,13 @@ fn update_extra_metal(
         let shine = moby_lod::shine_alpha(moby_lod::sphere_depth(v, sphere[3]), inp.shine_distance);
         let e = moby_lod::shine_basis(sphere, eye, &cam, &rows);
         let mut rec = [0u8; moby_lod::LOD_RECORD_SIZE];
-        // The vertex alpha is the slot's own (show_slot); only the shine fields are this system's.
+        // The vertex alpha and the glow word are the slot's own (show_slot, ExtraMobys::spawn); only the shine fields are
+        // this system's.
         let at = x.slot as usize * moby_lod::LOD_RECORD_SIZE;
-        let alpha = buffers.get(&x.lods).and_then(|b| b.data.as_ref()).and_then(|d| d.get(at..at + 4)).map_or(0x80, |d| d[0]);
-        moby_lod::write_lod_record(&mut rec, alpha, 0, shine, &e);
+        let old = buffers.get(&x.lods).and_then(|b| b.data.as_ref()).and_then(|d| d.get(at..at + 16));
+        let alpha = old.map_or(0x80, |d| d[0]);
+        let glow = old.map_or(0, |d| u32::from_le_bytes(d[12..16].try_into().unwrap()));
+        moby_lod::write_lod_record(&mut rec, alpha, 0, shine, glow, &e);
         writes.push((x.lods.clone(), x.slot, rec));
     }
     for (h, slot, rec) in writes {
@@ -1665,10 +1876,10 @@ fn update_extra_metal(
 }
 
 impl MobyOcclusion {
-    /// moby+0x23 (alpha) and moby+0x34 (mode bits) of static instance `ii` this tick: MobyProc's vertex alpha and
-    /// blend mode ([`MobyBlend`]).
-    pub fn look(&mut self, ii: usize, alpha: u8, mode: u16) {
-        if let Some(l) = self.look.get_mut(ii) { *l = (alpha, mode); }
+    /// What MobyProc reads from static instance `ii` this tick ([`MobyLook`]): its vertex alpha, blend mode, glow and
+    /// shine distance.
+    pub fn look(&mut self, ii: usize, look: MobyLook) {
+        if let Some(l) = self.look.get_mut(ii) { *l = look; }
     }
 
     /// The `MobyAnim` instance of gameplay instance `ii` (None without geometry).

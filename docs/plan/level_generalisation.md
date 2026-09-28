@@ -69,7 +69,7 @@ patch `idx`, writes its z into the patch (+0x08, the water level) and the patch'
 `FastBSphereCheck` of its bounding sphere (drawn and simulated only in view), and makes the random drops; the moby of
 patch 0 runs the module's init, the clock and the draw callback. Their collision (surface-0 faces at the moby's z) is
 the water Ratchet swims in, so moving water moves the swimming level. No lava / sludge / quicksand mechanism of its own:
-the other liquids are collision surfaces (hero `surface.rs`, per-level rules), already general.
+the other liquids are collision surfaces (hero `surface.rs`, per-level rules), already general. **Correction (2026-09-28):** the *visible* seas, lava and sludge are draw-callback surfaces of their own (the liquid grid module on 03 / 05 / 07 / 08 / 09 / 14, the ocean 1111 on 11 / 16, the Hoven liquid 1901 on 12): world_animation.md §3.3, `rc_game::water::sea`.
 
 | # | fix |
 |---|---|

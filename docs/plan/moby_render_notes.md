@@ -92,7 +92,7 @@ bit-exactness on real data is **inferred** from the op-by-op port, not measured.
 - Animation: keyframe decode (`fun_0020e0e0`), palette upload, GPU skinning.
 - Metal/chrome pass (−2) and glass (−3) triangles: skipped (none in Novalis high-LOD packets).
 - Point-light merge (third light), distance fade/cull against the draw distance (+0x32), alpha < 0x80
-  paths, glow (mode 0x10), deferred/shadow (0x400/0x800), low LOD, `is_rooted` ground snap, spawn
+  paths, glow (mode 0x10; done 2026-09-28, §9), deferred/shadow (0x400/0x800), low LOD, `is_rooted` ground snap, spawn
   conditions, `unknown_74` hook, moby update code (mobys never move).
 - Mip maps / TEX1 filtering.
 
@@ -190,3 +190,19 @@ inner 3.5 / 3 ones) with the fire and the world visible through them, the type-4
 mushrooms lit orange by the light. With only the blend fix (before the particle types), frame 40 (before the explosion) was
 byte-identical to the old renderer; two runs of frame 50 give identical PNGs. The flyers' altitude fade (+0x23 between 0 and
 0x80) now also shows as translucent (a few pixels in the flyer-trail view change; the additive trail blend is unchanged).
+
+## 9. The glow list, the metal pass of dynamic mobys, and the shine inputs (2026-09-28)
+
+* **Glow.** MobyProc's glow list (mode 0x10) is ported for every moby: the packets from class byte 0xa (high) / 0xb
+  (low) on are drawn in the moby's +0x90 RGB at its vertex alpha (docs/plan/moby_skinning_lighting.md §10).
+* **Metal on dynamic mobys.** `ExtraMobys::show_slot` (the scheduler's dynamic slots) drew no metal pass, so every
+  runtime-created moby with metal packets was drawn flat: the bolts a crate drops (13–16, glass), weapons'
+  and effects' metal classes (19 metal classes appear on some level only as runtime mobys). `upload_dynamic` now runs
+  the shine gate on the moby's own +0x73 (`moby_lod::moby_proc`) and the basis E, and the slot shows the class's metal
+  entities (spawned on first use) while the shine alpha is above 0. Statics take their shine distance from +0x73 too
+  (`MobyLook.shine_distance`: the bolts' update sets 0x14, `InitMobyInstance` 0x18).
+* **The logo's flat ball ("wrong inputs").** The Gadgetron logo 1143 (7 chrome packets, +0x73 = 32) is drawn by
+  crate::vendor_render through `ExtraMobys::spawn`; `update_extra_metal` rebuilt the moby rows from the record by
+  dividing by the **class** scale, but the logo is drawn at 2.5× its class scale (vendor 0x2bb128), so the rows were
+  2.5 long, `st = (E·n' + 1)/2` ran far outside [0, 1] and the clamped map gave one flat beige colour. The rows and
+  scale now come from the record itself (`record_placement`): the ball is the dark, glossy chrome of the original.

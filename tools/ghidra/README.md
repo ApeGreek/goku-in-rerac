@@ -20,6 +20,7 @@ should be a `--dry-run` where a script has one.
 | `scripts/export_decomp.py <program>` | Decompiled C of every function to `work/decomp/<program>/` (+ `index.tsv`) |
 | `scripts/export_overlays.py [ref] [levelNN.elf ...]` | level01 in full, other levels only their non-shared functions, to `work/decomp/levelNN.elf/` |
 | `names/*.csv`, `names/clusters.tsv` | The name tables (source of truth for names; committed) |
+| `names/census_systems.tsv` | System tags (system, has / partly / missing) of the shared functions the unported classes call; read by `rc-trace class-census` (docs/plan/class_census.md) |
 
 ## Inputs and outputs
 

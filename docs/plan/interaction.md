@@ -245,7 +245,11 @@ Everything the player sees and hears from walking up to a Gadgetron vendor to wa
   hologram shown and grown by 0.1 per tick to scale 1 (10 ticks), drawn at `V+0x90 · class scale · 2.5`. Its two
   manipulators (`AttachManipulator(child, 0/1, V+0x10/+0x50)`) spin its joints about z at +0.01 / −0.01 rad per tick
   (0x16139c / 0x1613a0, `FUN_00221e38(rec, 2, a)`). The draw callback **0x2ba9c0** (`RegisterDrawCallback2` every tick
-  of states 1 and 2) draws the projector beam under the logo. Leaving (XY > 18 or |Δz| > 10) → state 1, seq 0 (blend
+  of states 1 and 2) draws the projector beam under the logo, the scan plane, and the **four glow points**: the shared
+  glow quad `0x2781d0` (size 0.1333, FX 0xb, additive) at `rows·(1.1·cos a, 1.1·sin a, 0.59) + position`, a = k·π/2 − π,
+  coloured `+0x90 & 0xffff0000` (the blue byte of the pulsing glow word; 0x2bb058..0x2bb0d4): the halos on the four
+  antenna tips. Port: the callback is registered (`Callback::VendorBeam`, list 2); `crate::fx_draw` draws the glow
+  points, crate::vendor_render the beam (2026-09-28). Leaving (XY > 18 or |Δz| > 10) → state 1, seq 0 (blend
   10), the logo shrinks 0.1 per tick and hides at 0.
 * **Prompt** (state 2 only): §4's rule → "△ Activate Gadgetron Vendor" (21475, owner 1).
 * **Sounds**: none in states 1 / 2 (the class sound table has 8 entries; all are played by mode 5).
@@ -315,19 +319,28 @@ The same render creates the screen mobys (0x1ca954 + 0x100 = 0x1ca960: +0 and +0
    the textured-rectangle packet), RGBA 0x80808080, ALPHA 0x64. At rest the copy is 1:1 (the screen content is laid
    out in screen pixels).
 
-**The static** (`FUN_002b2cd8(w, h, s)`, into the target after the content): per screen a counter 0x1caba0[s]:
+**The static** (`FUN_002b2cd8(w, h, s)`, into the target after the content; it sets TEST_1 0x32003 and, before the
+noise and again before the bar, **CLAMP_1 = 0** (`VU1_addGSregister(8, 0)`: REPEAT), so the texel ranges below, far
+past the 32×32 noise and the 16×16 bar, tile): per screen a counter 0x1caba0[s]:
 when running (+2 per frame, the ticker's never below 0x18) FX texture **0x1a** (noise) is drawn over (0, 0, w, h)
-at a random texel offset (`randi(200)`, `randi(200)`) with alpha `min(2·(0x80 − clamp(c − 0x80)), 0x80)` (ALPHA
-0x68), until c passes 0xff; an idle screen restarts it with probability 1/700 per frame. Screens 1..5 also roll a
-**scan bar**: FX texture **0x1c** over (0, −(0x200 − c)/32, w, 1.5·(h + 16)), colour 0x505050, alpha ≤ 0x50,
-started with probability 1/360. The popup (screen 6) adds FX **0x19** (64×64 glass) over it.
+at a random texel offset (`randi(200)`, `randi(200)`) with alpha `min(2·(0x80 − |c − 0x80|), 0x80)`
+(`subtract_integer_with_clamp` 0x221110 is `abs`: fades in over 32 frames, holds 64, fades out over 32; the ticker's
+resting 0x18 gives 0x30), ALPHA 0x68 with FIX = that alpha (added: `Cd + Cs·FIX/128`), until c passes 0xff; an idle
+screen restarts it with probability 1/700 per frame. Screens 1..5 also roll a **scan bar**: FX texture **0x1c** over
+(0, −(0x200 − c)/32, w, 1.5·(h + 16)), colour 0x505050, alpha `min(0x100 − |c − 0xfe|, 0x50)` with c before its +2
+(fades in over 38 frames, holds, fades out; 255 frames), ALPHA 0x44, started with probability 1/360. The menu
+panels' effect (`fun_00223e28`, menus.md §3 step 7) uses the same noise curve. The popup (screen 6) adds FX **0x19** (64×64 glass) over it.
 
 **Glass quads** (0x2b3700, after the screens): screens 1..5 get a quad in 3D on the same inset corners, FX
 texture **0x19**, RGBA 0x80808080, TEST 0x32003, ALPHA 0x44, UV (0, 0)..(1, 0.984).
 
 **Screen contents** (target pixels, small font unless noted):
 * **Ticker** (0): the LED text 0x2b1838 (`fun_00238310(2.0, text, −scroll, 8)`): HUD icon 0xe935 glyph cells
-  0x1ca598 / advances 0x1ca698, scale 2, 'b' blinks the next glyph; +2 px per frame; when scrolled out, a random line
+  0x1ca598 / advances 0x1ca698, scale 2 (`DrawTexturedQuad(x, 8, 18, 18, u, v, 9, 9, 0x80404040, font)`: half
+  brightness, from the disassembly at 0x2b19b4), 'b' blinks the next glyph. The ticker is drawn right after the
+  hologram cone, whose `FastDrawQuadReal` leaves TEX1_1 = 1 (point sampling: its quad's +0x80), so its glyphs and
+  static are point-sampled; screens 1..5 follow the item's / salesman's moby draws (bilinear TEX1) [H: order in
+  `DrawWorld_Mode5`; moby TEX1 per moby_untextured.md]; +2 px per frame; when scrolled out, a random line
   of 0x1ca538[24] (`randi(24)`), 18 leading spaces; black bars at x 0..4 and 226..230.
 * **Item panel** (1): `DrawMobyList(+0x100)` **the item's 3D model** (class = item definition +0x10: the weapon's
   own model, e.g. Pyrocitor 176, Bomb Glove 192, `0x1df` for item 24) and `DrawMobyList(+0)` (class 13), both lit
@@ -452,7 +465,16 @@ Timing (NTSC frames): open = 1 (△ tick) + 4 (FadeToBlack) + 40 = 45 frames to 
   `CameraScript2(2)` on the next tick).
 * crate::vendor_render draws the approach logo (class 1143 with its chrome pass and its two spinning joints) and
   beam, the menu's cone, the item hologram, the popup, the screens as HUD-pass primitives (black target, content,
-  static; squeezed while powering on / off) and the glass quads; the item panel's and the salesman's 3D parts are
+  static; squeezed while powering on / off) and the glass quads; the static (and after it the glass quads) goes to
+  the HUD's static layer (`Hud2dHook::statics`, over the canvases): its primitives wrap their texels (`Prim::repeat`,
+  the 2D pass' flag 2) as the game's CLAMP_1 = 0 does, and the noise is added (ALPHA_1 0x68, FIX = its alpha).
+  **Fixed 2026-09-28**: the static's alpha used `max(c − 0x80, 0)` where the game takes `abs` (0x221110), so bursts
+  and scan bars started at full strength instead of fading in (and the ticker's resting noise was 0x80, not 0x30);
+  and the static was drawn with the pass' inherited CLAMP, so every texel past the textures' last row / column repeated it: the ticker's
+  always-running noise showed as long lines from the top-left corner (a 32×32 noise patch when both random offsets
+  fell under 32, else rows or columns stretched across the screen) or nothing, and a scan bar (FX 0x1c's last row,
+  opaque grey) covered its screen with a flat grey for its 255 frames; now the noise speckles and the bar's scan
+  lines roll, as in the game; the item panel's and the salesman's 3D parts are
   crate::screen_canvas canvases.
 * **crate::screen_canvas** (general render-to-texture): `Canvases::create(commands, images, name) → CanvasId`,
   `layer(id)` (the `RenderLayers` for the entities it shows), `show(id, Some(CanvasView { rect, focal, centre, clear
@@ -467,5 +489,5 @@ Timing (NTSC frames): open = 1 (△ tick) + 4 (FadeToBlack) + 40 = 45 frames to 
   the targets' edges at a quarter of the size the game shows.]
 
 **Still not ported**: the weapon demo scenes (substate 3), the PDA's remote vendor presentation, the popup's
-ammo-quantity backdrop (+0x500 drawn in the popup), the approach beam's scan plane and its four glow points
-(`FUN_002781d0`), the sound group 0x1d pause, the world snapshot (the port draws the frozen world live).
+ammo-quantity backdrop (+0x500 drawn in the popup), the approach beam's scan plane (FX 0x1b, the callback's second
+quad), the sound group 0x1d pause, the world snapshot (the port draws the frozen world live).

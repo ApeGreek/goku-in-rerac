@@ -24,7 +24,7 @@
 //! size, +0x254 glow phase, +0x258 fall-out ripple patch (0 on Novalis), +0x25c trigger cuboid, +0x260 gate moby.
 //! The fall-out rule (`0x2eec68`): with +0x258 ≠ 0 (a ripple patch index; Rilgar / level 11) an amoeboid below that
 //! patch's height (`creature::Globals::ripple_z`) bursts into goo and is deleted without bolts. Not ported (counted):
-//! the suck-cannon capture (state 0xe, `0x305260`), the big-head manipulator, the shadow probe.
+//! the big-head manipulator, the shadow probe.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
@@ -294,7 +294,14 @@ pub fn update(w: &mut World, id: MobyId) {
                 set_st(w, id, 1);
             }
         }
-        0xe => w.svc.unported("amoeboid 572: suck cannon 0x305260"),
+        // FUN_00305260: carried by the Suck Cannon (the shared reaction layer); landed after a let-go → state 1, the
+        // suck record's state (+0x128) cleared.
+        0xe => {
+            if c::react::carried(w, id, K) != 0 {
+                set_st(w, id, 1);
+                c::set_pi16(w, id, 0xc0 + c::react::rec::STATE, 0);
+            }
+        }
         0xf => {
             let tp = target_pos(w, id);
             slow_turn(w, id, c::atan(tp[0] - pos[0], tp[1] - pos[1]));

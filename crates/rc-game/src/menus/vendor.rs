@@ -76,6 +76,8 @@ pub mod msg {
 }
 /// The ticker's LED font texture (`GetIconFrame(0xe935, 0)`).
 pub const LED_ICON: u16 = 0xe935;
+/// The LED glyphs' RGBA (`fun_00238310`, level01 0x2b19b4..0x2b19bc: `0x8040 << 16 | 0x4040`).
+pub const LED_RGBA: u32 = 0x8040_4040;
 /// The ticker format 0x20a510: 18 spaces, then the message.
 const TICKER_PAD: usize = 18;
 /// The vendor class, its popup (0x471) and the class-13 backdrop of the item panel.
@@ -753,7 +755,9 @@ impl Vendor {
     }
 
     /// `VendorDrawTicker` 0x2b1a48 with the LED text `fun_00238310(2.0, text, −scroll, 8)`: characters 0x20..0x5a,
-    /// cells 9×9 drawn 18×18, 'b' makes the next glyph blink (hidden 10 of every 40 frames), glyphs drawn while
+    /// cells 9×9 drawn 18×18 by `DrawTexturedQuad(x, 8, 18, 18, u, v, 9, 9, 0x80404040, GetFrameTex(icon 0xe935 / 0))`
+    /// (RGBA from the disassembly, level01 0x2b19b4: half brightness, which leaves the font's dim rows and columns
+    /// between the lit LEDs dark), 'b' makes the next glyph blink (hidden 10 of every 40 frames), glyphs drawn while
     /// −9 < x < 256; black bars at x 0..4 and 226..230.
     fn draw_ticker(&self, a: &MenuAssets, vsync: u32, out: &mut Vec<MenuDraw>) {
         let frame = a.frame(LED_ICON, 0);
@@ -768,7 +772,7 @@ impl Vendor {
             let hidden = std::mem::take(&mut blink) && vsync % 40 < 10;
             if k != 0 && !hidden && x > -9 && x < 0x100 {
                 let (u, v) = (((cell & 0xffff) >> 4), ((cell as u32) >> 20) as i32);
-                out.push(MenuDraw::SpriteUv { frame, x0: x * 16, y0: 8 * 16, x1: (x + 18) * 16, y1: (8 + 18) * 16, u0: u * 16, v0: v * 16, u1: (u + 9) * 16, v1: (v + 9) * 16, alpha: 0x80, repeat_u: false });
+                out.push(MenuDraw::FrameQuad { frame, x, y: 8, w: 18, h: 18, u, v, tw: 9, th: 9, rgba: LED_RGBA });
             }
             x += self.tables.led_adv.get(k as usize).copied().unwrap_or(10) * 2;
         }

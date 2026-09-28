@@ -113,6 +113,8 @@ struct Run {
     talk_slots: usize,
     /// Frames on which the salesman started a voice line (stream id).
     voices: Vec<(usize, i32)>,
+    /// Mode-0 frames whose tick registered the vendor's draw callback `0x2ba9c0` (beam and glow points) on list 2.
+    beam_frames: Vec<usize>,
 }
 
 /// Runs `frames` main-loop frames: gameplay ticks in mode 0 (pad `tick_input(frame)`), vendor frames in mode 5
@@ -164,7 +166,7 @@ fn run(d: &Data, frames: usize, bolts: i32) -> Run {
     game.finish_load();
     let mut anim = RatchetAnim::new(&d.ratchet);
     let svc_cell = std::cell::RefCell::new(&mut svc);
-    let mut out = Run { recs: Vec::new(), handoffs: Vec::new(), purchases: Vec::new(), sounds: Vec::new(), state: GameState::zeroed(ChunkTables { global: Vec::new(), level: Vec::new() }), talk_slots, voices: Vec::new() };
+    let mut out = Run { recs: Vec::new(), handoffs: Vec::new(), purchases: Vec::new(), sounds: Vec::new(), state: GameState::zeroed(ChunkTables { global: Vec::new(), level: Vec::new() }), talk_slots, voices: Vec::new(), beam_frames: Vec::new() };
     let mut v: Option<(Vendor, usize)> = None;
     let mut pad = PadState::default();
     for f in 0..frames {
@@ -190,6 +192,7 @@ fn run(d: &Data, frames: usize, bolts: i32) -> Run {
             game.hero.idle.counter = game.counter as i32;
             game.tick(Some(&input.bytes()), &d.mesh, &mut anim.ctl(&d.ratchet), &mut hooks);
             let mut s = svc_cell.borrow_mut();
+            if s.draw_callbacks.list2.contains(&(rc_game::moby_update::classes::draw_callbacks::Callback::VendorBeam, vendor)) { out.beam_frames.push(f); }
             s.interact.apply_writes(&mut gs);
             if !world { gs.global.bolts = s.counters.bolts; }
             for h in std::mem::take(&mut s.interact.handoffs) {
@@ -280,6 +283,10 @@ fn novalis_vendor_prompt_open_buy_close() {
     let first = r.recs.iter().position(|x| x.2 == owner::VENDOR).expect("no prompt");
     assert!(first < 20, "prompt from frame {first}");
     assert!(r.recs[first..100].iter().all(|x| x.2 == owner::VENDOR && x.3 == 2 && x.6 == 1), "prompt held until △");
+    // States 1 and 2 register the beam / glow-point callback every tick (`RegisterDrawCallback2(0x2ba9c0, vendor)`, the
+    // △ tick included: the tail runs before the state change); state 3 (the menu) does not.
+    assert!((0..=100).all(|f| r.beam_frames.contains(&f)), "{:?}", r.beam_frames);
+    assert!(!r.beam_frames.iter().any(|f| (101..240).contains(f)), "state 3 (the menu's world frames) draws no beam");
     // △ at frame 100 → OpenVendorMenu, the vendor's state 3 and its unfold (seq 2), Ratchet in state 100, mode 5.
     assert!(matches!(r.handoffs.as_slice(), [(100, Handoff::OpenVendor { vendor: Some(_) })]), "{:?}", r.handoffs);
     assert_eq!((r.recs[100].3, r.recs[100].6, r.recs[100].7), (3, 2, 100));

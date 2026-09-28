@@ -163,8 +163,6 @@ pub enum GameWrite {
     GoldWeapon(usize),
     /// `UnlockPlanet(p)` 0x2756d0 (Novalis' Water Pump Worker: the Infobot to Aridia).
     UnlockPlanet(usize),
-    /// `SetMissionDone(m)` 0x265080.
-    MissionDone(u8),
     /// `0x13d5bc + 16·i` (the landmark record's +0xc: "talked to" flag of talk slot i, chunk 15).
     Talked(usize, u32),
     /// `memcard_Save(0, −1)` (not ported: counted).
@@ -535,10 +533,6 @@ impl Interact {
                 GameWrite::ClearFlag(i) => { if let Some(b) = gs.global.flags.get_mut(i) { *b = 0; } }
                 GameWrite::GoldWeapon(i) => { if let Some(b) = gs.global.gold_weapons.get_mut(i) { *b = 1; } }
                 GameWrite::UnlockPlanet(pl) => gs.unlock_planet(pl),
-                GameWrite::MissionDone(m) => {
-                    let l = gs.global.level;
-                    if let Some(b) = usize::try_from(l).ok().and_then(|l| gs.levels.get_mut(l)).and_then(|lv| lv.missions.get_mut(m as usize)) { *b = 0xff; }
-                }
                 GameWrite::Talked(i, v) => { if let Some(l) = gs.global.landmarks.get_mut(i) { l.flags = v; } }
                 GameWrite::Save => {}
                 GameWrite::GoldBolt { level, index } => {

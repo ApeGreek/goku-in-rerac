@@ -524,6 +524,9 @@ impl Hero {
             super::packs::jump_crouch_press(self, c);
             return;
         }
+        // The rail / cable overlays' line (level00 0x229b70 case 7.., Kerwan 0x21c668): a grind rail under the feet
+        // (0x13f8bc) → 0x28, a cable at the hands (0x13f94c) → 0x74 (super::boots; both flags stay 0 elsewhere).
+        if super::boots::jump_contacts(self, c) { return; }
         // E: force fall.
         if (self.jump.max_air as i32) < self.timer {
             if self.jump.landed == 0 {

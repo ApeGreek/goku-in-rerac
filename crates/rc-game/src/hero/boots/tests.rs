@@ -329,3 +329,121 @@ fn cable_slide() {
     assert!(top_speed > 13.0 && top_speed <= 14.0 + 1e-3);
     assert!(r.hero.position()[0] > 425.0);
 }
+
+// ------------------------------------------------------------------------------------------------
+// The cable caught from a jump (distilled from Kerwan's cable 0: 58.9 long, 26.74 drop; the platform under its
+// start 2.9 below it), with and without the wrench's □.
+
+/// Kerwan cable 0's slope (drop / length).
+const KERWAN_SLOPE: f32 = 26.74 / 58.9;
+
+/// A cable along +x through (`x0`, 410, `z0`) falling at Kerwan's slope, 40 long.
+fn sloped_cable(x0: f32, z0: f32) -> GrindPath {
+    let back = 2.0;
+    path(&[[x0 - back, 410.0, z0 + back * KERWAN_SLOPE], [x0 - back + 40.0, 410.0, z0 + (back - 40.0) * KERWAN_SLOPE]], false)
+}
+
+/// Ratchet standing at (402, 410) on a floor at z 100, facing +x, the wrench in hand (slot ready, fire mask □).
+fn standing(cable_z: Option<f32>) -> (Runner, Collision, Carriers) {
+    let coll = floor(100.0, 100, 112, 100, 106);
+    let mut r = Runner::new([402.0, 410.0, 100.0], 0.0);
+    r.hero.idle.level = 3;
+    let anim = rc_formats::moby_anim::AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false };
+    let wrench = super::super::items::HandItem { o_class: super::super::melee::WRENCH_CLASS, mstate: 0, anim, snapshot: None, scale: 1.0, position: [0.0; 3], rows: [[0; 4]; 3], hit_timer: 0, flight: Default::default() };
+    r.hero.items.slot = super::super::items::HandSlot { item: Some(wrench), fire_mask: crate::pad::button::SQUARE, state: 2, id: 8, ..Default::default() };
+    // The cable's point above the hands (0.3 ahead of the feet).
+    let w = world(cable_z.map(|z| sloped_cable(402.3, z)).into_iter().collect());
+    run(&mut r, &coll, &w, n(), 3);
+    (r, coll, w)
+}
+
+/// One jump (✕ at tick 0, `sq` at tick `sq_at`), 90 ticks: the states entered and each tick's (state, hand z,
+/// descending).
+fn jump(cable_z: Option<f32>, sq_at: Option<usize>) -> (Vec<i32>, Vec<(i32, f32, i32)>, Runner) {
+    let (mut r, coll, w) = standing(cable_z);
+    let mut states = vec![r.hero.state];
+    let mut recs = Vec::new();
+    for t in 0..90 {
+        let mut inp = if t == 0 { n().press(crate::pad::button::CROSS) } else { n() };
+        if Some(t) == sq_at { inp = inp.press(crate::pad::button::SQUARE); }
+        tick(&mut r, &coll, &w, inp);
+        if states.last() != Some(&r.hero.state) { states.push(r.hero.state); }
+        recs.push((r.hero.state, hand_point(&r.hero)[2], r.hero.jump.descending as i32));
+    }
+    (states, recs, r)
+}
+
+/// A rising jump catches a cable whose hands come within 0.7 of it (Kerwan's platform: the cable 2.9 above the
+/// feet); the jump group's line → 0x74 (the port lacked it: only the fall 6 caught cables).
+#[test]
+fn a_rising_jump_catches_the_cable() {
+    let (states, _, r) = jump(Some(100.0 + 2.9), None);
+    eprintln!("jump under the cable: {states:x?}");
+    assert_eq!(&states[..3], &[0, 7, 0x74], "{states:x?}");
+    assert_eq!((r.hero.group, r.hero.items.f13f7, r.hero.f15d4), (0x1a, 1, 3));
+    // No cable level (Novalis): the same jump lands.
+    let (mut r, coll, w) = standing(Some(102.9));
+    r.hero.idle.level = 1;
+    let mut seen = Vec::new();
+    for t in 0..90 {
+        tick(&mut r, &coll, &w, if t == 0 { n().press(crate::pad::button::CROSS) } else { n() });
+        seen.push(r.hero.state);
+    }
+    assert!(!seen.contains(&0x74));
+}
+
+/// □ pressed at the cable reaches 1.2 below it instead of 0.7 (0x13cae4 & 0x80 in `0x20d330`), and the weapon check
+/// (level00 0x227fa0) leaves the jump attack 0x14 to the grab: the wrench catches the cable.
+#[test]
+fn square_is_the_wrench_grab_not_the_jump_attack() {
+    // The apex of the hands while rising, without a cable.
+    let (_, base, _) = jump(None, None);
+    let top = base.iter().filter(|r| r.0 == 7 && r.2 == 0).map(|r| r.1).fold(f32::MIN, f32::max);
+    // A cable 0.95 above the highest rising hands: out of the bare hands' reach, inside □'s.
+    let cable = top + 0.95;
+    let t_sq = base.iter().position(|r| r.0 == 7 && r.2 == 0 && cable - 1.2 < r.1 - 0.05).expect("the hands rise into the reach of □");
+    eprintln!("hands' rising apex {top}, cable {cable}, □ at tick {t_sq}");
+    let (bare, _, _) = jump(Some(cable), None);
+    assert!(!bare.contains(&0x74), "{bare:x?}");
+    let (with_sq, _, r) = jump(Some(cable), Some(t_sq));
+    eprintln!("with □: {with_sq:x?}");
+    assert!(with_sq.windows(2).any(|s| s == [7, 0x74]), "{with_sq:x?}");
+    assert!(!with_sq.contains(&0x14));
+    assert_eq!(r.hero.items.slot.id, 8, "the wrench stays in hand");
+    // Without the cable, □ late in the rise is the jump attack.
+    let late = base.iter().enumerate().position(|(t, r)| 11 < t && r.0 == 7 && 0.1 < r.1 - 101.34).expect("a late airborne tick");
+    let (no_cable, _, _) = jump(None, Some(late));
+    assert!(no_cable.contains(&0x14), "{no_cable:x?}");
+}
+
+/// On the cable: no jump-off (0x74's case has no pad test), the slide speeds up to 14 u/s at 9·dt², the drop into
+/// the fall 5 ticks past the end with the 8-tick cable lockout 0x13f534; the grab anim 0x73.
+#[test]
+fn ride_to_the_end_no_jump_off() {
+    let (mut r, coll, w) = standing(Some(102.9));
+    let mut states = vec![r.hero.state];
+    let (mut speeds, mut on_off) = (Vec::new(), None);
+    for t in 0..400 {
+        // ✕ and □ mashed while hanging.
+        let inp = if t == 0 {
+            n().press(crate::pad::button::CROSS)
+        } else if t > 30 && t % 7 == 0 {
+            n().press(crate::pad::button::CROSS | if t % 2 == 0 { crate::pad::button::SQUARE } else { 0 })
+        } else {
+            n()
+        };
+        tick(&mut r, &coll, &w, inp);
+        if states.last() != Some(&r.hero.state) {
+            if states.last() == Some(&0x74) { on_off = Some((t, r.hero.f534)); }
+            states.push(r.hero.state);
+        }
+        if r.hero.state == 0x74 { speeds.push(r.hero.boots.cable_speed * 60.0); }
+    }
+    eprintln!("ride: {states:x?}, off at {on_off:?}, speeds {:?}..{:?}", speeds.first(), speeds.last());
+    assert_eq!(&states[..4], &[0, 7, 0x74, 6], "{states:x?}");
+    assert!(speeds.windows(2).all(|s| s[1] >= s[0] - 1e-4 && s[1] - s[0] <= 9.0 / 60.0 + 1e-4), "speed rises at 9 u/s²");
+    assert!((speeds.last().unwrap() - 14.0).abs() < 1e-3);
+    assert_eq!(on_off.unwrap().1, 8);
+    // The grab anim (0x66 follows at 0x73's end: the real anim, tests/hero_cable_kerwan.rs).
+    assert!(r.anim.calls.iter().any(|c| c.1 == 0x73));
+}

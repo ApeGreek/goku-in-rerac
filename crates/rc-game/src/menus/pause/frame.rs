@@ -62,6 +62,8 @@ pub struct FrameMoby {
     pub corners: [V4; 4],
     /// pvar +0x50..+0x5c written by the draw: x, y (the `MobyScreenRect` corner + 1), w, h.
     pub rect: [i32; 4],
+    /// pvar +0x48 / +0x4c: the panel's noise burst (`fun_00223e28`, crate::menus::screen_static).
+    pub noise: crate::menus::screen_static::PanelStatic,
 }
 
 /// The menu camera state `MobyScreenRect` projects with: `fun_00218d10` (position (256, 256, 64), rows
@@ -180,7 +182,7 @@ impl FrameMobys {
     /// The spawn of `FUN_0028c128` for the page's seqs: every moby on its sequence's last frame.
     pub fn spawn(&mut self, seqs: &[i32; SLOTS]) {
         let state = AnimState::spawn(&self.class.anim);
-        self.slots = Some([FrameMoby { state, corners: [[0; 4]; 4], rect: [0; 4] }; SLOTS]);
+        self.slots = Some([FrameMoby { state, corners: [[0; 4]; 4], rect: [0; 4], noise: Default::default() }; SLOTS]);
         for (i, &s) in seqs.iter().enumerate() {
             let last = self.last_frame(s).unwrap_or(0);
             self.cut(i, s, last);
@@ -225,6 +227,12 @@ impl FrameMobys {
     }
 
     pub fn present(&self) -> bool { self.slots.is_some() }
+
+    /// `fun_00223e28(0x1ba310[i])` on slot `i`'s pvar rect (crate::menus::screen_static::PanelStatic::draw).
+    pub fn panel_static(&mut self, i: usize, pal: bool, vignette: (usize, (i32, i32)), rng: &mut crate::rng::Rng, out: &mut Vec<crate::menus::screen_static::StaticDraw>) {
+        let Some(m) = self.slots.as_mut().map(|s| &mut s[i]) else { return };
+        m.noise.draw(m.rect, pal, vignette, rng, out);
+    }
 }
 
 #[cfg(test)]

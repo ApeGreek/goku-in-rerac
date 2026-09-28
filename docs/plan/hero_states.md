@@ -80,7 +80,7 @@ table is `crates/rc-game/src/hero/registry.rs::STATES` (name, group, module, por
 | 3 | stop / skid | 1 | walk, landings | 1, 7, 4, 6, 0, 2 | 5 / 6, 0x14 | ground.rs | P |
 | 4 | crouch | 0xc | R1/R2 | 1, 0 release, 0xb / pack crouch jumps / 7, 0x71, 0x15 (□), 6 | 0xd, 0xe/0xf turn | ground.rs | P |
 | 6 | fall | 2 | coyote, jumps' fall-over | landing 0/2/3 (0xc hard), 0x3d, 8 glide, jump (stuck), 0x10, 0x18 ledge, 0x28 rail, 0x74 cable | 10, 0xb, 0xc | air.rs | P |
-| 7 | jump | 4 | ✕ | 0xb flip chain, 10/0x10 R1 tap, 0x22, 6, landing picker, 9/7 bunny hop, 0x11 wall, 0xe, 8 glide, 0x18 | 7 | jump.rs | P |
+| 7 | jump | 4 | ✕ | 0xb flip chain, 10/0x10 R1 tap, 0x22, 0x28 rail / 0x74 cable (rail / cable overlays), 6, landing picker, 9/7 bunny hop, 0x11 wall, 0xe, 8 glide, 0x18 | 7 | jump.rs | P |
 | 9 | running jump | 4 | ✕ running | as 7 (raw write to 7 when slow) | 8 / 9 by run frame (0x17c258) | jump.rs | P |
 | 0xb | side / back flip | 4 | crouch + side/back stick + ✕ | as 7 (no double jump) | 0x1c/0x1d/0x1f | jump.rs | P |
 | 0xe | double jump | 4 | ✕ in 7/9 after 14 ticks | landing, 6, 8 glide, 0x18 | 0x16 fr 3 | jump.rs | P |
@@ -140,7 +140,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x68 / 0x69 / 0x7b | sinking liquid (surface 3, to the level 0x13f644) / jump out / no health | 0x19 | surface 3 (0x140636; L00), level 0xd body contact type 0xb | 0x69 (✕) / jump case / fade | none (the liquid holds him) | 0x71 / 7 | surface.rs (P1) | P |
 | 0x70 | Magneboots wrench swing | 6 | □ with 0x13f658 = 1 (weapon check) | 0 after the row's idle frame | ground case | 0x5c / 0x5d (melee rows 5 / 6) | boots.rs (P5) | P |
 | 0x71 | Magneboots hop | 1 | ✕ in 0 / 4 / 0x3f with 0x13f658 = 1 | 0 after frame 25 | ground case, gravity mode 1 | 0x5e | boots.rs (P5) | P |
-| 0x74 | cable slide (**L**) | 0x1a | fall / rising jump with the hands (0.3, 0, 1.34) at a grind path (0x13f94c; levels 0, 3, 4, 7, 9, 10, 13, 17) | 6 (5 ticks off the end) | spline follower on the hand point (speed → 14 u/s at 9·dt², spring pull), sparks | 0x73 / 0x66 | boots.rs (P5) | P |
+| 0x74 | cable slide (zipline: the wrench on a cable) | 0x1a | a **rising** jump-group state (7, 9, 10, 0xb..0x12, 0x1c, 0x3c, 0x69) or the fall 6 / 0x2d with the hands (0.3, 0, 1.34) −0.7 (−1.2 on the tick □ is pressed) .. 0.4 at a grind path (0x13f94c, `0x20d330`); code on 0, 3, 4, 7, 9, 10, 13, 17, cables only on Kerwan 3 (3) | 6 (5 ticks off the end; 8-tick lockout 0x13f534); no jump-off | spline follower on the hand point (speed → 14 u/s at 9·dt², half the entry speed along it to start, spring pull), sparks | 0x73 / 0x66 | boots.rs (P5; entries 2026-09-28) | P |
 | 0x75 / 0x76 | hurt on the surface / under water | 7 | hit intake in groups 0x12 / 0x11 | 0x37 / 0x34 after 50, 0x6a / 0x82 without health | small cases | 0x70 / 0x6f | damage.rs (P2) | P |
 | 0x77 | death fall | 2 | z below the level's death height and > 2 above ground | fade after 120 (level-specific z shortcuts) | fall-like, random spin (2 draws at entry) | 10 / 0xb | damage.rs (P2) | P |
 | 0x79 | pit fall | 2 | surfaces 8 / 0xc (0x14063a) | fade after 300; 6 / 0 when off the pit surface | fall case | 0xb | damage.rs (P2) | P |
@@ -302,6 +302,53 @@ the type-25 sparks as particles (`Boots::sparks` records them with their draws),
 class-0x101 bump, the camera look-ahead and body-lean joint records, AirAccel / StickTarget / LandEta in mode 1,
 the feet item slot (0x140430) itself, melee row 6 in `melee::COMBO` (the wrench update's hit window of the second
 0x70 swing uses row 5's).
+
+### Cable slide 0x74 (the zipline, 2026-09-28)
+Ratchet hangs from a cable by the wrench and slides down it. **Identity** (no longer **L**): Kerwan's level-script
+moby update `0x2df520` (level03) counts "state 0x74" as a stat (0x1418c8) and shows help message 0xbbf in a volume to
+a hero swinging the wrench (group 6, 0x140408 = 8) who has not used a cable yet. **The line**: a grind path
+(gameplay section 0x74), the same data and follower as the rails (`crate::spline`, `rc_formats::volumes::GrindPath`);
+no moby class. The code (the contact `0x20d330`, hand point `0x20d2f8`, SetState / physics / transitions cases)
+exists in the overlays of levels 0, 3, 4, 7, 9, 10, 13, 17 (identity: `0x233660(0.3, 0, 1.34)` + the −0.7 / −1.2 /
+0.4 test: L00 0x20d330, L03 0x205a68, L04 0x200910, L07 0x235198, L09 0x22d010, L10 0x200998, L13 0x218e18, L17
+0x20a288); of those only **Kerwan (3)** has grind paths: **3 cables** (2-point, 58.9 / 100.1 / 56.6 long, drops
+26.7 / 21.6 / 19.0; a post at each start, the platform 2.2..2.9 below). Every level's instances go through the same
+code: no per-level code.
+- **Attach** (`0x20d330`, after the wall probe): 0x13f534 = 0 (the lockout), group 4 with 0x13f76e = 0 (**rising**)
+  or group 2 (fall); the first path whose bounding sphere holds the hand point and whose nearest point
+  (`0x25df68(12, 10, 0)`) is < 0.9 horizontally (0.3 in groups 0 / 1) and < 1.5 vertically (10 and +0.5 with
+  0x13f51a); hands −0.7 .. 0.4 above it, −1.2 when □ is **pressed** this tick (0x13cae4 & 0x80). Then the
+  transitions: the jump group's line (level00 0x229b70 case 7.., after the Thruster stomp's R1 test, before the forced
+  fall: `0x28` on the rail contact, else `0x74`; Kerwan 0x21c668 has only the cable half) and the fall's (after the
+  ledge 0x18 and the rail 0x28). The weapon check (level00 0x227fa0, Kerwan 0x21aac8) skips the jump attack 0x14 while
+  the cable contact is set: □ at the cable is the grab. **The port had only the fall's line**, so a jump never caught
+  a cable (a jump stays in 7 until it lands) and □ started the jump attack: fixed by `boots::jump_contacts` (called
+  from `jump.rs`) and the weapon-check line (`melee.rs`). The same jump line also takes a descending jump onto a
+  grind rail (0x28) on the rail levels.
+- **Entry** (SetState 0x2223f8 case 0x74): group 0x1a, camera mode 0x1415d4 = 3, 0x1413f7 = 1 (the wrench is forced
+  into the hand: `items::update_hand_selected` swaps any other item for it), blink period 0x68, 0x13f950 / 0x13f968 = 0;
+  speed 0x13f954 = max(0, ½ · displacement · (direction to the point 1 ahead on the cable)); anim 0x73 (the grab)
+  blend 8.
+- **Physics** (0x217970 case 0x74): the hand point projected on the cable (`0x25df68(999, 8, 2.5)`), advanced by the
+  speed; yaw / pitch of the cable ahead; TurnTo(0.018, 0.2, 6.458·dt); speed → 14 u/s at 9·dt²; vel = the step; the
+  hands pulled onto the cable by a spring (0x25b8c0(0, 0.05, 0.3, 10·dt), its length only shrinking). At the last
+  point the ticks-off counter 0x13f950 starts: he flies on with his momentum (vel.z − 24·dt² a tick). Anim 0x66
+  (the slide): the loop class sound 0 (0x216e48) and, every other tick, a type-25 spark at the hand point (the lq/sq
+  copy at 0x21dc38 Ghidra drops: the spark starts at the hands) with 0.4·displacement + a random 0..4·dt push within
+  ±30° of the cable yaw, up 3..5·dt, gravity 35·dt².
+- **Transitions** (0x229b70 case 0x74): anim 0x73 passing frame 11 → voice 0xd + sparkle burst `0x2a7e20(hands, 4)`;
+  0x73's end → 0x66 (blend 0x1e); more than 5 ticks off the end → fall 6 with 0x13f534 = 8. **No jump-off**: the
+  case reads no pad; the prologue's checks (hit intake, the weapon check: group 0x1a is neither on foot nor in the
+  air list) do not leave it either.
+- **Camera**: no hero-state tweak (0x3111d8 has none for 0x1a / 3). Kerwan's camera records 10..12 (class 17) have
+  the region flag +0x2c = 2 ("while in group 0x1a", 0x318c40) with priority +0x2e = 0: part of the level camera
+  system, not ported for any level.
+- **Not ported / left**: the level cameras above; the help message 0xbbf and the 0x1418c8 stat (Kerwan's script moby,
+  unported); the hit intake while hanging uses the ported generic path.
+- **Tests**: `boots::tests` `a_rising_jump_catches_the_cable`, `square_is_the_wrench_grab_not_the_jump_attack`,
+  `ride_to_the_end_no_jump_off`, `cable_slide` (distilled Kerwan numbers); `tests/hero_cable_kerwan.rs` (Kerwan's 3
+  cables on the level mesh: ✕ from the platform → 7 → 0x74 → 6 → 0, anims 0x73 → 0x66, 14 u/s, off ≤ 1.1 past the
+  end, deterministic). Engine: `RC_LEVEL=3 RC_HERO_AT=197.137,148.537,76.03,2.912 RC_PLAY_SCRIPT="30:press X"`.
 
 ### P6 — Swingshot and the other hand items
 **Done (2026-09-26).** `gadgets.rs` (the hand-item mechanism, one table: `HAND_ITEMS` rows = the weapon check's case

@@ -70,8 +70,9 @@ Status: **P** ported, **P\*** ported in this pass, **part** partly, **–** not 
 
 | gap | game | plan |
 |---|---|---|
-| **Pyrocitor 16** (class 176, 0x2cd458; sold on Novalis): **ported (§7)**. The other weapons: Suck Cannon 11 (157, 0x2c7d68), Devastator 19 (177, 0x2ce448), Blaster 15 (168), Glove of Doom 20, Mine Glove 17, Drone 24, Decoy 25, Visibomb 23 …: their `HAND_ITEMS` rows, fire cases, projectiles and arm sequences | weapon updates listed above, `HeroPdaGadget` 0x240ed8 | One weapon at a time on the arm layer built here; the Pyrocitor first (Novalis vendor). |
-| Auto-aim target list 0x1abe80 (mode 0x20 records) and the melee aim assist 0x22e238 | | With the first enemy class that registers a target record. |
+| **Pyrocitor 16** (class 176, 0x2cd458; sold on Novalis): **ported (§7)**. **Blaster 15** (168, 0x2ca610), **Devastator 11** (157, 0x2c7d68), **R.Y.N.O. 23** (454, 0x2e4e60), **Tesla Claw 19** (177, 0x2ce448): **ported (§9)**. The other weapons (ids from the level01 item table 0x179f40, §8): Suck Cannon 9 (849, 0x303000), Visibomb Gun 13 (163), Morph-o-Ray 21 (185, 0x2d2450), Mine Glove 17 (190), Glove of Doom 20 (229), Drone Device 24 (483), Decoy Glove 25 (562) …: their `HAND_ITEMS` rows, fire cases, projectiles and arm sequences | weapon updates listed above, `HeroPdaGadget` 0x240ed8 | One weapon at a time on the arm layer built here. |
+| ~~Auto-aim target list 0x1abe80~~ | | Done: §8 (the list and the glove's search), §9 (the Blaster's, the Devastator's, the R.Y.N.O.'s and the Tesla Claw's searches). |
+| The melee aim assist 0x22e238 over the target list | | With the wrench's combat pass. |
 | 0x20 (Walloper lunge, item 0x12), 0x21 (wrench rebound off flag-2 targets) | hero_states.md §1.2 | |
 | ~~Gold bolt 1134, Infobot 750~~ | 0x307ca0, 0x2fbf80 | Done: §6. |
 | The nanotech cluster's glowing mesh (draw callback 0x301c00) | 0x301c00, `FUN_0021fda8` | A small custom renderer (effect textures 0xb and gp−0x4dbc, 290-vertex fans). |
@@ -362,3 +363,180 @@ size / spin, the pull and the per-tick list), `moby_attach::tests` (2: one hand 
 items hidden after a show-again across swaps), `hero_targeting_novalis.rs` (the glove targets a critter, the reticle
 snaps onto it, the bomb lands where it was; twice identical). `novalis_hero_digest` is unaffected by construction (its
 runs have no hand item data, and the new `Weapons` fields sit after the digest's cut).
+
+## 9. The gun-family weapons: Blaster, Devastator, R.Y.N.O., Tesla Claw (2026-09-28)
+
+**Which update is which** (level01 class table `lvl.vtbl` against the item table 0x179f40; the other levels run the same
+code by `LevelPorts`): Blaster **15** / class 168 → `0x2ca610` (search `0x2ca310`, shot class **305** `0x2e1cc8` /
+`0x2e2170` / `0x2e2a18`); Devastator **11** / 157 → `0x2c7d68` (missile class **153** `0x2c5440` / `0x2c5b70`; the
+gold re-target `0x2c5778`); R.Y.N.O. **23** / 454 → `0x2e4e60` (search `0x2e4bb8`, missile class **457** `0x2e5738` /
+`0x2e5a48`); Tesla Claw **19** / 177 → `0x2ce448` (`0x2cef78`, `0x2cf138`, draw callback `0x2d05d8` / `0x2d0748` /
+`0x2d0d18`). The other xrefs of `0x22ee08`: `0x2d2450` is the Morph-o-Ray (21 / 185), `0x303000` the Suck Cannon
+(9 / 849). The item defs (+0x18 / +0x24 / +0x28 / +0x2c / +0x30): Blaster 1 / 56 / 57 / 62 / 1; Devastator 2 / 54 / 73 /
+73 / 0; R.Y.N.O. 2 / 81 / −1 / −1 / 1; Tesla Claw 1 / 51 / −1 / −1 / 1. Only the Blaster has a weapon-check case
+(`HeroPdaGadget` case 0xf); the others fire from their updates, like the Pyrocitor. **H** (decompiler output, the
+disassembly where the decompiler dropped arguments; data read from the overlay).
+
+**Code**: `crates/rc-game/src/hero/{guns, blaster, devastator, ryno, tesla}.rs` (the item updates, their `HAND_ITEMS`
+rows), `moby_update/classes/{blaster_shot, devastator_missile, ryno_missile, missile}.rs` (the projectiles),
+`particles/{type21, type27, type44, type72}.rs`, `targeting.rs` (`cone_miss`, `polar`, the record readers, the screen
+markers); engine `marker_render.rs` (the 2D markers, into the HUD pass) and `tesla_render.rs` (the beam, on
+crate::fx_draw). Each module's doc carries its pvar layout, state machine and constants with their addresses.
+
+**What each does** (module docs for the detail):
+* **Blaster**: ○ draws (the persistent arm: stance 56 / layer 57 / crouched 62); while the arm is out and 5 ticks after
+  the draw, a shot every 6 ticks (one ammo each), 40 u/s from the item's joint list 0 (first person: 0.15 right, 0.15
+  down, 0.75 ahead of the eye along the view); its search takes the nearest targetable moby within 20 whose aim point is
+  within 9° of the aim (less the record's radius), with clear camera and muzzle lines; a target's pitch is clamped to
+  ±10° of the aim, the shot homes on its aim point (spring turns, 270°/s). A 0.42 hit sphere at the muzzle, five
+  sparks and a flash (type 27), a grey light 15 ticks; the item's firing sequence 4 whose loop sound (class sound 1) is
+  the gun's sound. The shot (305): a glow (type 26) and a 17-sprite trail (type 72) it places each tick; damage 0.25
+  (flags 0x10001) through the path test; sparks and smoke (types 27 / 23) where it ends; 35 ticks, 64 from the camera.
+  Markers: green (FX 0x26) over the target; red crosshair in first person.
+* **Devastator**: ○ held (35-tick lockout, one ammo a missile); standing (or walking slowly) Ratchet plays the shot 54,
+  else the two arm layers 73; its search takes creatures (class type 5) within 10° (+40° gold) of the aim (less the
+  radius), a creature within 2.5 and 60° of Ratchet at once; a creature no missile holds becomes the lock (20 ticks).
+  First person: a ray 70 along the view locks what it hits, the lock-on crosshair (FX 0x27, turning) and the green
+  marker over the lock. Muzzle smoke and burst (types 44 / 21), a warm light (radius 7). The missile (153): speeds up to
+  20 u/s, leads its target (`missile::intercept_time`), spring turns 360°/s; damage 3 on the path and a 2-radius blast
+  (flags 0x830000); the blast: 10 streaks, a fireball (`bomb::fireball`, 0x2c4c20), 3 pairs of rings, 10 puffs, the
+  flashes (`FlashSpawn`), the shake, the explosion light (the Bomb Glove's template); 300 ticks / 70 (140) from Ratchet.
+* **R.Y.N.O.**: its search follows the camera (creatures, 97°, 80, score `d/5` near, `yaw²·pitch²·d + d` far); the green
+  marker (FX 0x23). ○ fires a salvo: 7 missiles 9 ticks apart from its 9 barrels for one ammo (item swaps locked), each
+  taking 1 off the target's health left, then the next target (the salvo's own list of taken ones; 180°, 100) or a taken
+  one at random. The missile (457) wobbles about its centre line, leads its target, trails smoke (type 4), damage 3
+  (flags 0x830000) on its path and the beam explosion (`SpawnBeamExplosion`, 10 / 3 / 9).
+* **Tesla Claw**: ○ held after a 16-tick warm-up: a 20-point chain up to 12 long (grows at 7 % a tick) waving (three
+  phases), pulled to its target (creatures within 15, 32° of the camera, 45° of Ratchet; held at most 50 ticks), hit
+  tests every other point (a creature is passed through, anything else stops the chain and is hit), the target hit
+  (damage 2, flags 0x210000) every 5 ticks, a second chain, four flickering arcs, sparks (type 53), a bluish light, the
+  hum (class sound 4 looping), one ammo per 10 ticks. The draw: FX 14 / 16 strips across the view, the claw's glow
+  (FX 0xb), additive.
+
+**Shared pieces (built once)**: `guns::{item_point, first_person, camera_point, aim_angles, hero_point}` (all four, and
+`item_point` is the Pyrocitor's nozzle too); `targeting::cone_miss` (Blaster, Devastator), `targeting::polar`
+(`FUN_00277b50`: every gun and missile), `targeting::{aim_point, record_radius, record_health}`, `targeting::Markers` /
+`marker_render` (Blaster, Devastator, R.Y.N.O.); `missile::intercept_time` / `lead_point` (both missiles: the same
+code in `0x2c5b70` and `0x2e5a48`); `creature::turn::spring_turn` (the shot and both missiles); the weapon arm and
+persistent stance of §2.4 / §7 (`draw_weapon` via `Weapons::pending_draw`, `put_away`, `gun_stance`, `idle_stance`,
+`stance_kept`, `arm_on_state_change`) with `Weapons::pending_anim` (the Devastator's standing shot `0x247a90`) and a
+put-away now dropping a draw the same update asked for earlier (the R.Y.N.O.'s last missile); the hand item's sequence
+loop sound (`items::refresh_seq_loop`, `FUN_002637d8` for the hand item: the Blaster's firing sequence); `HitSink::
+{probe_moby, class_type}` (the guns' rays and creature filter); `SoundCmd::MobySound` / `HeroSounds::moby_sound` (a
+sound owned by a moby the hand item created: the R.Y.N.O.'s missile); `fx::create_one` (the hero's queued spawns and
+the shot's end share one record builder); `Particles::links` (records a hero-created moby owns by pointer: the shot's
+trail). Per weapon, as the game: each update, each search, each constant set, each projectile update.
+
+**Enemy-side reactions deferred** (the hits reach the targets through the existing hit path; their reactions are the
+classes' own): the missiles' `record +0x1e |= 0x80` (the target learns a missile is on it) is written but no ported
+class reads it; the Tesla Claw's temporary collision-off of the creatures its chain passes (+0x94) is done; the
+record +0x04 = 1 ("quick" targets: 5-tick hold, 1-tick cooldown), +0x0b (no lead) and +0x0c (the missile's top
+speed) are read.
+
+**Native, not emulated**: standard `f32` with `atan2` / `sin` / `cos` for the fast trig; the markers are 2D HUD
+primitives (i32 corners: the game's 1/16-pixel positions rounded [L]); the beam is ordinary textured quads; no PS2
+arithmetic. **Inferred [L]**: 0x140600 / 0x14060c (a forced aim yaw: never set in the level code) are 0; the camera's
+x axis is right and y down (the view rows 0x167100 as `BSphereView` has them) for the first-person muzzles; the hand
+item's loop-sound phase is 0 (it has no table address); game mode 2 never reaches a hand-item update in the port; the
+R.Y.N.O. missile blocked at its barrel explodes on its first update (the game at once); the Tesla draw's scroll
+steps per tick, its claw glow has no jitter and its first strip width is the call's `f12`; `sqrt` of the intercept's
+discriminant is of its magnitude; the Devastator's blocked spawn explodes one step out; the Tesla chain's lines
+ignore Ratchet (the game: the item). **M**: the camera angles of the R.Y.N.O. search from the camera's forward row;
+`FUN_0026e7b0` as `has_collision`; `0x15ed64` as 1.0.
+
+**Not ported**: the gold versions (0x13e52b / 0x13e52f / 0x13e533 not mirrored: the Blaster's ricochets, the gold
+missile's re-targets and triple blast, the Tesla's second target); the shot statistics and the Tesla's "hold ○"
+help; the R.Y.N.O.'s item state 3 (no writer in the level code); the Blaster's `fun_0020d580` in the hold state 0x72;
+0x141618 branches.
+
+**Tests** (`crates/rc-game/tests/hero_guns_novalis.rs`, headless on the arrival state with `GiveItem(id, equip)`,
+every run twice identical): per weapon the def row and ammo; Blaster standing (draw, one shot per 6 ticks per ammo,
+40 u/s, firing sequence 4, breaks crate 376, put away), running (arm layer 57), a critter targeted (green marker)
+and hit, first person (0x1e, red crosshair, shots below the eye); Devastator at the critters (shot 54, one missile /
+35 ticks, a lock, the blast, a critter hit), running (arm layers 73), first person (lock-on crosshair); R.Y.N.O. salvo
+(lock + marker, one ammo, 7 missiles 9 ticks apart, trails, a critter hit), running, first person; Tesla Claw at the
+critters (stance 51, ammo per 10 ticks, a lock, a hit, stop and put away) and at a crate (the chain stops there, the
+crate breaks). Unit tests in each module (searches, the shot's aim, the intercept, the trail curve, the strips, the
+particle types). The engine sees the markers and the beam (screenshots, below). `novalis_hero_digest`: unchanged.
+
+**Follow-up (user)**: a PCSX2 trace of each weapon firing on Novalis (`docs/workflows/pcsx2.md`: a savestate with the
+weapon bought, then `rc-trace`'s RAM reads of the item pvars, the projectiles' pvars and the markers 0x1694c0 per
+tick) would pin the search results, the salvo's target order and the missiles' wobble against the game.
+
+## 10. How weapons act on creatures; the Suck Cannon and the Taunter (2026-09-28)
+
+**Ids** (the item table 0x179f40 against `lvl.vtbl` 0x20bb00, level01): Suck Cannon **9** / class 849 → `0x303000`;
+Taunter **14** / 175 → `0x2ccb78`; Morph-o-Ray **21** / 185 → `0x2d2450` (its chicken: class **270** `0x2df448`, the
+morph `0x2defb0`). Neither the Suck Cannon nor the Taunter has a `HeroPdaGadget` case; both fire from their updates
+(`HAND_ITEMS` rows with `ItemUpdate::Slot`). **H** (decompiler output; the disassembly where the decompiler lost a
+comparison: the fire key `0.0 ≤ MobyAnimKeyTime` at 0x303a70; the class tables read from the overlays).
+
+**The enemy-reaction "interface" in the game — what is shared and what is not** (`creature::react`'s module doc):
+* **Shared by every weapon**: the hit records and the resolver (damage, knockback, burn: ported before, `creature::damage`).
+* **One real per-class dispatch, used by one weapon**: the third word of each `lvl.vtbl` entry (0x20bb00 + 12·i + 8) is a
+  six-slot **class reaction table** the loader puts in class header +0x2c. Only the Suck Cannon calls it (slot +0x00
+  from `0x3028c8`, +0x04 from the carried update, +0x08 from its fire, +0x0c from the carried update's let-go, +0x10 by
+  every handler, +0x14 at a landing). The default table (level01 0x20c3ac: `return 0` ×5 + a `DeleteMoby` wrapper)
+  makes a class unsuckable. Per class the slots are three-line wrappers; the work is the shared handlers `0x304168`,
+  `0x304390`, `0x3044a0`, `0x304690`, `0x305260`, `0x3051a8`, `0x304798` over the class's **suck record** (the creature
+  header's +0x14 record). Tables on the disc (all 19 overlays): 270 everywhere; 577 (01); 572 / 866 (01, 05, 11); 749,
+  580, 340, 827, 252, 193, 1246, 238, 63, 1445, 1382, 568, 1906 on other levels (not ported). 865, 459 and every other
+  Novalis class: the default.
+* **Per weapon, poking a shared record**: the Taunter writes the damage record's **+0x18** (the lure) of the creatures
+  in front (`0x2cc830`); the classes read and clear it (577: 240-tick alert, range 24; 572 family: alert; 459: 600-tick
+  alert). The Morph-o-Ray reads the damage record's health / +0x04 and replaces the target with a chicken
+  (`0x2defb0`: `CreateMoby(0x10e)`, death bits, `DeleteMoby` unless +0x0e = 1). The Decoy Glove's decoys and gold
+  chickens are the enemies' own target search's (`0x274b78`, ported).
+* **Not in this game**: stun, freeze.
+
+**In the port**: `moby_update/creature/react.rs` (the table resolution `tables_from_overlay` / `table`, the wrappers
+`CRITTER` / `AMOEBOID_866` / `AMOEBOID_572` / `CHICKEN` with the class sequence tables 0x161a70 / 0x161a50 / 0x161a40 /
+0x161870, the handlers, the carried update, the burst, the Suck Cannon's globals); the classes' held states call
+`react::carried` (577 state 7 → 0xe after a landing, 572 / 866 state 0xe → 1); `hero/suck_cannon.rs`, `hero/taunter.rs`,
+`hero/reactive.rs` (their pvars, `Weapons::reactive`); `HitSink::world` (a hand item's calls into class code run on the
+moby world; the engine's `CellHits` and the tests implement it); the engine resolves the level's tables once
+(`gameplay::level_reactions`) and fills the Taunter's whistle cycle from the level's sound defs.
+
+**The Suck Cannon** (module doc for the states): ○ held pulls creatures within 15 in a 12° cone (110° within 3; the
+same in pitch) with a clear line from the mouth: record 1 (turn away) → 2 (rise) → 3 (pulled at up to 0.75 a tick,
+drifting sideways in Ratchet's aim frame, shrinking with the distance, oriented toward the cannon's rows) → 4
+(swallowed: hidden, no update, scale 0, death bits, the cannon's sound 5); up to 5 held (10 gold). Released, anything
+still approaching is let go (record 7: it falls and walks, `0x26d610`, until it lands; the class resumes). ○ again
+fires one: at the muzzle, 0.4462 a tick along the aim plus Ratchet's velocity, homing on the fire search's creature
+(2.5-unit lock or a 26° cone with the bounding radius, clear camera lines) or the first-person ray's; on its path it
+hits mobys (damage 2, flags 0x430000, type 1 / 1, class 0x351), bounces off floors (record 6: rolling), and bursts on a
+wall (normal more than 50° from vertical), after 300 ticks, 60 from Ratchet or too slow: the Bomb Glove's explosion
+effects at half the fireballs (area hits only gold).
+
+**The Taunter**: ○ plays a whistle (the item's sequence 3; the whistles cycle while the next sound def has near = far =
+3.0) and lures the creatures within 30 and 55° of Ratchet's facing (every 4th frame while it sounds); the crates
+500 / 501 / 505 / 511 within 12 in the same cone are counted and one of them (`randi(count of the last whistle)`) gets a
+hit of 1 — the whistle breaks a crate.
+
+**Native, not emulated / inferred [L]**: standard `f32`; the orientation blend is a slerp (`fun_001fa400`) and the
+target rows are `Euler(−π/2, 0, −π/2) · cannon rows` [L: the product order]; the hand items are not table mobys, so the
+cannon's position, mouth and rows reach the creatures through `react::Cannon` (as the game's moby loop reads the
+matrix the hero update built), its sequence-4 request and sound 5 are made by its next update, the swap lock by the
+next update [L: one tick]; the lure moby is Ratchet's (the classes only test it for non-zero); a moby-only hit on the
+flight uses (0, 0, 1) for the stale normal [L]; the whistle's aliveness is the previous flush's
+(`HeroFx::item_loop_alive`). The chicken's suck record lives in its own pvars (+0xe0; the game: a global table).
+
+**Not ported** (gaps): the Morph-o-Ray and the chicken 270 (G-WPN-015); the vortex (`0x3067d0`, `0x306528`, draw
+callback `0x306158`, `0x307850` / `0x3078b8`) and its bolt / ammo vacuum `0x307a50` (their `rand` draws missing);
+particle type 18 (the flight trail: records and draws counted); the held-count HUD element; the Taunter's rings
+(`0x2cd000` / draw callback `0x2cd1d0`) and the mines' lure list 0x1b0c30 (batch 2); the gold cannon; the stats.
+
+**Tests** (`crates/rc-game/tests/hero_reactive_novalis.rs`, headless, every run twice identical): Novalis — a critter
+pulled (records 1 → 7 on the release → 2 → 3 → 4), held and hidden (held 1), fired (record 5 → 6) and burst at a wall
+more than 10 units on; the Taunter lures both pit critters (their +0x18 set, cleared by them the next tick) and knocks
+the first of four crates in front (a hit record, broken). Rilgar (level 05) — the level's tables resolve to {270, 572,
+866} (865 default) and a small amoeboid 866 is pulled and swallowed (held state 0xe). Unit: `react::tests` (the
+quaternion round trip, the class fallback), `suck_cannon::tests` (the groups). `novalis_hero_digest` with
+`RC_HERO_DIGEST_NO_IDLE=1`: unchanged by construction (the new hero fields sit after the digest's cut).
+
+**Engine** (`RC_SCENE=0 RC_AUDIO=0 RC_GIVE_ITEMS=9`, frame-exact dumps, two runs byte-identical): Novalis
+`RC_HERO_AT=135.6956,177.82448,40.578,0 RC_PLAY_SCRIPT='40-200:press CIRCLE,260-262:press CIRCLE,330-336:press CIRCLE'`
+— frame 112 a critter pulled in, 116 swallowed (its bolts burst out: the swallow's `SetDeathBits`), 268 fired out;
+Rilgar `RC_LEVEL=5 RC_HERO_AT=161.52519,326.2638,26.5,1.5708 RC_PLAY_SCRIPT='30-160:press CIRCLE'` — frames 50 / 54 /
+62: the small amoeboid in front, pulled, swallowed. The Taunter has no visible effect of its own yet (its rings are
+G-WPN-017).

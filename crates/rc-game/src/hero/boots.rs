@@ -44,12 +44,15 @@
 //!   after frame 25. **0x70** Magneboots wrench swing (group 6, □ with 0x13f658 = 1: the weapon check): melee rows
 //!   5 / 6 alternating, anim 0x5c / 0x5d, back to 0 after the row's idle frame.
 //!
-//! **Cable slide 0x74** (group 0x1a, anims 0x73 then 0x66; **L** identity: the hands hang on a grind path). Cable
-//! contact `0x20d330` (the overlays of [`CABLE_LEVELS`]): falling (or a rising jump), 0x13f534 = 0, the hand point
-//! (0.3 ahead, 1.34 up in his frame) near a grind path (the rail search above) and −0.7 (−1.2 with □ pressed) ..
-//! 0.4 above it. Physics: the hands follow the path at a speed that approaches 14 u/s at 9·dt² (half the entry
-//! speed along it to start), a spring pulls the hands onto it; past the end he flies on and falls (6) after 5
-//! ticks.
+//! **Cable slide 0x74** (the zipline: Ratchet hangs from a cable by the wrench; group 0x1a, anims 0x73 then 0x66;
+//! docs/plan/hero_states.md "Cable slide 0x74"). The cables are grind paths too; only Kerwan's (3) are cables. Cable
+//! contact `0x20d330` (the overlays of [`CABLE_LEVELS`]): a rising jump (group 4, 0x13f76e = 0) or the fall
+//! (group 2), 0x13f534 = 0, the hand point (0.3 ahead, 1.34 up in his frame) near a grind path (the rail search
+//! above) and −0.7 (−1.2 on the tick □ is pressed) .. 0.4 above it. Taken by the jump group ([`jump_contacts`]) and
+//! the fall; the weapon check leaves □ to the grab (no jump attack 0x14 at a cable). Entry: the wrench forced into
+//! the hand (0x1413f7). Physics: the hands follow the path at a speed that approaches 14 u/s at 9·dt² (half the
+//! entry speed along it to start), a spring pulls the hands onto it; past the end he flies on and falls (6, 8-tick
+//! lockout) after 5 ticks. No jump-off.
 //!
 //! **Effects** (hero polish): the rail's and the cable's loop (class sound 0 in the hero's sound slot 0x141568,
 //! `super::packs::loop_sound`; released by the grind jump / switch / hurt and by a group change), the type-25 sparks
@@ -301,6 +304,16 @@ pub(super) fn rail_contact(h: &Hero) -> bool { h.boots.contact }
 
 /// A cable caught (0x13f94c ≠ 0).
 pub(super) fn cable_contact(h: &Hero) -> bool { h.boots.cable }
+
+/// The jump group's contact line (level00 0x229b70 case 7 / 9 / 10 / 0xb..0x12 / 0x1c / 0x3c / 0x69, right after the
+/// Thruster stomp's R1 test and before the forced fall; Kerwan's 0x21c668 has only the cable half): `0x28` on the
+/// rail contact 0x13f8bc, else `0x74` on the cable contact 0x13f94c. The rail contact takes a descending jump, the
+/// cable contact a rising one ([`contacts`]). True when the state changed.
+pub(super) fn jump_contacts(h: &mut Hero, c: &mut Ctx) -> bool {
+    let to = if rail_contact(h) { 0x28 } else if cable_contact(h) { 0x74 } else { return false };
+    h.set_state(c, to, true);
+    true
+}
 
 // ------------------------------------------------------------------------------------------------
 // The gravity mode and frame (level01 0x248ad8, 0x248b68, 0x2323d8, 0x232738, 0x232cc0, 0x233588, 0x236358).

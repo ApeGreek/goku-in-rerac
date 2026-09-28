@@ -251,7 +251,7 @@ fn mission_checkpoint(w: &mut World, id: MobyId) {
     if cub == -1 || w.missions.mission_done(w.svc.level, w.m(id).mission) == 0xff { return; }
     w.svc.unported("bolt crank 280: visit-state save 0x29b0a0");
     let mission = w.m(id).mission;
-    w.svc.cinematic.requests.push(crate::cinematic::EngineRequest::MissionDone { mission });
+    crate::cinematic::set_mission_done(w, mission);
     let Some(s) = usize::try_from(cub).ok().and_then(|k| w.svc.volumes.cuboids.get(k)) else { return };
     let (centre, euler) = (s.matrix[3], s.euler);
     super::checkpoint::record(w, super::checkpoint::Record { pos: [centre[0], centre[1], centre[2]], rot: [euler[0], euler[1], euler[2]] });

@@ -223,7 +223,7 @@ fn mission_done(w: &mut World, id: MobyId) {
         }
     }
     let mission = w.m(id).mission;
-    w.svc.cinematic.requests.push(EngineRequest::MissionDone { mission });
+    crate::cinematic::set_mission_done(w, mission);
     let c = p::i32(&w.m(id).pvars, 0x30);
     if let Some(s) = w.svc.volumes.shape(rc_formats::volumes::ShapeKind::Cuboid, c).copied() {
         checkpoint::record(w, Record { pos: s.centre(), rot: s.euler });

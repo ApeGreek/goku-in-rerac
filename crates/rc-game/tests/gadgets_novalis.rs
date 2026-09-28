@@ -197,7 +197,7 @@ fn frame(m: &mut Menu, gs: &mut GameState, pressed: u32, f: &mut u32, sounds: &m
     sounds.extend(out.sounds);
     if out.equip.is_some() { *equip = out.equip; }
     let mut draws = Vec::new();
-    if out.exit.is_none() { m.menu.draw(&m.assets, gs, &env, &mut draws); }
+    if out.exit.is_none() { m.menu.draw(&m.assets, gs, &env, &mut rc_game::rng::Rng::new(), &mut draws); }
     draws
 }
 
@@ -227,6 +227,20 @@ fn gadgets_page_equips_the_packs() {
     let draws = run(&mut dr, &mut m, &mut gs, &[(0, 2)]);
     let sprites = draws.iter().filter(|d| matches!(d, MenuDraw::SpriteUv { .. })).count();
     assert_eq!(sprites, 2, "two owned items on the page");
+    // `fun_00223e28` last, over every on-screen panel (its navy rect: x0 = x + 1, x1 = x + w − 1): the vignette, the
+    // scan lines and the glass (and a noise burst only now and then).
+    use rc_game::menus::screen_static::{StaticTex, BAR_FX};
+    let navy: Vec<[i32; 4]> = draws
+        .iter()
+        .take_while(|d| !matches!(d, MenuDraw::PanelBegin { .. }))
+        .filter_map(|d| match d { MenuDraw::Rect { x0, y0, x1, y1, rgba } if *rgba == rc_game::menus::pause::NAVY => Some([x0 - 1, y0 - 1, x1 - x0 + 2, y1 - y0 + 2]), _ => None })
+        .filter(|[x, y, w, h]| *x < 0x200 && x + w >= 0 && *y < 0x1a1 && y + h >= 0)
+        .collect();
+    let lines: Vec<[i32; 4]> = draws.iter().filter_map(|d| match d { MenuDraw::Static(s) if s.tex == StaticTex::Fx(BAR_FX) => Some([s.x, s.y, s.w, s.h]), _ => None }).collect();
+    assert!(!navy.is_empty());
+    assert_eq!(lines, navy, "scan lines on every on-screen panel, in slot order");
+    let first = draws.iter().position(|d| matches!(d, MenuDraw::Static(_))).unwrap();
+    assert!(draws[first..].iter().all(|d| matches!(d, MenuDraw::Static(_))), "the effect is drawn after everything else");
     let v = m.menu.view;
     assert_eq!(v.model.map(|mv| mv.equip), Some([item::BOMB_GLOVE, 0, 0, item::HELI_PACK]));
     let pv = v.preview.expect("the item preview");

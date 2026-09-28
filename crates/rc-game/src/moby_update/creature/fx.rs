@@ -31,7 +31,7 @@ pub const LIGHT_UPDATE_FN: u32 = 0x2f3748;
 pub const PIECE_UPDATE_FN: u32 = 0x30cd18;
 pub const PIECE_CLASSES: [i16; 13] = [1736, 1737, 1738, 1747, 1748, 1749, 1761, 1762, 1763, 1770, 1814, 1815, 1817];
 
-fn frame_load(w: &World) -> (f32, f32) { (f32::from_bits(w.svc.frame_load[0].0), f32::from_bits(w.svc.frame_load[1].0)) }
+pub(crate) fn frame_load(w: &World) -> (f32, f32) { (f32::from_bits(w.svc.frame_load[0].0), f32::from_bits(w.svc.frame_load[1].0)) }
 
 /// A record of an unported particle type (the pool slot the game takes) and its count.
 pub fn part_unported(w: &mut World, ty: u8) -> bool {

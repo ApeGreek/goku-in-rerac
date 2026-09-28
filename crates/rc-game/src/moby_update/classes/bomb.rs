@@ -375,8 +375,8 @@ const TRAIL_SPREAD: f32 = 1.0;
 const SMOKE: [u32; 4] = [0x2fff_ffff, 0x2f00_ffff, 0x2f00_7fff, 0x2f00_4fff];
 
 /// The smoke rings' colours (`0x20a980`, `0x20a998`: `randi(6)` each).
-const RING_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
-const RING_C2: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
+pub(crate) const RING_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
+pub(crate) const RING_C2: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
 
 /// The explosion (+0xbc ≠ 0; `drift` = the reflected direction ·2·dt (or the velocity at the fuse's end),
 /// `normal` = the unit normal of the face it hit).
@@ -478,7 +478,7 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
 
 /// `FUN_002c4c20(pos, vel, life, type, gold)`: a fireball (class 122): 2 spin draws `randf(360°, 720°)·dt`, and for
 /// type 0 a smaller size (`randf(0.5, 0.75)`).
-fn fireball(w: &mut World, pos: [f32; 4], vel: [f32; 4], life: i32, ty: u8) {
+pub(crate) fn fireball(w: &mut World, pos: [f32; 4], vel: [f32; 4], life: i32, ty: u8) {
     let Some(m) = w.create_moby(FIREBALL_CLASS) else { return };
     let a = w.rng.randf(dt() * 2.0 * PI, dt() * 4.0 * PI);
     let b = w.rng.randf(dt() * 2.0 * PI, dt() * 4.0 * PI);
@@ -506,7 +506,7 @@ fn fireball(w: &mut World, pos: [f32; 4], vel: [f32; 4], life: i32, ty: u8) {
 /// `FUN_00309a68(size, parent, pos, vec, T, r, g, b, a)`: a flash of class 1192 (3 draws for its rotation), the
 /// shared `FlashUpdate` (`super::debris::flash_update`) growing it to `size` × its class scale over `T` ticks.
 #[allow(clippy::too_many_arguments)]
-fn flash(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec: [f32; 4], t: i32, r: u8, g: u8, b: u8, a: u8) {
+pub(crate) fn flash(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec: [f32; 4], t: i32, r: u8, g: u8, b: u8, a: u8) {
     let Some(m) = w.create_moby(FLASH_CLASS) else { return };
     let e = [w.rng.randf(-PI, PI), w.rng.randf(-PI, PI), w.rng.randf(-PI, PI), 0.0];
     let mo = w.mm(m);

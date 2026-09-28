@@ -331,7 +331,7 @@ pub fn update(w: &mut World, id: MobyId) {
             let planet = pi32(w, id, pv::PLANET);
             cinematic::unlock_planet(w, planet);
             let mission = w.m(id).mission;
-            if mission != 0xff { w.svc.cinematic.requests.push(cinematic::EngineRequest::MissionDone { mission }); }
+            cinematic::set_mission_done(w, mission);
             if let Some((c, e)) = cuboid(w, pi32(w, id, pv::CHECKPOINT)) {
                 super::checkpoint::record(w, super::checkpoint::Record { pos: c, rot: e });
             }

@@ -41,6 +41,7 @@
 //! | `LateOpaque` | Transparent3d (`Blend`) | none | on | GEQUAL | – (a shadow caster's opaque draws: after the shadow pass, crate::shadow_render) |
 //! | `EffectMix` | Transparent3d (`Blend`) | GS equation on display bytes (crate::display_blend) | off | GEQUAL | – |
 //! | `AdditiveNoZ` | Transparent3d (`Blend`) | `Cs·As + Cd` on display bytes (crate::display_blend) | off | GEQUAL | – |
+//! | `EffectLowAlpha { aref }` | Transparent3d (`Blend`) | GS equation on display bytes (crate::display_blend) | off | GEQUAL | As ≥ AREF (a moby glow packet's `ColorOnlyLowAlpha` half) |
 //! | `Hud` | Transparent2d on the HUD camera (crate::hud_render) | GS equation | off | ALWAYS | – |
 //!
 //! `Hud` is TEST_1 0x5380b (ATE GEQUAL 0x80, AFAIL RGB_ONLY, ZTST GEQUAL) with every 2D primitive at Z 0xfffff0,
@@ -168,6 +169,9 @@ pub enum GsPass {
     AdditiveNoZ,
     /// `(Cs − Cd)·As + Cd` on display bytes (crate::display_blend), no Z write (translucent effect mobys).
     EffectMix,
+    /// `ColorOnlyLowAlpha` on display bytes (crate::display_blend): the soft edge (As < AREF) of a moby's glow
+    /// packets (crate::moby_render, the MobyProc glow list).
+    EffectLowAlpha { aref: u8 },
     /// `Opaque` drawn in Transparent3d: a shadow caster's opaque draws, which the game draws after the shadow pass
     /// (crate::moby_render `caster_pass`, crate::shadow_render).
     LateOpaque,
@@ -216,10 +220,11 @@ impl GsPass {
             GsPass::Hud => (true, false, Always, D::None),
             GsPass::LateTested { aref } => (true, true, GreaterEqual, D::Below(aref)),
             GsPass::AdditiveNoZ | GsPass::EffectMix => (true, false, GreaterEqual, D::None),
+            GsPass::EffectLowAlpha { aref } => (true, false, GreaterEqual, D::AtOrAbove(aref)),
             GsPass::LateOpaque => (false, true, GreaterEqual, D::None),
         };
         let additive = matches!(self, GsPass::AdditiveNoZ);
-        let display = matches!(self, GsPass::AdditiveNoZ | GsPass::EffectMix);
+        let display = matches!(self, GsPass::AdditiveNoZ | GsPass::EffectMix | GsPass::EffectLowAlpha { .. });
         GsState { blend, additive, depth_write, depth_compare, discard, display }
     }
 

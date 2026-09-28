@@ -8,7 +8,8 @@ cutscene are there, and are they one system" and documents the in-level cinemati
 ## 1. Answer in brief
 
 The game has **three distinct kinds** of cutscene, and **no script system**. Two of them share nothing but the
-call that starts them.
+call that starts them. (The same holds for level logic in general: no script VM or data, only each level's own class code
+calling engine helpers; docs/plan/level_scripting.md.)
 
 | kind | examples | started by | data | game mode | camera | player | skip |
 |---|---|---|---|---|---|---|---|

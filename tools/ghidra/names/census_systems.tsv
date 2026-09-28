@@ -1,0 +1,449 @@
+# Class census system tags (docs/plan/class_census.md): one row per shared function the unported classes call.
+# key: L01:<level-01 address> | boot:<boot address> | C:<clusters.tsv hash, 12 hex> (engine code not linked on level 01) | H:<masked-code hash>.
+# status: has (the port has it: cited in crates/) | partly | missing | trivial (arithmetic a port writes inline) | ignore (debug) | family (level code private to one class family).
+# conf: V = read in the decomp / the port cites it; L = inferred from the decompiled code without a port citation.
+key	name	system	status	conf	note
+L01:00221188	VecAdd	math	has	V	VecAdd
+L01:00220e30	ticks	math	has	V	ticks (hud.rs, particles.rs)
+L01:00221ff8	fast_add_rotations	math	has	V	
+L01:00221710	fast_sin	math	has	V	
+L01:002211b8	VecSub	math	has	V	
+L01:00221360	VecDistance	math	has	V	
+L01:0026c9c8	random_float_between	math	has	V	rng.rs randf
+L01:00221410	FastVecNormalize	math	has	V	
+L01:00222160	truncate_float_to_s32	math	trivial	V	cvt.w.s
+L01:002216f8	fast_cos	math	has	V	
+L01:002217c0	FastArcTan__Fff	math	has	V	pad.rs fast_arctan
+L01:0026c930	randi	math	has	V	rng.rs randi
+L01:00221398	VecDistance2	math	has	V	
+L01:002212e8	FastVecLength	math	has	V	
+L01:00220e78	FastDecTimer__FRi	math	has	V	
+L01:0026ca90	random_angle_radians	math	has	V	
+H:4f75811bc46e3aab	FUN_001ff260	math	trivial	V	zero a quadword
+L01:00221210	VecScale	math	has	V	
+L01:00220ea8	FastDecTimer__FRs	math	has	V	
+H:3ee41218b715c799	FUN_001ff218	math	trivial	V	fabs
+L01:0026c970	rand_range	math	has	V	
+L01:00222150	convert_integer_to_float	math	trivial	V	int to float
+L01:00222040	fast_subtract_rotations	math	has	V	
+L01:00220e20	multiply_global_scale	math	has	V	
+L01:002221a8	FastTweenColor	math	has	V	
+L01:00221318	fun_001f9b20	math	has	V	
+L01:00222100	FastDiffRots__Fff	math	has	V	
+L01:002215e0	MatrixMulVec3	math	has	V	
+L01:00270728	Approach	math	has	V	Approach
+L01:0026ca28	randf_sym	math	has	V	
+L01:0026cb58	rand_vec	math	has	V	
+boot:001160d8	rand	math	has	V	rand
+L01:002212d0	FastVecCross	math	has	V	
+L01:00221980	EulerToMatrix	math	has	V	
+L01:00221608	fun_001f9d20	math	has	V	
+L01:00277b50	FUN_00277b50	math	has	V	targeting.rs
+L01:002212a8	FastVecDot	math	has	V	
+L01:00270830	FUN_00270830	math	has	V	water/managers.rs spring
+L01:002745f0	FUN_002745f0	math	has	V	
+L01:00221c08	fun_001fa2d8	math	trivial	V	VU0 matrix transpose
+L01:00220ed8	FUN_00220ed8	math	has	V	
+L01:002731d0	FUN_002731d0	math	has	V	
+L01:002211a0	FUN_002211a0	math	trivial	V	vadd in place
+L01:002211e8	fun_001f9a40	math	has	V	
+L01:002747a0	FUN_002747a0	math	has	V	
+L01:00221460	fun_001f9c48	math	has	V	
+L01:00270ac0	FUN_00270ac0	math	has	V	creature turn
+L01:00272078	FUN_00272078	math	has	V	light word copy (pickup.rs)
+L01:00221960	fun_001fa030	math	has	V	
+L01:002210f0	VecLength	math	has	V	
+L01:002214a8	ClampVecLength	math	has	V	
+L01:00221be8	MatrixCopyRows	math	trivial	V	matrix copy
+L01:00221570	FUN_00221570	math	has	V	
+L01:00221e38	FUN_00221e38	math	has	V	half-angle quaternion (services.rs)
+L01:00270780	Spring	math	has	V	Spring
+L01:00221178	fun_001f9a00	math	trivial	V	
+L01:00221db8	fun_001fa400	math	has	V	
+C:d274f7cb7e91	build_spherical_offset	math	has	V	build_spherical_offset = 0x277b50's formula
+L01:00221ef8	fun_001fa480	math	has	V	
+L01:00272028	FUN_00272028	math	trivial	V	matrix product helper
+L01:00274ac8	FUN_00274ac8	math	has	V	rot about axis (follow_camera.rs)
+L01:00277a00	FUN_00277a00	math	trivial	V	sine bob on z
+L01:00222088	FastNormalizeAngle	math	has	V	
+L01:00277a80	FUN_00277a80	math	trivial	V	spherical oscillation
+C:894382b54358	FUN_0030a830	math	trivial	V	state == 5 test
+boot:001153fc	memset	math	trivial	V	memset
+C:7ac108432ef4	FUN_00250a78	math	trivial	V	ballistic arc parameters
+L01:002218f8	fun_001f9fc8	math	trivial	V	identity matrix
+H:48bb33607515a86f	FUN_002025d8	math	trivial	V	return 0
+L01:00221d78	fun_001fa3c0	math	has	V	quaternion product
+L01:00220f78	FastMemZero16__FPvi	math	trivial	V	
+L01:00221bc8	fun_001fa298	math	trivial	V	matrix copy
+L01:00221ce8	sceVu0MulMatrix	math	has	V	
+L01:0026cae0	fun_00213358	math	has	V	random direction (rand_vec shape)
+L01:00221110	subtract_integer_with_clamp	math	has	V	
+L01:00270ea0	FUN_00270ea0	math	has	V	
+L01:00221240	VecScale	math	has	V	VecScale
+L01:002705a8	FUN_002705a8	math	has	V	
+L01:00221038	FastMemCopy	math	trivial	V	memcpy
+C:dcf5a192ab6c	FUN_001fc060	math	trivial	V	timer decrement by a rate
+L01:00270b58	SpringAngle	math	has	V	SpringAngle
+L01:002705b8	FUN_002705b8	math	trivial	V	lerp 4 lanes
+L01:00220f50	FastMemSet	math	trivial	V	
+L01:00222170	FUN_00222170	math	has	V	
+L01:0026e520	FUN_0026e520	math	has	V	quadratic roots
+L01:00221288	FUN_00221288	math	has	V	
+L01:00221c58	FUN_00221c58	math	trivial	V	
+L01:00221d30	FUN_00221d30	math	trivial	V	
+L01:0026e7d8	FUN_0026e7d8	math	trivial	V	
+C:a1a81f477e9b	FUN_0027fe88	math	trivial	V	rotate a point about a pivot
+H:f9b3ac25fa727ad0	FUN_0021ea10	math	trivial	V	empty function
+boot:00115248	memcpy	math	trivial	V	memcpy
+L01:00221928	fun_001f9ff8	math	has	V	
+L01:00221128	FUN_00221128	math	has	V	
+L01:00221728	FastArcSin__Ff	math	has	V	
+L01:00222138	FUN_00222138	math	trivial	V	modf
+L01:00221170	FUN_00221170	math	trivial	V	
+L01:00220fa0	MemCopy	math	trivial	V	
+L01:002219a0	BuildEulerMatrix	math	has	V	
+L01:00221c98	fun_001fa328	math	has	V	
+L01:00271db0	fun_00214260	math	trivial	L	matrix helper
+L01:00221510	FUN_00221510	math	has	V	
+L01:0026cc00	FUN_0026cc00	math	has	V	Hermite
+L01:0026cc38	FUN_0026cc38	math	has	V	
+L01:00276380	fun_00214a98	math	has	V	
+L01:002764a8	load_display_text_resource_entry	math	has	V	
+C:d001715051e4	FUN_0024e830	creature	missing	L	target acquisition variant (hero states 0x18 / 0x72, decoys 0xcb / 0x76c) not on L01; the port has 0x274b78
+L01:0020cc78	STUB_printf	debug	ignore	V	STUB_printf
+L01:00220f18	raise_kernel_trap	debug	ignore	V	trap
+boot:00120478	fptodp	debug	ignore	L	float to double (printf args)
+boot:00116248	sprintf	debug	ignore	L	sprintf
+L01:002636c0	DeleteMoby	moby	has	V	DeleteMoby
+L01:00263390	CreateMoby__Fi	moby	has	V	CreateMoby
+L01:00265bd8	MobyBuildMatrix	moby	has	V	MobyBuildMatrix
+L01:002650d0	FUN_002650d0	moby	has	V	ambient colour write
+L01:00265100	FUN_00265100	moby	has	V	
+L01:00275690	FUN_00275690	moby	has	V	bounding-sphere view test
+L01:002221f0	FastBSphereCheck	moby	has	V	FastBSphereCheck
+L01:00273278	FUN_00273278	moby	has	V	crate class test
+L01:00265900	UpdateMobyGrids	moby	has	V	UpdateMobyGrids
+L01:00267fc0	MobyCollXformCached	moby	has	V	
+L01:0026c660	MobyAnimBlend	anim	has	V	MobyAnimBlend
+L01:002645a8	FUN_002645a8	anim	has	V	joint points
+L01:00263920	MobyAnimKeyTime	anim	has	V	MobyAnimKeyTime
+L01:002765b0	FUN_002765b0	anim	has	V	key time crossed
+L01:00264370	AttachManipulator	anim	has	V	AttachManipulator
+L01:002643e8	DetachManipulator	anim	has	V	DetachManipulator
+L01:00264508	MobyAttachToJoint	anim	has	V	MobyAttachToJoint
+L01:0026c5a8	hard_cut	anim	has	V	hard_cut
+L01:00265260	MobyAnimAdvance	anim	has	V	MobyAnimAdvance
+L01:00268d80	MobyMarkJointChain	anim	has	V	
+L01:00271030	NormaliseMatrixColumns	anim	has	V	
+L01:00264630	MobyGetBoneMatrix	anim	has	V	MobyGetBoneMatrix
+L01:002646d0	MobyEvalAttachLists	anim	has	V	
+L01:00265d78	MobyAnimSphereLerp	anim	has	L	MobyAnimSphereLerp (named, not cited in the port)
+L01:0026c7a8	MobyAnimBlendEx	anim	partly	L	MobyAnimBlendEx: documented in moby_animation.md, no port citation
+L01:00247a90	SetAnim	anim	has	V	SetAnim (hero)
+L01:002777d8	FUN_002777d8	anim	partly	V	NPC look-at manipulators: talking_npc.rs cites them; G-HERO-009 lists the NPC manipulators as not ported
+L01:00278720	FUN_00278720	cheat	missing	V	big-head manipulator (cheat flag 0x15edb7), not modelled (path_enemy.rs)
+C:ec9f80c602e5	FUN_00251d70	cheat	missing	V	big-head scale (cheat 0x15edb7), level copy
+C:606d87e75d7d	FUN_0025ea60	cheat	missing	V	big-head scale (cheat 0x15edb7), level copy
+C:2bdd99d367de	FUN_0024edc8	anim	has	L	current anim frame (seq / blend / frame at +0x50..0x54), not on L01; the port keeps that state
+C:580a5ea4d4ce	FUN_00263678	anim	has	L	anim frame reached test, not on L01
+C:fb8fab7333a3	FUN_00249618	anim	has	L	sequence frame count from the class table, not on L01
+C:eaa5cf4465ec	FUN_002418b0	anim	has	L	sequence frame count, not on L01
+C:94cf214dfe7f	FUN_0027b9c0	anim	partly	L	moby kept on another moby's joint every tick (attach child), not on L01
+L01:002b52a8	FUN_002b52a8	anim	partly	L	manipulator z rotations (0x221e38), vendor-style
+L01:00263d90	FUN_00263d90	anim	has	V	class texture/scale helper (pyro_glow.rs)
+L01:00263718	update_moby_animation_state	anim	has	L	update_moby_animation_state
+L01:002a1618	PlayClassSound	sound	has	V	PlayClassSound
+L01:002a12f0	SoundIsAlive	sound	has	V	SoundIsAlive
+L01:002a1348	release_voice_slot	sound	has	V	release_voice_slot
+L01:002a13a0	SoundSlotAlloc	sound	has	V	SoundSlotAlloc
+L01:002a16c0	PlayClassSoundByClass	sound	has	V	PlayClassSoundByClass
+L01:002a1968	SoundSetVolume	sound	has	L	SoundSetVolume (audio.md)
+L01:002a1988	SoundSetPitchBend	sound	has	L	SoundSetPitchBend (audio.md)
+L01:002a1770	PlayLevelSoundAtMoby	lsound	has	V	PlayLevelSoundAtMoby (services.rs)
+C:7789cc0440c2		lsound	partly	L	level sound on a slot (0x15f574 base), not on L01
+C:bcf4ccdaa994	FUN_0027eca0	lsound	partly	L	level sound on a slot, not on L01
+L01:0029ac10	FUN_0029ac10	lsound	has	V	
+L01:0027a248	MusicRequestTrack	music	has	V	MusicRequestTrack
+L01:002ac330	DialogStreamStart	dialog	has	V	DialogStreamStart
+L01:002acf50	DialogStreamUpdate	dialog	has	V	DialogStreamUpdate
+L01:00279e78	continue_audio_stream_if_ready	dialog	has	L	
+L01:0026f320	MobyGetHitMessage	hit	has	V	MobyGetHitMessage
+L01:0026f378	FUN_0026f378	hit	has	V	hit resolver (creature damage)
+L01:0026eaa8	FUN_0026eaa8	hit	has	V	hits dealt
+L01:0026e808	FUN_0026e808	hit	has	V	sphere hit with template
+L01:0026e830	FUN_0026e830	hit	has	L	0x26e808 with a direction from the moby's yaw: wrapper of a ported function, not cited
+L01:0026e968	FUN_0026e968	hit	has	V	hit record
+L01:0026f8f8	FUN_0026f8f8	hit	has	V	
+C:76f90a069f65	FUN_0025bd28	hit	has	L	joint point + 0x26e830 wrapper, not on L01
+L01:00272318	FUN_00272318	creature	has	V	hit flash start
+L01:002723f8	FUN_002723f8	creature	has	V	hit flash update
+L01:00271418	FUN_00271418	creature	has	V	knock start
+L01:00271558	FUN_00271558	creature	has	V	knock update
+L01:0026fa48	FUN_0026fa48	creature	has	V	
+L01:0026faf0	FUN_0026faf0	creature	has	V	
+L01:00270cc0	FUN_00270cc0	creature	has	V	
+L01:00274df8	FUN_00274df8	creature	has	V	target
+L01:00274b78	FUN_00274b78	creature	has	V	target
+L01:0026d058	SpringTurn2	creature	has	V	SpringTurn2
+L01:0026cef0	SpringTurn	creature	has	V	SpringTurn
+L01:0026d930	SeedJumpPattern	creature	has	V	walker
+L01:0026d9a8	FUN_0026d9a8	creature	has	V	walker step
+L01:0026d610	FUN_0026d610	creature	has	V	walker move
+L01:0026d8b0	FUN_0026d8b0	creature	has	V	
+L01:0026d1d0	FUN_0026d1d0	creature	has	V	
+L01:0026e6c0	FUN_0026e6c0	creature	has	V	point in path polygon
+L01:00276820	FUN_00276820	creature	has	V	ClampToPath
+L01:00276640	FUN_00276640	creature	has	V	
+L01:00276fe8	LineOfSightTest	creature	has	V	LineOfSightTest
+L01:0026e090	FUN_0026e090	creature	has	V	group alert (+0xbc)
+L01:0026de80	FUN_0026de80	creature	has	V	walk toward target (mouse.rs)
+L01:00273f50	FUN_00273f50	creature	has	V	death explosion
+L01:00273310	SpawnBeamExplosion	creature	has	V	SpawnBeamExplosion
+L01:00278ad8	BreakFxB	creature	has	V	BreakFxB
+L01:002742a8	FUN_002742a8	creature	has	V	piece explosion
+L01:0026e618	GroundHeight	creature	has	V	GroundHeight
+L01:0026e690	FUN_0026e690	creature	has	V	GroundHeight wrapper
+L01:002151d8	CollType	coll	has	V	CollType
+L01:00271258	FUN_00271258	creature	missing	V	burn sparks: counted unported (knock.rs)
+L01:002ff768	FUN_002ff768	water	missing	V	water-entry splash: counted unported (knock.rs)
+L01:0026d270	FUN_0026d270	creature	missing	V	moby move-collide (floating pushables 695): not ported (gaps G-CLS-005)
+L01:00270340		creature	missing	L	hop movement (GroundHeight, SpringTurn2): no port citation
+C:ad33de15cdab	FUN_00247c10	creature	missing	L	steering toward a target (SpringTurn2 + walker step), not on L01
+C:a8d6490c966c	FUN_0025b710	creature	missing	L	same steering helper, other copy
+C:9a9b8f2fffcb		creature	missing	L	random wander, not on L01
+C:6857983d1481	FUN_00278d00	group	has	L	group members' +0xbc = command (0x26e090's job), level copy
+L01:0026e150	FUN_0026e150	group	has	V	group iteration (crate_.rs)
+L01:0026e238	FUN_0026e238	group	has	V	group iteration
+L01:0026e008	MobyGroupCount	group	has	V	MobyGroupCount
+L01:0026e0e0	FUN_0026e0e0	group	has	V	group state command (water managers)
+L01:0027dc98	PartType02Spawn	particles	has	V	type 2
+L01:0027e538	PartType04Spawn	particles	has	V	type 4
+L01:0027f2b0	PartType08Spawn	particles	has	V	type 8
+L01:0027f8f8	PartType11Spawn	particles	has	V	type 11
+L01:00280138	PartType12Spawn	particles	has	V	type 12
+L01:00280698	PartType13Spawn	particles	has	V	type 13
+L01:00280f30	PartType16Spawn	particles	has	V	type 16
+L01:00281748	PartType19Spawn	particles	has	V	type 19
+L01:00281c10	PartType21Spawn	particles	has	V	type 21
+L01:00281f30	PartType22Spawn	particles	has	V	type 22
+L01:00282060	PartType23Spawn	particles	has	V	type 23
+L01:002825f8	PartType25Spawn	particles	has	V	type 25
+L01:00282b00	PartType26Spawn	particles	has	V	type 26
+L01:00282d80	PartType27Spawn	particles	has	V	type 27
+L01:002840e0	PartType34Spawn	particles	has	V	type 34
+L01:002845a8	PartType35Spawn	particles	has	V	type 35
+L01:00286450	PartType44Spawn	particles	has	V	type 44
+L01:00286780	PartType45Spawn	particles	has	V	type 45
+L01:00286a68	PartType46Spawn	particles	has	V	type 46
+L01:00287158	PartType52Spawn	particles	has	V	type 52
+L01:00287328	PartType53Spawn	particles	has	V	type 53
+L01:00288410	PartType59Spawn	particles	has	V	type 59
+L01:00288588	PartType60Spawn	particles	has	V	type 60
+L01:00288d90	PartType64Spawn	particles	has	V	type 64
+L01:0027c5e8	KillPart	particles	has	V	KillPart
+L01:0027c498	CreatePart	particles	has	V	CreatePart
+H:8eab78ecd474c056	FUN_002678b8	particles	has	V	CreatePart (short copy)
+L01:00278810	FUN_00278810	particles	has	V	trail puffs (cutscene_fx.rs)
+C:dd9a5274ae45		particles	has	L	ring of type-21 / type-44 particles, not on L01
+L01:0027e750	PartType05Spawn	ptype	missing	V	type 5 spawner (no type05 module)
+L01:00282ef0	PartType28Spawn	ptype	missing	V	type 28
+L01:00284d88	PartType40Spawn	ptype	missing	V	type 40
+L01:00285768	PartType41Spawn	ptype	missing	V	type 41
+L01:00287e70	PartType58Spawn	ptype	missing	V	type 58
+L01:00289850	PartType67Spawn	ptype	missing	V	type 67
+L01:0028a7a8	PartType74Spawn	ptype	missing	V	type 74
+C:1fa9adb9d4ec	FUN_00274948	ptype	missing	V	CreatePart(0x45): type 69 spawner, not on L01
+L01:002780b0	SpawnImpactSparks	ptype	missing	L	SpawnImpactSparks (particles.md only)
+L01:00211870	CollLine_Fix	coll	has	V	CollLine_Fix
+L01:00212960	coll_sphere	coll	has	V	coll_sphere
+L01:00214468	coll_sphere_mobys	coll	has	V	coll_sphere_mobys
+L01:00274820	PointInCuboid	trig	has	V	PointInCuboid
+L01:002748f8	FUN_002748f8	trig	has	V	point in cylinder
+L01:002749b0	FUN_002749b0	trig	has	V	point in sphere
+L01:0026c250	SetDeathBits	death	has	V	SetDeathBits
+L01:00275988	FUN_00275988	death	has	V	BoltBurst
+L01:002787a0		death	has	V	BreakFxA (bolts)
+C:641f527e8cd4	FUN_002a35d8	death	partly	L	killed / visit bytes 0x1bb024 (SetDeathBits-like), not on L01
+L01:0026f020	FUN_0026f020	shadow	has	V	shadow probe
+L01:0026ee30	FUN_0026ee30	shadow	has	V	
+L01:0026eec8	FUN_0026eec8	shadow	missing	V	blob shadow: counted unported (mouse.rs)
+C:bd2754fc3a9b	FUN_0024d018	shadow	missing	L	blob-shadow list 0x16e200 (32 entries), not on L01
+C:91c6e8fb9bfe		fxdraw	has	V	RegisterDrawCallback (enqueue_callback_list_1)
+L01:0021afe0	RegisterDrawCallback	fxdraw	has	V	RegisterDrawCallback
+L01:0021ee28	FastDrawQuadReal	fxdraw	has	V	FastDrawQuadReal (fx_draw.rs)
+L01:0021ae98	GetEffectTex__Fii	fxdraw	has	V	GetEffectTex
+L01:002b4918	VU1_addGSregister__FUiUlb	fxdraw	has	V	VU1_addGSregister (GS state set by callbacks)
+L01:0021bc50	emit_rgba_draw_packet	fxdraw	has	L	RGBA draw packet
+L01:002781d0	FUN_002781d0	fxdraw	has	V	glow quad
+L01:0021fda8	DrawEnvOverlayMesh	fxdraw	has	V	DrawEnvOverlayMesh
+L01:0021e340	DrawSpriteHelper_A	fxdraw	partly	L	DrawSpriteHelper_A: not cited by the port
+C:9e7a11937cc7	FUN_00263618	fxdraw	has	L	glow-quad variant (FX 0xb, ALPHA 0x48), not on L01
+L01:0021be90	DrawTexturedQuad	fxdraw	has	V	
+L01:002a70a8	ShipDrawCallback	fxdraw	has	V	ShipDrawCallback
+L01:00316ef8	CameraScript	cine	has	V	CameraScript
+L01:00316dd0	FUN_00316dd0	cine	has	V	script camera target position
+L01:00316e28	FUN_00316e28	cine	has	V	
+L01:00317070	CameraScript2	cine	has	V	CameraScript2
+L01:002368e0	HeroTeleport	cine	has	V	HeroTeleport
+L01:0021b438	FadeToBlack__FiUi	cine	has	V	FadeToBlack
+L01:0027b028	FUN_0027b028	cine	has	V	talk / scene system
+L01:0027b480	FUN_0027b480	cine	has	V	
+L01:0027b438	FUN_0027b438	cine	has	V	
+L01:0027b3b0	FUN_0027b3b0	cine	has	V	
+L01:0027b550	FUN_0027b550	cine	has	V	
+L01:002783a8	FUN_002783a8	cine	has	V	
+L01:002ad0c0	StartPssMovie	cine	has	V	StartPssMovie
+L01:002ad050	PlayMovieB	cine	has	V	
+L01:002a2450	FUN_002a2450	cine	has	V	ship hide / show
+C:3b375f0ab07b	FUN_002e9758	camera	missing	L	script camera (type 5) focus point +0x90, not on L01
+C:33058002480b	FUN_002f89b0	camera	missing	L	script camera focus point, other copy
+L01:00313740	FUN_00313740	camera	missing	V	follow camera (type 0) field +0x10 set by mobys: no port citation
+L01:00313768	FUN_00313768	camera	missing	V	follow camera +0x11c / +0x120
+L01:00313858	FUN_00313858	camera	missing	V	follow camera flags +0x1b8 or-equals 3
+L01:00313820	FUN_00313820	camera	missing	V	look flag D+0x116: not modelled (follow_camera.rs)
+L01:00313560	FUN_00313560	camera	missing	V	camera owner lock +0x220
+L01:00313598	FUN_00313598	camera	missing	V	camera owner lock +0x220
+L01:003137f8	FUN_003137f8	camera	missing	V	+0x226
+L01:00313b48	FUN_00313b48	camera	missing	V	+0x1bc
+L01:003137b0	FUN_003137b0	camera	missing	L	
+L01:00313628	FUN_00313628	camera	has	V	props.rs
+L01:00313690	FUN_00313690	camera	has	V	
+L01:003136c8	FUN_003136c8	camera	has	L	
+L01:00313af0	FUN_00313af0	camera	has	V	
+L01:002721f0	FUN_002721f0	camera	has	V	Euler pitch / roll (follow_camera.rs)
+L01:0020fb60	FUN_0020fb60	target	has	V	screen markers (marker_render.rs)
+L01:002711f8	FUN_002711f8	target	has	V	target record
+L01:002789e0	ShowBanner	hud	has	V	ShowBanner (cinematic.rs)
+L01:00277c38	ShowPlanetBanner	hud	has	V	ShowPlanetBanner
+L01:0024ad98	queue_animation_update	hud	has	V	queue_animation_update (hud.rs)
+L01:0024b090	FUN_0024b090	hud	has	V	
+L01:0024b4b0	FUN_0024b4b0	hud	has	V	
+L01:0024c828	FUN_0024c828	hud	has	V	
+L01:0024afa0	fun_001ff480	hud	has	L	HUD slot lookup (queue_animation_update)
+L01:0024b418	FUN_0024b418	hud	has	L	
+L01:0024b538	FUN_0024b538	hud	has	L	
+L01:0024e8d0	HudShowBolts	hud	has	L	HudShowBolts
+L01:0024e908	HudBoltsUpdate	hud	has	L	
+L01:0024ea00	HudBoltsDraw	hud	has	L	
+L01:0024f368	HudWeaponInit	hud	has	L	
+L01:0024fd28	HudFrame	hud	has	L	
+L01:0024fe10	GetIconFrame__Fii	hud	has	L	
+L01:002500e0	HudSprite	hud	has	L	
+L01:00250468	HudSpriteRot180	hud	has	L	
+L01:0021d3f8	font_print_right	hud	has	L	font print
+L01:0021d6d8	font_print_center_large	hud	has	L	font print
+L01:002259e8	msg_string__Fi	hud	has	L	message string
+L01:00278eb8		hud	has	V	prompt tick
+L01:00225818	Help_Request	help	partly	V	Help_Request: the help box is ported; its callers / voices / gates are G-UI-017
+L01:00278f58	try_set_help_message	help	partly	V	try_set_help_message
+L01:00279000	force_help_message	help	partly	V	force_help_message
+L01:002258b0	FUN_002258b0	help	partly	L	help box state reset
+L01:00225a28	FUN_00225a28	help	partly	L	help enable timer
+L01:00225a88	FUN_00225a88	help	partly	L	help disable
+L01:00261448	memcard_Save__Fii	save	missing	V	memcard_Save: logged only (G-SAV-002)
+L01:00260e80	memcard_MakeWholeSave	save	missing	L	memcard_MakeWholeSave
+L01:002755f8	CarryRiders	platform	has	V	CarryRiders (hero riding)
+L01:002752c0	FUN_002752c0	platform	partly	V	carry point: hero ported, mobys on a platform not (infobot.rs, G-CLS-024)
+L01:00275290	FUN_00275290	platform	partly	V	platform block: bolts / crates on platforms not ported
+L01:002753b0	FUN_002753b0	platform	partly	V	
+L01:00275528	FUN_00275528	platform	partly	V	moby attaches to a platform (bolt.rs: not ported)
+C:584a926e540b	FUN_00265358	platform	missing	L	child mobys placed by the parent's matrix every tick, not on L01
+L01:00277fb8	HeroOnMoby	platform	has	V	HeroOnMoby
+L01:00308b28		teleport	missing	V	teleporter pad states: not ported (teleporter.rs)
+L01:00309898		menu	has	V	MenuMobyUpdate
+L01:00272e28	SplineSample	path	has	V	SplineSample
+L01:002726c8	SplineProject	path	has	V	SplineProject
+L01:00272660	FUN_00272660	path	has	V	
+L01:0028b410	FUN_0028b410	path	has	V	flyer path driver helpers (flyer.rs)
+L01:0028b828	FUN_0028b828	path	has	V	
+L01:0028b878	FUN_0028b878	path	has	V	
+L01:0028b8c8	FUN_0028b8c8	path	has	V	
+L01:0028ba80	FUN_0028ba80	path	has	V	
+L01:0028bb90	FUN_0028bb90	path	has	V	
+L01:0028b510	FUN_0028b510	path	has	V	
+L01:0028b7b0		path	has	V	
+L01:00277d40	FUN_00277d40	path	missing	L	position + heading at t along a path: no port citation
+C:c4c12687d93c	FUN_00262e40	path	missing	L	position + heading at t along a path (0x277d40's job), not on L01
+C:49a176c9f6de	FUN_00270d00	path	missing	L	nearest segment of a path within r (path table 0x1b04b0), not on L01
+C:aeb1c69a6e0e	FUN_00264558	path	missing	L	path point nearest a distance, not on L01
+C:a3bbdace838c	FUN_002a0260	path	missing	L	path point nearest a distance, other copy
+C:dc2339668382		path	missing	L	nearest path points to a pair, not on L01
+C:17a7139ba6a7	FUN_00263710	path	missing	L	segment crosses a path wall, not on L01 (0x276640-like)
+C:7c53e29c001b	FUN_00261b48	path	missing	L	segment crosses a path wall, other copy
+L01:00277260	FUN_00277260	path	missing	L	point at distance along a segment list
+L01:00252850	FreePointLight	light	has	V	FreePointLight
+L01:00252750	WritePointLight_B	light	has	V	WritePointLight_B
+L01:002525f8	WritePointLight_A	light	has	V	WritePointLight_A
+C:5d1f33c5603a	FUN_0025fb60	light	partly	L	timed flicker of a point light (0x252960), not on L01
+L01:00265080	SetMissionDone	mission	has	V	SetMissionDone
+L01:00275760	GiveItem	mission	has	V	GiveItem
+L01:002756d0	UnlockPlanet	mission	has	V	UnlockPlanet
+L01:0022dea8	FUN_0022dea8	herostate	has	V	water-group test
+L01:002405a0	FUN_002405a0	herostate	has	V	SetState(0, 1)
+L01:002319b0	FUN_002319b0	herostate	has	V	death sequence
+L01:002486c0	FUN_002486c0	herostate	has	V	
+L01:002487a8	FUN_002487a8	herostate	has	V	
+L01:0026ebe8	FUN_0026ebe8	herostate	has	V	hand -> head point (melee.rs)
+L01:00231450		herostate	missing	V	control mode 3 exit (vehicles / Hologuise, G-HERO-005)
+L01:00231348	FUN_00231348	herostate	missing	L	body / control-mode switch (0x1413f4), G-HERO-005
+L01:00249580	FUN_00249580	herostate	missing	L	hero states 0x65..0x67 with a target point (scripted)
+L01:002495d0	FUN_002495d0	herostate	missing	L	hero state 0x65..0x67 query
+C:8a18636e69bd	FUN_002159d8	herostate	partly	L	the level's hero SetState copy (not code-identical to L01: H2)
+C:7b3e1e804b94	FUN_00227dd0	herostate	partly	L	hero SetState, level copy (H2)
+C:ea215dba76e7	FUN_002356a0	herostate	partly	L	hero SetState, level copy (H2)
+C:2f2e9be4c73e	FUN_00230b38	herostate	partly	L	hero SetState, level copy (H2)
+C:8cdb2fd899d9	FUN_0024db50	herostate	partly	L	hero SetState, level copy (H2)
+C:ec679874da9e	FUN_0022b728	herostate	partly	L	hero SetState, level copy (H2)
+C:f5aa57dd48b9	FUN_00239528	herostate	partly	L	idle state per body (1 Clank 0x43, 2 Giant Clank 0x5a, 3 Hologuise 0x53)
+C:8ee0c630ac3d	FUN_0021ac18	herostate	partly	L	idle state per body, level copy
+C:0e46409356dd	FUN_0022c418	herostate	partly	L	idle state per body, level copy
+C:b664c822083b	FUN_00208ca8	herostate	missing	L	leave body mode 2 (Giant Clank / vehicle): restores Ratchet, deletes the body moby
+L01:00304168	FUN_00304168	react	missing	V	Suck Cannon (class 849) capture interface; counted unported (amoeboid.rs 0x305260)
+L01:00304390	FUN_00304390	react	missing	V	Suck Cannon capture
+L01:003044a0	FUN_003044a0	react	missing	V	Suck Cannon capture
+L01:00304690	FUN_00304690	react	missing	V	Suck Cannon release
+L01:00304100	FUN_00304100	react	missing	V	Suck Cannon state lookup
+L01:00305260	FUN_00305260	react	missing	V	the capture state 0xe/7 (amoeboid.rs, critter.rs count it)
+L01:002c5080	FUN_002c5080	fxmoby	has	V	DebrisSpawn
+L01:002c20e0	FUN_002c20e0	fxmoby	has	V	FlashSpawn
+L01:00309a68	FUN_00309a68	fxmoby	has	V	flash class 1192
+L01:002f8530	SpawnDebrisMoby	fxmoby	has	V	SpawnDebrisMoby (gunship.rs)
+L01:002f3570	FUN_002f3570	fxmoby	has	V	explosion light
+C:494499ccf189	FUN_0028dee8	fxmoby	missing	L	child moby spawn with scale / spin / random velocity, not on L01
+C:48e5de3f3f27	FUN_00300c60	fxmoby	missing	L	random-class debris spawn, not on L01
+L01:002e2cc0	FUN_002e2cc0	fxmoby	missing	L	class 428 debris spawn: no port citation
+L01:0026fba0	FUN_0026fba0	breakfx	has	V	volume points
+C:6e363a2f7f51	FUN_00251f08	breakfx	partly	L	break pieces + volume points variant, not on L01
+L01:0026ed38	SetWaterLevel	water	has	V	SetWaterLevel
+L01:002b82a8	RippleDisturb	water	has	V	RippleDisturb
+L01:002b96c0	FUN_002b96c0	water	has	V	
+L01:002b96e0	DrawStaticStrips	water	has	V	DrawStaticStrips
+L01:00277bf0	FUN_00277bf0	water	has	V	swim effects
+L01:002daf10	FUN_002daf10	pickup	has	V	
+C:473a49ced2e4	FUN_002d7510	family	family	V	class 857 list over the target list (L06 / L10)
+C:c0ab026d2ff1	FUN_002cbac0	family	family	V	class 408 group helper (L15 / L17)
+C:1d1cafaaf214	FUN_002d3dd0	family	family	V	L02 family helper
+C:52e996e92c1e	FUN_002d5658	family	family	V	L02 class 668 group helper
+C:c702baf4f749		family	family	V	L17 class 1843 group helper
+C:8d30388b53fa	FUN_00303d98	family	family	V	L14 three-slot manager
+C:c484ca66e046	FUN_00303b30	family	family	V	L14 three-slot manager
+C:a6d48cfe452c	FUN_002e0170	family	family	V	L14 child spawn (class 403)
+C:a85f6ddd50a0	FUN_002dea98	family	family	V	L14 child spawn (class 325)
+C:e279dc616356	FUN_002c6d98	family	family	V	L03 group check
+C:5c477bf40201	FUN_002d4150	family	family	V	L12 child spawn (class 184)
+C:fea79b08ec8a		family	family	V	class 574 state test
+C:e9efe398571a		family	family	V	approach by 0.1
+C:804ab5384c93	FUN_002db990	family	family	V	pvar init
+C:8faeb3633958	FUN_00295de8	family	family	V	L04 family (manipulators)
+C:a8c09d3f73ff	FUN_00295778	family	family	V	L04 family (capsule collision)
+C:99346c2b3975	FUN_002e9d10	family	family	V	L06 knock variant
+L01:00278020	FUN_00278020	heightmap	missing	L	level height from the byte grid 0x15fc98..0x15fca8
+L01:002a29a0	FUN_002a29a0	levelexit	missing	L	game mode request 0x15f5c0 (level exit / transition)
+L01:00279070	OpenShipMenu	levelexit	missing	L	OpenShipMenu (G-LVL-001)
+L01:0028bf50	PauseAllSounds	sound	has	V	PauseAllSounds
+L01:002ad558	EnterSlideshowMode	cine	missing	L	EnterSlideshowMode
+L01:00249530	FUN_00249530	gadget	missing	V	Drone Device path: not ported (gadgets.rs)
+C:b73827d476e2	FUN_0021e530	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
+C:ef4e6bb0b47f	FUN_0024cee8	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
+C:4d615d92f5c8	FUN_0021e398	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
+C:84d6abe16fc6	FUN_002400d0	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)

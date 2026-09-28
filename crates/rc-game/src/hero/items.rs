@@ -201,6 +201,12 @@ pub trait HitSink {
     /// `CollLine_Fix(a, b, flags, ignore, 0)`: the hit point of the line against the world and the mobys, no hit
     /// record (`Some(None)`: no hit). None: the sink has no collision (the caller tests the world mesh alone).
     fn probe(&mut self, _table: &mut MobyTable, _a: V4, _b: V4, _flags: u32, _ignore: Option<MobyId>) -> Option<Option<[f32; 3]>> { None }
+    /// `CollLine_Fix(a, b, flags, ignore, 0)` with what it hit ([`Probe`]), `Some(None)` for no hit. None: the sink has no collision (the guns'
+    /// first-person rays and the Tesla Claw's chain then test the world mesh alone).
+    fn probe_moby(&mut self, _table: &mut MobyTable, _a: V4, _b: V4, _flags: u32, _ignore: Option<MobyId>) -> Option<Option<Probe>> { None }
+    /// The class type byte (class header `+0x46`; 5 = a creature) of `o_class` (the Devastator's, the R.Y.N.O.'s and
+    /// the Tesla Claw's searches keep only type 5). None: unknown (no class data).
+    fn class_type(&self, _o_class: i16) -> Option<u8> { None }
     /// `WritePointLight_A` 0x2525f8: the first free point light of the bank (−1: none, or the frame load is above 0.8).
     fn light_alloc(&mut self, _l: crate::point_lights::PointLight) -> i32 { -1 }
     /// A point light of the bank (None: not taken).
@@ -209,6 +215,21 @@ pub trait HitSink {
     fn light_set(&mut self, _slot: i32, _l: crate::point_lights::PointLight) {}
     /// `FreePointLight` 0x252850.
     fn light_free(&mut self, _slot: i32) {}
+    /// A hand item's calls into mobys' class code (the Suck Cannon's reaction-table slots, the Taunter's lure, the
+    /// Morph-o-Ray's morph: `crate::moby_update::creature::react`): `f` runs on the moby world over the table and the
+    /// moby system's services and class data, with the hero as it is and the one `rand` stream. False when the sink
+    /// has no moby system (nothing ran).
+    fn world(&mut self, _table: &mut MobyTable, _hero: &super::Hero, _rng: &mut crate::rng::Rng, _counter: u64, _f: &mut dyn FnMut(&mut crate::moby_update::services::World)) -> bool { false }
+}
+
+/// What a line probe hit (`CollOutput`): +0x18 the moby (None: the world), +0x20 the point, +0x40 the raw normal, the
+/// surface id (`CollType`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Probe {
+    pub moby: Option<MobyId>,
+    pub point: [f32; 3],
+    pub normal: [f32; 3],
+    pub surface: i32,
 }
 
 /// A sink that hits nothing (tests, no moby system).
@@ -366,14 +387,47 @@ pub fn glove_frame(hero: &MobyFrame, class: &MobyAnimClass, table: &[u8]) -> Mob
     MobyFrame { header, quats, scales, trans, payload }
 }
 
-/// The hand item's `MobyAnimAdvance` with its sound trigger (`rc_formats::moby_anim::advance_trigger`): the fired
-/// class sound is `PlayClassSound(sound, 0, item)`, queued with the item's other sounds (played right after its update,
-/// `super::gadgets::flush_item_sounds`). The loop-sound refresh of the item's sequences (gadgets 168 seq 4, 185 seq 3) is
-/// not routed (docs/plan/audio.md "Sound paths").
-fn advance_item(anim: &mut moby_anim::AnimState, class: &moby_anim::MobyAnimClass, sounds: &mut Vec<i32>) {
+/// The hand item's `MobyAnimAdvance` with its sounds (the item's copy of `crate::moby_update::anim_sound::advance`):
+/// a trigger (`rc_formats::moby_anim::advance_trigger`) plays `PlayClassSound(sound, 0, item)`, queued with the item's
+/// other sounds (played right after its update, `super::gadgets::flush_item_sounds`); a tick that landed a blend does
+/// neither; otherwise the sequence loop sound is refreshed (`FUN_002637d8`, [`refresh_seq_loop`]): the Blaster's
+/// firing sequence 4 carries class sound 1 (docs/plan/audio.md "Sound paths", path 4).
+fn advance_item(anim: &mut moby_anim::AnimState, class: &moby_anim::MobyAnimClass, fx: &mut super::fx::HeroFx, frame: i32) {
     let before = *anim;
     moby_anim::advance(anim, class);
-    if let Some(s) = moby_anim::advance_trigger(&before, anim, class) { sounds.push(s as i16 as i32); }
+    if moby_anim::advance_landed(&before, anim) { return; }
+    if let Some(s) = moby_anim::advance_trigger(&before, anim, class) {
+        fx.item_sounds.push(s as i16 as i32);
+        return;
+    }
+    refresh_seq_loop(fx, moby_anim::loop_sound_of(class, anim.seq_b), frame);
+}
+
+/// `FUN_002637d8` for the hand item: +0x7c = `lp` (the loop sound of key B's sequence, 0xff none). No slot: played
+/// (flags 4) on the item's phase tick (`(address >> 8 & 3) == (0x15f5cc & 3)`; the hand item has no table address in
+/// the port: phase 0 [L]); a slot playing another class sound than `lp` is released (the sequence changed its loop);
+/// a slot another owner took is forgotten (`super::gadgets::flush_item_sounds`' alive test before the next play).
+fn refresh_seq_loop(fx: &mut super::fx::HeroFx, lp: u8, frame: i32) {
+    use super::fx::LOOP_SEQ;
+    use super::packs::SoundCmd;
+    let none = crate::moby_update::anim_sound::NONE;
+    match fx.item_loops[LOOP_SEQ] {
+        None => {
+            if lp != none && frame & 3 == 0 {
+                fx.item_voices.push(SoundCmd::ItemLoop { n: LOOP_SEQ, index: lp as i8 as i32, flags: 4 });
+                fx.seq_loop = Some(lp as i8 as i32);
+            }
+        }
+        Some(_) => {
+            if fx.seq_loop != Some(lp as i8 as i32) || lp == none {
+                fx.item_voices.push(SoundCmd::ItemRelease { n: LOOP_SEQ });
+                fx.seq_loop = None;
+            } else if frame & 3 == 0 {
+                // A slot another owner took is replayed on the phase tick (the flush's alive test).
+                fx.item_voices.push(SoundCmd::ItemLoop { n: LOOP_SEQ, index: lp as i8 as i32, flags: 4 });
+            }
+        }
+    }
 }
 
 /// `HeroItemsAttach` 0x22fec0, hand part: position = `W.r3` of the attach list (`FUN_0022a940`'s matrices
@@ -396,14 +450,14 @@ fn attach_hand(hero: &mut Hero, table: &MobyTable, anim: &dyn AnimCtl, env: &Ite
     if detached {
         // A detached item (the thrown wrench): the hand point 0x1403c0 only, `MobyAnimAdvance`; the moby keeps its
         // own position and rotation.
-        if let Some(c) = env.data.class(it.o_class) { advance_item(&mut it.anim, &c.anim, &mut hero.fx.item_sounds); }
+        if let Some(c) = env.data.class(it.o_class) { advance_item(&mut it.anim, &c.anim, &mut hero.fx, env.frame); }
         hero.items.slot.hand_point = hp;
         return;
     }
     it.position = hp;
     let glove = is_glove(id);
     if !glove {
-        if let Some(c) = env.data.class(it.o_class) { advance_item(&mut it.anim, &c.anim, &mut hero.fx.item_sounds); }
+        if let Some(c) = env.data.class(it.o_class) { advance_item(&mut it.anim, &c.anim, &mut hero.fx, env.frame); }
     }
     let mut rows: [moby_anim::V4; 3] = [0, 1, 2].map(|i| w[i].map(f32::to_bits));
     if !glove { moby_anim::normalise_columns(&mut rows); }
@@ -425,6 +479,14 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
     // The Pyrocitor's pilot flame, light and loop go with its moby (the game deletes them in its update or when the
     // moby goes): an item swapped or taken away without its put-away update (death reload, vendor) drops them here.
     if hero.items.slot.id != super::pyrocitor::PYROCITOR { super::pyrocitor::item_gone(hero, table, env, hits); }
+    if hero.items.slot.id != super::blaster::BLASTER { super::blaster::item_gone(hero, hits); }
+    if hero.items.slot.id != super::devastator::DEVASTATOR { super::devastator::item_gone(hero, hits); }
+    if hero.items.slot.id != super::tesla::TESLA { super::tesla::item_gone(hero, hits); }
+    // The item's sequence loop goes with its moby.
+    if hero.items.slot.item.is_none() && hero.fx.item_loops[super::fx::LOOP_SEQ].is_some() {
+        hero.fx.item_voices.push(super::packs::SoundCmd::ItemRelease { n: super::fx::LOOP_SEQ });
+        hero.fx.seq_loop = None;
+    }
     if hero.items.slot.item.is_none() {
         update_hand_selected(hero, g, rng, env);
         return;

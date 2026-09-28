@@ -3,7 +3,8 @@
 // Per vertex: position (Bevy space), ST, GS vertex RGBA bytes / 128. GS: PRIM 0x7c (Gouraud, TME, FGE, ABE), TEX0
 // MODULATE with TCC (C = Ct·Cv >> 7, A = At·Av >> 7), then fog, then ALPHA 0x48 (Cs·As + Cd, params.misc.x = 1) or
 // 0x44 ((Cs − Cd)·As + Cd), on the frame's display bytes like the GS (crate::display_blend `gs_add` / `gs_mix`;
-// blend One, OneMinusSrcAlpha). The texture holds the raw GS bytes (texel alpha 0..0x80).
+// blend One, OneMinusSrcAlpha). The texture holds the raw GS bytes (texel alpha 0..0x80). FX_OPAQUE (FxPrimParams::opaque):
+// an opaque world surface in the main pass, no blend, Z written.
 
 #import bevy_pbr::view_transformations::{position_world_to_clip, position_world_to_view}
 #import randcrw::display_blend::{gs_add, gs_mix}
@@ -58,9 +59,20 @@ fn fragment(in: FxVertexOutput) -> @location(0) vec4<f32> {
     if (fog.color.w > 0.5) {
         rgb = mix(fog.color.rgb, rgb, in.fog);
     }
+#ifdef FX_OPAQUE
+    // An opaque world surface (FxPrimParams::opaque): the display bytes as the world shaders write them.
+    return vec4<f32>(srgb_to_linear(rgb), 1.0);
+#else
     let cs = round(rgb * 255.0);
     if (params.misc.x > 0.5) {
         return gs_add(cs, a);
     }
     return gs_mix(cs, a);
+#endif
+}
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(hi, lo, c <= vec3<f32>(0.04045));
 }

@@ -106,6 +106,7 @@ use rc_game::menus::pause::frame::{self, FrameClass, FrameMobys};
 use rc_game::menus::pause::port::Setting;
 use rc_game::menus::pause::{MenuEnv, PageMenu, PostAction, DARKEN};
 use rc_game::menus::quick_select::{HeroGate, QuickSelect};
+use rc_game::menus::screen_static::{StaticDraw, StaticTex};
 use rc_game::menus::{MenuAssets, MenuDraw, MenuInput, Overlay};
 use rc_game::pad::button;
 
@@ -551,7 +552,7 @@ fn menu_frame(
                     mm.state.set(Mode::Gameplay);
                     println!("menus: frame {frame}: menu closed, mode 0 (stub calls {:?})", menu.stub_calls);
                 } else {
-                    menu.draw(&rt.assets, gs, &env, &mut rt.draws);
+                    menu.draw(&rt.assets, gs, &env, &mut play.game.rng, &mut rt.draws);
                 }
                 // The page's 3D widgets (crate::menu_models).
                 widgets3d.view = menu.view;
@@ -597,8 +598,10 @@ fn build_prims(
     let mut h = Hud2d::default();
     h.frame_sizes = rt.assets.hud.frame_sizes.clone();
     let mut st = TextState::default();
-    let snapshot = convert(&rt.draws, &mut h, &mut st, &lh.glyphs);
+    let mut statics: [Vec<Prim>; 3] = Default::default();
+    let snapshot = convert(&rt.draws, &mut h, &mut statics, &mut st, &lh.glyphs);
     hook.prims = h.prims;
+    hook.statics = statics;
     hook.replace_hud = rt.render_mode == Mode::Menu;
     // The vendor (mode 5) runs `HudUpdate(1)` every frame: the HUD ticks and draws over its screens.
     hook.freeze = !matches!(rt.render_mode, Mode::Gameplay | Mode::Vendor);
@@ -759,7 +762,7 @@ fn translate(d: &Draw, ox: i32, oy: i32) -> Draw {
 
 /// Converts the menu draws to primitives; returns whether the snapshot is shown. The snapshot and the
 /// menu's black 0x30 are the menu layer's (module docs), not primitives.
-fn convert(draws: &[MenuDraw], h: &mut Hud2d, st: &mut TextState, glyphs: &[rc_formats::font::GlyphTable; 3]) -> bool {
+fn convert(draws: &[MenuDraw], h: &mut Hud2d, statics: &mut [Vec<Prim>; 3], st: &mut TextState, glyphs: &[rc_formats::font::GlyphTable; 3]) -> bool {
     let full = [0, W - 1, 0, H - 1];
     let mut panel = full;
     let (mut ox, mut oy) = (0, 0);
@@ -777,7 +780,7 @@ fn convert(draws: &[MenuDraw], h: &mut Hud2d, st: &mut TextState, glyphs: &[rc_f
                 } else {
                     [[ax, ay], [ax + 1, ay], [bx, by], [bx + 1, by]]
                 };
-                h.prims.push(Prim { tex: Tex::None, pos, uv: [[0, 0]; 4], rgba: *rgba, scissor: full });
+                h.prims.push(Prim { tex: Tex::None, pos, uv: [[0, 0]; 4], rgba: *rgba, scissor: full, repeat: false, nearest: false });
             }
             MenuDraw::SpriteUv { frame, x0, y0, x1, y1, u0, v0, u1, v1, alpha, repeat_u } => {
                 let rgba = ((*alpha as u32) & 0xff) << 24 | 0x007f_7f7f;
@@ -785,7 +788,7 @@ fn convert(draws: &[MenuDraw], h: &mut Hud2d, st: &mut TextState, glyphs: &[rc_f
                 let (ua, ub, va, vb) = (u0 / 16, u1 / 16, v0 / 16, v1 / 16);
                 let tw = h.frame_sizes.get(*frame).map_or(0, |s| s.0);
                 let mut quad = |xa: i32, xb: i32, ua: i32, ub: i32| {
-                    h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, py0], [xb, py0], [xa, py1], [xb, py1]], uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]], rgba, scissor: full });
+                    h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, py0], [xb, py0], [xa, py1], [xb, py1]], uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]], rgba, scissor: full, repeat: false, nearest: false });
                 };
                 if *repeat_u && tw > 0 && ub - ua == tw {
                     // CLAMP_1 = REPEAT: split at the texture's wrap.
@@ -796,6 +799,11 @@ fn convert(draws: &[MenuDraw], h: &mut Hud2d, st: &mut TextState, glyphs: &[rc_f
                 } else {
                     quad(px0, px1, ua, ub);
                 }
+            }
+            MenuDraw::FrameQuad { frame, x, y, w, h: ph, u, v, tw, th, rgba } => {
+                let (xa, ya, xb, yb) = (x + ox, y + oy, x + w + ox, y + ph + oy);
+                let (ub, vb) = (u + tw, v + th);
+                h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, ya], [xb, ya], [xa, yb], [xb, yb]], uv: [[*u, *v], [ub, *v], [*u, vb], [ub, vb]], rgba: *rgba, scissor: full, repeat: false, nearest: false });
             }
             MenuDraw::Snapshot => snapshot = true,
             // The menu layer's clear colour until the snapshot arrives, then in the snapshot's bytes.
@@ -811,10 +819,26 @@ fn convert(draws: &[MenuDraw], h: &mut Hud2d, st: &mut TextState, glyphs: &[rc_f
                 (ox, oy) = (0, 0);
             }
             MenuDraw::Stub(_) => {}
+            MenuDraw::Static(s) => {
+                let p = static_prim(s, ox, oy);
+                statics[(s.pass as usize).min(2)].push(Prim { scissor: panel, ..p });
+            }
         }
         for p in &mut h.prims[start..] { p.scissor = clip(p.scissor, panel); }
     }
     snapshot
+}
+
+/// A static draw (rc_game::menus::screen_static, `DrawTexturedQuad` / `fun_00200080` after CLAMP_1 = 0) as a
+/// primitive of the static layer (`Hud2dHook::statics`).
+pub(crate) fn static_prim(s: &StaticDraw, ox: i32, oy: i32) -> Prim {
+    let tex = match s.tex {
+        StaticTex::Fx(i) => Tex::Fx(i),
+        StaticTex::Frame(i) => Tex::Frame(i),
+    };
+    let (x0, y0, x1, y1) = (s.x + ox, s.y + oy, s.x + s.w + ox, s.y + s.h + oy);
+    let (u0, v0, u1, v1) = (s.u, s.v, s.u + s.tw, s.v + s.th);
+    Prim { tex, pos: [[x0, y0], [x1, y0], [x0, y1], [x1, y1]], uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]], rgba: s.rgba, scissor: [0, W - 1, 0, H - 1], repeat: true, nearest: false }
 }
 
 // ---- Snapshot, render world (module docs, "Snapshot") ----

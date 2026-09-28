@@ -288,7 +288,7 @@ impl Game {
                 items_update(&mut self.hero, &mut self.item_globals, &mut self.mobys, &*anim, &mut self.rng, &ienv, hits);
                 // The slot loop's item update that needs the hero's context (the Swingshot's hook: SetState, the
                 // collision lines), at the same point of the frame (hero::gadgets).
-                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() || self.hero.weapons.pending_draw || self.hero.weapons.pending_idle {
+                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() || self.hero.weapons.pending_draw || self.hero.weapons.pending_idle || self.hero.weapons.pending_anim.is_some() {
                     let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
                     let mobys = scene.as_ref().map(OwnedScene::scene);
                     let view = self.camera.out;

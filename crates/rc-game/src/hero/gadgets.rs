@@ -20,8 +20,11 @@
 //! Ported rows: the wrench (item 8, fire in [`super::melee`] ahead of the table, update `melee::wrench_update`, its
 //! thrown flight [`super::comet`]), the Swingshot (item 12, [`super::swingshot`]) and the Bomb Glove (item 10, the
 //! throw gloves' fire case and the glove's update: [`super::weapons`]) and the Pyrocitor (item 16, no fire case: its
-//! update fires it, [`super::pyrocitor`]). The game's other cases, not ported yet (their rows hold `None`):
-//! the throw weapons 10 / 0x11 / 0x14 / 0x18 / 0x19 (→ 0x23 / `0x22ee08`), 0xf, 0x12 (→ 0x20), 0x15, the Hologuise
+//! update fires it, [`super::pyrocitor`]); the guns (docs/plan/hero_gameplay.md §9, shared parts in [`super::guns`]):
+//! the Blaster (item 15, case 0xf draws it, [`super::blaster`]), the R.Y.N.O. (23, [`super::ryno`]), the Devastator
+//! (11, [`super::devastator`]) and the Tesla Claw (19, [`super::tesla`]), their updates firing. The game's other
+//! cases, not ported yet: the other throw weapons 0x11 / 0x14 / 0x18 / 0x19 (→ 0x23 / `0x22ee08`: their updates),
+//! 0x12 (→ 0x20), 0x15, the Hologuise
 //! 0x1f (the 18-tick timer 0x14162e), the PDA 0x20 (`OpenVendorMenu`); the holster check 0x2405f8.
 
 use super::items::{HitSink, ItemData, ItemEnv};
@@ -52,13 +55,25 @@ pub struct HandItemKind {
 }
 
 /// The hand items the port knows (see the module doc).
-pub static HAND_ITEMS: [HandItemKind; 4] = [
+pub static HAND_ITEMS: [HandItemKind; 10] = [
     HandItemKind { id: super::items::item::WRENCH, name: "wrench", fire: None, update: ItemUpdate::Slot(super::melee::wrench_update) },
     HandItemKind { id: super::swingshot::SWINGSHOT, name: "Swingshot", fire: Some(super::swingshot::fire), update: ItemUpdate::Hero(super::swingshot::item_update) },
     // The throw gloves' case of the weapon check (0x23 / the arm) and the Bomb Glove's update 0x2d8330 (super::weapons).
     HandItemKind { id: super::items::item::BOMB_GLOVE, name: "Bomb Glove", fire: Some(super::weapons::fire), update: ItemUpdate::Slot(super::weapons::glove_update) },
     // No weapon-check case: the Pyrocitor's update 0x2cd458 fires it (super::pyrocitor).
     HandItemKind { id: super::pyrocitor::PYROCITOR, name: "Pyrocitor", fire: None, update: ItemUpdate::Slot(super::pyrocitor::update) },
+    // The weapon check's case 0xf draws it; its update 0x2ca610 fires (super::blaster).
+    HandItemKind { id: super::blaster::BLASTER, name: "Blaster", fire: Some(super::blaster::fire), update: ItemUpdate::Slot(super::blaster::update) },
+    // No weapon-check case: its update 0x2e4e60 fires the salvo (super::ryno).
+    HandItemKind { id: super::ryno::RYNO, name: "R.Y.N.O.", fire: None, update: ItemUpdate::Slot(super::ryno::update) },
+    // No weapon-check case: its update 0x2c7d68 fires (super::devastator).
+    HandItemKind { id: super::devastator::DEVASTATOR, name: "Devastator", fire: None, update: ItemUpdate::Slot(super::devastator::update) },
+    // No weapon-check case: its update 0x2ce448 fires the beam (super::tesla).
+    HandItemKind { id: super::tesla::TESLA, name: "Tesla Claw", fire: None, update: ItemUpdate::Slot(super::tesla::update) },
+    // No weapon-check case: its update 0x303000 pulls and fires (super::suck_cannon, through creature::react).
+    HandItemKind { id: super::suck_cannon::SUCK_CANNON, name: "Suck Cannon", fire: None, update: ItemUpdate::Slot(super::suck_cannon::update) },
+    // No weapon-check case: its update 0x2ccb78 whistles and lures (super::taunter).
+    HandItemKind { id: super::taunter::TAUNTER, name: "Taunter", fire: None, update: ItemUpdate::Slot(super::taunter::update) },
 ];
 
 /// The row of item `id`.
@@ -135,6 +150,8 @@ pub fn flush_item_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sounds:
             super::packs::SoundCmd::ItemRelease { n } => {
                 if let Some(s) = h.fx.item_loops[n].take() { sounds.release(moby, s); }
             }
+            super::packs::SoundCmd::MobySound { moby: id, o_class, pos, index, flags } => { sounds.moby_sound(id, o_class, pos, index, flags, rng); }
         }
     }
+    for n in 0..h.fx.item_loops.len() { h.fx.item_loop_alive[n] = h.fx.item_loops[n].is_some_and(|s| sounds.alive(s)); }
 }

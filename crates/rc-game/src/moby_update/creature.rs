@@ -15,6 +15,7 @@
 //! | [`fx`] | `0x273f50`, `SpawnBeamExplosion` 0x273310, `BreakFxB` 0x278ad8, `0x2efbf8`, `0x2f3570` | death explosion, explosion effect, break pieces, rate limiter, explosion light |
 //! | [`projectile`] | `CollLine_Fix` / `coll_sphere_mobys` with a template, `PartType04/08/15/16/22/26Spawn` | enemy shots' sweep and hit template; particle records of the unported types |
 //! | [`region`] | `0x26e6c0`, `0x276640`, `ClampToPath` 0x276820, `0x276a48`, `0x276c40`, `LineOfSightTest` 0x276fe8 | arena polygons and waypoint graphs on the level paths |
+//! | [`react`] | the class reaction table (`lvl.vtbl` word 3), `0x304168` / `0x304390` / `0x3044a0` / `0x304690` / `0x305260` / `0x3051a8` / `0x304798` | how the Suck Cannon (and only it) acts on a class; the damage record's lure |
 //! | [`ground`] | `GroundHeight` 0x26e618 + `CollType` 0x2151d8, `0x2765b0`, `MobyAnimKeyTime` 0x263920 | ground probe with surface id, anim-frame crossing |
 //!
 //! Bolt drops are `SetDeathBits` 0x26c250 → `BoltBurst` 0x275988 ([`crate::moby_update::classes::crate_::set_death_bits`],
@@ -36,6 +37,7 @@ pub mod fx;
 pub mod ground;
 pub mod knock;
 pub mod projectile;
+pub mod react;
 pub mod region;
 pub mod target;
 pub mod turn;
@@ -70,6 +72,8 @@ pub struct Globals {
     /// `*(0x1612d0 + i·0x1190 + 8)`: the height of ripple patch `i` of the level's ripple manager (the amoeboid's
     /// fall-out rule, pvar+0x258). Filled by whoever sets up the level's water; empty: the rule cannot fire (counted).
     pub ripple_z: Vec<f32>,
+    /// The weapons' reaction layer ([`react::Globals`]: the Suck Cannon's slots, the reaction tables, the chickens).
+    pub react: react::Globals,
 }
 
 /// A call an enemy's scripted sequence makes into the camera and the hero ([`Globals::scripts`]).

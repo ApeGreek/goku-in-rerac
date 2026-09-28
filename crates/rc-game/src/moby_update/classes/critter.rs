@@ -22,13 +22,13 @@
 //! Pvars (624 bytes; header at 0: damage +0x20, flash +0x110, knockback +0x120, walker +0x180): +0x1d0 home, +0x1e0
 //! hover target, +0x1f0 turn velocity, +0x1f4 / +0x1f8 side offset (rad / deg), +0x1fc range, +0x204 speed, +0x208 /
 //! +0x214 s16 timers, +0x20a kind, +0x20c hover pick timer, +0x210 offset flip timer, +0x216 s16 leash, +0x218 leash
-//! moby, +0x21c path (−1 on Novalis), +0x228 hover wait. Not ported (counted in `Services::unported`): the suck-cannon
-//! capture (state 7, `0x305260`; no suck cannon yet), the path clamp `0x28b5e0` (no Novalis critter has a path), the
+//! moby, +0x21c path (−1 on Novalis), +0x228 hover wait, +0x60 the suck record (`creature::react`; state 7 is the Suck
+//! Cannon's: `0x305260`). Not ported (counted in `Services::unported`): the path clamp `0x28b5e0` (no Novalis critter has a path), the
 //! big-head manipulator `0x278720` (the cheat flag 0x15edb7), the shadow probe `0x26f020` (moby +0x84/+0x88).
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
-use crate::moby_update::creature::{self as c, attack, damage, flash, fx, ground, knock, target, turn, walker};
+use crate::moby_update::creature::{self as c, self as creature, attack, damage, flash, fx, ground, knock, target, turn, walker};
 use crate::moby_update::services::World;
 
 pub const UPDATE_FN: u32 = 0x2efc60;
@@ -291,8 +291,15 @@ pub fn update(w: &mut World, id: MobyId) {
             }
         }
         7 => {
-            // FUN_00305260: the suck-cannon capture (no suck cannon in the port yet).
-            w.svc.unported("critter 577: suck cannon 0x305260");
+            // FUN_00305260: carried by the Suck Cannon (the shared reaction layer); a let-go critter that landed
+            // waits in 0xe (hover wait `ticks(180)`, sequence 0 at once), its suck record's state (+0xc8) cleared.
+            if creature::react::carried(w, id, K) != 0 {
+                set_state(w, id, 0xe);
+                let t = w.ticks(0xb4);
+                c::set_pi32(w, id, HOVER_WAIT, t);
+                if seq_b(w, id) != 0 { w.anim_blend(id, 0, 0, 0); }
+                c::set_pi16(w, id, 0x60 + creature::react::rec::STATE, 0);
+            }
         }
         8 => {
             if c::len3(to_t) < r - 4.0 && dz_t < 8.0 && w.rng.randi(0x13) == 0 {

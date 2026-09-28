@@ -157,16 +157,7 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
         shut_down(hero, table, env, hits);
     }
     // The nozzle: joint list 0 of the item.
-    let nozzle = {
-        let it = hero.items.slot.item.as_ref().unwrap();
-        match class.chains.first().filter(|c| !c.is_empty()) {
-            Some(chain) => {
-                let p = moby_anim::evaluate_chains(&class.anim, &it.anim, it.snapshot.as_ref(), &[chain.as_slice()]);
-                to_f32x3(super::melee::list_point(&p[0], &it.rows, it.position, it.scale))
-            }
-            None => it.position,
-        }
-    };
+    let nozzle = super::guns::item_point(hero, env, 0);
     let pad = env.pad;
     let mask = hero.items.slot.fire_mask;
     let held = pad.held & mask != 0;

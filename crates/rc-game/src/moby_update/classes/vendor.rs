@@ -19,7 +19,8 @@
 //!   `try_set_help_message(1, 21475 "△ Activate Gadgetron Vendor")`; △ (0x13cae4 & 0x10) with the lease →
 //!   `OpenVendorMenu(vendor)` ([`Handoff::OpenVendor`]), state 3.
 //! * **3** (vendor open; `VendorExit` sets 1 again): V+0x90 = 0, the hologram's scale 0.
-//! * **Tail** (states 1 and 2): `RegisterDrawCallback2(0x2ba9c0, vendor)` (the hologram cone, not ported: counted),
+//! * **Tail** (states 1 and 2): `RegisterDrawCallback2(0x2ba9c0, vendor)` (the beam and the four glow points; drawn by
+//!   `rc-engine`: [`super::draw_callbacks::Callback::VendorBeam`]),
 //!   the manipulators' z rotations `FUN_00221e38(V+0x20, 2, a)` / `(V+0x60, 2, b)` (counted), a += 0.01, b −= 0.01,
 //!   the hologram's scale = V+0x90 · class scale · 2.5, `MobyBuildMatrix(child)`.
 
@@ -154,7 +155,7 @@ pub fn update(w: &mut World, id: MobyId) {
 
 /// The common tail of states 1 and 2 (module docs).
 fn tail(w: &mut World, id: MobyId) {
-    w.svc.unported("vendor: hologram cone draw callback 0x2ba9c0");
+    w.svc.draw_callbacks.register2(super::draw_callbacks::Callback::VendorBeam, id);
     w.svc.unported("vendor: hologram manipulator spin");
     let g = &mut w.svc.interact.vendor;
     g.spin[0] = add_rot(g.spin[0], 0.01);

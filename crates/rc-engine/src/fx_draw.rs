@@ -41,6 +41,20 @@
 //! TEX1 bilinear, ALPHA 0x44. Not modelled: the 60-tick cross-fade of the ST when the ship switches between the
 //! near (live ST) and far (frozen ST) states outside scenes (in a scene, game mode ≠ 0, the ST is always live), and
 //! FX 1 instead of 0x15 in the mode-6 space scenes with `0x13e050 == 4`.
+//!
+//! **The glow quad** (level01 `0x2781d0`, [`glow_quad`]): the engine's shared soft-glow billboard, called by class draw
+//! callbacks and the hero's glow drawer: the vendor's four glow points (`0x2ba9c0`), the mouse 1818's glow sprites
+//! (`0x30de68`) and `0x229440` (six calls). Arguments: size (f12), a pull toward the camera (f13), the point (a0) and
+//! one RGBA for the four corners (a1). With F = unit(camera 0x167240 − point), R = F × (0, 0, 1) normalised and
+//! U = R × F, the point moves pull·F toward the camera and the corners are `point + size·(y·R + z·U)` for the table
+//! at 0x1b08f0, (y, z) = (−1, 1), (−1, −1), (1, 1), (1, −1), ST (0, 0), (0, 1), (1, 0), (1, 1); one
+//! `FastDrawQuadReal` with FX 0xb (the radial glow), CLAMP_1 5, TEX1 bilinear, **ALPHA 0x48** (additive, on display
+//! bytes like every callback draw here).
+//!
+//! **The vendor's glow points** (class 11's callback `0x2ba9c0`, list 2; [`vendor_glow_points`]): after its beam
+//! (drawn by crate::vendor_render), four glow quads of size 0.1333 (0x3e087fcc), no pull, at the antenna tips
+//! `rows · (1.1·cos a, 1.1·sin a, 0.59) + position` for a = k·π/2 − π (k = 0..3), coloured `moby+0x90 & 0xffff0000`:
+//! the blue byte and the alpha of the vendor's pulsing glow word (0x2bb058..0x2bb0d4).
 
 use crate::game_camera::{game_eye, GameFog, TfragFog};
 use anyhow::Result;
@@ -64,17 +78,36 @@ pub const LIST2_BIAS: f32 = 3.0e6;
 /// Static uniform of one draw group.
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct FxPrimParams {
-    /// x = 1: ALPHA 0x48 (additive `Cs·As + Cd`), 0: ALPHA 0x44 (`(Cs − Cd)·As + Cd`).
+    /// x = 1: ALPHA 0x48 (additive `Cs·As + Cd`), 0: ALPHA 0x44 (`(Cs − Cd)·As + Cd`). w = 1: an opaque world surface
+    /// ([`FxPrimParams::opaque`]; the pipeline key).
     pub misc: Vec4,
 }
 
 impl FxPrimParams {
     pub fn blend(additive: bool) -> Self { FxPrimParams { misc: Vec4::new(additive as u32 as f32, 0.0, 0.0, 0.0) } }
+
+    /// A strip the GS writes with Z and a FIX of 0x80 (`(Cs − Cd)·0x80 + Cd` = Cs, e.g. TEST 0x5360a without the alpha
+    /// test): drawn in the main pass as an opaque world surface (no blend, Z written, display bytes converted to linear
+    /// like the world shaders), not as an effect (crate::sea_render).
+    pub fn opaque() -> Self { FxPrimParams { misc: Vec4::new(0.0, 0.0, 0.0, 1.0) } }
+
+    fn is_opaque(&self) -> bool { self.misc.w > 0.5 }
+}
+
+/// The pipeline key: an effect (display blend, no Z) or an opaque world surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FxPrimKey {
+    opaque: bool,
+}
+
+impl From<&FxPrimMaterial> for FxPrimKey {
+    fn from(m: &FxPrimMaterial) -> Self { FxPrimKey { opaque: m.params.is_opaque() } }
 }
 
 /// One draw group of a callback: an FX texture, the fog, one of the two ALPHA equations, its Transparent3d order.
 /// Drawn by crate::display_blend's effect pass (the entity carries `DisplayEffect`).
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
+#[bind_group_data(FxPrimKey)]
 pub struct FxPrimMaterial {
     #[texture(0)]
     #[sampler(1)]
@@ -90,7 +123,7 @@ pub struct FxPrimMaterial {
 impl Material for FxPrimMaterial {
     fn vertex_shader() -> ShaderRef { SHADER_PATH.into() }
     fn fragment_shader() -> ShaderRef { SHADER_PATH.into() }
-    fn alpha_mode(&self) -> AlphaMode { AlphaMode::Blend }
+    fn alpha_mode(&self) -> AlphaMode { if self.params.is_opaque() { AlphaMode::Opaque } else { AlphaMode::Blend } }
     fn depth_bias(&self) -> f32 { self.order }
     fn enable_prepass() -> bool { false }
     fn enable_shadows() -> bool { false }
@@ -99,12 +132,17 @@ impl Material for FxPrimMaterial {
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
+        key: MaterialPipelineKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         descriptor.primitive.cull_mode = None;
-        // TEST_1 0x53001 / 0x51001 (ATST NEVER, AFAIL FB_ONLY: colour, never Z; ZTST GEQUAL).
-        crate::gs_state::GsPass::BlendNoZ.specialize(descriptor);
-        crate::display_blend::specialize(descriptor);
+        if key.bind_group_data.opaque {
+            crate::gs_state::GsPass::Opaque.specialize(descriptor);
+            if let Some(f) = descriptor.fragment.as_mut() { f.shader_defs.push("FX_OPAQUE".into()); }
+        } else {
+            // TEST_1 0x53001 / 0x51001 (ATST NEVER, AFAIL FB_ONLY: colour, never Z; ZTST GEQUAL).
+            crate::gs_state::GsPass::BlendNoZ.specialize(descriptor);
+            crate::display_blend::specialize(descriptor);
+        }
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
@@ -561,6 +599,35 @@ pub fn nanotech_prims(t: &NanotechTables, g: &rc_game::moby_update::classes::pic
     out
 }
 
+/// The glow quad's corner table at 0x1b08f0 ((y, z); x = 0) and its ST.
+const GLOW_CORNERS: [[f32; 2]; 4] = [[-1.0, 1.0], [-1.0, -1.0], [1.0, 1.0], [1.0, -1.0]];
+const GLOW_ST: [[f32; 2]; 4] = [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]];
+/// The glow quad's texture: FX 0xb (`GetEffectTex(0xb)`), the radial glow the nanotech halo uses too.
+pub const GLOW_FX: usize = HALO_FX;
+
+/// One glow quad (`0x2781d0`, module doc) into `b`: `size`, `pull` toward the camera `cam`, at `point`, RGBA `rgba`
+/// (GS bytes, R low). Draw `b` as an additive FX [`GLOW_FX`] group.
+pub fn glow_quad(b: &mut PrimBuf, size: f32, pull: f32, point: [f32; 3], rgba: u32, cam: [f32; 3]) {
+    let f = unit3(sub3(cam, point));
+    let r = unit3(cross_ba([0.0, 0.0, 1.0], f));
+    let u = cross_ba(f, r);
+    let p = add3(point, scale3(f, pull));
+    let pts = GLOW_CORNERS.map(|[y, z]| add3(p, add3(scale3(r, y * size), scale3(u, z * size))));
+    b.quad(pts, GLOW_ST, [rgba; 4]);
+}
+
+/// The vendor callback's four glow points (module doc) for the vendor moby's rotation rows, position and glow word.
+pub fn vendor_glow_points(rows: &[[f32; 3]; 3], pos: [f32; 3], glow: u32, cam: [f32; 3]) -> FxGroup {
+    let mut b = PrimBuf::default();
+    let rgba = glow & 0xffff_0000;
+    for k in 0..4 {
+        let a = k as f32 * std::f32::consts::PI * 0.5 - std::f32::consts::PI;
+        let p = xform(rows, pos, [a.cos() * 1.1, a.sin() * 1.1, 0.59]);
+        glow_quad(&mut b, f32::from_bits(0x3e08_7fcc), 0.0, p, rgba, cam);
+    }
+    FxGroup { fx: GLOW_FX, additive: true, prims: b }
+}
+
 /// `M·(x, y, z, w)`: rows 0..2 the axes, row 3 the point (`0x221608`).
 fn apply4(m: &[[f32; 4]; 4], v: [f32; 4]) -> [f32; 3] { std::array::from_fn(|k| m[0][k] * v[0] + m[1][k] * v[1] + m[2][k] * v[2] + m[3][k] * v[3]) }
 
@@ -610,7 +677,8 @@ struct FxDraw {
 
 type MainCamera<'w, 's> = Query<'w, 's, &'static Transform, (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>;
 
-/// The callbacks of this tick that draw here (the nanotech glow), per list in registration order.
+/// The callbacks of this tick that draw here (the nanotech glow, the ship glass, the vendor's glow points), per list in
+/// registration order.
 #[allow(clippy::too_many_arguments)]
 fn draw_list1(
     mut commands: Commands,
@@ -650,8 +718,14 @@ fn draw_list1(
                         let Some(m) = drawn.or_else(|| cbs.matrices.get(&id).copied()) else { continue };
                         out.push(ship_glass_prims(g, &m, cam));
                     }
-                    // Drawn by crate::water_render.
-                    Callback::FireField760 | Callback::RipplePatches => {}
+                    // The glow points (the beam: crate::vendor_render).
+                    Callback::VendorBeam => {
+                        let Some(mo) = p.game.mobys.mobys.get(id) else { continue };
+                        let rows = [0, 1, 2].map(|i| [mo.rows[i][0], mo.rows[i][1], mo.rows[i][2]]);
+                        out.push(vendor_glow_points(&rows, [mo.position[0], mo.position[1], mo.position[2]], mo.glow, cam));
+                    }
+                    // Drawn by crate::water_render / crate::sea_render.
+                    Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) => {}
                 }
             }
         }
@@ -666,6 +740,38 @@ fn draw_list1(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `0x2781d0`: a square of side 2·size centred on the point pulled toward the camera, facing it, upright (z up),
+    /// corners in the table's order with its ST, one colour.
+    #[test]
+    fn glow_quad_faces_the_camera() {
+        let mut b = PrimBuf::default();
+        glow_quad(&mut b, 0.5, 0.25, [10.0, 0.0, 2.0], 0x80bb_0000, [0.0, 0.0, 2.0]);
+        assert_eq!(b.idx, [0, 1, 2, 1, 2, 3]);
+        assert_eq!(b.uv, GLOW_ST.to_vec());
+        // Camera along −x: F = (−1, 0, 0), R = F × z = (0, 1, 0), U = R × F = (0, 0, 1); the centre is 0.25 nearer.
+        let game: Vec<[f32; 3]> = b.pos.iter().map(|p| [p[0], -p[2], p[1]]).collect();
+        let want = [[9.75, -0.5, 2.5], [9.75, -0.5, 1.5], [9.75, 0.5, 2.5], [9.75, 0.5, 1.5]];
+        for (g, w) in game.iter().zip(want) { assert!(g.iter().zip(w).all(|(a, b)| (a - b).abs() < 1e-5), "{game:?}"); }
+        assert!(b.color.iter().all(|c| *c == [0.0, 0.0, 0xbb as f32 / 128.0, 1.0]));
+    }
+
+    /// The vendor's glow points: four quads at the antenna tips (1.1 out along ±x / ±y of the vendor, 0.59 up), coloured
+    /// by the blue byte and the alpha of its glow word.
+    #[test]
+    fn vendor_glow_points_sit_on_the_antennas() {
+        let id = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let g = vendor_glow_points(&id, [100.0, 50.0, 10.0], 0x8060_6060, [100.0, 40.0, 10.59]);
+        assert_eq!((g.fx, g.additive), (0xb, true));
+        let game: Vec<[f32; 3]> = g.prims.pos.iter().map(|p| [p[0], -p[2], p[1]]).collect();
+        for (k, c) in game.chunks(4).enumerate() {
+            let m = [0, 1, 2].map(|i| c.iter().map(|p| p[i]).sum::<f32>() / 4.0);
+            let a = k as f32 * std::f32::consts::FRAC_PI_2 - std::f32::consts::PI;
+            let want = [100.0 + 1.1 * a.cos(), 50.0 + 1.1 * a.sin(), 10.59];
+            assert!(m.iter().zip(want).all(|(x, y)| (x - y).abs() < 1e-4), "point {k}: {m:?} vs {want:?}");
+        }
+        assert!(g.prims.color.iter().all(|c| *c == [0.0, 0.0, 0x60 as f32 / 128.0, 1.0]));
+    }
 
     #[test]
     fn strips_and_quads_make_the_game_triangles() {

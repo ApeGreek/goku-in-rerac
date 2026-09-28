@@ -51,6 +51,14 @@ pub mod swingshot;
 pub mod comet;
 pub mod weapons;
 pub mod pyrocitor;
+pub mod guns;
+pub mod blaster;
+pub mod ryno;
+pub mod devastator;
+pub mod tesla;
+pub mod reactive;
+pub mod suck_cannon;
+pub mod taunter;
 pub mod crank;
 pub mod scripted;
 pub mod worn;
@@ -677,6 +685,9 @@ pub trait HeroSounds {
     fn footstep(&mut self, _moby: &crate::moby_runtime::Moby, _level: i32, _class: u8, _foot: u8, _variant: u8, _rng: &mut crate::rng::Rng) -> i32 { -1 }
     /// `SoundIsAlive(owner, slot)` 0x2a12f0 for a slot the hero's sounds took (the hand item's loops).
     fn alive(&mut self, _slot: i32) -> bool { false }
+    /// `PlayClassSound(index, flags, moby)` on a moby the hand item's update created (the R.Y.N.O.'s missile, class
+    /// `o_class` at `pos`, table moby `id`). Default: as [`HeroSounds::item_sound`].
+    fn moby_sound(&mut self, _id: crate::moby_runtime::MobyId, o_class: i16, pos: [f32; 3], index: i32, flags: u32, rng: &mut crate::rng::Rng) -> i32 { self.item_sound(o_class, pos, index, flags, rng) }
 }
 
 /// No sound layer: [`hero_update`].

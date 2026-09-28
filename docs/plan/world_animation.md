@@ -280,6 +280,63 @@ Port: `rc_game::water::managers` (the ports, native `f32`; the module stays on i
 `rc-engine` `water_render.rs` draws the module of any level. Level generalisation: docs/plan/level_generalisation.md
 "Water on every level".
 
+### 3.3 The sea and the other liquid surfaces (2026-09-28)
+
+**What holds the sea.** No tfrag, tie, shrub, sky or moby geometry lies at the sea height on 05 / 11 / 12 (surveyed:
+flat tfrags, tie / moby instances at the collision water height, sky shells by elevation). The seas are drawn by
+level classes from a **draw callback**, with geometry built by code; the placed moby has no class geometry (Wrench's
+class names: 854 "Ocean (Aridia)", 879 "Ocean (Rilgar)", 1018 "Ocean (Umbris)", 1111 "Ocean (Pokitaru)"). Three
+mechanisms (confidence high: disassembly and the level data):
+
+1. **The liquid grid module** (reference level05: init `0x2ce098(f12 scale, a0 state, a1 FIX)` / wrapper `0x2ce110`
+   (FIX 0x80), draw `0x2ce830(state)` = `0x2ce130` (fog override from the record, the 64×64 image: `0x277b20` blends two
+   FX frames texel by texel, `trunc(A·(1−t) + B·t)` on the **stored** CLUT entries, uploaded PSMCT24; GS state
+   `ALPHA = FIX<<32 | 0x64`, TEST 0x5360a or 0x5370b when FIX < 0x61), DMA of the strip order `0x1cb280`, `0x2775c8`
+   (block cull: flag ≠ 0, |block centre − camera|² < record w = 160000, frustum), `0x277900` (one 124-vertex strip
+   per 7×7-cell block through the water-strip VU1 program 0x10e810: positions from the grid at the record's z, ST =
+   `0x1cb390 · scale`, per-block RGBA), `0x2ce720` (fog restore). The state record (0x40 bytes) is in the class's data:
+   `rc_formats::sea::LiquidGrid` has the layout. Users (each level's own class wrapper, found by code identity):
+
+   | level | class (update) | record | z | cell / grid | FIX | anim FX / ticks | fog RGB | list |
+   |---|---|---|---|---|---|---|---|---|
+   | 03 | 994 (`0x2dc9b0`) | `0x1dc1a0` | −24 | 40 / 42×35 | 0x20 | 40+4 / 30 | 60 60 60 | after the mobys |
+   | 05 | 879 (`0x316110`) | `0x211b20` | 59.5 ± 0.25 (61.5 on the Hoverboard) | 30 / 42×35 | 0x80 | 43+16 / 15 | 00 00 14 | after the ties |
+   | 07 | 460 (`0x2f8058`) | `0x1d3400` | 34.55 | 10 / 14×14 | 0x80 | 63+16 / 30 | 78 3c 14 | after the ties |
+   | 07 | 1018 (`0x30d440`) | `0x208560` | 38.37 | 30 / 42×35 | 0x80 | 42+16 / 30 | 0d 0d 0d | after the ties |
+   | 08 | 327 (`0x2da0f0`) | `0x1d7060` | 15 | 30 / 42×35 | 0x80 | 40+16 / 30 | 0d 0d 13 | after the mobys |
+   | 09 | 317 (`0x2ef7f8`, the same code as 460) | `0x1fc740` | 25 | 15 / 49×49 | 0x80 | 44+16 / 30 | c8 64 14 (the lava) | after the ties |
+   | 14 | 1260 (`0x303370`) | `0x1e9c60` | 16 | 40 / 42×35 | 0x40 | 40+4 / 30 | 20 20 20 | after the mobys |
+
+   The record's fog is near 10000 / far 260080 integer units (≈ 9.8 / 254 game units) with intensities 255 → 0, so the
+   liquid fades to its own fog colour with distance. "After the ties" is the draw list `0x16e100` (count `0x15f42c`) that
+   `DrawWorld` drains after `DrawTies` and before `DrawShrubs` (`RunDrawCallbacks_2` 0x21b0a8); only these levels'
+   copies of the register function fill it (level05 `0x228110`, 07 `0x221290`, 09 `0x218810`, 12 `0x21bf18`, 02
+   `0x20a390`; level 14 has one for the before-mobys list `0x16e300` too).
+2. **The camera-following ocean 1111** (level11 update `0x30b358`, callback `0x30a908`; the identical code on 16 at
+   `0x2dee10` / `0x2de3c0`): a band from 75 behind the camera to pvar 10 ahead (width ±87 → ±750), a wall when the camera
+   is high, and two additive layers of 4×4 tiles of pvar 6 around the camera with ST scrolled by the camera's motion ·
+   2·scale/(5·S) and by constant speeds (`0x161df8` scales 2, 3; `0x1d9af0` speeds). Details: `rc-engine`
+   `sea_render.rs` module doc; `rc_game::water::sea` for the update.
+3. **The Hoven liquid 1901** (level12 update `0x30bff0`, callback `0x30be68`, after-ties list): static strips
+   (group 1: 10 strips, tables `0x205a08` / `0x2059e0` / `0x205a58` / counts `0x1fbd10`, drawn while the camera is in the
+   moby's cuboid; group 2: 5 strips of the open sea at z ≈ 25, tables `0x208ab0` / `0x208a98` / `0x208ae0` / `0x205a80`)
+   through the generic strip emitter (level01 `0x21fda8`), ST + a scroll per layer (`0x1620e0..` speeds), FX 0x2c / 0x2f
+   (FIX 0x7f) and 0x30 (additive FIX `0x1620d4` = 0x78). The first init sets every colour (`0x30bba0`).
+
+**Not ported (other liquid layers found on the way):** 02's 854 runs the module's image and fog set-up with its own
+arguments (`0x2a4818`) and draws seven small liquid meshes through `0x2a48a0` (records `0x1f3c00..0x1f3e10`, cuboid
+gated), not the grid; 09's callback also draws 108 scrolling lava-flow meshes (`0x21e8c0(0x1f3080, 0x6c, …)`, its own
+second animation FX 0x2c.., period 20) and 10 more meshes (`0x2c1978(state, 0x1f63c0, 10)`); 12's class 293 draws 47
+strips through the two-texture strip module `0x2bc210` (FX 44 / 45; the same code on 14 at `0x2ab3e8`); 08's 327 adds a
+splash when Ratchet falls in. The water-strip VU1 program (resident id 7) has more users per level (survey:
+`tools`-free clustering of the callers of the level's `setup_water_strip_vu1` copy), not all of them liquids.
+
+**In the port.** `rc_formats::sea` (tables), `rc_game::water::sea` (the class ports `ClassUpdate::Sea(i)`, their data in
+`LevelWaterData::sea` and state in `WaterWorld::sea`; the after-ties list is `DrawCallbacks::ties`), `rc-engine`
+`sea_render.rs` (the draws, through the shared draw-callback material `fx_draw::FxPrimMaterial`: display-blend effects,
+or `FxPrimParams::opaque` for the FIX ≥ 0x61 / 0x7f Z-writing strips drawn as opaque world surfaces). `RC_SEA=0` turns
+it off. Guards: `rc-game/tests/sea_levels.rs` (the inventory on 19 levels, each port's update on its level).
+
 ## 4. Reflective overlay (1848), confidence high
 
 `0x30f208` runs every tick: `0x162110 += dt·0.025` and `0x162114 += dt·0.025` (dt = the copy at `0x15ed7c`, 1/60), each wrapped to
@@ -425,7 +482,7 @@ hook for when the hero moby renders), the zone lookup uses the fly camera (no ca
   no tfrag colour cycling.**
 - **Moby glow** +0x90 (init = class header +0x40, `InitMobyInstance`). It is pulsed by updates: vendor 11
   `(sin(t)·48 + 96)·0x010101 | 0x80000000`, ship 531 `0x2a1c40`. It is consumed by the MobyProc mode-0x10
-  path, which is not reversed. Confidence medium.
+  glow list (pinned and ported 2026-09-28: docs/plan/moby_skinning_lighting.md §10).
 - **Point lights** (class 1504 moves a light slot near the camera) relight ties, shrubs and tfrags per
   frame through the existing Light* passes. Without point lights those passes are static.
 
@@ -458,7 +515,7 @@ hook for when the hero moby renders), the zone lookup uses the fly camera (no ca
 
 - VU1 57843 entries 0xc/0xe (perspective ST, clip) assumed standard. (`fun_001f9988` = VU0 sqrt and
   strip +0x1c = 1 are pinned, §3.1.)
-- 1848's mesh identity; moby glow rendering; (the tint pass position is pinned: after the HUD, §6.1)
+- 1848's mesh identity; (the tint pass position is pinned: after the HUD, §6.1)
   relative to the HUD.
 - Other levels: which classes use the ripple module (05/07/11/12/13), and lava/goo (level-specific code,
   e.g. `0x21fa98` strip-emitter copies in 09/12/14), not surveyed.

@@ -6,7 +6,10 @@
 // (Cs / 255, As / 128) for the (Cs - Cd)·As + Cd blend (ALPHA_1 0x44) set by GsPass::Hud.
 //
 // HUD_COMPOSITE: the UI material that puts the offscreen image on the main camera, nearest (pixel doubling),
-// premultiplied display bytes -> straight linear colour for the sRGB target's alpha blend.
+// premultiplied display bytes -> straight linear colour for the sRGB target's alpha blend; `composite_static` the
+// static layer's (premultiplied blend).
+//
+// HUD_ADD: the static layer's noise pass (ALPHA_1 0x68, added with FIX = the vertex alpha).
 
 #import bevy_ui::ui_vertex_output::UiVertexOutput
 
@@ -18,7 +21,7 @@ struct HudVertex {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) rgba: u32,
-    // atlas x | y << 16, texture w | h << 16, flags (1 = textured), 0
+    // atlas x | y << 16, texture w | h << 16, flags (1 = textured, 2 = REPEAT, 4 = NEAREST), 0
     @location(3) tex: vec4<u32>,
     // x0, x1, y0, y1 (inclusive pixels)
     @location(4) scissor: vec4<u32>,
@@ -44,11 +47,15 @@ fn vertex(v: HudVertex) -> HudVarying {
     return out;
 }
 
-// Texel p of the texture at the atlas rectangle `t`, CLAMP to its own size, as 0..255 bytes.
+// Texel p of the texture at the atlas rectangle `t`, CLAMP to its own size (or REPEAT, flag 2: CLAMP_1 = 0), as
+// 0..255 bytes.
 fn texel(t: vec4<u32>, p: vec2<i32>) -> vec4<f32> {
     let origin = vec2<i32>(i32(t.x & 0xffffu), i32(t.x >> 16u));
     let size = vec2<i32>(i32(t.y & 0xffffu), i32(t.y >> 16u));
-    let q = clamp(p, vec2<i32>(0), size - vec2<i32>(1));
+    var q = clamp(p, vec2<i32>(0), size - vec2<i32>(1));
+    if (t.z & 2u) != 0u {
+        q = ((p % size) + size) % size;
+    }
     return round(textureLoad(atlas, origin + q, 0) * 255.0);
 }
 
@@ -71,10 +78,18 @@ fn fragment(in: HudVarying) -> @location(0) vec4<f32> {
         let t10 = texel(in.tex, i0 + vec2<i32>(1, 0));
         let t01 = texel(in.tex, i0 + vec2<i32>(0, 1));
         let t11 = texel(in.tex, i0 + vec2<i32>(1, 1));
-        let ct = floor(mix(mix(t00, t10, f.x), mix(t01, t11, f.x), f.y));
+        var ct = floor(mix(mix(t00, t10, f.x), mix(t01, t11, f.x), f.y));
+        if (in.tex.z & 4u) != 0u {
+            // TEX1 MMAG / MMIN NEAREST: the texel under the sample point.
+            ct = texel(in.tex, vec2<i32>(floor(in.uv)));
+        }
         // MODULATE: C = Ct·Cf >> 7, A = At·Af >> 7, clamped to 0xff.
         cs = min(floor(ct.rgb * cf.rgb / 128.0), vec3<f32>(255.0));
         a = min(floor(ct.a * cf.a / 128.0), 255.0);
+#ifdef HUD_ADD
+        // ALPHA_1 0x68, FIX = the vertex alpha: Cd + (Cs·FIX >> 7); the texture's alpha takes no part. Coverage 0.
+        return vec4<f32>(floor(cs * cf.a / 128.0) / 255.0, 0.0);
+#endif
     } else {
         cs = cf.rgb;
         a = cf.a;
@@ -102,5 +117,20 @@ fn composite(in: UiVertexOutput) -> @location(0) vec4<f32> {
     }
     let straight = clamp(c.rgb / c.a, vec3<f32>(0.0), vec3<f32>(1.0));
     return vec4<f32>(to_linear(straight), min(c.a, 1.0));
+}
+
+// The static layer (hud_render::HudStaticComposite, premultiplied blend): its display-space premultiplied colour in
+// linear light added over what is under it, that scaled by 1 - coverage. Exact over black; the noise (coverage 0)
+// adds.
+@fragment
+fn composite_static(in: UiVertexOutput) -> @location(0) vec4<f32> {
+    let p = clamp(vec2<i32>(floor(in.uv * vec2<f32>(512.0, 416.0))), vec2<i32>(0), vec2<i32>(511, 415));
+    let c = textureLoad(hud_image, p, 0);
+    let rgb = to_linear(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0)));
+    let a = clamp(c.a, 0.0, 1.0);
+    if a <= 0.0 && max(rgb.r, max(rgb.g, rgb.b)) <= 0.0 {
+        discard;
+    }
+    return vec4<f32>(rgb, a);
 }
 #endif

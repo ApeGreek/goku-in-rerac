@@ -352,6 +352,12 @@ impl HitSink for CellHits<'_, '_> {
         let mut s = self.svc.borrow_mut();
         ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.probe(table, a, b, flags, ignore)
     }
+    // The guns' rays and class filter (rc_game::hero::{blaster, devastator, ryno, tesla}).
+    fn probe_moby(&mut self, table: &mut MobyTable, a: [rc_game::ps2v::Pf; 4], b: [rc_game::ps2v::Pf; 4], flags: u32, ignore: Option<MobyId>) -> Option<Option<rc_game::hero::items::Probe>> {
+        let mut s = self.svc.borrow_mut();
+        ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.probe_moby(table, a, b, flags, ignore)
+    }
+    fn class_type(&self, o_class: i16) -> Option<u8> { self.classes.info(o_class).map(|i| i.ty) }
     fn light_alloc(&mut self, l: rc_game::point_lights::PointLight) -> i32 {
         let mut s = self.svc.borrow_mut();
         ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.light_alloc(l)
@@ -367,6 +373,14 @@ impl HitSink for CellHits<'_, '_> {
     fn light_free(&mut self, slot: i32) {
         let mut s = self.svc.borrow_mut();
         ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.light_free(slot)
+    }
+    // The hand items' calls into class code (rc_game::moby_update::creature::react: the Suck Cannon, the Taunter).
+    fn world(&mut self, table: &mut MobyTable, hero: &rc_game::hero::Hero, rng: &mut rc_game::rng::Rng, counter: u64, f: &mut dyn FnMut(&mut rc_game::moby_update::services::World)) -> bool {
+        let mut s = self.svc.borrow_mut();
+        let mut w = rc_game::moby_update::services::World::new(table, hero, rng, self.classes, &mut s, counter);
+        w.coll = Some(self.coll);
+        f(&mut w);
+        true
     }
 }
 
@@ -501,6 +515,22 @@ pub fn level_ports() -> &'static rc_game::moby_update::classes::LevelPorts {
             return LevelPorts::by_class_number();
         };
         LevelPorts::from_overlays(&target, &overlay, &[EMITTER_UPDATE])
+    })
+}
+
+/// The loaded level's ported class reaction tables (`rc_game::moby_update::creature::react::tables_from_overlay`: the
+/// level's `lvl.vtbl` third words against level 01's tables). Built once per process; empty without the overlays (the
+/// class-number fallback).
+pub fn level_reactions() -> &'static std::collections::HashMap<i16, rc_game::moby_update::creature::react::Table> {
+    use rc_formats::level_overlay::LevelOverlay;
+    static T: std::sync::OnceLock<std::collections::HashMap<i16, rc_game::moby_update::creature::react::Table>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+        let overlay = |l: u32| -> Option<LevelOverlay> { LevelOverlay::parse(&crate::disc_source::level_file(&root, l, "overlay.bin").ok()?).ok() };
+        match (overlay(index), overlay(1)) {
+            (Some(t), Some(r)) => rc_game::moby_update::creature::react::tables_from_overlay(&t, &r),
+            _ => Default::default(),
+        }
     })
 }
 
@@ -791,6 +821,8 @@ fn setup(
     // The moby loop's services and the load pass (counter 0) on the game's stream.
     let mut svc = Services::new();
     svc.level = level_index;
+    // The class reaction tables of the level's `lvl.vtbl` (rc_game::moby_update::creature::react).
+    svc.creatures.react.tables = level_reactions().clone();
     // The level's water (rc_game::water::world: the ripple managers' tables, the module, the underwater look).
     if let Some(d) = lv.water.data.clone() { svc.water = rc_game::water::world::WaterWorld::new(d); }
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }
@@ -1002,7 +1034,7 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
             _ => None,
         };
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
-        occl.look(ii, m.alpha, m.mode);
+        occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73 });
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
             a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()));
         }
@@ -1215,6 +1247,14 @@ fn tick(
     if let Some(a) = ammo.as_deref() {
         for (i, &(has, _)) in a.0.iter().enumerate().take(p.game.hero.weapons.uses_ammo.len()) { p.game.hero.weapons.uses_ammo[i] = has; }
         if p.game.hero.weapons.defs.is_empty() { p.game.hero.weapons.defs = a.1.clone(); }
+    }
+    // The Taunter's whistle cycle from its class's sound defs (rc_game::hero::taunter::cycle_of).
+    if p.game.hero.weapons.reactive.taunter.cycle.is_empty() {
+        if let Some(a) = audio_cell.borrow_mut().as_deref_mut() {
+            if let Some(c) = a.system().data.sounds.classes.iter().find(|c| c.o_class == rc_game::hero::taunter::CLASS as i32) {
+                p.game.hero.weapons.reactive.taunter.cycle = rc_game::hero::taunter::cycle_of(&c.defs);
+            }
+        }
     }
     if let Some(gs) = state.as_deref() {
         p.game.hero.weapons.ammo = gs.0.global.ammo;
@@ -1491,10 +1531,11 @@ fn upload_dynamic(
         if Some(id) == ship { continue; }
         let ci = (mo.state < 0x80).then(|| d.class_ix.get(&mo.o_class).copied()).flatten();
         if ci.is_some() { live += 1; }
-        // MobyProc: the culls, then the vertex alpha (fade × +0x23) and the blend (moby_render::MobyBlend).
+        // MobyProc: the culls, then the vertex alpha (fade × +0x23), the blend (moby_render::MobyBlend) and the shine
+        // gate (+0x73) with its sphere-map basis.
         let pick = ci.and_then(|ci| {
             if mo.mode & 0x81 != 0 { return None; }
-            let Some((eye, rows)) = cam else { return Some((ci, mo.alpha, false)) };
+            let Some((eye, rows)) = cam else { return Some((ci, mo.alpha, false, 0, [[0.0; 3]; 3])) };
             let c = &m.classes[ci].class.header;
             let inp = crate::moby_lod::ProcInput {
                 position: pos3(mo),
@@ -1502,18 +1543,21 @@ fn upload_dynamic(
                 scale: mo.scale,
                 draw_distance: mo.draw_dist as i32,
                 lod_trans: c.lod_trans,
-                shine_distance: 0,
+                shine_distance: mo.b73,
                 alpha: mo.alpha,
             };
             let sphere = crate::moby_lod::world_sphere(&inp, crate::moby_lod::seq_sphere(&m.anim[ci], &mo.anim, c.bsphere));
             let v = crate::moby_lod::view_centre(sphere, eye, &rows);
-            crate::moby_lod::moby_proc(v, sphere[3], &inp).ok().map(|p| (ci, p.alpha, p.fading))
+            crate::moby_lod::moby_proc(v, sphere[3], &inp).ok().map(|p| {
+                let e = if p.shine > 0 { crate::moby_lod::shine_basis(sphere, eye, &rows, &inp.rows) } else { [[0.0; 3]; 3] };
+                (ci, p.alpha, p.fading, p.shine, e)
+            })
         });
         let ci = pick.map(|p| p.0);
         d.visible[slot] = ci.is_some() as u8;
         d.shown[slot] = ci;
         let model = moby_render::extra_model(rows3(&mo.rows), mo.scale, pos3(mo));
-        let look = pick.map(|(ci, alpha, fading)| (&m.classes[ci], moby_render::SlotLook { model, alpha, fading, mode: mo.mode }));
+        let look = pick.map(|(ci, alpha, fading, shine, e)| (&m.classes[ci], moby_render::SlotLook { model, alpha, fading, mode: mo.mode, glow: mo.glow, shine, e }));
         d.extra.show_slot(commands, lv, slot as u32, look, meshes, images, materials, buffers);
         let Some(ci) = ci else { continue };
         drawn += 1;

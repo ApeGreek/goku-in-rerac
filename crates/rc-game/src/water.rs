@@ -38,6 +38,7 @@
 //! (the engine passes the game's one stream from the moby scheduler, at 751's place in the run order).
 
 pub mod managers;
+pub mod sea;
 pub mod world;
 
 use crate::ps2v::{self, Pf, F};

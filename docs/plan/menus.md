@@ -251,7 +251,20 @@ mobys `DrawMobyList(m, 1)` (enable array 0x1b2840 all 1). 4) per moby: pvar corn
 flag 1 draw direct): render to a `2^u × 2^v` target (≥ 128 each, u+v ≤ 17, v reduced) cleared to 0x80100808
 (`0x251838`), draw in panel-local pixels, then `DrawTexturedQuad` onto the rect with ALPHA 0x8000000064 (opaque copy):
 draw returns 2 = 1:1 w×h, 4 aspect crop, 8 centre crop, 0x10 whole texture, 1 none. The rect loop writes the widget only
-while a page is current (`0x1ba174 ≠ 0`); during a transition only the mobys and the navy rects draw. Navy rect vs 3D frame
+while a page is current (`0x1ba174 ≠ 0`); during a transition only the mobys and the navy rects draw.
+7) Last (kind ≠ 0x14, with or without a page), for every slot i < 14 with 0x1b2840[i] ≠ 0 (slot 6 only with Goodies)
+**`fun_00223e28(0x1ba310[i])`** (boot 0x223e28, level01 copy 0x297830; read from the disassembly) [H]: on the pvar
+rect (+0x50..+0x5c; skipped unless x < 0x200, x + w ≥ 0, y < 0x1a1 (PAL 0x1c1), y + h ≥ 0): CLAMP_1 = 0 (REPEAT),
+ALPHA_1 0x44; `fun_00200080` icon 0xe99e frame 7 (a 128×128 black vignette) over the rect, alpha 0x80; the noise
+burst in pvar +0x48 (running) / +0x4c (counter): idle → `rand() % 2000 == 0` starts it (counter 0); running →
+counter += 2, u = `rand() % 200`, v = `rand() % 200`, ALPHA_1 0x68 with FIX = `min(2·(0x80 − |c − 0x80|), 0x80)`
+(`subtract_integer_with_clamp` 0x221110 is abs: 32 frames in, 64 held, 32 out), FX 0x1a `DrawTexturedQuad(x, y, w,
+h, u, v, w, h, 0x808080)`, stopped once c ≥ 0x100; then ALPHA_1 0x44, the scan lines FX 0x1c `(x, y, w, h, 0, 0, w,
+3h >> 1, 0x50606060)` every frame; the glass FX 0x19 `(x + 1, y + 1, w + dw, h + dh, 1, 1, 0x3e, 0x3e, 0x80808080)`,
+dw / dh −2 below 0x4c pixels, −1 below 0x97, else 0. Per panel, on the game's `rand` stream. Port:
+`rc_game::menus::screen_static` (shared with the vendor's monitors, interaction.md §9.3) and the HUD's static layer
+(`hud_render::Hud2dHook::statics`, over the Weapons / Gadgets pages' 3D views). The boot's own copy of this draw,
+0x2196b8 (called from `transition_default_draw` 0x1eb410), also calls it [L: the out-of-level menus; not ported]. Navy rect vs 3D frame
 layering: the mobys are queued first (`DrawMobyList` into the VU1 chain, before the rect loop) [M: that `fun_00200e08` goes
 into the same chain is not traced]; seqs 7..13 (one frame, rate 0: the advance never steps) park the unused slots off screen.
 

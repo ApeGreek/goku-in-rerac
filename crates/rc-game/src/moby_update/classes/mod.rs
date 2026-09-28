@@ -37,17 +37,22 @@
 //! | 1134 (gold bolts; every level with one) | 0x307ca0 `GoldBoltUpdate` | [`gold_bolt`] |
 //! | 750 (infobots; levels 0, 1, 3–8, 10, 12–15, 17) | 0x2fbf80 `InfobotUpdate` | [`infobot`] |
 //! | 179 (the Pyrocitor's pilot flame; created by the hand item) | 0x2d1068 | [`pyro_glow`] |
+//! | 305 (the Blaster's shot; created by the hand item) | 0x2e2170 | [`blaster_shot`] |
+//! | 153 (the Devastator's missile; created by the hand item) | 0x2c5b70 | [`devastator_missile`] |
+//! | 457 (the R.Y.N.O.'s missile; created by the hand item) | 0x2e5a48 | [`ryno_missile`] (the intercept shared with 153: [`missile`]) |
 //! | 605 (buried bolt caches, the Metal Detector's targets; levels 1–18) | 0x2f2eb8 | [`buried_bolts`] |
 //! | 832 (Visibomb range limiters; levels 1–15, 18) | 0x302648 | [`rc_range`] |
 //! | 604 / 1818 / 1633 (the Sonic Summoner's house, "mouse" and its shot; levels 1–6, 8, 11, 12, 14) | 0x2f2b68, 0x30df40, 0x30c9a8 | [`mouse`] |
 //! | 258 (activation zones; levels 5, 7, 9, 10, 12–15, 17) | level05 0x2f5200 | [`activation_zone`] |
 //! | 830 (floor switches; levels 5, 11, 15, 17, 18) | level05 0x30c5b0 | [`floor_switch`] |
+//! | 994, 879, 460, 1018, 327, 317, 1260, 1111, 1901 (the seas and liquid surfaces; levels 3, 5, 7–9, 11, 12, 14, 16) | per level | `crate::water::sea` (`ClassUpdate::Sea(i)`) |
 
 pub mod activation_zone;
 pub mod amoeboid;
 pub mod bolt;
 pub mod bolt_crank;
 pub mod bomb;
+pub mod blaster_shot;
 pub mod bomb_water;
 pub mod buried_bolts;
 pub mod breakables;
@@ -57,6 +62,7 @@ pub mod crate_;
 pub mod critter;
 pub mod cutscene_fx;
 pub mod debris;
+pub mod devastator_missile;
 pub mod draw_callbacks;
 pub mod dropship;
 pub mod enemy_spawner;
@@ -70,6 +76,7 @@ pub mod hinged_bridge;
 pub mod infobot;
 pub mod gunship;
 pub mod item_offer;
+pub mod missile;
 pub mod mission_npc;
 pub mod mouse;
 pub mod path_enemy;
@@ -78,6 +85,7 @@ pub mod pickup;
 pub mod props;
 pub mod pyro_glow;
 pub mod rc_range;
+pub mod ryno_missile;
 pub mod splash;
 pub mod swing_target;
 pub mod talking_npc;
@@ -151,14 +159,19 @@ pub enum ClassUpdate {
     MouseShot,
     ActivationZone,
     FloorSwitch,
+    BlasterShot,
+    RynoMissile,
+    DevastatorMissile,
     /// A copy of the break template: `breakables::RECIPES[i]`.
     Breakable(u8),
     /// A water class: `crate::water::managers::PORTS[i]` (the ripple managers, the water plane).
     Water(u8),
+    /// A sea / liquid surface class: `crate::water::sea::PORTS[i]`.
+    Sea(u8),
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 61] = [
+    pub const ALL: [ClassUpdate; 64] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -220,6 +233,9 @@ impl ClassUpdate {
         ClassUpdate::MouseShot,
         ClassUpdate::ActivationZone,
         ClassUpdate::FloorSwitch,
+        ClassUpdate::BlasterShot,
+        ClassUpdate::RynoMissile,
+        ClassUpdate::DevastatorMissile,
     ];
 
     /// The level01 class-table address of this update.
@@ -286,15 +302,19 @@ impl ClassUpdate {
             ClassUpdate::MouseShot => mouse::SHOT_FN,
             ClassUpdate::ActivationZone => activation_zone::UPDATE_FN,
             ClassUpdate::FloorSwitch => floor_switch::UPDATE_FN,
+            ClassUpdate::BlasterShot => blaster_shot::UPDATE_FN,
+            ClassUpdate::RynoMissile => ryno_missile::UPDATE_FN,
+            ClassUpdate::DevastatorMissile => devastator_missile::UPDATE_FN,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].func,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].func,
+            ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].func,
         }
     }
 
     pub fn from_address(a: u32) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.address() == a) }
 
     /// [`ClassUpdate::ALL`] and every break-template copy (`Breakable(i)`).
-    pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)).chain(crate::water::managers::ids().map(ClassUpdate::Water)) }
+    pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)).chain(crate::water::managers::ids().map(ClassUpdate::Water)).chain(crate::water::sea::ids().map(ClassUpdate::Sea)) }
 
     /// The classes the level01 table maps to this function.
     pub fn classes(self) -> &'static [i16] {
@@ -360,8 +380,12 @@ impl ClassUpdate {
             ClassUpdate::MouseShot => &mouse::SHOT_CLASSES,
             ClassUpdate::ActivationZone => &activation_zone::CLASSES,
             ClassUpdate::FloorSwitch => &floor_switch::CLASSES,
+            ClassUpdate::BlasterShot => &blaster_shot::CLASSES,
+            ClassUpdate::RynoMissile => &ryno_missile::CLASSES,
+            ClassUpdate::DevastatorMissile => &devastator_missile::CLASSES,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].classes,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].classes,
+            ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].classes,
         }
     }
 }
@@ -380,6 +404,7 @@ impl ClassUpdate {
             ClassUpdate::FloorSwitch => floor_switch::REFERENCE_LEVEL,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].level,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].level,
+            ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].level,
             _ => 1,
         }
     }
@@ -526,8 +551,12 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::MouseShot => mouse::shot_update(w, id),
         ClassUpdate::ActivationZone => activation_zone::update(w, id),
         ClassUpdate::FloorSwitch => floor_switch::update(w, id),
+        ClassUpdate::BlasterShot => blaster_shot::update(w, id),
+        ClassUpdate::RynoMissile => ryno_missile::update(w, id),
+        ClassUpdate::DevastatorMissile => devastator_missile::update(w, id),
         ClassUpdate::Breakable(i) => breakables::update(w, id, i),
         ClassUpdate::Water(i) => crate::water::managers::update(w, id, i),
+        ClassUpdate::Sea(i) => crate::water::sea::update(w, id, i),
     }
 }
 

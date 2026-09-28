@@ -75,7 +75,7 @@ None. The loader and every renderer ran on all 19 levels.
 
 ### L — missing layer
 
-**L1 (unassigned: water renderer; possibly moby). The open sea is not drawn on 11 Pokitaru and 12 Hoven.**
+**L1 (fixed 2026-09-28, see Resolutions). The open sea is not drawn on 11 Pokitaru and 12 Hoven.**
 - **11:** the default camera looks at the open sea, and ~90 % of the frame is the sky dome's lower hemisphere.
   - A column read down the middle of `diag/11_back.png` goes (7,91,122) → (0,50,170) → (0,5,240) pure blue at
     the bottom of the frame. This is the gouraud nadir colour, not fog (0,86,127) or the background
@@ -275,6 +275,29 @@ Nothing specific found. There were no missing tfrags, and every tfrag, tie and m
 - No change to `tfrag_light.rs`.
 - The pure-black gaps are the sky's lower hemisphere below terrain that has nothing under it (W1). Whether the
   game has a layer there is the L1 question.
+
+**L1 fixed: the seas are draw-callback surfaces of level classes (docs/plan/world_animation.md §3.3).**
+- No tfrag, tie, shrub, sky or moby geometry holds the sea: the placed controller mobys have no class geometry and draw
+  the sea from a draw callback. Three mechanisms, each ported once and found by code identity (`rc_game::water::sea`,
+  `rc-engine` `sea_render.rs`, `ClassUpdate::Sea(i)`):
+  - the **liquid grid module** (level05 `0x2ce098` … `0x2ce830`): 03 (994), **05 (879, the open sea around Rilgar)**,
+    07 (460, 1018), 08 (327), **09 (317, the lava bed: W2)**, 14 (1260, a translucent FIX 0x40 sludge);
+  - the **camera-following ocean 1111** (level11 `0x30b358` / `0x30a908`): **11** and 16 (the same code);
+  - the **Hoven liquid 1901** (level12 `0x30bff0` / `0x30be68`, static strips): **12**.
+- The grids and 1901 draw on the draw list drained after the ties and before the shrubs (`0x16e100`), which level01
+  never fills; the port now has it (`DrawCallbacks::ties`).
+- Height: 05's grid is at 59.5 ± 0.25 (the collision water 59.44); 11's ocean at 223 ± 0.25 (collision 223); 12's open-sea
+  strips at 24.92 / 25.99 (the 19 ripple patches at 25.5).
+- Shots (`RC_CAM`, frame 120; before = `RC_SEA=0`, identical to the pre-change build: `nosea_11_*` md5 = the original
+  `before_11_*`): 05 default / over `400,40,95,300,160,58` / under `330,70,55,330,160,66`; 11 `470,380,245,400,300,223`,
+  default, under `470,380,216,400,300,226`; 12 `300,280,70,360,450,25`; 09 `300,100,90,300,300,25`; 14
+  `300,200,80,300,350,16`; 07 `300,200,90,300,350,38`. Two runs of each are byte-identical; Novalis (no sea port) is
+  byte-identical with and without the sea path.
+- Not ported (listed in world_animation.md §3.3): 02's seven liquid meshes (`0x2a48a0`), 09's lava-flow meshes
+  (`0x21e8c0`, `0x2c1978`), 12's 293 strips (`0x2bc210`, also on 14), 08's splash.
+
+**W2 resolved:** the maroon bed was the tfrag under the lava; the lava itself is 317's liquid grid (z 25, 49×49 cells of
+15, an animated FX 44..59 image, fog colour c8 64 14), now drawn. The lava streams are not ported yet (above).
 
 **M2: the game draws texture −1 triangles.** See `docs/plan/moby_untextured.md`.
 - At load, the ad-gif blocks with TEX0 index −1 are rewritten to a reserved 8×8 all-0x80 PSMCT32 texture at GS

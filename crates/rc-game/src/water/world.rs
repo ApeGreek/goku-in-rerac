@@ -64,6 +64,8 @@ pub struct LevelWaterData {
     pub look: UnderwaterLook,
     /// The classes of the level's table that run a ripple manager (751 or a patch manager), in table order.
     pub manager_classes: Vec<i32>,
+    /// The sea ports present on the level and their data ([`super::sea`]).
+    pub sea: Vec<super::sea::SeaPortData>,
 }
 
 /// Reads the underwater look bytes (tint RGBA, fog RGB, pad, near, far, near / far intensity) at `a`.
@@ -88,7 +90,7 @@ impl LevelWaterData {
         let pvars = rc_formats::gameplay::parse_pvars(gameplay)?;
         let vtbl = target.vtbl();
         let mut refs: HashMap<u32, Arc<LevelOverlay>> = HashMap::new();
-        for l in std::iter::once(1).chain(PORTS.iter().map(|p| p.level)) {
+        for l in std::iter::once(1).chain(PORTS.iter().map(|p| p.level)).chain(super::sea::PORTS.iter().map(|p| p.level)) {
             if refs.contains_key(&l) { continue; }
             if let Some(o) = reference(l) { refs.insert(l, o); }
         }
@@ -134,6 +136,7 @@ impl LevelWaterData {
             }
             data.ports.push(pd);
         }
+        data.sea = super::sea::load(&ov, target, &rel_of);
         Ok(data)
     }
 
@@ -165,6 +168,8 @@ pub struct WaterWorld {
     /// The patch managers' `.lit` globals (counters, flood stage, drown count, …) by reference label, from the stored
     /// values ([`PortData::words`]) on the first use.
     pub globals: HashMap<u32, u32>,
+    /// The sea ports' state ([`super::sea`]).
+    pub sea: super::sea::SeaState,
 }
 
 impl WaterWorld {

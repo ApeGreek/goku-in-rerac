@@ -38,6 +38,8 @@ pub struct LoadedLevel {
     pub hud: Option<crate::hud_render::LevelHud>,
     /// Level-code water tables (crate::water_render; empty when `RC_WATER=0` or the level has none).
     pub water: crate::water_render::LevelWater,
+    /// The liquid grids' raw animation frames (crate::sea_render; the sea ports' data is in `water.data`).
+    pub sea: crate::sea_render::LevelSea,
     /// The level collision mesh (the hero and the follow camera query it, crate::gameplay); None when it
     /// does not parse (warned; the game tick is then off).
     pub collision: Option<rc_formats::collision::Collision>,
@@ -121,6 +123,7 @@ pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
     let particles = crate::particle_render::load(&core, &core_index, &core_data, &gameplay, index).context("loading particles")?;
     let hud = crate::hud_render::load(root, index, &core, &core_index, &core_data, &gameplay).map_err(|e| eprintln!("hud: {e:#}")).ok();
     let water = crate::water_render::load(root, index, &gameplay).context("loading water")?;
+    let sea = crate::sea_render::load(&core, &core_index, &core_data, &water);
     let collision = rc_formats::collision::parse_collision(&core, &core_data)
         .map_err(|e| eprintln!("level {index:02}: collision not parsed ({e}); no game tick"))
         .ok();
@@ -128,7 +131,7 @@ pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
     let audio = crate::audio_out::load(root, index, &core_index, &core, &core_data, &gameplay, collision.clone());
     let moby_class_order = core.moby_classes.iter().map(|e| e.o_class).collect();
     Ok(LoadedLevel {
-        tfrags, textures, fog, background, mobys, ties, shrubs, sky, occlusion, tfrag_lod, particles, hud, water, collision, death_z, audio,
+        tfrags, textures, fog, background, mobys, ties, shrubs, sky, occlusion, tfrag_lod, particles, hud, water, sea, collision, death_z, audio,
         gameplay, moby_class_order, timings: t,
     })
 }

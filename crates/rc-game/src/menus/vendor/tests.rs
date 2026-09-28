@@ -101,8 +101,10 @@ fn ticker_static_always_runs_and_other_screens_burst() {
     let d = s.step(222.0, 40.0, 0, &mut rng);
     assert_eq!(d.len(), 1);
     assert_eq!(d[0].fx, screens::NOISE_FX);
-    assert_eq!(d[0].rgba >> 24, 0x80, "full strength while the counter is below 0xc0");
-    // A burst on screen 3: +2 per frame, fading after 0xc0, over at 0x100.
+    // Between bursts the ticker's counter is floored at 0x18: 2·(0x80 − |0x18 − 0x80|) = 0x30.
+    assert_eq!(d[0].rgba >> 24, 0x30, "the ticker's resting static");
+    // A burst on screen 3: +2 per frame; `subtract_integer_with_clamp` 0x221110 is abs(), so the noise fades in
+    // (c 4 → 0x40), holds at 0x80 (0x40..0xc0) and fades out (→ 0 at 0x100), then the counter resets.
     s.burst[3] = 2;
     let mut alphas = Vec::new();
     for _ in 0..200 {
@@ -110,9 +112,31 @@ fn ticker_static_always_runs_and_other_screens_burst() {
         if let Some(n) = d.iter().find(|x| x.fx == screens::NOISE_FX) { alphas.push(n.rgba >> 24); }
         if s.burst[3] == 0 { break; }
     }
-    assert_eq!(alphas.len(), 127, "0x04..0xfe step 2, then the reset");
-    assert_eq!(alphas[0], 0x80);
-    assert!(alphas.last().copied().unwrap() < 0x08);
+    assert_eq!(alphas.len(), 127, "c = 0x04..0x100 step 2, then the reset");
+    assert_eq!(&alphas[..4], &[8, 12, 16, 20]);
+    assert_eq!(alphas[30], 0x80, "full from c = 0x40");
+    assert_eq!(alphas[93], 0x80, "still full at c = 0xc0");
+    assert_eq!(&alphas[123..], &[12, 8, 4, 0]);
+}
+
+#[test]
+fn scan_bar_fades_in_and_out() {
+    // FX 0x1c on screens 1..5: alpha 0x100 − |c − 0xfe| (c before the +2) capped at 0x50, over c = 2..0x1fe.
+    let mut s = Statics::default();
+    let mut rng = Rng::new();
+    s.bar[2] = 2;
+    let mut alphas = Vec::new();
+    for _ in 0..300 {
+        let d = s.step(120.0, 90.0, 2, &mut rng);
+        if let Some(b) = d.iter().find(|x| x.fx == screens::BAR_FX) { alphas.push(b.rgba >> 24); }
+        if s.bar[2] == 0 { break; }
+    }
+    assert_eq!(alphas.len(), 255, "c = 2..0x1fe step 2");
+    assert_eq!(&alphas[..3], &[4, 6, 8]);
+    assert_eq!(alphas[38], 0x50, "full from c = 0x4e");
+    assert_eq!(alphas[214], 0x50, "still full at c = 0x1ae");
+    assert_eq!(alphas[215], 0x4e);
+    assert_eq!(&alphas[252..], &[4, 2, 0]);
 }
 
 #[test]
@@ -137,4 +161,23 @@ fn power_factor_follows_the_counters() {
     v.exit_t = 4;
     assert_eq!(v.power(), 0.5);
     assert!(!v.world_runs() && v.screens_shown());
+}
+
+#[test]
+fn ticker_glyphs_are_half_bright_textured_quads() {
+    // `fun_00238310(2.0, text, −scroll, 8)`: `DrawTexturedQuad(x, 8, 18, 18, u, v, 9, 9, 0x80404040, LED font)`.
+    let mut out = VendorOut::default();
+    let gs = GameState::zeroed(rc_formats::save_game::ChunkTables { global: Vec::new(), level: Vec::new() });
+    let mut v = Vendor::open(VendorTables { shop: shop(), ..Default::default() }, &gs, false, &mut out);
+    v.tables.led_cell = vec![-1; 64];
+    v.tables.led_cell[0x21] = 0x0090_0120; // 'A': u = 0x120 >> 4 = 18, v = 0x90 >> 4 = 9
+    v.tables.led_adv = vec![10; 64];
+    v.ticker = b"A".to_vec();
+    v.ticker_scroll = -20;
+    let glyphs = [[rc_formats::font::Glyph::default(); rc_formats::font::GLYPHS]; 3];
+    let hud = crate::hud::HudAssets { icons: vec![], frame_sizes: vec![(64, 64)], glyphs, messages: vec![] };
+    let a = MenuAssets::new(hud, Overlay::default());
+    let d = v.screen_content(screens::TICKER, (230, 35), &a, &gs, 0);
+    assert_eq!(d[0], MenuDraw::FrameQuad { frame: 0, x: 16, y: 8, w: 18, h: 18, u: 18, v: 9, tw: 9, th: 9, rgba: LED_RGBA });
+    assert_eq!(LED_RGBA, 0x8040_4040);
 }

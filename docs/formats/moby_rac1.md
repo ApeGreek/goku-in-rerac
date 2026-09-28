@@ -143,7 +143,7 @@ From `packed_struct(MobyClassHeader, …)` in `moby_low.h`, plus the interpretat
 | 0x2d | 1 | `u8` | `mip_dist` | Mipmap distance (`docs/moby_renderer.md`); Wrench's placeholder builder uses 8. | same |
 | 0x2e | 2 | `s16` | `corncob` / `rac1_short_2e` | **RAC1: not a corncob pointer.** Wrench stores it verbatim as `rac1_short_2e` and never dereferences it — its meaning is **unknown** for RAC1. | **R&C2+:** quadword pointer to the "corn" system data (`corncob * 0x10`), §1.5. |
 | 0x30 | 16 | `Vec4f` | `bounding_sphere` | Centre `(x,y,z)` and radius `w` of the sphere enclosing the moby. | same |
-| 0x40 | 4 | `s32` | `glow_rgba` | Glow colour (§6.4); **exact encoding unknown**, stored verbatim. | same |
+| 0x40 | 4 | `s32` | `glow_rgba` | Glow colour (§6.4): RGBA bytes, R low. Non-zero → `InitMobyInstance` sets moby mode 0x10 and +0x90 = this word; MobyProc then draws the glow packets (below) in +0x90's RGB with byte 3 replaced by the vertex alpha (`docs/plan/moby_skinning_lighting.md` §10). | same |
 | 0x44 | 2 | `s16` | `mode_bits` | Class-level bit flags; **individual bits unknown** at class level. (Note: the *instance* `mode_bits` field is a different, 32-bit field — §7.) | same |
 | 0x46 | 1 | `u8` | `type` | **unknown** class type tag. | same |
 | 0x47 | 1 | `u8` | `mode_bits2` | More bit flags; **unknown**. | same |
@@ -690,7 +690,7 @@ Header byte **0x0b** doubles as `rac3dl_team_textures`: `palettes_per_texture = 
 
 ### 6.4 Glow
 
-`glow_rgba` at header 0x40 (`s32`) is the only glow-related class field; **its encoding is unknown** (the name implies packed RGBA). `docs/moby_renderer.md` also speculates that the GC/UYA/DL vertex-table field at 0xe is a `glow_rgba`, but the code treats it as opaque, and in RAC1 that slot is an offset instead (§2.7). There is no separate "glow submesh" list in the class header.
+`glow_rgba` at header 0x40 (`s32`) is the glow colour (RGBA, R low; byte 3 unused by the draw). RAC1 header bytes **0x0a / 0x0b** are the index of the first **glow packet** of the high / low LOD list (0xff or ≥ the count: none; MobyProc level01 0x26b8b0 `lbu v1, 0xa(class + lod)`); the packets from there to the end of the list are drawn unlit in the moby's glow colour while the moby has mode bit 0x10 (`docs/plan/moby_skinning_lighting.md` §10). `docs/moby_renderer.md` also speculates that the GC/UYA/DL vertex-table field at 0xe is a `glow_rgba`, but the code treats it as opaque, and in RAC1 that slot is an offset instead (§2.7). There is no separate "glow submesh" list in the class header.
 
 ### 6.5 Bangles
 
@@ -897,7 +897,7 @@ Corrections found while porting (all now in both loaders): the secret-index stri
 
 ## 9. Unknowns — consolidated
 
-**Class header:** `rac1_byte_a` (0x0a) and `rac1_byte_b` (0x0b) — both RAC1-only and completely unknown; semantics of `lod_trans` (0x0e); the contents of the shadow block; `rac1_short_2e` (0x2e, the slot that becomes the corncob pointer in later games); the encoding of `glow_rgba` (0x40); every bit of `mode_bits` (0x44), `type` (0x46) and `mode_bits2` (0x47). `MobyClassEntry::unknown_8` / `unknown_c` in the core index are also unknown.
+**Class header:** semantics of `lod_trans` (0x0e); the contents of the shadow block; `rac1_short_2e` (0x2e, the slot that becomes the corncob pointer in later games); every bit of `mode_bits` (0x44), `type` (0x46) and `mode_bits2` (0x47). `MobyClassEntry::unknown_8` / `unknown_c` in the core index are also unknown.
 
 **Packets:** index-header byte 0x00; the secret-index slots past the first *block-count* quadwords of the AD-GIF unpack (never read); the GC/UYA/DL vertex-table field 0xe (speculatively `glow_rgba`); the meaning of the `unused_4`..`unused_7` bytes in regular vertices; whether anything writes the RGBA multiplier blob at runtime.
 

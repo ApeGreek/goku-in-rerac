@@ -11,8 +11,10 @@
 //!   `NpcTalkRegister`.
 //! * **1**: `NpcTalkUpdate`; when it starts a scene: `FUN_002783a8(2.2, npc)` (after the scene Ratchet stands 2.2
 //!   in front of the NPC, facing it: [`Interact::scene_end_place`]) and state 2.
-//! * **2**: waits while game mode 2 (a scene) runs; then the NPC's mission (+0xb0) → `SetMissionDone` (and the
-//!   checkpoint +0x4c, not ported: counted); state 1; when the node that played last (talk +0x04) is 4 (Novalis:
+//! * **2**: waits while game mode 2 (a scene) runs; then, the NPC's mission (+0xb0) not done yet: `SetMissionDone`
+//!   ([`crate::cinematic::set_mission_done`]) and, with a checkpoint cuboid +0x4c, the checkpoint record
+//!   `FUN_0029ac10(centre, Euler)` of that cuboid ([`super::checkpoint::record`]); state 1; when the node that
+//!   played last (talk +0x04) is 4 (Novalis:
 //!   the Infobot sold): `UnlockPlanet(2)` and `ShowPlanetBanner(2)` (`crate::cinematic`: the saved game's planet
 //!   bits and the HUD banner "Infobot for Planet Aridia acquired"), state 3, a save (logged).
 //! * **3**: `DeleteMoby`.
@@ -70,8 +72,11 @@ pub fn update(w: &mut World, id: MobyId) {
             if w.svc.interact.talker == Some(id) { return; }
             let mission = w.m(id).mission;
             if mission != 0xff && w.missions.mission_done(w.svc.level, mission) != 0xff {
-                w.svc.interact.writes.push(GameWrite::MissionDone(mission));
-                if p::i32(&w.m(id).pvars, 0x4c) != -1 { w.svc.unported("talking npc: checkpoint from cuboid"); }
+                crate::cinematic::set_mission_done(w, mission);
+                let c = p::i32(&w.m(id).pvars, 0x4c);
+                if let Some(s) = w.svc.volumes.shape(rc_formats::volumes::ShapeKind::Cuboid, c).copied() {
+                    super::checkpoint::record(w, super::checkpoint::Record { pos: s.centre(), rot: s.euler });
+                }
             }
             w.mm(id).state = 1;
             if p::i16(&w.m(id).pvars, talk::LAST) == 4 {
@@ -86,4 +91,46 @@ pub fn update(w: &mut World, id: MobyId) {
         _ => w.svc.unported("talking npc: Batalia turret guy states 4/5"),
     }
     w.svc.unported("talking npc: head look-at");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cinematic::EngineRequest;
+    use crate::moby_runtime::{Moby, MobyTable};
+    use crate::moby_update::services::LevelMissions;
+
+    /// State 2 after the talker's scene: its open mission is set done through the one mission writer and its
+    /// checkpoint cuboid (+0x4c) becomes the checkpoint record (`FUN_0029ac10(centre, Euler)`); once done, nothing.
+    #[test]
+    fn scene_end_sets_mission_and_checkpoint() {
+        let mut m = Moby { o_class: 774, mission: 1, state: 2, pvars: vec![0; 0x50], ..Moby::default() };
+        p::set_i32(&mut m.pvars, 0x4c, 0);
+        let mut t = MobyTable::new(vec![m], 4);
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = crate::moby_update::Services::new();
+        svc.level = 1;
+        let (c, e) = ([1.0, 2.0, 3.0], [0.0, 0.0, 1.5]);
+        svc.volumes = std::sync::Arc::new(rc_formats::volumes::Volumes { cuboids: vec![super::super::checkpoint::tests::cube(c, e)], ..Default::default() });
+        let open = LevelMissions::fresh_load(1, [0; 16]);
+        {
+            let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
+            w.missions = &open;
+            update(&mut w, 0);
+            assert_eq!(w.m(0).state, 1);
+            assert_eq!(w.svc.cinematic.requests, [EngineRequest::MissionDone { mission: 1 }]);
+            assert_eq!(w.svc.save.checkpoint, Some(super::super::checkpoint::Record { pos: c, rot: e }));
+        }
+        let mut done = open.clone();
+        done.done[1] = 0xff;
+        svc.cinematic.requests.clear();
+        svc.save.checkpoint = None;
+        t.mobys[0].state = 2;
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 1);
+        w.missions = &done;
+        update(&mut w, 0);
+        assert!(w.svc.cinematic.requests.is_empty() && w.svc.save.checkpoint.is_none());
+    }
 }

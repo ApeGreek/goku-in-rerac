@@ -35,7 +35,9 @@
 //!   rects and every other widget are HUD 2D primitives, so the view must land above the HUD composite: the node is a
 //!   child of it (UI children draw over their parent). No HUD primitive shares a 3D widget's rectangle.
 //!
-//! The canvas camera renders before the main camera (order −4) into its own image either way.
+//! The canvas camera renders before the main camera (order −4) into its own image either way. The HUD's static layer
+//! (crate::hud_render, `Hud2dHook::statics`: the monitors' and panels' noise and scan lines) is composed over every
+//! canvas.
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{ClearColorConfig, RenderTarget, SubCameraView};

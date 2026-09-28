@@ -22,6 +22,7 @@ camera, fog, `rand` stream, moby table), and per-tick hero recordings replayed t
 | Rewrite the spawn test fixture | `cargo run -p rc-trace -- distill-spawn --state NAME` |
 | Record the hero over PINE | `cargo run --release -p rc-trace -- record --seconds 90` |
 | Replay a recording through the port | `cargo run --release -p rc-trace -- replay-hero --trace FILE` |
+| Census of the unported moby classes and the shared systems they call (no PCSX2; reads `extracted/`, tags `tools/ghidra/names/census_systems.tsv`; docs/plan/class_census.md) | `cargo run -p rc-trace -- class-census` → `work/census/` |
 
 ## Inputs and outputs
 

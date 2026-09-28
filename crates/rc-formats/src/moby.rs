@@ -37,9 +37,9 @@ pub struct MobyClassHeader {
     pub joint_count: u8,
     /// 0x09: joint count used with the low LOD (skinning doc 2).
     pub low_lod_joint_count: u8,
-    /// 0x0a: unknown.
+    /// 0x0a: first glow packet of the high-LOD list (0xff / past the end: none); docs/plan/moby_skinning_lighting.md §10.
     pub rac1_byte_a: u8,
-    /// 0x0b: unknown.
+    /// 0x0b: first glow packet of the low-LOD list (0xff / past the end: none).
     pub rac1_byte_b: u8,
     /// 0x0c: animation sequence count; the pointer list is at 0x48.
     pub sequence_count: u8,
@@ -72,7 +72,7 @@ pub struct MobyClassHeader {
     pub rac1_short_2e: i16,
     /// 0x30: bounding sphere centre xyz and radius, world units.
     pub bsphere: [f32; 4],
-    /// 0x40: glow colour, encoding unknown.
+    /// 0x40: glow colour (RGBA, R low); non-zero → the moby's mode 0x10 and +0x90 (`InitMobyInstance`).
     pub glow_rgba: i32,
     /// 0x44: class mode bits, unknown.
     pub mode_bits: i16,

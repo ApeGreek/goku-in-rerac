@@ -134,6 +134,21 @@ pub struct Weapons {
     /// as the moby loop left it ([`refresh_aim`]).
     pub aim: Option<MobyId>,
     pub aim_pos: [f32; 3],
+    /// The Blaster's pvars ([`super::blaster`]).
+    pub blaster: super::blaster::Blaster,
+    /// The Devastator's pvars ([`super::devastator`]).
+    pub devastator: super::devastator::Devastator,
+    /// Ratchet's `SetAnim(blend, seq, frame)` (`0x247a90`) an item update asked for (the Devastator's standing shot 54),
+    /// made right after the slot loop by [`after_items`].
+    pub pending_anim: Option<(i32, u8, i32)>,
+    /// The Tesla Claw's pvars and chain ([`super::tesla`]).
+    pub tesla: super::tesla::Tesla,
+    /// The R.Y.N.O.'s pvars ([`super::ryno`]).
+    pub ryno: super::ryno::Ryno,
+    /// 0x1694c0: the screen markers the guns register this tick (`FUN_0020fb60`; drawn by the engine).
+    pub markers: crate::targeting::Markers,
+    /// The Suck Cannon's, the Taunter's and the Morph-o-Ray's pvars ([`super::reactive`]).
+    pub reactive: super::reactive::Reactive,
 }
 
 impl Default for Weapons {
@@ -141,7 +156,7 @@ impl Default for Weapons {
         Weapons {
             ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 2], layer_fade: 0, layer_seq: 0,
             arm_item: 0, deferred: None, throws: 0, defs: Vec::new(), gold: [0; N], pyro: Default::default(), pending_draw: false, pending_idle: false,
-            aim: None, aim_pos: [0.0; 3],
+            aim: None, aim_pos: [0.0; 3], blaster: Default::default(), ryno: Default::default(), devastator: Default::default(), tesla: Default::default(), pending_anim: None, markers: Default::default(), reactive: Default::default(),
         }
     }
 }
@@ -235,6 +250,8 @@ pub fn draw_weapon(h: &mut Hero, c: &mut Ctx) {
 /// standing in the weapon's stance (state 0, key B on 0x1415e4), Ratchet blends back to his idle sequence
 /// (`SetAnim(−2, idle)`: made by [`after_items`] / [`apply_pending`], where the animation can be changed).
 pub fn put_away(h: &mut Hero) {
+    // A draw the same item update asked for earlier (made after the slot loop in the port) came first in the game.
+    h.weapons.pending_draw = false;
     if h.f13f8 == 0 { return; }
     if h.weapons.layers[0].is_some() { h.weapons.layer_fade = 1; } else if h.state == 0 { h.weapons.pending_idle = true; }
     h.f13fa = 0;
@@ -248,6 +265,7 @@ pub(super) fn apply_pending(h: &mut Hero, c: &mut Ctx) {
         h.set_anim(c.anim, c.rng, Pf::b(0xc000_0000), seq, 0);
     }
     if std::mem::take(&mut h.weapons.pending_draw) { draw_weapon(h, c); }
+    if let Some((blend, seq, frame)) = h.weapons.pending_anim.take() { h.set_anim(c.anim, c.rng, Pf::from_i32(blend), seq, frame); }
 }
 
 /// `0x242858`: a weapon that keeps the arm raised (0x1413fa, item def +0x30) is out on foot (0x141618 clear):

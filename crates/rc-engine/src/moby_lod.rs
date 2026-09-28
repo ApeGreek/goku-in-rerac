@@ -22,6 +22,15 @@
 //! * Shine (0x212968): when moby+0x73 ≠ 0 (0x18 for a class with metal packets), m = (moby+0x73 << 10) −
 //!   ftoi0(v.z − r) (not clamped); m ≤ 0 → no metal pass; else shine alpha = min(m >> 7, 0x80): full within
 //!   8 units, fading out at 24 units.
+//! * Glow list (level01 0x26b890..0x26b8f8, entered from 0x26b2a0 when moby+0x34 & 0x10): for the drawn LOD's packets
+//!   from index class[0xa] (high) / class[0xb] (low) to the end of that list, MobyProc appends a 16-byte record
+//!   {moby+0x90 with byte 3 replaced by the vertex alpha (job +0xbc), the packet entries, the job's chain slots, the
+//!   packet count} to SPR 0x3400..0x3800, copied to 0x1ac680 (byte length gp−0x6c08) at the end (0x26b4c8).
+//!   `DrawMobysCleanUp` (0x264d68) then runs `fun_002116b8` (0x26a650) after the skin/light pass: every transfer
+//!   vertex colour of those packets (packet byte 0xf of them) is overwritten with that word. So a glow packet is
+//!   drawn unlit, in the moby's glow colour, at the moby's vertex alpha, with the moby's own GS state.
+//!   `InitMobyInstance` (0x263488) sets mode 0x10 and +0x90 = class +0x40 when the class's glow word is non-zero;
+//!   updates may rewrite +0x90 (the vendor's pulse, the floor switch). Port: [`glow_word`], moby.wgsl.
 //!
 //! The bounding sphere is moby+0x00 as `fun_0020def8` builds it: the current sequence's sphere (A/B lerped
 //! by t while blending), times the scale moby+0x2c on all four lanes, rotated by the rows and added to the
@@ -175,17 +184,34 @@ pub fn tint_enabled() -> bool { std::env::var("RC_MOBY_LOD_TINT").is_ok_and(|v| 
 /// `RC_MOBY_METAL=0`: no metal (shine) pass.
 pub fn metal_enabled() -> bool { !std::env::var("RC_MOBY_METAL").is_ok_and(|v| v.trim() == "0") }
 
-/// One `MobyLod` record of moby.wgsl / moby_metal.wgsl: misc (vertex alpha, flags, shine alpha, 0), E rows.
+/// One `MobyLod` record of moby.wgsl / moby_metal.wgsl: misc (vertex alpha, flags, shine alpha, glow word), E rows.
 pub const LOD_RECORD_SIZE: usize = 64;
 /// `MobyLod.misc.y` bit: tint this instance (low LOD with `RC_MOBY_LOD_TINT=1`).
 pub const FLAG_TINT: u32 = 1;
+/// `MobyLod.misc.w` bit: the moby is on the glow list (mode 0x10); bits 0..23 are its glow RGB (moby+0x90).
+pub const GLOW_ON: u32 = 1 << 24;
 
-pub fn write_lod_record(out: &mut [u8], alpha: u8, flags: u32, shine: u8, e: &[[f32; 3]; 3]) {
+/// The `MobyLod` glow word of a moby with mode bits `mode` (+0x34) and glow colour `glow` (+0x90): [`GLOW_ON`] | RGB
+/// when mode bit 0x10 is set (MobyProc 0x26b2a0), else 0 (its glow packets keep their lit colours). Byte 3 of +0x90
+/// is not used: the glow pass replaces it with the vertex alpha (module doc).
+pub fn glow_word(mode: u16, glow: u32) -> u32 { if mode & 0x10 != 0 && glow_enabled() { GLOW_ON | (glow & 0x00ff_ffff) } else { 0 } }
+
+/// `RC_MOBY_GLOW=0`: no glow list (the glow packets keep their lit colours, as before it was ported).
+pub fn glow_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| !std::env::var("RC_MOBY_GLOW").is_ok_and(|v| v.trim() == "0"))
+}
+
+/// The glow word of a fresh moby of a class with glow colour `class_glow` (class header +0x40): `InitMobyInstance`
+/// sets mode 0x10 and +0x90 = that word when it is non-zero.
+pub fn class_glow_word(class_glow: i32) -> u32 { if class_glow != 0 { glow_word(0x10, class_glow as u32) } else { 0 } }
+
+pub fn write_lod_record(out: &mut [u8], alpha: u8, flags: u32, shine: u8, glow: u32, e: &[[f32; 3]; 3]) {
     let mut w = |i: usize, v: u32| out[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
     w(0, alpha as u32);
     w(1, flags);
     w(2, shine as u32);
-    w(3, 0);
+    w(3, glow);
     for (r, row) in e.iter().enumerate() {
         for (k, v) in row.iter().enumerate() { w(4 + r * 4 + k, v.to_bits()); }
         w(4 + r * 4 + 3, 0);
@@ -195,13 +221,26 @@ pub fn write_lod_record(out: &mut [u8], alpha: u8, flags: u32, shine: u8, e: &[[
 /// The record of a moby drawn as before this module (α 0x80, no metal pass).
 pub fn default_lod_records(n: usize) -> Vec<u8> {
     let mut v = vec![0u8; n.max(1) * LOD_RECORD_SIZE];
-    for rec in v.chunks_mut(LOD_RECORD_SIZE) { write_lod_record(rec, 0x80, 0, 0, &[[0.0; 3]; 3]); }
+    for rec in v.chunks_mut(LOD_RECORD_SIZE) { write_lod_record(rec, 0x80, 0, 0, 0, &[[0.0; 3]; 3]); }
     v
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The glow word: on with mode bit 0x10 only; RGB from +0x90, its byte 3 dropped (the vertex alpha replaces it);
+    /// a class with a glow colour starts on, one without off.
+    #[test]
+    fn glow_word_of_mode_and_colour() {
+        assert_eq!(glow_word(0x10, 0x8084_e643), GLOW_ON | 0x84_e643);
+        assert_eq!(glow_word(0x210, 0x0020_8020), GLOW_ON | 0x20_8020);
+        assert_eq!(glow_word(0x200, 0x8084_e643), 0);
+        assert_eq!(class_glow_word(0x808c_8c8cu32 as i32), GLOW_ON | 0x8c_8c8c);
+        assert_eq!(class_glow_word(0), 0);
+        // Black is a colour: mode 0x10 with +0x90 = 0 draws the glow packets black.
+        assert_eq!(glow_word(0x10, 0), GLOW_ON);
+    }
     use rc_formats::moby::{LevelMobyClass, MobySubmesh};
 
     fn inp(dd: i32, lod: u8, shine: u8) -> ProcInput {

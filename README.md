@@ -172,11 +172,13 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 | `RC_LOD_TINT` | `1`: tint tfrag LOD 1 red, LOD 2 blue, clipping path green |
 | `RC_TIE_LOD` | `0`: force tie LOD 0 with morph k = 0 (culling unchanged) |
 | `RC_TIE_LOD_TINT` | `1`: tint tie LOD 1 red, LOD 2 blue |
+| `RC_SEA` | `0`: do not draw the seas and liquid surfaces of the draw callbacks (crate::sea_render) |
 | `RC_NO_TIES` | `1`: do not draw ties |
 | `RC_NO_SHRUBS` | `1`: do not draw shrubs |
 | `RC_SKY_ROT` | Sky rotation speed in ticks per 60 Hz tick (`0` freezes; default 1) |
 | `RC_ANIM` | `0`: disable moby animation (bind pose) |
 | `RC_MOBY_CPU_LIGHT` | `1`: use the bit-exact CPU moby lighting (bind pose) instead of the GPU path |
+| `RC_MOBY_GLOW` | `0`: no moby glow list (glow packets drawn lit instead of in the moby's glow colour +0x90) |
 | `RC_MOBY_LIGHT_CHECK` | `1`: compare GPU vs bit-exact CPU moby lighting at load and report |
 | `RC_OCCL` | `0`: occlusion off; `1`: freeze the mask built from the starting camera |
 | `RC_OCCL_STATS` | `1`: print occlusion cell and cull counts, at most once a second |

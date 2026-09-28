@@ -648,7 +648,8 @@ impl MissionState for NoMissions {}
 
 /// The mission state of the loaded level (L = 0x15ed84) the moby code reads:
 /// * `0x15fc88[16]`: the mission bytes as `LoadLevelCoreData` 0x258128 copied them from the save at load;
-/// * `0x14c050 + L·16`: the live save bytes (`SetMissionDone` writes them; the port has no writer yet);
+/// * `0x14c050 + L·16`: the live save bytes (`SetMissionDone` writes them: `crate::cinematic::set_mission_done`, applied
+///   by the engine after the tick);
 /// * `0x14ee90` s32[16]: hero deaths per mission since the fresh entry. `LoadLevelCoreData` clears it right
 ///   before `MobyLoadTimeUpdatePass`, but only on a fresh load (`param_2 == 0`; `entry` passes 1 for the death
 ///   reload, 0x141401 set); the hero death routine `FUN_002319b0` does `deaths[killer+0xb0]++` (killer =
@@ -1652,6 +1653,15 @@ impl crate::hero::items::HitSink for ServiceHits<'_> {
         let sc = self.svc.scene(&src);
         Some(coll_line_m(self.coll.unwrap_or(no_mesh()), Some(&sc), ph::to_f32x3(a), ph::to_f32x3(b), QueryFlags(flags), ignore).map(|h| h.point))
     }
+
+    fn probe_moby(&mut self, table: &mut MobyTable, a: V4, b: V4, flags: u32, ignore: Option<MobyId>) -> Option<Option<crate::hero::items::Probe>> {
+        let src = self.svc.scene_parts(table, self.classes);
+        let sc = self.svc.scene(&src);
+        let h = coll_line_m(self.coll.unwrap_or(no_mesh()), Some(&sc), ph::to_f32x3(a), ph::to_f32x3(b), QueryFlags(flags), ignore);
+        Some(h.map(|h| crate::hero::items::Probe { moby: h.moby, point: h.point, normal: h.normal, surface: h.surface_id() }))
+    }
+
+    fn class_type(&self, o_class: i16) -> Option<u8> { self.classes.info(o_class).map(|i| i.ty) }
 
     fn light_alloc(&mut self, l: crate::point_lights::PointLight) -> i32 {
         let load = f32::from_bits(self.svc.frame_load[1].0);

@@ -42,13 +42,23 @@ Renderers follow a fixed recipe: establish the GS state and math from the decomp
 Every brief carries, in this order:
 - One paragraph of context: what exists, where (file paths, doc names, the exact API names the agent will call, copied from the previous agent's report).
 - **Product or tooling, and which folder**: "Product work in `crates/<crate>`" or "Tooling work in `tools/<tool>`" (plus `docs/` as needed). Product work never adds a dependency on `tools/`; tooling work writes its output only to `work/`.
-- **Hard constraints** block: cargo path (`export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`); `cargo dev` only; no Bevy/profile/dep/feature changes; **file ownership** (explicit list of files it may create/edit; "minimal insertions, re-read right before each edit" for `main.rs`, `level_load.rs`, `lib.rs`; explicit "do NOT touch" list naming the files other running agents own); no commits; no disc bytes; tests green and clippy clean for its files; Ghidra MCP URL and API gotchas (`decompile_function` takes `address`; pass the program per call; disassembly for asm/VU0 code); Lombyte path.
+- **Hard constraints** block: cargo path (`export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`); `cargo dev` only; no Bevy/profile/dep/feature changes; **file ownership** (explicit list of files it may create/edit; "minimal insertions, re-read right before each edit" for `main.rs`, `level_load.rs`, `lib.rs`; explicit "do NOT touch" list naming the files other running agents own); no commits; no disc bytes; targeted tests green and clippy clean for its files (test policy below); Ghidra MCP URL and API gotchas (`decompile_function` takes `address`; pass the program per call; disassembly for asm/VU0 code); Lombyte path.
   Every brief also carries these standard lines verbatim:
   - "Use standard floats and native mechanisms; do not add hardware modelling. If a PS2 arithmetic effect is noticeable in play, reproduce the result, not the mechanism, and record it in hardware_fidelity_layers.md."
   - "Do not spawn sub-agents."
   - "Only one cargo or engine process at a time: never start a build, test or engine run while another is still running, and never run two in parallel from one command."
   - "Run the engine with `RC_SCENE=0`."
   - "Every port-only option (one the original game does not have) goes on the native-looking 'Port Options' page under Options."
+  - "Add every item you leave unfinished to `docs/plan/gaps.md` (new IDs in the right section) and mark the gaps you close there (struck through, with the date and your doc § or file); your report lists both."
+  - "Tests: run the targeted tests for what you touched, clippy on your files, and `cargo check --workspace --all-targets` once at the end. Never run `cargo test --workspace`."
+- **Test policy (2026-09-28).** Working agents run only the targeted tests, clippy on their files and one final
+  `cargo check --workspace --all-targets`. The coordinator runs the full workspace suite once per batch, through the
+  commit agent before committing, and writes the result to `work/test-results/latest.txt` (git-ignored) with the time,
+  HEAD and `git status --short`. Failures go back to the agent that owns the files.
+- **Gap register.** `docs/plan/gaps.md` is the one list of known gaps. Every report and doc update adds the agent's
+  unfinished items there (new IDs) and strikes the ones it closes.
+  File gaps at the system level: name the missing shared system, and list the specific object or level only as a
+  consumer of it.
 - **Read first**: the docs and files, with the specific facts the agent must not re-derive.
 - **Deliverables**: numbered, concrete, each with its test or verification.
 - **Report back**: the exact list of things the orchestrator needs (numbers, addresses, screenshot paths, verified vs inferred, left undone, files changed). The report is all the orchestrator sees; agents' transcripts are never read (they would flood context).

@@ -62,6 +62,24 @@ pub enum PartSpawn {
     Ring46 { size: f32, spin: f32, pos: [f32; 4], vel: [f32; 4], rng: Rng },
     /// `PartType35Spawn(pos, vel, kind, life)` 0x2845a8: a water drop; `rng` as for [`PartSpawn::Ring45`] (two draws).
     Drop35 { pos: [f32; 4], vel: [f32; 4], kind: i32, life: i32, rng: Rng },
+    /// `PartType27Spawn(size, pos, vel, rgba, life)` 0x282d80: a gun spark (the Blaster's muzzle); `rot` = the spawner's
+    /// `rand()` (made at the call).
+    Spark27 { size: f32, pos: [f32; 4], vel: [f32; 4], rgba: u32, life: i32, rot: u8 },
+    /// `PartType26Spawn(size, moby, rgba, life, −1)` 0x282b00: a glow riding a moby the hero code created (the Blaster
+    /// shot), at `at`; `rng` = the stream at the spawner's `rand()` (made at the call).
+    Glow26 { size: f32, moby: usize, rgba: u32, life: i32, at: [f32; 3], rng: Rng },
+    /// Spawner 0x28a3f0 of type 72 for moby `moby`'s pointer slot `slot` (the Blaster shot's trail; the record is
+    /// linked in `Particles::links`), with the spawner's draws and the shot's size / colour writes after it.
+    Trail72 { moby: usize, slot: u8, pos: [f32; 4], draws: crate::particles::type72::Draws, size: f32, rgba: u32 },
+    /// `PartType23Spawn(jitter, lo, hi, size, pos, spin, vel, rgba)` 0x282060 then the caller's patch (the Blaster
+    /// shot's impact smoke `0x2e2a18`: timer `life`, phase 2 fading from `alpha`, ALPHA 0x44 when `normal`); `rng` = the
+    /// stream at the spawner's first draw (its five draws were made at the call).
+    Puff23 { jitter: f32, lo: f32, hi: f32, size: f32, pos: [f32; 4], spin: i32, vel: [f32; 4], rgba: u32, life: i32, alpha: u8, normal: bool, rng: Rng },
+    /// Spawner 0x286450 of type 44 (the Devastator's muzzle smoke); `rot` = its `randi(0xff)` (made at the call).
+    Smoke44 { spawn: crate::particles::type44::Spawn, rot: u8 },
+    /// `PartType21Spawn(size, pos, vel, c1, c2, life, split)` 0x281c10 (the Devastator's muzzle sparks); `rot` = its
+    /// `rand()` (made at the call).
+    Spark21 { size: f32, pos: [f32; 4], vel: [f32; 4], c1: u32, c2: u32, life: i32, split: i16, rot: u8 },
 }
 
 /// A moby the hero code created this tick (`CreateMoby` inside the hero update), with the creator's draws already made.
@@ -145,8 +163,15 @@ pub struct HeroFx {
     /// Ratchet's own sounds the hand item's update makes (`0x236738` voices, the thrown wrench's whoosh loop in slot
     /// 0x14156c and its release), played with the item sounds (`super::gadgets::flush_item_sounds`).
     pub item_voices: Vec<super::packs::SoundCmd>,
-    /// The hand item's looping class sounds' slots (the Pyrocitor's flame: +0x4a of its pvars), by channel.
-    pub item_loops: [Option<i32>; 2],
+    /// The hand item's looping class sounds' slots, by channel: [`LOOP_FLAME`] the item update's own loop (the
+    /// Pyrocitor's flame +0x4a), [`LOOP_HUM`] the Tesla Claw's hum (+0x48), [`LOOP_CLICK`] the Blaster's empty click (its pvar +0x0c,
+    /// kept while it plays), [`LOOP_SEQ`] the item's sequence loop sound (moby +0x7d: the Blaster's firing sequence 4).
+    pub item_loops: [Option<i32>; 4],
+    /// Whether each [`HeroFx::item_loops`] slot was still playing at the last flush (`SoundIsAlive` as the next
+    /// update reads it: the Taunter's whistle).
+    pub item_loop_alive: [bool; 4],
+    /// The class sound [`LOOP_SEQ`]'s slot plays (the item's +0x7c when it was started).
+    pub seq_loop: Option<i32>,
     /// Footsteps the transitions played this tick (`HeroFootstepSound(class, foot, 1)` of the landing), in order:
     /// `(class, foot)`, played by [`flush`] right after the transitions.
     pub footsteps: Vec<(u8, u8)>,
@@ -163,6 +188,12 @@ pub struct HeroFx {
     /// The back pack's placement ([`end`], [`pack_point`]).
     pub back: BackFrame,
 }
+
+/// [`HeroFx::item_loops`] channels.
+pub const LOOP_FLAME: usize = 0;
+pub const LOOP_CLICK: usize = 1;
+pub const LOOP_SEQ: usize = 2;
+pub const LOOP_HUM: usize = 3;
 
 /// A camera shake request (the writer's stores into 0x167260 for [`ShakeAxis::Up`], 0x167270 for
 /// [`ShakeAxis::Forward`]): `amp` units for `ticks` ticks.
@@ -253,19 +284,46 @@ pub fn create_particles(h: &Hero, sys: &mut Particles) {
     sys.hero = crate::hero::physics::to_f32x3(h.pos);
     let gold = h.weapons.gold[super::pyrocitor::PYROCITOR as usize];
     sys.gold = gold;
-    for s in &h.fx.parts {
-        match *s {
-            PartSpawn::Spark { pos, vel, variant, size } => { type25::spawn(sys, pos, vel, variant, size); }
-            PartSpawn::Dust { size, pos, vel, alpha, rot } => { type47::spawn(sys, size, pos, vel, alpha, rot); }
-            PartSpawn::Bubble { size, level, pos, vel, draws } => { type34::spawn(sys, size, level, pos, vel, &draws); }
-            PartSpawn::Sparkle { s12, s13, s14, pos, life, rgba, b8, t0, vel } => {
-                type53::spawn(sys, s12.to_bits(), s13.to_bits(), s14.to_bits(), pos.map(f32::to_bits), life, rgba, b8, t0, vel.map(f32::to_bits));
+    sys.hero_plat = crate::hero::physics::to_f32x3(h.plat_applied);
+    for s in &h.fx.parts { create_one(sys, s, gold); }
+}
+
+/// One queued spawn's record(s) (the hero's hook, and the moby updates that describe their spawns the same way: the
+/// Blaster shot's impact).
+pub fn create_one(sys: &mut Particles, s: &PartSpawn, gold: u8) {
+    match *s {
+        PartSpawn::Spark { pos, vel, variant, size } => { type25::spawn(sys, pos, vel, variant, size); }
+        PartSpawn::Dust { size, pos, vel, alpha, rot } => { type47::spawn(sys, size, pos, vel, alpha, rot); }
+        PartSpawn::Bubble { size, level, pos, vel, draws } => { type34::spawn(sys, size, level, pos, vel, &draws); }
+        PartSpawn::Sparkle { s12, s13, s14, pos, life, rgba, b8, t0, vel } => {
+            type53::spawn(sys, s12.to_bits(), s13.to_bits(), s14.to_bits(), pos.map(f32::to_bits), life, rgba, b8, t0, vel.map(f32::to_bits));
+        }
+        PartSpawn::Flame { len, pos, vel, flags, draws } => { type12::spawn(sys, len, pos, vel, flags, gold, &draws); }
+        PartSpawn::Blob { spawn, mut rng } => { type02::spawn(sys, &mut rng, &spawn); }
+        PartSpawn::Ring45 { size, growth, pos, mut rng } => { type45::spawn45_on(sys, &mut rng, size, growth, pos, type45::HERO_WATER_LEVEL, u32::MAX); }
+        PartSpawn::Ring46 { size, spin, pos, vel, mut rng } => { type46::spawn_on(sys, &mut rng, size, spin, pos, vel, type45::HERO_WATER_LEVEL); }
+        PartSpawn::Drop35 { pos, vel, kind, life, mut rng } => { type35::spawn(sys, &mut rng, pos, vel, kind, life); }
+        PartSpawn::Spark27 { size, pos, vel, rgba, life, rot } => { crate::particles::type27::spawn(sys, size, pos, vel, rgba, life, rot); }
+        PartSpawn::Glow26 { size, moby, rgba, life, at, mut rng } => { crate::particles::type26::spawn(sys, &mut rng, size, moby, rgba, life, -1, at); }
+        PartSpawn::Trail72 { moby, slot, pos, draws, size, rgba } => {
+            if let Some(i) = crate::particles::type72::spawn(sys, pos, &draws) {
+                let r = &mut sys.pool.recs[i];
+                crate::particles::rec::set_ff(r, 0xc, size);
+                crate::particles::rec::set_u32(r, 4, rgba);
+                sys.links.insert((moby, slot), i);
             }
-            PartSpawn::Flame { len, pos, vel, flags, draws } => { type12::spawn(sys, len, pos, vel, flags, gold, &draws); }
-            PartSpawn::Blob { spawn, mut rng } => { type02::spawn(sys, &mut rng, &spawn); }
-            PartSpawn::Ring45 { size, growth, pos, mut rng } => { type45::spawn45_on(sys, &mut rng, size, growth, pos, type45::HERO_WATER_LEVEL, u32::MAX); }
-            PartSpawn::Ring46 { size, spin, pos, vel, mut rng } => { type46::spawn_on(sys, &mut rng, size, spin, pos, vel, type45::HERO_WATER_LEVEL); }
-            PartSpawn::Drop35 { pos, vel, kind, life, mut rng } => { type35::spawn(sys, &mut rng, pos, vel, kind, life); }
+        }
+        PartSpawn::Smoke44 { spawn, rot } => { crate::particles::type44::spawn(sys, &spawn, rot); }
+        PartSpawn::Spark21 { size, pos, vel, c1, c2, life, split, rot } => { crate::particles::type21::spawn(sys, size, pos, vel, c1, c2, life, split, rot); }
+        PartSpawn::Puff23 { jitter, lo, hi, size, pos, spin, vel, rgba, life, alpha, normal, mut rng } => {
+            if let Some(i) = crate::particles::type23::spawn(sys, &mut rng, jitter, lo, hi, size, pos, spin, vel, rgba) {
+                let r = &mut sys.pool.recs[i];
+                crate::particles::rec::set_i16(r, 0xa, life as i16);
+                crate::particles::rec::set_u32(r, 0x24, 2);
+                r[0x2a] = alpha;
+                r[0x2b] = life as u8;
+                if normal { r[3] = 0x44; }
+            }
         }
     }
 }

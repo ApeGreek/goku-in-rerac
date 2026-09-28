@@ -11,7 +11,9 @@
 //!   the vendor, the hologram cone (`VendorDrawHologramCone` 0x2b3cc8: FX 0x18, ALPHA 0x44, V scroll), the six screens
 //!   placed on the vendor's monitor joints, the popup while buying, the glass quads (FX 0x19) and then the HUD.
 //!   A screen's black target, content and static are 2D primitives of the HUD pass at the screen's rectangle (the target
-//!   copied 1:1 at rest, squeezed while powering on / off); the item panel's and the salesman's 3D parts are
+//!   copied 1:1 at rest, squeezed while powering on / off); the static (`FUN_002b2cd8`: CLAMP_1 = 0, REPEAT; the
+//!   noise added with ALPHA_1 0x68) and the glass quads go to the HUD's static layer (`Hud2dHook::statics`), over the
+//!   canvases; the item panel's and the salesman's 3D parts are
 //!   crate::screen_canvas canvases under the HUD pass: the item model (+0x100) with the class-13 backdrop, and the
 //!   salesman (class 12 with the `vendor.bin` sequences), each drawn with the target's zoom-1.0 view and light set 14
 //!   (the vendor's light: colour (0.9, 0.9, 0.6), direction vendor rows · (−0.42, −0.7, −0.577), ambient 0x202020).
@@ -19,8 +21,9 @@
 //! Differences: the world behind the menu is drawn live (the game re-uploads a still snapshot taken with the vendor
 //! hidden; the port's world does not move in the menu either, but it can hide parts of the vendor where scenery is
 //! nearer); the screens' 2D pass draws after the HUD's own elements (the game draws the HUD last; they do not overlap
-//! on Novalis); the static's noise uses the HUD's blend (the game adds it with a fixed alpha: the same on the black
-//! screens, slightly darker over text).
+//! on Novalis); the static layer composes in linear light over what is under it (exact over the black screens; over
+//! the 3D item and salesman slightly brighter than the GS's display-byte blend where a scan line is partly
+//! transparent).
 
 use crate::hud_render::{Hud2d, Hud2dHook, HudBuild, Prim, Tex};
 use crate::interact_render::{ScreenDraw, VendorRt};
@@ -163,9 +166,9 @@ fn still(anim: &MobyAnimClass, seq: u8) -> Vec<Rows> {
     moby_anim::evaluate_with_snapshot(anim, &s, None)
 }
 
-/// The screens' 2D primitives (module docs): per screen its black target (the canvases clear their own), content and
-/// static in target pixels, mapped onto the rectangle; the popup; then the glass quads.
-fn screen_prims(sd: &ScreenDraw, glyphs: &[rc_formats::font::GlyphTable; 3], frame_sizes: &[(i32, i32)], canvas: bool) -> Vec<Prim> {
+/// The screens' 2D primitives (module docs): per screen its black target (the canvases clear their own) and content in
+/// target pixels, mapped onto the rectangle (returned), and its static into the static layer's passes (`statics`).
+fn screen_prims(sd: &ScreenDraw, glyphs: &[rc_formats::font::GlyphTable; 3], frame_sizes: &[(i32, i32)], canvas: bool, statics: &mut [Vec<Prim>; 3]) -> Vec<Prim> {
     let p = sd.placed;
     let (tw, th) = ((p.full[2] - 1.0).max(1.0), (p.full[3] - 1.0).max(1.0));
     let (x0, x1) = (p.drawn[0].min(p.drawn[0] + p.drawn[2]), p.drawn[0].max(p.drawn[0] + p.drawn[2]));
@@ -180,32 +183,45 @@ fn screen_prims(sd: &ScreenDraw, glyphs: &[rc_formats::font::GlyphTable; 3], fra
     let mut local: Vec<Prim> = Vec::new();
     if !canvas {
         // The target's clear (FUN_00223470 black, copied with ALPHA 0x64 = replace): opaque black.
-        local.push(Prim { tex: Tex::None, pos: [[0, 0], [screens::TARGET.0, 0], [0, screens::TARGET.1], [screens::TARGET.0, screens::TARGET.1]], uv: [[0, 0]; 4], rgba: 0x8000_0000, scissor: [0, 0, 0, 0] });
+        local.push(Prim { tex: Tex::None, pos: [[0, 0], [screens::TARGET.0, 0], [0, screens::TARGET.1], [screens::TARGET.0, screens::TARGET.1]], uv: [[0, 0]; 4], rgba: 0x8000_0000, scissor: [0, 0, 0, 0], repeat: false, nearest: false });
     }
     for d in &sd.content {
         match d {
             MenuDraw::Hud(x) => crate::text_render::execute(&mut h, &mut st, glyphs, std::slice::from_ref(x)),
             MenuDraw::Rect { x0, y0, x1, y1, rgba } => h.rect(y0 - 1, y1 - 1, x0 - 1, x1 - 1, *rgba),
+            MenuDraw::FrameQuad { frame, x, y, w, h: qh, u, v, tw, th, rgba } => {
+                let (x1, y1, u1, v1) = (x + w, y + qh, u + tw, v + th);
+                h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[*x, *y], [x1, *y], [*x, y1], [x1, y1]], uv: [[*u, *v], [u1, *v], [*u, v1], [u1, v1]], rgba: *rgba, scissor: [0, 0, 0, 0], repeat: false, nearest: false });
+            }
             MenuDraw::SpriteUv { frame, x0, y0, x1, y1, u0, v0, u1, v1, alpha, .. } => {
                 let rgba = ((*alpha as u32) & 0xff) << 24 | 0x007f_7f7f;
                 let (px0, py0, px1, py1) = (x0 / 16, y0 / 16, x1 / 16, y1 / 16);
                 let (ua, ub, va, vb) = (u0 / 16, u1 / 16, v0 / 16, v1 / 16);
-                h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[px0, py0], [px1, py0], [px0, py1], [px1, py1]], uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]], rgba, scissor: [0, 0, 0, 0] });
+                h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[px0, py0], [px1, py0], [px0, py1], [px1, py1]], uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]], rgba, scissor: [0, 0, 0, 0], repeat: false, nearest: false });
             }
             _ => {}
         }
     }
-    for f in &sd.fx {
-        h.strip_glyph(f.fx, f.x as i32, f.y as i32, f.w as i32, f.h as i32, f.u, f.v, f.u1 - f.u, f.v1 - f.v, f.rgba);
-    }
     local.extend(h.prims);
     // The target is 512×128: texels outside it are not drawn.
     let map = |q: [i32; 2]| [(p.drawn[0] + q[0] as f32 * sx).round() as i32, (p.drawn[1] + q[1] as f32 * sy).round() as i32];
+    // The static (`FUN_002b2cd8`) sets CLAMP_1 = 0 (`VU1_addGSregister(8, 0)`) before its draws: its texel ranges run
+    // far past the textures (noise 0x1a is 32×32 at offsets up to 199, the bar 0x1c 16×16 over the whole screen), so
+    // they tile (under the 2D pass' inherited CLAMP they smeared the edge texels into long lines and a flat grey). The
+    // noise is added (ALPHA_1 0x68, FIX = its alpha): static layer pass 1; the bar and the popup's glass pass 2.
+    for f in &sd.fx {
+        let mut s = Hud2d::default();
+        s.strip_glyph(f.fx, f.x as i32, f.y as i32, f.w as i32, f.h as i32, f.u, f.v, f.u1 - f.u, f.v1 - f.v, f.rgba);
+        for q in s.prims {
+            statics[if f.additive { 1 } else { 2 }].push(Prim { pos: q.pos.map(map), scissor, repeat: true, nearest: sd.nearest, ..q });
+        }
+    }
     local
         .into_iter()
         .map(|mut q| {
             q.pos = q.pos.map(map);
             q.scissor = scissor;
+            q.nearest = sd.nearest;
             q
         })
         .collect()
@@ -246,8 +262,9 @@ fn draw(
     if let Some(lh) = lv.hud.as_ref() {
         let sizes: Vec<(i32, i32)> = lh.frames.iter().map(|t| (t.width as i32, t.height as i32)).collect();
         let mut prims: Vec<Prim> = Vec::new();
+        let mut statics: [Vec<Prim>; 3] = Default::default();
         for sd in &d.screens {
-            prims.extend(screen_prims(sd, &lh.glyphs, &sizes, sd.s == screens::ITEM || sd.s == screens::SALESMAN));
+            prims.extend(screen_prims(sd, &lh.glyphs, &sizes, sd.s == screens::ITEM || sd.s == screens::SALESMAN, &mut statics));
         }
         if let Some(view) = d.view {
             let (gw, gh) = gfx.glass_size;
@@ -257,13 +274,15 @@ fn draw(
                 let pts: Option<Vec<[f32; 2]>> = c.iter().map(|&p| view.project(p)).collect();
                 let Some(pts) = pts else { continue };
                 let pos = [0, 1, 2, 3].map(|k| [pts[k][0].round() as i32, pts[k][1].round() as i32]);
-                prims.push(Prim { tex: Tex::Fx(screens::GLASS_FX), pos, uv: [[0, 0], [gw, 0], [0, vh], [gw, vh]], rgba: 0x8080_8080, scissor: [0, 511, 0, 415] });
+                // After the screens and their static (the static layer's last pass).
+                statics[2].push(Prim { tex: Tex::Fx(screens::GLASS_FX), pos, uv: [[0, 0], [gw, 0], [0, vh], [gw, vh]], rgba: 0x8080_8080, scissor: [0, 511, 0, 415], repeat: false, nearest: false });
             }
         }
         if !prims.is_empty() {
             prims.extend(std::mem::take(&mut hook.prims));
             hook.prims = prims;
         }
+        for (k, s) in statics.into_iter().enumerate() { hook.statics[k].extend(s); }
     }
     // ---- The canvases of the item panel and the salesman.
     let canvas_of = |s: usize| d.screens.iter().find(|x| x.s == s).map(|x| {
@@ -336,6 +355,9 @@ fn draw(
         let key = (*slot, oc);
         if !gfx.ents.contains_key(&key) {
             let ents = gfx.extra.spawn(&mut commands, lv, s.class, *slot, Transform::IDENTITY, "vendor screen moby", &mut meshes, &mut images, &mut materials);
+            // Mode 5's `DrawMobyList` batch: its last list (the salesman or the popup) has no glow packets, so no screen
+            // moby is recoloured (`ExtraMobys::clear_glow`); the logos are world mobys of the main pass.
+            if *slot < SLOT_LOGO { gfx.extra.clear_glow(&mut commands, *slot); }
             let layer = match *slot {
                 SLOT_ITEM | SLOT_BACKDROP => Some(canvases.layer(gfx.item_canvas)),
                 SLOT_SALESMAN => Some(canvases.layer(gfx.salesman_canvas)),
@@ -413,4 +435,37 @@ fn draw(
     let tex = lv.particles.textures.as_ref().map(|t| t.fx_textures.as_slice());
     let mut a = crate::fx_draw::FxAssets { meshes: &mut meshes, images: &mut images, materials: &mut fx_materials, fx: tex, fog };
     gfx.cone.show(&mut commands, &mut vis, &mut a, groups, crate::fx_draw::LIST1_BIAS + 50.0, "vendor cone");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rc_game::menus::vendor::screens::{FxDraw, Placed};
+
+    #[test]
+    fn the_static_tiles_its_textures() {
+        // An idle item panel at 1:1 (123×99 texels on a 123×99 rectangle) with a burst of noise FX 0x1a (32×32) at the
+        // offset (150, 90) (`FUN_002b2cd8`: texels 150..150 + (w + 150)) and the scan bar FX 0x1c (16×16) over
+        // h + 16: both run far past their textures and must wrap (CLAMP_1 = 0), the screen's other draws must not.
+        let placed = Placed { full: [100.0, 60.0, 124.0, 100.0], drawn: [100.0, 60.0, 124.0, 100.0], ..Default::default() };
+        let noise = FxDraw { fx: screens::NOISE_FX, x: 0.0, y: 0.0, w: 123.0, h: 99.0, u: 150, v: 90, u1: 150 + 273, v1: 90 + 189, rgba: 0x8080_8080, additive: true };
+        let bar = FxDraw { fx: screens::BAR_FX, x: 0.0, y: -12.0, w: 123.0, h: 115.0, u: 0, v: 0, u1: 123, v1: 172, rgba: 0x5050_5050, additive: false };
+        let sd = ScreenDraw { s: screens::BUTTONS, placed, content: vec![MenuDraw::Rect { x0: 1, y0: 1, x1: 9, y1: 9, rgba: 0x8080_8080 }], fx: vec![noise, bar], nearest: false };
+        let glyphs = [[rc_formats::font::Glyph::default(); rc_formats::font::GLYPHS]; 3];
+        let mut statics: [Vec<Prim>; 3] = Default::default();
+        let p = screen_prims(&sd, &glyphs, &[], false, &mut statics);
+        // The target's black clear and the content rectangle; the static in the static layer: the noise (added) in
+        // pass 1, the bar in pass 2, both wrapping.
+        assert_eq!(p.iter().map(|q| (q.tex, q.repeat)).collect::<Vec<_>>(), [(Tex::None, false), (Tex::None, false)]);
+        assert!(statics[0].is_empty());
+        assert_eq!(statics[1].iter().map(|q| (q.tex, q.repeat)).collect::<Vec<_>>(), [(Tex::Fx(screens::NOISE_FX), true)]);
+        assert_eq!(statics[2].iter().map(|q| (q.tex, q.repeat)).collect::<Vec<_>>(), [(Tex::Fx(screens::BAR_FX), true)]);
+        assert_eq!(statics[1][0].uv, [[150, 90], [423, 90], [150, 279], [423, 279]]);
+        assert_eq!(statics[1][0].pos[0], [100, 60]);
+        assert!(p.iter().chain(statics.iter().flatten()).all(|q| !q.nearest), "bilinear after the moby draws");
+        // The ticker (after the hologram cone's TEX1_1 = 1): every primitive point-sampled.
+        let mut statics: [Vec<Prim>; 3] = Default::default();
+        let p = screen_prims(&ScreenDraw { s: screens::TICKER, nearest: true, ..sd }, &glyphs, &[], false, &mut statics);
+        assert!(p.iter().chain(statics.iter().flatten()).all(|q| q.nearest));
+    }
 }

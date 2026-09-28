@@ -13,10 +13,12 @@
 //! rectangle) are drawn on the (shrunk) rectangle. The content is laid out in target pixels ([`content`]); the
 //! engine draws the target's 3D part (the item model, the salesman) and composes.
 //!
-//! **Static** (`FUN_002b2cd8`, [`Statics`]): per screen a burst counter (+2 per frame; the ticker's always runs)
-//! that draws FX 0x1a noise at a random offset, strong then fading, and on screens 1..5 a scan bar (FX 0x1c)
-//! rolling down; idle screens start a burst with probability 1/700 and a bar with 1/360 per frame (the game's `rand`).
-//! Native `f32`.
+//! **Static** (`FUN_002b2cd8`, [`Statics`]): per screen a burst counter (+2 per frame; the ticker's always runs, at
+//! alpha 0x30 between bursts) that draws FX 0x1a noise at a random offset, fading in, holding and fading out
+//! (alpha `2·(0x80 − |c − 0x80|)` ≤ 0x80), and on screens 1..5 a scan bar (FX 0x1c) rolling down, fading in and out
+//! the same way (`0x100 − |c − 0xfe|` ≤ 0x50); idle screens start a burst with probability 1/700 and a bar with 1/360 per frame (the game's `rand`).
+//! Its draws sample with CLAMP_1 = 0 (`VU1_addGSregister(8, 0)`: REPEAT), so the texel ranges past the 32×32 noise
+//! and the 16×16 bar tile (the engine sets it, crate::vendor_render). Native `f32`.
 
 use super::layout::VendorLayout;
 use crate::menus::MenuDraw;
@@ -151,7 +153,7 @@ pub fn place(layout: &VendorLayout, s: usize, joints: &dyn Fn(usize) -> V3, view
 pub fn glass(layout: &VendorLayout, s: usize, joints: &dyn Fn(usize) -> V3) -> Quad {
     Quad::new([joints(4 * s), joints(4 * s + 1), joints(4 * s + 2)], layout.margins[s])
 }
-pub const GLASS_FX: usize = 0x19;
+pub const GLASS_FX: usize = crate::menus::screen_static::GLASS_FX;
 pub const GLASS_V1: f32 = 0.984_375;
 
 /// The static counters 0x1caba0[7] / 0x1cabc0[7].
@@ -177,8 +179,8 @@ pub struct FxDraw {
     pub additive: bool,
 }
 
-pub const NOISE_FX: usize = 0x1a;
-pub const BAR_FX: usize = 0x1c;
+pub const NOISE_FX: usize = crate::menus::screen_static::NOISE_FX;
+pub const BAR_FX: usize = crate::menus::screen_static::BAR_FX;
 
 impl Statics {
     /// `FUN_002b2cd8(w, h, s)` for this frame: the draws over the target's content (w × h = the drawn size).
@@ -195,8 +197,9 @@ impl Statics {
             let c = if s == 0 { self.burst[s].max(0x18) } else { self.burst[s] };
             let fx = rng.randi(200) as f32;
             let fy = rng.randi(200) as f32;
-            let a = (c - 0x80).max(0);
-            let alpha = ((0x80 - a) * 2).min(0x80);
+            // The shared curve (crate::menus::screen_static::burst_alpha: fade in over 32 frames, hold, fade out); the
+            // ticker's floor 0x18 keeps it at 0x30.
+            let alpha = crate::menus::screen_static::burst_alpha(c);
             // DrawBoneQuads(0, 0, w, h, fx, fy, (int)(w + fx), (int)(h + fy)): texels fx .. fx + (w + fx).
             let (u, v) = (fx as i32, fy as i32);
             out.push(FxDraw { fx: NOISE_FX, x: 0.0, y: 0.0, w, h, u, v, u1: u + (w + fx) as i32, v1: v + (h + fy) as i32, rgba: (alpha as u32) << 24 | 0x80_8080, additive: true });
@@ -209,7 +212,8 @@ impl Statics {
                 if rng.randi(360) == 0 { self.bar[s] = 2; }
             } else {
                 self.bar[s] = c + 2;
-                let a = (0x100 - (c - 0xfe).max(0)).min(0x50);
+                // abs() again: fades in over 38 frames (4 → 0x50), holds, fades out over the last 38.
+                let a = (0x100 - (c - 0xfe).abs()).min(0x50);
                 let y = -((0x200 - self.bar[s]) as f32) * 0.031_25;
                 let h2 = h + 16.0;
                 out.push(FxDraw { fx: BAR_FX, x: 0.0, y, w, h: h2, u: 0, v: 0, u1: w as i32, v1: (h2 * 1.5) as i32, rgba: (a as u32) << 24 | 0x50_5050, additive: false });

@@ -50,7 +50,10 @@ mod particle_render;
 mod play_camera;
 mod render_settings;
 mod reticle_render;
+mod marker_render;
+mod tesla_render;
 mod scene_render;
+mod sea_render;
 mod screen_canvas;
 mod shadow_render;
 mod shrub_billboard;
@@ -140,8 +143,10 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(display_blend::DisplayBlendPlugin)
     .add_plugins(particle_render::ParticlePlugin)
     .add_plugins(water_render::WaterPlugin)
+    .add_plugins(sea_render::SeaRenderPlugin)
     .add_plugins(fx_draw::FxDrawPlugin)
     .add_plugins(reticle_render::ReticlePlugin)
+    .add_plugins(tesla_render::TeslaPlugin)
     .add_plugins(sky_stars::SkyStarsPlugin)
     .add_plugins(fog_state::FogStatePlugin)
     .add_plugins(hud_render::HudPlugin)

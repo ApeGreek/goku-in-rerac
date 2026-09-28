@@ -28,7 +28,7 @@ mod options;
 pub mod planet_select;
 pub mod port;
 
-use super::{scale_ticks, text, text_plain, tween, MenuAssets, MenuDraw, MenuInput, MenuSound, Overlay};
+use super::{scale_ticks, screen_static, text, text_plain, tween, MenuAssets, MenuDraw, MenuInput, MenuSound, Overlay};
 use crate::game_state::GameState;
 use crate::hud::{text as wtext, Draw};
 use crate::pad::button;
@@ -862,8 +862,10 @@ impl PageMenu {
     /// gets its rect from `MobyScreenRect(corner 0, corner 3)`: (x + 1, y + 1, w, h) into pvar +0x50.. and,
     /// while a page is current, into that page's widget of the slot (+0x18..+0x24); then the navy rect
     /// `fun_00200e08(x + 2, y + 2, x + w, y + h)`. The widgets draw into their slot's rect (pvar +0x50..) in
-    /// two passes (draw flags & 2 first).
-    pub fn draw(&mut self, a: &MenuAssets, gs: &GameState, env: &MenuEnv, out: &mut Vec<MenuDraw>) {
+    /// two passes (draw flags & 2 first). Last, with or without a current page, every live slot's panel effect
+    /// `fun_00223e28(0x1ba310[i])` (vignette, noise bursts, scan lines, glass: crate::menus::screen_static), which
+    /// draws from the game's `rand` stream `rng`.
+    pub fn draw(&mut self, a: &MenuAssets, gs: &GameState, env: &MenuEnv, rng: &mut crate::rng::Rng, out: &mut Vec<MenuDraw>) {
         out.push(MenuDraw::Snapshot);
         out.push(MenuDraw::Darken { alpha: DARKEN });
         self.view = gadgets::GadgetsView::default();
@@ -879,25 +881,35 @@ impl PageMenu {
             }
             out.push(MenuDraw::Rect { x0: x + 1, y0: y + 1, x1: x + w - 1, y1: y + h - 1, rgba: self.consts.navy });
         }
-        let Some(cp) = cur else { return };
-        for pass in 0..2 {
-            for (i, (&wa, rect)) in cp.widgets.iter().zip(rects).enumerate() {
-                let Some(wd) = self.w(wa) else { continue };
-                if wd.dflags & 4 != 0 || wd.draw == 0 || (i == 6 && !self.goodies) { continue; }
-                if (pass == 0) != (wd.dflags & 2 != 0) { continue; }
-                let Some([x, y, w, h]) = rect else { continue };
-                let mut buf = Vec::new();
-                let ret = self.call_draw(wa, a, gs, env, &mut buf);
-                if wd_direct(self.w(wa)) {
+        if let Some(cp) = cur {
+            for pass in 0..2 {
+                for (i, (&wa, rect)) in cp.widgets.iter().zip(rects).enumerate() {
+                    let Some(wd) = self.w(wa) else { continue };
+                    if wd.dflags & 4 != 0 || wd.draw == 0 || (i == 6 && !self.goodies) { continue; }
+                    if (pass == 0) != (wd.dflags & 2 != 0) { continue; }
+                    let Some([x, y, w, h]) = rect else { continue };
+                    let mut buf = Vec::new();
+                    let ret = self.call_draw(wa, a, gs, env, &mut buf);
+                    if wd_direct(self.w(wa)) {
+                        out.extend(buf);
+                        continue;
+                    }
+                    if ret & 1 != 0 || ret & 0x1e == 0 { continue; }
+                    out.push(MenuDraw::PanelBegin { x, y, w, h, clear: self.consts.navy });
                     out.extend(buf);
-                    continue;
+                    out.push(MenuDraw::PanelEnd);
                 }
-                if ret & 1 != 0 || ret & 0x1e == 0 { continue; }
-                out.push(MenuDraw::PanelBegin { x, y, w, h, clear: self.consts.navy });
-                out.extend(buf);
-                out.push(MenuDraw::PanelEnd);
             }
         }
+        // The panels' effect, slot by slot (the same slots as the rects).
+        let frame = a.frame(screen_static::VIGNETTE_ICON, screen_static::VIGNETTE_FRAME);
+        let vignette = (frame, a.frame_size(frame));
+        let mut fx = Vec::new();
+        for (i, r) in rects.iter().enumerate() {
+            if r.is_none() { continue; }
+            if let Some(f) = self.frames.as_mut() { f.panel_static(i, env.pal, vignette, rng, &mut fx); }
+        }
+        out.extend(fx.into_iter().map(MenuDraw::Static));
     }
 
     fn call_draw(&mut self, w: u32, a: &MenuAssets, gs: &GameState, env: &MenuEnv, out: &mut Vec<MenuDraw>) -> u32 {

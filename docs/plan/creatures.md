@@ -128,6 +128,7 @@ call it.
 | `projectile::part` | `PartType16Spawn` 0x280f30, `PartType22Spawn` 0x281f30, `PartType26Spawn` 0x282b00 | 700 smoke, 459 jet exhaust, 696–698 burst, 722 / 686 glows | record + the spawner's draws (16: the 0.9 / 0.95 / 1.0 throttle, then `rand()`; 22 / 26: `rand()`); the types are not simulated. Types 4 / 8 / 15 go through `fx::part04` / `part08` / `part15` (simulated) |
 | `projectile::in_world` | the [2, 1021]³ test | 459, 696–698 | |
 | `Globals::cutscene` / `scripts` | `0x15f404`; `SetState` + `CameraScript` / `CameraScript2(0)` | 688 fly-by, 459 camera cuboid | `ScriptRequest::{Start, End}`: the tick's cinematic hand-off (`rc_game::cinematic::from_creature`) turns them into Ratchet's hold state and the script camera |
+| `react::*` | the class reaction table (`lvl.vtbl` word 3), `0x304168`, `0x304390`, `0x3044a0`, `0x304690`, `0x305260`, `0x3051a8`, `0x304798`; the damage record's lure +0x18 | 577 (state 7), 572 / 866 (state 0xe) | §8; the Suck Cannon's and the Taunter's side is hero_gameplay.md §10 |
 | `Globals::ripple_z` | `*(0x1612d0 + i·0x1190 + 8)`: ripple patch heights | 572 fall-out rule | empty on Novalis (no amoeboid uses it); the water set-up of levels 5 / 11 has to fill it |
 
 Particle types the creatures spawn: 2 (amoeboid goo, `fx::goo_burst` = 0x2ef770), 8 (explosion puffs), 15 (explosion
@@ -302,7 +303,7 @@ through.
 * Particle types 16 (smoke), 22 (jet exhaust / ember smoke) and 26 (the globs' and shells' glow): records taken and the
   spawners' draws made, not simulated or drawn (the updates' draws are missing).
 * `Globals::ripple_z` must be filled by the water set-up of levels 5 / 11 for the amoeboid fall-out rule.
-* Suck cannon capture (577 state 7, 572 state 0xe, `0x305260`); the big-head manipulator (`0x278720`, a cheat flag);
+* ~~Suck cannon capture (577 state 7, 572 state 0xe, `0x305260`)~~ (done 2026-09-28: §8); the big-head manipulator (`0x278720`, a cheat flag);
   the moby shadow probe (`0x26f020` / `0x26eff8`: moby +0x84 / +0x88).
 * The knockback's burn sparks (`0x271258`) and water splash (`0x2ff768`); the beam explosion's debris burst (`0x2c4c20`).
 * The explosion light lights mobys (the point-light merge) but not the world (tfrag / tie / shrub point-light relight).
@@ -361,3 +362,16 @@ hints) / 832 (RC range) / 1546 (cutscene FX), 1134 (gold bolt: the idle glows ne
 constants; the pickup is a cinematic), 1504 (wandering point light: the bank exists, the colour walk is not traced),
 1848 (env-map overlay renderer), the 701 camera look (`FUN_002f9000`). Other agents own 11, 774, 280 / 641 / 665,
 737, 730 / 790, 746 and the enemies.
+
+## 8. Weapon reactions (2026-09-28)
+
+How a weapon reaches a creature besides a hit (hero_gameplay.md §10 for the weapons): the **class reaction table** (the
+third word of the class's `lvl.vtbl` entry; only the Suck Cannon uses it) and the damage record's **lure** +0x18 (the
+Taunter). `creature::react` ports the table's shared handlers once; a class supports the Suck Cannon by having a table
+(its three-line wrappers are `react::Wrappers` rows: held state, the amoeboids' 866-only start, the bounce sound, the
+sequence table, the suck record's offset = the header's +0x14 record) and by calling `react::carried` from its held
+state: 577 (state 7; a landed let-go → 0xe with the hover wait `ticks(180)`), 572 / 866 (state 0xe → 1). The level's
+tables are matched against level 01's by `react::tables_from_overlay` (Rilgar: {270, 572, 866}; 865 keeps the default
+and is never taken; 459 too). The lure: 577 (+0x38 → +0x214 = `ticks(240)`), 572 family (+0x38 alert), 459 (+0x38 →
++0x1e2 = `ticks(600)`) already read and clear it; the Taunter now writes it. Test: `tests/hero_reactive_novalis.rs`.
+

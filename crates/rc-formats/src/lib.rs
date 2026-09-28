@@ -37,6 +37,7 @@ pub mod strings;
 pub mod sound_bank;
 pub mod vag;
 pub mod water;
+pub mod sea;
 pub mod save_game;
 pub mod scene;
 pub mod volumes;

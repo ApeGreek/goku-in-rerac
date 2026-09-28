@@ -171,6 +171,9 @@ fn setup(
     let mut extra = ExtraMobys::new(lv, records, crate::moby_anim::identity_palette(palette_len), &mut buffers);
     for (k, (p, (_, class, _, layer))) in parts.iter_mut().zip(&specs).enumerate() {
         p.entities = extra.spawn(&mut commands, lv, class, k as u32, Transform::IDENTITY, "menu 3D widget", &mut meshes, &mut images, &mut materials);
+        // The widgets overwrite their mobys' mode bits after creating them (+0x34 = 0: the 3D Ratchet 0x297ad0, the
+        // preview 0x291c38; 4: `LoadHandGadget` 0x297d70), so none is on the glow list (`ExtraMobys::clear_glow`).
+        extra.clear_glow(&mut commands, k as u32);
         for &e in &p.entities { commands.entity(e).insert((canvases.layer(ids[*layer]), Visibility::Hidden)); }
     }
     // The menu light (set 14, crate::menu_render's frame mobys).

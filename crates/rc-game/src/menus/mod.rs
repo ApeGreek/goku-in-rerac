@@ -11,6 +11,7 @@
 pub mod mode;
 pub mod pause;
 pub mod quick_select;
+pub mod screen_static;
 pub mod vendor;
 
 use crate::hud::{Draw, HudAssets, Rot};
@@ -143,6 +144,9 @@ pub enum MenuDraw {
     /// `fun_00200258` / `fun_00200958`: a HUD frame over (x0, y0)..(x1, y1) (1/16 pixel) with UVs in 1/16 texel;
     /// `repeat_u` = drawn with CLAMP_1 = 0 (REPEAT).
     SpriteUv { frame: usize, x0: i32, y0: i32, x1: i32, y1: i32, u0: i32, v0: i32, u1: i32, v1: i32, alpha: i32, repeat_u: bool },
+    /// `DrawTexturedQuad(x, y, w, h, u, v, tw, th, rgba, GetFrameTex(frame))` (0x21be90) with a HUD frame: pixels,
+    /// texels, the caller's RGBA (MODULATE: 0x80 = 1.0).
+    FrameQuad { frame: usize, x: i32, y: i32, w: i32, h: i32, u: i32, v: i32, tw: i32, th: i32, rgba: u32 },
     /// Full-screen: the frame-buffer snapshot taken when the menu opened (`FUN_002b4d38`).
     Snapshot,
     /// Full-screen black at `alpha` (`emit_rgba_draw_packet(0, 0, 0, a)`).
@@ -153,6 +157,9 @@ pub enum MenuDraw {
     PanelEnd,
     /// A content stub (streamed image, 3D globe / moby): nothing drawn; named for the log.
     Stub(&'static str),
+    /// A draw of the panels' noise / scan lines / glass ([`screen_static`], `fun_00223e28`), in screen pixels;
+    /// composed over everything else of the page, the 3D views included.
+    Static(screen_static::StaticDraw),
 }
 
 /// Sound requests (`fun_0022da68(n, 0x11, moby)`: class-0x472 sound n; the ring plays none).

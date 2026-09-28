@@ -16,11 +16,16 @@
 //! | `0x2d8330` Bomb Glove (class 192, item 10) | the throw's aim point ([`aim_search`], [`BOMB_GLOVE`]) | range 15 (2D, from the launch point), within 45° of the reference yaw or 90° within 4, elevation < 55°, at most 2 above the launch point, a clear world line from the camera (flags 6); greedy: each accepted target becomes the reference (its yaw, its distance) for the rest of the list |
 //! | `0x2351d0` → `0x22e238` / `0x22dff0` melee aim assist (wrench swings, the Comet-Strike, the glove throw 0x23 without a glove target) | the swing's facing | range 11, cone 50° (`0x2351d0(11, 50°, −1)`), score `d + diff·d` (+7 for a record flag), health ≠ 0 |
 //! | `0x22c080` `HeroScanTargets` | the head-look target | every 7th tick; range = record `+0x38`, 110° cone, 60° pitch, score `d + diff·d` (−1.5 for the current one), record `+0x39` priority, a clear line from the head |
-//! | `0x2c7d68` / `0x2c5778` (gold byte 0x13e52b: the Devastator 11, class 157, and its missile) | the gun's auto-aim / homing | within 2.5 a hard lock (60° / 45°), else the cone 10° (+40° gold) narrowed by the record's radius byte `+0x0a`, a clear camera line |
+//! | `0x2c7d68` (the Devastator 11, class 157; `crate::hero::devastator::search`) | the missile's aim and lock | creatures (class type 5); within 2.5 a hard lock (60° / 45°), else the cone 10° (+40° gold) narrowed by the record's radius byte `+0x0a` ([`cone_miss`]), a clear camera line; a creature no missile holds becomes the lock |
+//! | `0x2ca310` (the Blaster 15, class 168; `crate::hero::blaster::search`) | the shot's aim | range 20 (3D), the cone 9° narrowed by the radius byte ([`cone_miss`]), clear camera and muzzle lines (a blocked one ends the search), the yaw taken within 10° |
+//! | `0x2e4bb8` (the R.Y.N.O. 23, class 454; `crate::hero::ryno::search`) | the salvo's targets | creatures with a record and health ≥ 0, drawn (or not yet taken this salvo), within 97° of the camera's yaw and elevation and 80 (the salvo's re-targets: 180°, 100), score `d/5` within 5 else `yaw²·pitch²·d + d`, a clear line (flags 2) |
+//! | `0x2cf138` (the Tesla Claw 19, class 177; `crate::hero::tesla::build`) | the beam's target(s) | creatures with a record within 15 (2D) of the claw, 32° of the camera's yaw and 45° of Ratchet's; score `1.5·(32° − off)/32° + (15 − d)/15`, the best two (the second for the gold claw) |
+//! | `0x2c5778` (the gold Devastator missile's re-target) | | not ported (gold not mirrored) |
 //! | `0x2cc830`, `0x2cf138`, `0x2d2018`, `0x2d49f8`, `0x30d308`, `0x2bfe40` (the mines of class 190) | lures, the two-target scorer, the mines' seek | their own ranges and cones (not ported) |
 //!
-//! So the system here is one list and one record reader shared by every weapon, plus a search per weapon as a data
-//! row ([`AimRules`]; the Bomb Glove's is the only one wired: `crate::hero::weapons`).
+//! So the system here is one list and one record reader shared by every weapon, plus a search per weapon: the Bomb
+//! Glove's as a data row ([`AimRules`]), the guns' as their own functions (their rules differ in kind, not only in
+//! constants), sharing the cone test [`cone_miss`] (the Blaster and the Devastator) and the record readers.
 //!
 //! **The ground reticle is the Bomb Glove's alone.** The bomb (class 121) of the glove (class 0xc0) runs the landing
 //! preview `0x2c2be0` every tick from its update `0x2c3300` ([`arc_landing`]): from the launch point (held) or its
@@ -121,6 +126,107 @@ pub fn aim_search(rules: &AimRules, table: &MobyTable, list: &[MobyId], from: [f
     }
     out
 }
+
+/// `FUN_00277b50(len, yaw, pitch, out)`: `len·(cos yaw·cos pitch, sin yaw·cos pitch, sin pitch)`.
+pub fn polar(len: f32, yaw: f32, pitch: f32) -> [f32; 3] { [yaw.cos() * len * pitch.cos(), yaw.sin() * len * pitch.cos(), pitch.sin() * len] }
+
+/// The guns' cone test (the Blaster's search `0x2ca310`, the Devastator's `0x2c7d68`, the same code with their own
+/// constants): the point `dist` along the aim `(yaw, pitch)` from `from` and the target's aim point `p` subtend
+/// `2·asin(|chord| / 2·dist)`; above `threshold`, a target with a record has its radius byte `radius` (×0.125) taken
+/// off (`− asin(r / dist)`, not below 0, only when `r < dist`). Compared with `threshold` by the caller.
+pub fn cone_miss(dist: f32, yaw: f32, pitch: f32, from: [f32; 3], p: [f32; 3], radius: Option<u8>, threshold: f32) -> f32 {
+    let a = polar(dist, yaw, pitch);
+    let q = [a[0] + from[0], a[1] + from[1], a[2] + from[2]];
+    let chord = ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2) + (q[2] - p[2]).powi(2)).sqrt();
+    let mut ang = (chord / (dist + dist)).clamp(-1.0, 1.0).asin() * 2.0;
+    if threshold < ang {
+        if let Some(b) = radius {
+            let r = b as f32 * 0.125;
+            if r < dist {
+                ang -= (r / dist).clamp(-1.0, 1.0).asin();
+                if ang < 0.0 { ang = 0.0; }
+            }
+        }
+    }
+    ang
+}
+
+/// The record's radius byte `+0x0a` (the guns' cone tests).
+pub fn record_radius(m: &Moby) -> Option<u8> { record(m).and_then(|r| m.pvars.get(r + 0x0a).copied()) }
+
+/// The record's first word `+0x00` as a float (the creatures' health: the R.Y.N.O. and the Tesla Claw read it).
+pub fn record_health(m: &Moby) -> Option<f32> { record(m).map(|r| f32::from_le_bytes(m.pvars[r..r + 4].try_into().unwrap())) }
+
+/// A moby's aim point: its position raised by the record's `+0x10` (0.5 without a record: the guns' default).
+pub fn aim_point(m: &Moby) -> [f32; 3] { [m.position[0], m.position[1], m.position[2] + aim_height(m).unwrap_or(0.5)] }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The screen markers (0x1694c0: `FUN_0020fb60` registers, `FUN_0020fc40` draws in `DrawWorld`)
+
+/// One screen marker (`FUN_0020fb60(size, angle, step, owner, rgba, pos, fx, mode, …)`, 0x30 bytes at 0x1694c0 + 0x30·i):
+/// FX texture `fx` drawn as a 2D sprite of `40·size` pixels (`FUN_0020f838`), turned by `angle`, at the screen
+/// projection of `at` (None: the screen centre 0x13e508 / 0x13e50c = (256, 208)), vertex colour `rgba` (R low),
+/// ALPHA 0x44 (`DrawWorld` sets it right before). The guns' markers use `mode == -1` with FX 0x23 / 0x26 / 0x27, which
+/// the register turns into draw mode 2 (one sprite anchored at its centre).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Marker {
+    pub size: f32,
+    pub angle: f32,
+    pub rgba: u32,
+    pub at: Option<[f32; 3]>,
+    pub fx: usize,
+}
+
+/// The marker list of one tick (at most three; the draw empties it, a new tick's first register drops the old ones;
+/// Ratchet's hold state 0x72 empties it at the draw: not drawn).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Markers {
+    pub tick: u64,
+    pub list: Vec<Marker>,
+}
+
+impl Markers {
+    /// `FUN_0020fb60`: refused in game mode 2 (the callers here never run in it) and past three entries.
+    pub fn register(&mut self, tick: u64, m: Marker) {
+        if self.tick != tick {
+            self.tick = tick;
+            self.list.clear();
+        }
+        if self.list.len() < 3 { self.list.push(m); }
+    }
+    pub fn of_tick(&self, tick: u64) -> &[Marker] { if self.tick == tick { &self.list } else { &[] } }
+}
+
+/// The game's screen (`UpdateViewContext`: 512 × 416, centre (256, 208), tangents 0.63 and 0.63·0.775 on NTSC).
+pub const SCREEN: [f32; 2] = [512.0, 416.0];
+pub const SCREEN_TAN: [f32; 2] = [0.63, 0.63 * 0.775];
+
+/// `FUN_00218838`'s projection of a world point for a camera at `eye` with rows (forward, left, up), in screen pixels
+/// (None behind the eye): camera x = −left (right), y = −up (down), z = forward.
+pub fn project(eye: [f32; 3], rows: [[f32; 3]; 3], p: [f32; 3]) -> Option<[f32; 2]> {
+    let d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
+    let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+    let (z, x, y) = (dot(rows[0]), -dot(rows[1]), -dot(rows[2]));
+    if z <= 0.0 { return None; }
+    Some([SCREEN[0] * 0.5 + x / z * (SCREEN[0] * 0.5 / SCREEN_TAN[0]), SCREEN[1] * 0.5 + y / z * (SCREEN[1] * 0.5 / SCREEN_TAN[1])])
+}
+
+/// `FUN_0020f838` draw mode 2 (`fun_001f5ab0(x, y, w, w, angle, 0.5, 0.5, 0x3f, 0x3f, tex, …)`): the sprite's corners in
+/// GS strip order (v0 v1 v2 v3) around the screen point `c`, side `40·size`, turned by `angle`; texel UVs 1..63 (the
+/// `<< 4` of 0x3f with the 0x10 start).
+pub fn marker_corners(m: &Marker, c: [f32; 2]) -> [[f32; 2]; 4] {
+    let w = m.size * 40.0;
+    let (s, co) = m.angle.sin_cos();
+    // fun_001f5ab0: A = h·(sin, cos), B = w·(cos, −sin), anchor (0.5, 0.5): v0 = P + A/2 − B/2, v1 = P + A/2 + B/2,
+    // v2 = P − A/2 − B/2, v3 = P − A/2 + B/2.
+    let a = [w * s, w * co];
+    let b = [w * co, -w * s];
+    let at = |ka: f32, kb: f32| [c[0] + a[0] * ka + b[0] * kb, c[1] + a[1] * ka + b[1] * kb];
+    [at(0.5, -0.5), at(0.5, 0.5), at(-0.5, -0.5), at(-0.5, 0.5)]
+}
+
+/// The corners' texel UVs in [`marker_corners`]' order.
+pub const MARKER_UV: [[i32; 2]; 4] = [[1, 1], [63, 1], [1, 63], [63, 63]];
 
 // ---------------------------------------------------------------------------------------------------------------
 // The landing preview (0x2c2be0)

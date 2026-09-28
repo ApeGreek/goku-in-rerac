@@ -38,7 +38,11 @@ pub fn round_places(x: f32, n: u32) -> f32 {
 pub fn key_time(w: &World, id: MobyId) -> f32 {
     let m = w.m(id);
     let Some(class) = w.classes.anim(m.o_class) else { return 0.0 };
-    let s = &m.anim;
+    key_time_of(class, &m.anim)
+}
+
+/// [`key_time`] on any animation state of `class` (the hand items' too: the Suck Cannon's firing key).
+pub fn key_time_of(class: &rc_formats::moby_anim::MobyAnimClass, s: &rc_formats::moby_anim::AnimState) -> f32 {
     let time = |seq: u8, f: u8| class.frame(seq, f).map(|fr| fr.header.time as i32 as f32).unwrap_or(0.0);
     let ta = if s.seq_a == rc_formats::moby_anim::SNAPSHOT_SEQ { time(s.seq_b, s.frame_b) } else { time(s.seq_a, s.frame_a) };
     if s.t == 0.0 { return ta * 0.0625; }

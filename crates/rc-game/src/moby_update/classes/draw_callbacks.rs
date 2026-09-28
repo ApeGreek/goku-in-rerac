@@ -33,15 +33,24 @@ pub enum Callback {
     /// 05 / 07 / 11 / 12 / 13: `FUN_002b91c8(table, n)`; draw only, apart from the per-patch UV advance the renderer
     /// makes): `crate::water::managers`.
     RipplePatches,
+    /// The Gadgetron vendor 11's beam and glow points (level01 `0x2ba9c0`, list 2; draw only): registered by its update
+    /// in states 1 and 2 ([`super::vendor`]). `rc-engine` draws the four glow points in `fx_draw` (through the shared glow
+    /// quad `0x2781d0`) and the beam in `vendor_render`.
+    VendorBeam,
+    /// A sea / liquid surface of `crate::water::sea::PORTS[i]` (draw only; list 1 or the after-ties list by port).
+    Sea(u8),
 }
 
-/// The two lists (registration order).
+/// The lists (registration order).
 #[derive(Clone, Debug, Default)]
 pub struct DrawCallbacks {
     /// `0x21afe0` (after the mobys, before the particles).
     pub list1: Vec<(Callback, MobyId)>,
     /// `0x21b198` (after the particles).
     pub list2: Vec<(Callback, MobyId)>,
+    /// `0x16e100` (count `0x15f42c`): drained by `DrawWorld` after the ties and before the shrubs (`RunDrawCallbacks_2`
+    /// 0x21b0a8; registered by the levels' own copies of the register function, e.g. level05 `0x228110`).
+    pub ties: Vec<(Callback, MobyId)>,
     /// For the draw-only callbacks that draw in a joint's frame (the ship glass: `0x264508(m, 0, M)`): the matrix
     /// (rows x, y, z, point) of the registering moby this tick, taken where the port has the pose (a scene actor's).
     pub matrices: std::collections::HashMap<MobyId, [[f32; 4]; 4]>,
@@ -65,21 +74,26 @@ impl DrawCallbacks {
     pub fn register2(&mut self, cb: Callback, id: MobyId) {
         if self.list2.len() < LIST_LEN { self.list2.push((cb, id)); }
     }
+
+    /// The after-ties list's register function (level05 `0x228110`, 64 entries).
+    pub fn register_ties(&mut self, cb: Callback, id: MobyId) {
+        if self.ties.len() < LIST_LEN { self.ties.push((cb, id)); }
+    }
 }
 
 /// Entries per list (`0x21afe0` / `0x21b198` refuse the 65th).
 pub const LIST_LEN: usize = 64;
 
-/// The frame render's callbacks of the last tick, then the lists cleared (`0x2ab920`): list 1 then list 2, each in
-/// registration order. Called first thing in the moby loop (see the module doc).
+/// The frame render's callbacks of the last tick, then the lists cleared (`0x2ab920`): the after-ties list, list 1, then
+/// list 2, each in registration order. Called first thing in the moby loop (see the module doc).
 pub fn run_frame(w: &mut World) {
     let lists = std::mem::take(&mut w.svc.draw_callbacks);
-    for (cb, id) in lists.list1.into_iter().chain(lists.list2) {
+    for (cb, id) in lists.ties.into_iter().chain(lists.list1).chain(lists.list2) {
         if w.table.mobys.get(id).is_none_or(|m| m.state >= 0x80) { continue; }
         match cb {
             Callback::FireField760 => super::fire_field::draw_callback(w, id),
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
-            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches => {}
+            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) => {}
         }
     }
 }
