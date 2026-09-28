@@ -8,8 +8,9 @@
 //! 0.5 (+0x0c) × `randf(0.5, 1)` (one draw a tick); its spin +0x44 += 0.5 rad (`FUN_002731d0`: the angle wrapped).
 //! The owner writes its rows and position every tick (the item update). Standard `f32`.
 //!
-//! In the port the owner (the hand item) is not a moby of the table: its fields are written into this moby's pvars by
-//! the Pyrocitor ([`crate::hero::pyrocitor::glow_pv`]).
+//! Two owners: the Pyrocitor's hand item and the Visibomb's missile 172 (`super::visibomb`, its glow `0x2cb808`), both
+//! creating it through `0x2d0fc8` ([`init`]). The owner's fields the update reads are written into this moby's pvars by
+//! the owner ([`crate::hero::pyrocitor::glow_pv`]; the hand item is not a moby of the table).
 
 use crate::hero::pyrocitor::glow_pv as pv;
 use crate::moby_runtime::MobyId;
@@ -24,6 +25,23 @@ fn wrap(a: f32) -> f32 {
     use std::f32::consts::{PI, TAU};
     let x = (a + PI) / TAU;
     (x - x.floor()) * TAU - PI
+}
+
+/// `0x2d0fc8(owner)`'s set-up of a new flame after `CreateMoby(0xb3)` (the caller creates it: the Pyrocitor through
+/// the hero's hit sink, the Visibomb's missile in the moby loop): distances 0xff, visible, mode 0x204 (plus the port's
+/// KEEP_ROWS: the owner writes the rows every tick), alpha 0x50, state 0, rotation 0, the owner's rows; the position
+/// where the caller wants it (None: as created, until the owner places it).
+pub fn init(m: &mut crate::moby_runtime::Moby, rows: [[f32; 3]; 3], pos: Option<[f32; 3]>) {
+    m.update_dist = 0xff;
+    m.draw_dist = 0xff;
+    m.visible = 1;
+    m.mode = 0x204 | 0x100;
+    m.alpha = 0x50;
+    m.state = 0;
+    m.rotation = [0.0; 4];
+    for (row, src) in m.rows.iter_mut().zip(rows) { *row = [src[0], src[1], src[2], 0.0]; }
+    if let Some(p) = pos { m.position = [p[0], p[1], p[2], 0.0]; }
+    if m.pvars.len() < 0x10 { m.pvars.resize(0x10, 0); }
 }
 
 /// `0x2d1068`.

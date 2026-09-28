@@ -89,6 +89,10 @@ pub struct ItemInfo {
     pub o_class2: i32,
     /// +0x38: the HUD icon (60000 + id; 0 none).
     pub icon: u16,
+    /// +0x3a: the ammo pickup's class (the Weapons page's ammo model, 0x2919a0), −1 none.
+    pub ammo_class: i16,
+    /// +0x40 / +0x42 / +0x44: the Help pages' text ids (the item's help, the gold version's, the gadget help's title).
+    pub help: [i16; 3],
 }
 
 /// The item definitions, by id.
@@ -111,6 +115,8 @@ impl ItemInfos {
                     o_class: w(i, 0x10),
                     o_class2: w(i, 0x14),
                     icon: u16::from_le_bytes([raw[i * sz + 0x38], raw[i * sz + 0x39]]),
+                    ammo_class: i16::from_le_bytes([raw[i * sz + 0x3a], raw[i * sz + 0x3b]]),
+                    help: [0x40, 0x42, 0x44].map(|o| i16::from_le_bytes([raw[i * sz + o], raw[i * sz + o + 1]])),
                 })
                 .collect(),
         )
@@ -255,7 +261,9 @@ pub fn debug_grant(gs: &mut GameState, sess: &mut SessionState, ids: &[usize], t
             out[s.index()] = Some(i as i32);
         }
     }
-    if let Some(&h) = ids.iter().rev().find(|&&i| slot_of(i) == Some(Slot::Hand) && i != item::WRENCH as usize) {
+    // The Drone Device is never put in the hand: granting it launches its drones as buying it does (0x2af7e8: 0x141345).
+    if ids.contains(&0x18) { sess.drone = true; }
+    if let Some(&h) = ids.iter().rev().find(|&&i| slot_of(i) == Some(Slot::Hand) && i != item::WRENCH as usize && i != 0x18) {
         sess.temp_hand = h as i32;
         out[0] = Some(h as i32);
     }

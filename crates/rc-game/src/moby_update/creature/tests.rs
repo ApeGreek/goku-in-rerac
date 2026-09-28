@@ -84,9 +84,9 @@ fn anim_class() -> rc_formats::moby_anim::MobyAnimClass {
 
 fn classes() -> ClassTable {
     let mut t = ClassTable::default();
-    for (slot, oc) in [(1u8, 577i16), (2, 0x23c), (3, 1747), (4, 1748), (5, 1749), (6, 0x70), (7, 13), (8, 0x27f)] {
+    for (slot, oc) in [(1u8, 577i16), (2, 0x23c), (3, 1747), (4, 1748), (5, 1749), (6, 0x70), (7, 13), (8, 0x27f), (9, 270), (10, 428)] {
         let info = ClassInfo { slot, update_fn: scheduler::port_update_fn(oc), scale: 1.0, has_collision: false, ..Default::default() };
-        let anim = matches!(oc, 577 | 0x23c).then(anim_class);
+        let anim = matches!(oc, 577 | 0x23c | 270).then(anim_class);
         t.classes.insert(oc, (info, anim));
     }
     t
@@ -330,3 +330,136 @@ fn projectile_sweep_hits_the_floor_and_misses_the_air() {
     assert!((hit[2] - 10.0).abs() < 1e-3, "{hit:?}");
     assert!(projectile::sweep(&mut w, [120.0, 120.0, 13.0, 0.0], [120.4, 120.0, 12.9, 0.0], 0, 0.5, Some(1), &t).is_none());
 }
+
+// -------------------------------------------------------------------------------------------------
+// The Morph-o-Ray's morph and the chicken 270 (crate::moby_update::classes::chicken)
+
+use crate::moby_update::classes::chicken;
+
+fn morph_sim(hero_at: [f32; 3], gold: u8) -> (Sim, usize) {
+    let mut s = Sim::new(577, [120.0, 120.0, 10.0], critter_pvars(), hero_at);
+    s.table.mobys[1].spawn_flag = 0xff;
+    s.table.mobys[1].b4 = 2;
+    s.load();
+    for _ in 0..3 { s.tick(); }
+    let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, s.counter);
+    w.coll = Some(&s.mesh);
+    let ch = chicken::morph(&mut w, 1, gold).expect("no slot");
+    (s, ch)
+}
+
+#[test]
+fn the_morph_spawns_a_chicken_and_deletes_the_target() {
+    let (s, ch) = morph_sim([130.0, 120.0, 10.0], 0);
+    assert!(s.table.mobys[1].state >= 0xfd, "the critter deleted");
+    let c = &s.table.mobys[ch];
+    assert_eq!((c.o_class, c.state, c.pvars.len()), (270, 1, chicken::PVARS));
+    assert_eq!(c.position[..2], s.table.mobys[1].position[..2], "at the critter's place");
+    assert!(std::f32::consts::PI - c.rotation[2].abs() < 0.01, "facing away from Ratchet: {}", c.rotation[2]);
+    assert_eq!(c.mode & (PVAR_HEADER | crate::moby_runtime::mode::TARGETABLE), PVAR_HEADER | crate::moby_runtime::mode::TARGETABLE);
+    let word = |o: usize| u32::from_le_bytes(c.pvars[o..o + 4].try_into().unwrap()) as usize;
+    assert_eq!((word(0x10), word(0x14), word(0)), (chicken::KNOCK, chicken::SUCK, 0));
+    assert_eq!(s.svc.creatures.react.chickens[0], ch as u32 + 1);
+    assert_eq!(s.svc.creatures.react.chicken_next, 1);
+    assert!(s.svc.fx.part_spawns.contains_key(&5), "the type-5 flash counted");
+    let r = chicken::SUCK;
+    assert_eq!(f32::from_le_bytes(c.pvars[r + 0x80..r + 0x84].try_into().unwrap()), f32::from_bits(0x3f5c_ed91));
+}
+
+#[test]
+fn the_chicken_runs_from_ratchet() {
+    let (mut s, ch) = morph_sim([123.0, 120.0, 10.0], 0);
+    // Born in the air (the critter hovered 6 up): the first flee is refused (a drop), it falls and pecks until its timer
+    // runs out, then runs (1 unit a second while Ratchet is 3..6 away).
+    let mut states = Vec::new();
+    for _ in 0..400 {
+        s.tick();
+        let st = s.table.mobys[ch].state;
+        if states.last() != Some(&st) { states.push(st); }
+    }
+    let p = s.table.mobys[ch].position;
+    eprintln!("chicken states {states:?} at {p:?}");
+    assert!(states.contains(&3) || states.contains(&4), "states {states:?}");
+    assert!(p[0] < 117.0, "ran away from Ratchet (at x 123): {p:?}");
+    assert!((p[2] - 10.0).abs() < 0.01, "on the floor: {p:?}");
+}
+
+#[test]
+fn a_hit_bursts_the_chicken_into_feathers() {
+    let (mut s, ch) = morph_sim([140.0, 140.0, 10.0], 0);
+    s.tick();
+    let dir = [Pf::f(1.0), Pf::ZERO, Pf::ONE, Pf::ZERO];
+    let t = crate::moby_update::services::HitTemplate { dir, attacker: None, flags: 0x1_0000, b18: 0, b19: 1, h1a: 0x47, damage: Pf::ONE, w20: 1 };
+    crate::moby_update::services::deliver_hit_in(&mut s.table, &mut s.svc.hits, ch, &t);
+    let before = s.svc.fx.part_spawns.get(&22).copied().unwrap_or(0);
+    s.tick();
+    let c = &s.table.mobys[ch];
+    assert_eq!(c.state, 6, "burst and hidden");
+    assert_eq!(c.mode & (crate::moby_runtime::mode::HIDDEN | crate::moby_runtime::mode::TARGETABLE), crate::moby_runtime::mode::HIDDEN);
+    assert_eq!(s.svc.fx.part_spawns.get(&22).copied().unwrap_or(0) - before, 20, "20 puffs (size 1)");
+    let feathers: Vec<usize> = (0..s.table.mobys.len()).filter(|&i| s.table.mobys[i].o_class == chicken::FEATHER && s.table.mobys[i].state < 0xfd).collect();
+    assert!((5..=8).contains(&feathers.len()), "feathers {}", feathers.len());
+    // The feathers drift down, rock, and are gone within their life (visible: the MobyProc flag set each tick).
+    let z0 = s.table.mobys[feathers[0]].position[2];
+    for _ in 0..30 {
+        for &f in &feathers { s.table.mobys[f].visible = 1; }
+        s.tick();
+    }
+    assert!(s.table.mobys[feathers[0]].position[2] < z0 + 0.5, "falling");
+    for _ in 0..400 {
+        for &f in &feathers { if s.table.mobys[f].state < 0xfd { s.table.mobys[f].visible = 1; } }
+        s.tick();
+    }
+    assert!(feathers.iter().all(|&f| s.table.mobys[f].state >= 0xfd || s.table.mobys[f].o_class != chicken::FEATHER), "the feathers ended");
+}
+
+#[test]
+fn the_gold_chicken_is_a_tough_decoy() {
+    let (mut s, ch) = morph_sim([140.0, 140.0, 10.0], 1);
+    let c = &s.table.mobys[ch];
+    assert_eq!((c.cmd, c.mode & PVAR_HEADER), (1, 0), "a decoy (+0xbc) without records");
+    for _ in 0..60 { s.tick(); }
+    let k = s.table.mobys[ch].scale / s.classes.classes[&270].0.scale;
+    assert!((k - 4.0).abs() < 0.01, "grew to 4× its class scale: {k}");
+}
+
+#[test]
+fn a_displaced_chicken_goes_when_out_of_view() {
+    // The ring wraps (20 slots): the chicken already in the next slot is displaced (+0x70 = 1) and, not drawn, deleted
+    // on its next tick.
+    let (mut s, first) = morph_sim([140.0, 140.0, 10.0], 0);
+    s.svc.creatures.react.chicken_next = 0;
+    let id = {
+        let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, s.counter);
+        let id = w.create_moby(577).expect("slot");
+        w.mm(id).position = [110.0, 110.0, 10.0, 0.0];
+        id
+    };
+    let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, s.counter);
+    w.coll = Some(&s.mesh);
+    let second = chicken::morph(&mut w, id, 0).expect("slot");
+    assert_eq!(i32::from_le_bytes(s.table.mobys[first].pvars[0x70..0x74].try_into().unwrap()), 1, "displaced");
+    s.table.mobys[first].visible = 0;
+    s.tick();
+    assert!(s.table.mobys[first].state >= 0xfd, "the displaced chicken went");
+    assert_eq!(s.table.mobys[second].o_class, 270);
+    assert!(s.table.mobys[second].state < 0xfd);
+}
+
+#[test]
+fn move_ground_walks_a_floor_and_refuses_a_step() {
+    let (mut s, ch) = morph_sim([140.0, 140.0, 10.0], 0);
+    let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, s.counter);
+    w.coll = Some(&s.mesh);
+    let mut from = [120.0, 120.0, 10.0, 0.0];
+    let mut to = [120.5, 120.0, 10.0, 0.0];
+    assert_eq!(walker::move_ground(&mut w, ch, 0.2, 0.5, 0.333, 0.2618, &mut from, &mut to, 0), 1);
+    assert_eq!((from[0], from[1]), (120.5, 120.0));
+    // Off the floor's edge (x 40.. is the floor: 20..40 in cells of 1? the floor spans 20..40 units): more than 0.333
+    // down → refused.
+    let mut from = [120.0, 120.0, 12.0, 0.0];
+    let mut to = [120.5, 120.0, 12.0, 0.0];
+    assert_eq!(walker::move_ground(&mut w, ch, 0.2, 0.5, 0.333, 0.2618, &mut from, &mut to, 0), 0, "a drop of 2 is refused");
+    assert_eq!(to[0], 120.0);
+}
+

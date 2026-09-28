@@ -107,7 +107,7 @@ use rc_game::menus::pause::port::Setting;
 use rc_game::menus::pause::{MenuEnv, PageMenu, PostAction, DARKEN};
 use rc_game::menus::quick_select::{HeroGate, QuickSelect};
 use rc_game::menus::screen_static::{StaticDraw, StaticTex};
-use rc_game::menus::{MenuAssets, MenuDraw, MenuInput, Overlay};
+use rc_game::menus::{MenuAssets, MenuDraw, MenuInput, MenuSound, Overlay};
 use rc_game::pad::button;
 
 /// The system set that builds the menus' 2D primitives into `Hud2dHook` (crate::vendor_render adds to them after).
@@ -252,11 +252,20 @@ fn setup(
         }
     };
     let mut menu = PageMenu::load(&overlay);
+    // The map's mission and marker lists from the level-01 overlay: the same records in every overlay, and their
+    // callbacks are ported by their level-01 addresses (rc_game::menus::pause::map_page::callback).
+    if let (Some(m), Ok(r)) = (menu.as_mut(), reference.as_ref()) {
+        if let Ok(ov1) = rc_game::menus::Overlay::parse(r) { m.map.tables = rc_game::menus::pause::map_page::MapTables::read(&ov1); }
+    }
     // The item definitions for the Gadgets / Weapons grids (rc_game::inventory; the overlay's 0x179f40 table).
     if let (Some(m), Ok(t)) = (menu.as_mut(), &items) {
         let n = rc_formats::save_game::ITEM_COUNT * rc_formats::save_game::ITEM_DEF_SIZE;
         if let Some(raw) = overlay.bytes(t.item_defs_addr, n) { m.items = Some(std::sync::Arc::new(rc_game::inventory::ItemInfos::from_raw(raw))); }
+        // The price records' "has ammo" (+8) and max ammo (+0xe) for the Weapons page's ammo text.
+        let u = |r: &rc_formats::save_game::ItemRecord, o: usize| u16::from_le_bytes([r.0[o], r.0[o + 1]]);
+        m.ammo_records = t.records.iter().map(|r| (u(r, 8), u(r, 0xe))).collect();
     }
+    if let Some(m) = menu.as_mut() { m.lang = lh.lang; }
     // The frame mobys: class 0x472 from the level core.
     let frame_class = match load_frame_class(&level.0, &overlay) {
         Ok(f) => Some(f),
@@ -317,7 +326,15 @@ fn setup(
         .id();
     let frame = frame_class.map(|(fc, ci)| frame_render(&mut commands, &level.0, &overlay, &fc, ci, &mut meshes, &mut images, &mut materials, &mut buffers));
     let layer = MenuLayer { image, cam2d, node, cam3d: None, frame };
-    let assets = MenuAssets::new(HudAssets::new(&lh.hud, lh.glyphs, lh.messages.clone()), overlay);
+    // The map picture's palettes: the grid icon's frame per level (rc_game::menus::pause::map_page::MapPage::palettes).
+    if let Some(m) = menu.as_mut() {
+        m.map.palettes = (0..rc_game::map::LEVELS as i32)
+            .map(|l| lh.hud.frame_image(lh.hud.icon_frame(rc_game::menus::pause::map_page::GRID_ICON, l)).ok().map(|im| im.clut.to_vec()))
+            .collect();
+    }
+    let mut assets = MenuAssets::new(HudAssets::new(&lh.hud, lh.glyphs, lh.messages.clone()), overlay);
+    // The global `all_text` in the game's language (the Help Log page's message table, `MenuTextLoad`).
+    assets.all_text = load_all_text(&root, lh.lang);
     commands.insert_resource(MenuRt {
         assets,
         qs,
@@ -487,19 +504,40 @@ fn menu_frame(
                 }
                 qs.draw(&rt.assets, &gs.global, play.game.counter, &mut rt.draws);
             }
+            // 0x2abfb0: once the map page has found the level's map (0x184694), move record 9 ("the map was used")
+            // is bumped every mode-0 frame (the Novalis director's map hint waits for it).
+            if rt.menu.as_ref().is_some_and(|m| m.map.available) {
+                let (level, t) = (gs.global.level, gs.global.play_time);
+                rc_game::help::bump(&mut gs.global.move_help[9], level, t);
+            }
             // 0x2aba68: Start / pad lost → pause menu, Select|R3 → map (≥ 8 frames in mode 0, hero state and HP).
             let hs = play.game.hero.state;
             let allowed = mm.state.frames_in_mode >= 8 && ![0x72, 0x32, 0x1d].contains(&hs) && sess.hp != 0;
+            // Select / R3 also need movement group ≠ 22 (0x2abdec).
+            let map_allowed = allowed && play.game.hero.group != 22;
             if let (true, Some(menu)) = (allowed, rt.menu.as_mut()) {
                 let kind = if inp.pressed & button::START != 0 || !inp.connected {
                     Some(0)
-                } else if inp.pressed & (button::SELECT | button::R3) != 0 {
+                } else if map_allowed && inp.pressed & (button::SELECT | button::R3) != 0 {
                     Some(10)
                 } else {
                     None
                 };
                 if let Some(k) = kind {
                     menu.enter(k, gs);
+                    // The map system joins the page menu while it is open (rc_game::menus::pause::map_page).
+                    menu.map.state = std::mem::take(&mut play.svc.map);
+                    menu.map.loader = rc_game::menus::pause::map_page::Loader(Some(std::sync::Arc::new(crate::gameplay::map_file)));
+                    let h = &play.game.hero;
+                    menu.map.hero = rc_game::menus::pause::map_page::HeroMark { pos: [h.pos[0].to_f32(), h.pos[1].to_f32(), h.pos[2].to_f32()], yaw: h.rot[2].to_f32(), group: h.group };
+                    menu.map.mirror = gs.global.cheats_active[4] != 0;
+                    // The hook table 0x179638 (the map markers' mobys on this level): slot → position and angle.
+                    menu.map.hooks = play.svc.interact.talk_slots.iter().filter_map(|(&id, &k)| {
+                        let m = play.game.mobys.mobys.get(id)?;
+                        Some((k, (m.position[0], m.position[1], m.rotation[2])))
+                    }).collect();
+                    // EnterMenuMode 0x28bf50: snd_PauseAllSoundsInGroup(0x1d), music_Pause(0).
+                    if let Some(a) = audio.as_deref_mut() { a.system().menu_open(); }
                     mm.state.set(Mode::Menu);
                     rt.snapshot_request = true;
                     rt.snapshot_ready = false;
@@ -538,6 +576,12 @@ fn menu_frame(
                     }
                 }
                 if trace && !out.sounds.is_empty() { println!("menus: frame {frame}: sounds {:?}", out.sounds); }
+                // The class-0x472 sounds (`PlayClassSound(n, 0x11, frame moby)`), the close's audio, then the frame's sound_update.
+                if let Some(a) = audio.as_deref_mut() {
+                    play_menu_sounds(&mut play, a, &out.sounds);
+                    if let Some(x) = out.exit { a.system().menu_close(!matches!(x, PostAction::ShipTravel(_))); }
+                    menu_sound_frame(&mut play, a);
+                }
                 if let Some((a, b)) = out.transition { println!("menus: frame {frame}: transition {a:#x} → {b:#x} (kind 1, 12 ticks)"); }
                 if let Some(p) = out.entered { println!("menus: frame {frame}: page {p:#x} entered (kind {:#x})", menu.kind); }
                 if out.quit { println!("menus: frame {frame}: Quit Game ○ (0x15f570 = 1: leaving the level is not ported)"); }
@@ -548,6 +592,8 @@ fn menu_frame(
                     println!("menus: frame {frame}: equip requests (hand, feet, head, back) {req:?}");
                 }
                 if let Some(x) = out.exit {
+                    // The map system back to the level (its view, zooms and a Map-o-Matic switch kept).
+                    play.svc.map = std::mem::take(&mut menu.map.state);
                     if x != PostAction::Resume { println!("menus: frame {frame}: post-action {x:?} not ported; resuming"); }
                     mm.state.set(Mode::Gameplay);
                     println!("menus: frame {frame}: menu closed, mode 0 (stub calls {:?})", menu.stub_calls);
@@ -583,7 +629,40 @@ fn menu_frame(
     mm.loop_frame += 1;
 }
 
+/// The global `all_text` lump's block of language `lang` (`+4·lang` offsets; docs/plan/hud_text.md §5), empty when absent.
+fn load_all_text(root: &std::path::Path, lang: u32) -> Vec<rc_formats::strings::Message> {
+    let Ok(b) = crate::disc_source::read(root, "global/all_text.bin") else { return Vec::new() };
+    let bytes = if rc_formats::wad::is_wad(&b) { rc_formats::wad::decompress(&b).unwrap_or_default() } else { b.to_vec() };
+    let off = bytes.get(4 * lang as usize..4 * lang as usize + 4).map_or(0, |w| u32::from_le_bytes(w.try_into().unwrap()) as usize);
+    bytes.get(off..).and_then(|blk| rc_formats::strings::parse_text_block(blk).ok()).unwrap_or_default()
+}
+
+/// One page-menu frame's audio: `sound_update` (`SceneController` 0x28c990 runs it after `MobyUpdateLoop`; the level's
+/// sound instances are not updated), then the frame's samples.
+fn menu_sound_frame(play: &mut Play, audio: &mut crate::audio_out::AudioOut) {
+    let game = &mut play.game;
+    let h = game.hero.pos;
+    let listener = rc_game::audio::class_sounds::listener_of(&game.camera.out);
+    let input = rc_game::audio::FrameInput { listener, hero_pos: [h[0].to_f32(), h[1].to_f32(), h[2].to_f32()] };
+    let table = &game.mobys;
+    let (sys, buf) = audio.parts();
+    buf.clear();
+    sys.sound_update_with(&input, game.counter as u32, &mut game.rng, &|id| rc_game::audio::class_sounds::owner_position(table, id));
+    sys.render(rc_game::audio::SAMPLES_PER_FRAME, buf);
+    audio.push_frame();
+}
+
+/// The frame's page-menu sounds (`rc_game::menus::MenuSound::event`: class 0x472's sound n, flags 0x11).
+pub fn play_menu_sounds(play: &mut Play, audio: &mut crate::audio_out::AudioOut, sounds: &[MenuSound]) {
+    if sounds.is_empty() { return; }
+    let listener = rc_game::audio::class_sounds::listener_of(&play.game.camera.out);
+    for &s in sounds {
+        audio.system().play_class_sound(&s.event(play.game.counter), None, &listener, &mut play.game.rng);
+    }
+}
+
 /// The frame's draws → HUD primitives; the snapshot node and its capture.
+#[allow(clippy::too_many_arguments)]
 fn build_prims(
     rt: Option<ResMut<MenuRt>>,
     level: Res<crate::Level>,
@@ -592,6 +671,7 @@ fn build_prims(
     cams: Query<&RenderTarget, With<crate::fly_cam::FlyCam>>,
     primary: Query<Entity, With<PrimaryWindow>>,
     mut request: ResMut<SnapshotRequest>,
+    (mut pictures, mut images): (Option<ResMut<crate::hud_images::HudImages>>, ResMut<Assets<Image>>),
 ) {
     let Some(mut rt) = rt else { return };
     let Some(lh) = level.0.hud.as_ref() else { return };
@@ -599,7 +679,9 @@ fn build_prims(
     h.frame_sizes = rt.assets.hud.frame_sizes.clone();
     let mut st = TextState::default();
     let mut statics: [Vec<Prim>; 3] = Default::default();
-    let snapshot = convert(&rt.draws, &mut h, &mut statics, &mut st, &lh.glyphs);
+    if let Some(p) = pictures.as_deref_mut() { p.frame += 1; }
+    let mut resolve = |src: &rc_game::menus::ImageSrc| pictures.as_deref_mut().and_then(|p| p.resolve(src, &mut images));
+    let snapshot = convert(&rt.draws, &mut h, &mut statics, &mut st, &lh.glyphs, &mut resolve);
     hook.prims = h.prims;
     hook.statics = statics;
     hook.replace_hud = rt.render_mode == Mode::Menu;
@@ -762,7 +844,14 @@ fn translate(d: &Draw, ox: i32, oy: i32) -> Draw {
 
 /// Converts the menu draws to primitives; returns whether the snapshot is shown. The snapshot and the
 /// menu's black 0x30 are the menu layer's (module docs), not primitives.
-fn convert(draws: &[MenuDraw], h: &mut Hud2d, statics: &mut [Vec<Prim>; 3], st: &mut TextState, glyphs: &[rc_formats::font::GlyphTable; 3]) -> bool {
+fn convert(
+    draws: &[MenuDraw],
+    h: &mut Hud2d,
+    statics: &mut [Vec<Prim>; 3],
+    st: &mut TextState,
+    glyphs: &[rc_formats::font::GlyphTable; 3],
+    pictures: &mut dyn FnMut(&rc_game::menus::ImageSrc) -> Option<usize>,
+) -> bool {
     let full = [0, W - 1, 0, H - 1];
     let mut panel = full;
     let (mut ox, mut oy) = (0, 0);
@@ -819,6 +908,19 @@ fn convert(draws: &[MenuDraw], h: &mut Hud2d, statics: &mut [Vec<Prim>; 3], st: 
                 (ox, oy) = (0, 0);
             }
             MenuDraw::Stub(_) => {}
+            MenuDraw::Image { src, x, y, w, h: ph, u, v, tw, th, rgba } => {
+                if let Some(slot) = pictures(src) { h.prims.push(crate::hud_images::prim(slot, x + ox, y + oy, *w, *ph, *u, *v, *tw, *th, *rgba)); }
+            }
+            MenuDraw::Quad { tex, pos, uv, rgba, repeat } => {
+                let tex = match tex {
+                    rc_game::menus::QuadTex::Frame(f) => Some(Tex::Frame(*f)),
+                    rc_game::menus::QuadTex::Image(src) => pictures(src).map(Tex::Dyn),
+                };
+                if let Some(tex) = tex {
+                    let pos = pos.map(|[x, y]| [x + ox, y + oy]);
+                    h.prims.push(Prim { tex, pos, uv: *uv, rgba: *rgba, scissor: full, repeat: *repeat, nearest: false });
+                }
+            }
             MenuDraw::Static(s) => {
                 let p = static_prim(s, ox, oy);
                 statics[(s.pass as usize).min(2)].push(Prim { scissor: panel, ..p });

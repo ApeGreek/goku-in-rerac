@@ -21,8 +21,8 @@
 //! hum (class sound 4, flags 4) kept playing. Not firing: the chain is reset next time, the light's level falls, the
 //! hum is released. **States**: 0 → 1 (warm-up `ticks(16)`, the light (radius 0 at the start), 20 points); 1: the
 //! warm-up steps; firing → the weapon drawn (`0x22ee08`), 3; ○ pressed without firing → class sound 0, put away;
-//! 3: ○ released (or not firing, or 0x1413fc) → the targets cleared, length 0, put away (`0x22efd8`), 1 (the "tap"
-//! statistics 0x141405 / 0x141918 and the "hold ○" help are not ported). **The light**: 2 ahead of Ratchet and 2 up
+//! 3: ○ released (or not firing, or 0x1413fc) → the targets cleared, length 0, put away (`0x22efd8`), 1, with the shot statistics
+//! (move record 26, the short-shot counter 0x141405) and, after three short shots, the "keep ○ held" help 20016. **The light**: 2 ahead of Ratchet and 2 up
 //! (his rows), radius 7.5, colour `(0.7k, 0.7k, k)`, `k = level/ticks(10)`; freed when the item is put away (then
 //! state 4).
 //!
@@ -149,6 +149,14 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
     let id = hero.items.slot.id;
     let tick = env.frame as u64;
     if pad.pressed & mask != 0 && hero.items.f13fc == 0 { hero.weapons.tesla.length = 0.8; }
+    // The "keep ○ held" help 20016 (record 0x81) after three short shots, while move record 26 is unused.
+    {
+        let r = &hero.help.records;
+        let group_ok = (hero.group as u32) < 2 || hero.group == 9;
+        if r.help[0x81].count == 0 && r.moves[26].count == 0 && 2 < hero.help.tesla_taps && group_ok {
+            hero.help.out.push(crate::help::HeroHelpOut::Request { msg: 0x4e30, rec: 0x81 });
+        }
+    }
     let ammo = hero.weapons.has_ammo(id);
     let mut firing = false;
     {
@@ -279,6 +287,11 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
             }
         }
         3 if !(pad.released & mask == 0 && firing && hero.items.f13fc == 0) => {
+            // The shot's statistics (move record 26: counted for a shot longer than ticks(70), its time and mask on
+            // every shot) and the short-shot counter 0x141405 (below ticks(30), else reset).
+            let out = if ticks(0x46) < hero.f50c { crate::help::HeroHelpOut::BumpMove(26) } else { crate::help::HeroHelpOut::TouchMove(26) };
+            hero.help.out.push(out);
+            hero.help.tesla_taps = if hero.f50c < ticks(0x1e) { hero.help.tesla_taps.wrapping_add(1) } else { 0 };
             let t = &mut hero.weapons.tesla;
             t.targets = [None; 2];
             t.none = [0; 2];
@@ -611,9 +624,18 @@ pub struct BeamQuad {
 /// at both ends, `w2` across, faded at both ends). Additive (ALPHA 0x48).
 #[allow(clippy::too_many_arguments)]
 pub fn strip(out: &mut Vec<BeamQuad>, pts: &[[f32; 3]], n: usize, w1: f32, w2: f32, ext: f32, a1: u32, a2: u32, color: u32, scroll: f32, eye: [f32; 3]) {
+    strip_colored(out, pts, n, [w1, w2, ext], [a1, a2], [WHITE, color], scroll, eye)
+}
+
+/// [`strip`] with the core's colour too (`core`, alpha 0 in the low 24 bits): the same draw code the Walloper's arcs use
+/// (`0x2d1830`, its core 0xffffff and glow 0x7f2020 from gp−0x5550 / −0x554c; `super::walloper`). `w` = (core width,
+/// glow width, glow lengthening), `a` = (core alpha, glow alpha), `rgb` = (core colour, glow colour).
+#[allow(clippy::too_many_arguments)]
+pub fn strip_colored(out: &mut Vec<BeamQuad>, pts: &[[f32; 3]], n: usize, w: [f32; 3], a: [u32; 2], rgb: [u32; 2], scroll: f32, eye: [f32; 3]) {
+    let ([w1, w2, ext], [a1, a2], [core, color]) = (w, a, rgb);
     let n = n.min(pts.len());
     if n < 2 { return; }
-    let full1 = WHITE | a1 << 24;
+    let full1 = core | a1 << 24;
     let side = |a: [f32; 3], b: [f32; 3], w: f32| {
         let c = cross3(sub3(b, a), sub3(a, eye));
         let l = len3(c);
@@ -626,7 +648,7 @@ pub fn strip(out: &mut Vec<BeamQuad>, pts: &[[f32; 3]], n: usize, w1: f32, w2: f
     for i in 1..n - 1 {
         let s = side(pts[i], pts[i + 1], w1);
         let (qa, qb) = (add3(pts[i], s), sub3(pts[i], s));
-        if i == 1 { c[0] = WHITE; c[1] = WHITE; } else if i == n - 2 { c[2] = WHITE; c[3] = WHITE; } else if i == 2 { c[0] = full1; c[1] = full1; }
+        if i == 1 { c[0] = core; c[1] = core; } else if i == n - 2 { c[2] = core; c[3] = core; } else if i == 2 { c[0] = full1; c[1] = full1; }
         out.push(BeamQuad { fx: FX_CORE, corners: [pa, pb, qa, qb], st, rgba: c });
         pa = qa;
         pb = qb;

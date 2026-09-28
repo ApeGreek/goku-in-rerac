@@ -233,6 +233,8 @@ impl Game {
         carriers.grind = self.grind_paths.clone();
         // The Swingshot targets of the moby loop's run list (hero::swingshot, the weapon check's searches).
         carriers.targets = self.swing_targets(hooks.world.as_deref());
+        // The melee aim search's targets (0x1abe80, hero::melee::aim_search), with a hand item out.
+        if self.hero.items.slot.item.is_some() { carriers.melee = crate::hero::melee::melee_targets(&self.mobys, &self.target_list(hooks.world.as_deref())); }
         // The weapon's target (0x13fda0) where the moby loop left it (SetState 0x23 aims at it).
         crate::hero::weapons::refresh_aim(&mut self.hero, &self.mobys);
         let hero_tick = {
@@ -314,6 +316,10 @@ impl Game {
             // FUN_00227e90: the walk / run footsteps (after HeroItemsUpdate in 0x228870).
             crate::hero::fx::walk_footsteps(&mut self.hero, &self.mobys.mobys[self.hero_moby], &anim.view(), hero_sounds, &mut self.rng);
         }
+        // The camera calls the hand items' updates made through the moby world (the Visibomb's launch switches the
+        // type-6 camera in, `0x317d88`), applied before this tick's camera update as the game's direct calls are.
+        let cine = hooks.world.as_deref_mut().map(|w| w.take_cinematic()).unwrap_or_default();
+        if !cine.is_empty() { crate::cinematic::apply_camera_calls(&mut self.camera, &cine, &CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: None, hero_moby }); }
         (hooks.particles)(&self.hero, &self.camera.out, &mut self.rng, self.counter);
         let resets = self.camera.resets;
         if self.camera_paused {

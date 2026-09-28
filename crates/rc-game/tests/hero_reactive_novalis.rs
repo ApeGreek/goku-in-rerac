@@ -125,6 +125,27 @@ struct CellHits<'a, 'b> {
     classes: &'a ClassTable,
     coll: &'a collision::Collision,
     parts: &'a std::cell::RefCell<&'b mut Particles>,
+    /// As the engine's: the moby loop's item tables (with Ratchet's ammo) and a sound layer (here a log).
+    items: &'a rc_game::moby_update::classes::pickup::ItemTables,
+    log: &'a SoundLog,
+}
+
+/// The class sounds played through a world's sound layer this tick: (from a hand item's call, sound class, index,
+/// flags, moby).
+type SoundLog = std::cell::RefCell<Vec<(bool, i16, i32, u32, usize)>>;
+
+/// A stand-in sound layer that logs every class sound and refuses the slot (as without a sound layer: -1), so the
+/// runs behave as before.
+struct LogSink<'a> {
+    log: &'a SoundLog,
+    hand: bool,
+}
+
+impl rc_game::moby_update::services::SoundSink for LogSink<'_> {
+    fn play_class_sound(&mut self, ev: &rc_game::moby_update::services::SoundEvent, _: &mut Rng) -> i32 {
+        self.log.borrow_mut().push((self.hand, ev.sound_class, ev.index, ev.flags, ev.moby));
+        -1
+    }
 }
 
 impl CellHits<'_, '_> {
@@ -162,9 +183,13 @@ impl rc_game::hero::items::HitSink for CellHits<'_, '_> {
     fn world(&mut self, table: &mut MobyTable, hero: &Hero, rng: &mut Rng, counter: u64, f: &mut dyn FnMut(&mut World)) -> bool {
         let mut s = self.svc.borrow_mut();
         let mut p = self.parts.borrow_mut();
+        let inv = self.items.clone().with_hero(hero);
+        let mut sink = LogSink { log: self.log, hand: true };
         let mut w = World::new(table, hero, rng, self.classes, &mut s, counter);
         w.coll = Some(self.coll);
         w.particles = Some(&mut **p);
+        w.inventory = &inv;
+        w.sound = Some(&mut sink);
         f(&mut w);
         true
     }
@@ -198,6 +223,12 @@ struct Row {
     /// The Taunter's rings drawn this tick and on; its whistle sounding.
     rings: (bool, usize),
     whistle: bool,
+    /// The class sounds of the tick (hand item's call?, sound class, index, flags, moby).
+    sounds: Vec<(bool, i16, i32, u32, usize)>,
+    /// Ratchet's ammo, all items (0x13d428).
+    ammo: i32,
+    /// The live ammo pickups (the vacuum's classes): position, state.
+    pickups: Vec<([f32; 3], u8)>,
     rng: u32,
 }
 
@@ -209,6 +240,10 @@ struct Setup<'a> {
     watch: &'a [usize],
     /// How long a hand-item class sound plays (the stand-in sound layer's `SoundIsAlive`; 0: no sound layer).
     sound_ticks: u64,
+    /// Before tick `.0`: Ratchet moved to `.1` (position, yaw) through the hero block (a class's store, `HeroPose`).
+    teleport: Option<(u32, ([f32; 3], f32))>,
+    /// Before tick `.0`: a wrench-like hit (flags 0x10000, damage 1) to the watched moby `.1`.
+    hit: Option<(u32, usize)>,
 }
 
 /// A stand-in sound layer: every hand-item class sound plays for `ticks` ticks (the Taunter's whistles, the Suck
@@ -268,6 +303,9 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
     svc.build_grid(&mut game.mobys);
     let mut particles = Particles::new(None, Vec::new());
     let mut sched = Scheduler::new();
+    let recs: Vec<[u8; 0x18]> = lv.tables.records.iter().map(|r| r.0).collect();
+    let items = rc_game::moby_update::classes::pickup::ItemTables::new(&recs, gs.global.vendor);
+    let log: SoundLog = Default::default();
     {
         let hero: Hero = game.hero.clone();
         let mut w = World::new(&mut game.mobys, &hero, &mut game.rng, &*classes, &mut svc, 0);
@@ -288,10 +326,14 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
         let mut mobys = |table: &mut MobyTable, hero: &Hero, rng: &mut Rng, cam: &rc_game::follow_camera::CameraView, coll: &collision::Collision, counter: u64| {
             let mut s = svc_cell.borrow_mut();
             let mut p = parts_cell.borrow_mut();
+            let inv = items.clone().with_hero(hero);
+            let mut sink = LogSink { log: &log, hand: false };
             let mut w = World::new(table, hero, rng, classes_ref, &mut s, counter);
             w.camera = cam.pos;
             w.coll = Some(coll);
             w.particles = Some(&mut **p);
+            w.inventory = &inv;
+            w.sound = Some(&mut sink);
             sched.tick(&mut w);
         };
         let mut parts = |hero: &Hero, _: &rc_game::follow_camera::CameraView, rng: &mut Rng, _: u64| {
@@ -305,7 +347,16 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
         // The render's +0x31 ("drawn last frame", MobyProc's; the R.Y.N.O.'s search reads it): the watched mobys are
         // in view in these runs.
         for &i in &watch { if game.mobys.mobys[i].state < 0x80 { game.mobys.mobys[i].visible = 1; } }
-        let mut hits = CellHits { svc: &svc_cell, classes: &classes, coll: &lv.mesh, parts: &parts_cell };
+        let mut hits = CellHits { svc: &svc_cell, classes: &classes, coll: &lv.mesh, parts: &parts_cell, items: &items, log: &log };
+        if let Some((_, (p, yaw))) = s.teleport.filter(|x| x.0 == t) {
+            let mut f = rc_game::moby_update::services::HeroFields::of(&game.hero);
+            f.pose = Some(rc_game::moby_update::services::HeroPose { pos: p, yaw, target_yaw: yaw });
+            svc_cell.borrow_mut().hero_writes = Some((game.counter, f));
+        }
+        if let Some((_, k)) = s.hit.filter(|x| x.0 == t) {
+            let tmpl = Tmpl { flags: 0x1_0000, damage: rc_game::ps2v::Pf::ONE, ..Default::default() };
+            rc_game::moby_update::services::deliver_hit_in(&mut game.mobys, &mut svc_cell.borrow_mut().hits, watch[k], &tmpl);
+        }
         fake.now = game.counter;
         let r = game.tick_with_hero_sounds(Some(&input(t).bytes()), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks, &mut hits, None, &mut fake);
         assert_eq!(r.hero, rc_game::hero::HeroTick::Ran, "hero stopped in state {:#x} at tick {t}", game.hero.state);
@@ -336,6 +387,9 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
             vacuumed: h.weapons.reactive.suck.vacuumed,
             rings: (h.weapons.reactive.taunter.rings.drawn == Some(tick), h.weapons.reactive.taunter.rings.rings.iter().filter(|r| r.on).count()),
             whistle: h.fx.item_loop_alive[rc_game::hero::fx::LOOP_ITEM],
+            sounds: std::mem::take(&mut *log.borrow_mut()),
+            ammo: h.weapons.ammo.iter().sum(),
+            pickups: game.mobys.mobys.iter().filter(|m| m.state < 0x80 && rc_game::hero::suck_cannon::PICKUP_CLASSES.contains(&m.o_class)).map(|m| ([m.position[0], m.position[1], m.position[2]], m.state)).collect(),
             rng: game.rng.state,
         });
     }
@@ -396,8 +450,15 @@ fn novalis_suck_cannon_pulls_and_fires_a_critter() {
     assert_eq!(lv.reactions.get(&577), Some(&rc_game::moby_update::creature::react::Table::Critter));
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
     let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
-    let s = Setup { item: 9, at, watch: &[a, b], sound_ticks: 0 };
-    let rows = run(&lv, &s, &suck_then_fire, 480);
+    let s = Setup { item: 9, at, watch: &[a, b], sound_ticks: 0, teleport: None, hit: None };
+    // The other critter (moby 592) walks up and bites (0x2efc60 state 4: hit 1, flags 1) at tick 258, so Ratchet is in
+    // hurt 0x16 at the press at 260 and the press at 330 fires. Faithful, not a regression (hero_gameplay.md §10.2): the
+    // help director 1341 (0x30acb8, ported 2026-09-28) sets its update distance to 0xff in state 0 (`sb 0xff, 0x30(s0)`
+    // at 0x30ad20), so it is always on the run list, and the pull 0x302bd0 hands it to the vacuum 0x307a50, which draws
+    // `randi(10)` for every live moby. That is one more draw a tick from tick 51, and it moves the critters' side-offset
+    // rolls (0x2efc60's `randf(30, 90)` flips).
+    // 700 ticks: a critter fired at 330 (after a knock-down) may roll until its 300-tick timer bursts it.
+    let rows = run(&lv, &s, &suck_then_fire, 700);
     dump(&rows);
     let held = rows.iter().position(|r| r.suck.0 == 1).expect("nothing swallowed");
     let k = rows[held].watched.iter().position(|w| w.2 == Some(4)).expect("which one");
@@ -409,12 +470,15 @@ fn novalis_suck_cannon_pulls_and_fires_a_critter() {
     assert!(rows[held + 1].watched[k].3 & (HIDDEN | 2) == HIDDEN | 2, "hidden inside the cannon");
     assert_eq!(rows[held].suck, (1, 0, 1));
     let fired = rows.iter().position(|r| r.fired == 1).expect("never fired");
-    assert!(held < fired && (260..265).contains(&fired), "fired at {fired} by the press at 260");
+    // The press at 260 fires unless the other critter has knocked Ratchet down (hurt 0x16: a blocked group) — then the
+    // press at 330 does.
+    let hurt = rows[255..265].iter().any(|r| r.state == 0x16);
+    assert!(held < fired && ((260..265).contains(&fired) || (hurt && (330..337).contains(&fired))), "fired at {fired} (hurt at the first press: {hurt})");
     assert_eq!(rows[fired].suck, (0, 0, 0), "the slot emptied");
     assert!(rows[fired].watched[k].2.is_some_and(|x| x >= 5), "record {:?}", rows[fired].watched[k].2);
     let burst = rows.iter().position(|r| r.bursts == 1).expect("no burst");
     assert!(rows[burst].watched[k].0 >= 0xfd, "deleted after the burst");
-    assert_eq!(rows, run(&lv, &s, &suck_then_fire, 480), "deterministic");
+    assert_eq!(rows, run(&lv, &s, &suck_then_fire, 700), "deterministic");
 }
 
 /// Rilgar (level 05), a small amoeboid 866 awake by the river: the same interface through the amoeboids' table (held
@@ -425,7 +489,7 @@ fn rilgar_suck_cannon_takes_a_small_amoeboid() {
     assert_eq!(lv.reactions.get(&866), Some(&rc_game::moby_update::creature::react::Table::Amoeboid));
     assert_eq!(lv.reactions.get(&865), None, "865 keeps the default table");
     let at = facing_moby(&lv, 1262, 5.0, -std::f32::consts::FRAC_PI_2);
-    let s = Setup { item: 9, at, watch: &[1262], sound_ticks: 0 };
+    let s = Setup { item: 9, at, watch: &[1262], sound_ticks: 0, teleport: None, hit: None };
     let input = |t: u32| if (30..=160).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 200);
     dump(&rows);
@@ -446,7 +510,7 @@ fn novalis_taunter_lures_the_critters() {
     assert_eq!(lv.items.defs[14].o_class, 175, "item 14 is the Taunter (class 175)");
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
     let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
-    let s = Setup { item: 14, at, watch: &[a, b], sound_ticks: 0 };
+    let s = Setup { item: 14, at, watch: &[a, b], sound_ticks: 0, teleport: None, hit: None };
     let input = |t: u32| if t == 60 { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 120);
     dump(&rows);
@@ -467,7 +531,7 @@ fn novalis_taunter_knocks_a_crate() {
     let c = lv.instances[CRATE].position;
     let at = ([c[0], c[1] + 6.0, c[2]], -std::f32::consts::FRAC_PI_2);
     let crates: Vec<usize> = [375, 377, 376, 533].iter().map(|&m| instance_of(&lv, m)).collect();
-    let s = Setup { item: 14, at, watch: &crates, sound_ticks: 0 };
+    let s = Setup { item: 14, at, watch: &crates, sound_ticks: 0, teleport: None, hit: None };
     let input = |t: u32| if t == 60 { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 120);
     dump(&rows);
@@ -488,7 +552,7 @@ fn novalis_suck_cannon_holds_continuously() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
     let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
-    let s = Setup { item: 9, at, watch: &[a, b], sound_ticks: 0 };
+    let s = Setup { item: 9, at, watch: &[a, b], sound_ticks: 0, teleport: None, hit: None };
     let input = |t: u32| if (40..=400).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 460);
     dump(&rows);
@@ -513,7 +577,7 @@ fn novalis_suck_cannon_holds_continuously() {
 fn rilgar_suck_cannon_far_reach_and_two_in_sequence() {
     let Some(lv) = load_level(5) else { eprintln!("skipped: no extracted/"); return };
     let at = ([167.55005, 305.2638, 26.5], (319.1 - 305.26f32).atan2(164.2 - 167.55));
-    let s = Setup { item: 9, at, watch: &[1261, 1266], sound_ticks: 0 };
+    let s = Setup { item: 9, at, watch: &[1261, 1266], sound_ticks: 0, teleport: None, hit: None };
     let input = |t: u32| if (30..=300).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 320);
     dump(&rows);
@@ -539,7 +603,7 @@ fn novalis_taunter_lures_for_the_whole_hold() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
     let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
-    let s = Setup { item: 14, at, watch: &[a, b], sound_ticks: 90 };
+    let s = Setup { item: 14, at, watch: &[a, b], sound_ticks: 90, teleport: None, hit: None };
     let input = |t: u32| if (60..=300).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 340);
     dump(&rows);
@@ -555,4 +619,117 @@ fn novalis_taunter_lures_for_the_whole_hold() {
     let most = rows[first..first + 60].iter().map(|r| r.rings.1).max().unwrap();
     assert_eq!(most, 3, "a ring every 10 ticks, 30 ticks each");
     assert_eq!(rows, run(&lv, &s, &input, 340), "deterministic");
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// Crates and the bolt pickup sound (the user's report 2026-09-28: "can't suck crates", "no bolt pickup sound")
+
+/// Ticks with a bolt pickup sound (`FUN_002bcb90`'s `PlayClassSound(0, 0x20, bolt)`: a bolt class 13..16, index 0,
+/// flags 0x20), from a hand item's call (`true`: the vacuum) or the moby loop (`false`: a bolt's own pickup).
+fn bolt_sounds(rows: &[Row], hand: bool) -> Vec<usize> {
+    rows.iter().enumerate().filter(|(_, r)| r.sounds.iter().any(|s| s.0 == hand && (13..=16).contains(&s.1) && s.2 == 0 && s.3 == 0x20)).map(|(t, _)| t).collect()
+}
+
+/// The pull's filter (`0x302bd0`: a targetable moby whose class reaction table's slot +0x00 is not the default
+/// `0x3040b8`, asm 0x302c70..0x302c7c) and the vacuum's (`0x307a50`: class type 0x13, or the 8 ammo pickups of
+/// `0x2732b8`): no crate class (500, 501, 502, 505, 511) has a reaction table in any level's `lvl.vtbl` and none is a
+/// bolt, so the Suck Cannon leaves crates alone — the four below the spawn plateau, within 12 and in the cone, stay put
+/// for a 160-tick suck.
+#[test]
+fn novalis_suck_cannon_leaves_crates() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    for c in [500i16, 501, 502, 505, 511] {
+        assert_eq!(lv.reactions.get(&c), None, "crate {c}: the default reaction table");
+        assert_eq!(rc_game::moby_update::creature::react::table_by_class(c), None);
+        if let Some((info, _)) = lv.classes.classes.get(&c) { assert_ne!(info.ty, 0x13, "crate {c} is not a bolt"); }
+        assert!(!rc_game::hero::suck_cannon::PICKUP_CLASSES.contains(&c));
+    }
+    let c = lv.instances[CRATE].position;
+    let at = ([c[0], c[1] + 6.0, c[2]], -std::f32::consts::FRAC_PI_2);
+    let crates: Vec<usize> = [375, 377, 376, 533].iter().map(|&m| instance_of(&lv, m)).collect();
+    let s = Setup { item: 9, at, watch: &crates, sound_ticks: 0, teleport: None, hit: None };
+    let input = |t: u32| if (40..=200).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
+    let rows = run(&lv, &s, &input, 240);
+    dump(&rows);
+    let start = rows.iter().position(|r| r.hand.1 == 3).expect("never sucking");
+    assert!(rows[start + 1..=200].iter().all(|r| r.hand.1 == 3 && r.vortex.0), "sucking with the vortex up the whole hold");
+    for r in &rows {
+        assert_eq!(r.suck, (0, 0, 0), "nothing coming or held");
+        for (w, w0) in r.watched.iter().zip(&rows[0].watched) { assert_eq!((w.0, w.1), (w0.0, w0.1), "a crate moved or changed state"); }
+    }
+    assert_eq!(rows, run(&lv, &s, &input, 240), "deterministic");
+}
+
+/// What the Suck Cannon does to a crate in the game: a fired creature's flight hits the mobys on its path (template
+/// flags 0x430000, damage 2) and the crate's hit mask 0x1830000 takes it: the crate breaks (`CrateBreakFx`,
+/// `CrateDropBolts`), and the next suck vacuums its bolts. Novalis: a critter swallowed at the pit (its bolts vacuumed:
+/// the pickup sound through the hand item's call), Ratchet moved 5 in front of crate 376, the critter fired into it
+/// (the crate breaks), ○ held again: the crate's bolts vacuumed with the pickup sound.
+#[test]
+fn novalis_suck_cannon_fired_critter_breaks_a_crate() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    assert_eq!(lv.instances[CRATE].o_class, 500);
+    let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
+    let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
+    let c = lv.instances[CRATE].position;
+    let near = ([c[0], c[1] + 5.0, c[2]], -std::f32::consts::FRAC_PI_2);
+    let s = Setup { item: 9, at, watch: &[a, b, CRATE], sound_ticks: 0, teleport: Some((215, near)), hit: None };
+    let input = |t: u32| if (40..=200).contains(&t) || (260..=262).contains(&t) || (330..=470).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
+    let rows = run(&lv, &s, &input, 500);
+    dump(&rows);
+    let held = rows.iter().position(|r| r.suck.0 >= 1).expect("nothing swallowed");
+    assert!(held < 200);
+    let first = bolt_sounds(&rows[..=200], true);
+    assert!(!first.is_empty(), "the swallowed critter's bolts vacuumed with the pickup sound");
+    let fired = rows.iter().position(|r| r.fired == 1).expect("never fired");
+    assert!((260..266).contains(&fired), "fired at {fired}");
+    let crate0 = rows[0].watched[2].0;
+    let broke = rows.iter().position(|r| r.watched[2].0 != crate0).expect("the crate did not break");
+    assert!(fired < broke && broke < fired + 30, "broke at {broke}");
+    assert!(rows[fired..=broke].iter().any(|r| r.hit[2]), "hit by the flight");
+    let later = bolt_sounds(&rows[330..], true);
+    assert!(!later.is_empty(), "the crate's bolts vacuumed with the pickup sound");
+    assert!(rows[470].vacuumed > rows[329].vacuumed);
+    assert_eq!(rows, run(&lv, &s, &input, 500), "deterministic");
+}
+
+/// The normal pickup plays the same sound through the same code (`FUN_002bcb90` from the bolt's idle, in the moby
+/// loop): crate 376 broken by a wrench-like hit next to Ratchet, its bolts fly to him with `PlayClassSound(0, 0x20)`.
+#[test]
+fn novalis_bolt_pickup_sound_on_a_normal_pickup() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    let c = lv.instances[CRATE].position;
+    let at = ([c[0], c[1] + 1.5, c[2]], -std::f32::consts::FRAC_PI_2);
+    let s = Setup { item: 9, at, watch: &[CRATE], sound_ticks: 0, teleport: None, hit: Some((30, 0)) };
+    let input = |_: u32| PadInput::neutral();
+    let rows = run(&lv, &s, &input, 200);
+    dump(&rows);
+    assert!(rows[40].watched[0].0 != rows[0].watched[0].0, "the crate broke");
+    let loop_sounds = bolt_sounds(&rows, false);
+    assert!(!loop_sounds.is_empty(), "the bolts' own pickup sound");
+    assert!(bolt_sounds(&rows, true).is_empty(), "no hand-item call");
+    assert_eq!(rows, run(&lv, &s, &input, 200), "deterministic");
+}
+
+
+/// The ammo crate 552 (class 511) broken next to Ratchet drops Bomb Glove ammo (he holds 10 of 40); the Suck Cannon's
+/// vacuum takes the pickup from 6 away (`0x2db850` from `0x307a50`): the ammo rises in the tick of the take (the
+/// vacuum's `AddAmmo` goes to Ratchet at once, with the level's max ammo), and class 213's pickup sound plays through
+/// the hand item's call.
+#[test]
+fn novalis_suck_cannon_vacuums_an_ammo_pickup() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    const AMMO_CRATE: usize = 552;
+    assert_eq!(lv.instances[AMMO_CRATE].o_class, 511);
+    let c = lv.instances[AMMO_CRATE].position;
+    let at = ([c[0], c[1] - 5.0, c[2]], std::f32::consts::FRAC_PI_2);
+    let s = Setup { item: 9, at, watch: &[AMMO_CRATE], sound_ticks: 0, teleport: None, hit: Some((90, 0)) };
+    let input = |t: u32| if (5..=260).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
+    let rows = run(&lv, &s, &input, 300);
+    dump(&rows);
+    assert!(rows[100].watched[0].0 != rows[0].watched[0].0, "the ammo crate broke");
+    let t = rows.iter().position(|r| r.vacuumed > 0 && r.sounds.iter().any(|x| x.0 && x.1 == 213)).expect("no ammo pickup vacuumed");
+    assert!(rows[t].ammo > rows[t - 1].ammo, "the ammo rose in the tick of the take: {} -> {}", rows[t - 1].ammo, rows[t].ammo);
+    assert!(rows[t].ammo <= 40);
+    assert_eq!(rows, run(&lv, &s, &input, 300), "deterministic");
 }

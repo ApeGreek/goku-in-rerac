@@ -2,7 +2,8 @@
 //!
 //! * Ratchet (`0x1413d0`) by default, **no target** while his movement group (`0x1413dc`) is 0x18 or his state
 //!   (`0x1413d4`) is 0x72 (the cutscene hold): kind 2 then, and every field of the record is zero.
-//! * A decoy nearer than `range` (3-D distance, `fun_001f9b80`) wins over him (kind 1): the mobys of list `0x1b0cb0`
+//! * A decoy nearer than `range` (the **xy** distance, `fun_001f9b80` = `VecDistance2` 0x221398; the port read it as
+//!   3-D until 2026-09-28, hero_gameplay.md §18) wins over him (kind 1): the mobys of list `0x1b0cb0`
 //!   of class 0xcb / 0x76c in state 3, then the 20 slots of `0x1dd580` of class 0x10e with `+0xbc ≠ 0`; each closer
 //!   one replaces the previous and shrinks the range. The port has no writer of those two gadget lists, so it scans
 //!   the moby table in index order for the same classes and states (the same candidates; only the order of equally
@@ -49,7 +50,7 @@ pub fn acquire_in(w: &World, id: MobyId, range: f32, region: Option<usize>) -> T
         kind = 2;
     }
     let mut consider = |cand: MobyId, best: &mut Option<MobyId>, kind: &mut u32| {
-        let d = super::dist3(me, w.m(cand).position);
+        let d = super::dist2(me, w.m(cand).position);
         if d < range && inside(w.m(cand).position) {
             range = d;
             *best = Some(cand);

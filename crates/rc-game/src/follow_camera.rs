@@ -41,6 +41,7 @@ use crate::ps2v::Pf;
 use rc_formats::collision::Collision;
 
 pub mod script;
+pub mod type6;
 
 const K_PI: Pf = Pf::b(0x4049_0fdb);
 const HALF_PI: Pf = Pf::b(0x3fc9_0fdb);
@@ -253,6 +254,8 @@ pub struct Camera {
     pub blend: CamBlend,
     /// The script camera (type 5, [`script::ScriptCamera`]): `CameraScript` / `CameraScript2`.
     pub script: script::ScriptCamera,
+    /// The type-6 camera ([`type6::Type6`]: the Visibomb's missile view).
+    pub type6: type6::Type6,
 }
 
 /// Which shake record a request writes: 0x167260 moves the camera along its up row, 0x167270 along its forward row.
@@ -697,9 +700,16 @@ impl Camera {
         // other camera's activation (the first-person check 0x316880; the follow camera takes over from a released
         // one), the switch `0x20d110` with the new type's init, then the active type's update.
         // The script camera (type 5) never yields to an activation check; `CameraScript2` releases it (script.rs).
-        let prev = if self.script.active { self.script_frame(inp) } else { self.switch_cameras(inp) };
-        if self.script.active {
-            // Its update ran in script_frame.
+        // The type-6 camera (the missile view) likewise holds until its hand-back `0x317e70` (type6.rs).
+        let prev = if self.type6.active {
+            self.type6_frame(inp)
+        } else if self.script.active {
+            self.script_frame(inp)
+        } else {
+            self.switch_cameras(inp)
+        };
+        if self.type6.active || self.script.active {
+            // Its update ran in type6_frame / script_frame.
         } else if self.first_person.active {
             self.first_person_update(inp);
         } else {
@@ -1725,6 +1735,7 @@ enum Release {
 impl Camera {
     /// The active camera's rows and position (UpdateCam +0x00.. and +0x30).
     fn active_view(&self) -> ([V4; 3], V4) {
+        if self.type6.active { return self.type6_view(); }
         if self.script.active { return self.script_view(); }
         if self.first_person.active {
             let mut p = crate::hero::physics::from_f32x3(self.first_person.pos);

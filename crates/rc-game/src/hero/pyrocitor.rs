@@ -8,7 +8,7 @@
 //!
 //! **The update**, every tick in the slot loop (slot ready):
 //! 1. `0x2cde98`: the item put away (key B on sequence 2) → state 4, the pilot flame deleted, the light freed, the loop
-//!    released. (Its hold statistics and the "hold ○" help message after three short taps are not ported.)
+//!    released. Otherwise its hold statistics and the "hold ○" help after three short taps ([`hold_stats`]).
 //! 2. The nozzle `P` = the item's joint list 0 point (`FUN_002645a8`).
 //! 3. By the item's state (+0x20): **0** → 1; **1** (drawn): key A on sequence 1 → 2; on sequence 0 past key time 10 with
 //!    ○ held → blend to sequence 1 over 5 ticks; **2** (ready): the pilot flame is created (`CreateMoby(0xb3)`,
@@ -97,10 +97,37 @@ pub struct Pyro {
     /// +0x4c / +0x4e: the fire and smoke timers.
     pub fire_timer: i16,
     pub smoke_timer: i16,
+    /// +0x50: ticks ○ has been held in state 3 (the hold statistics, [`hold_stats`]).
+    pub hold: i16,
 }
 
 impl Default for Pyro {
-    fn default() -> Self { Pyro { glow: None, hits: [None; 15], light: -1, fire_timer: 0, smoke_timer: 0 } }
+    fn default() -> Self { Pyro { glow: None, hits: [None; 15], light: -1, fire_timer: 0, smoke_timer: 0, hold: 0 } }
+}
+
+/// `0x2cde98`'s other half (the item not being put away; from the disassembly): while the "hold ○" help (record 0x4e)
+/// and move record 10 are unused, the ticks of each fire (state 3) are counted in +0x50; when a fire ends, one longer
+/// than `ScaleTicks(120)` bumps move record 10 (the player learnt it), one shorter than `ScaleTicks(30)` counts a tap
+/// (0x141404); after three taps the help 20004 "To use the Pyrocitor, hold down ○" is requested (record 0x4e) on each
+/// fire's end.
+fn hold_stats(hero: &mut Hero) {
+    let r = &hero.help.records;
+    if r.help[0x4e].count != 0 || r.moves[10].count != 0 { return; }
+    let firing = hero.items.slot.item.as_ref().is_some_and(|m| m.mstate == 3);
+    let p = &mut hero.weapons.pyro;
+    if firing {
+        p.hold = p.hold.wrapping_add(1);
+        return;
+    }
+    let held = p.hold as i32;
+    if held == 0 { return; }
+    if crate::hud::scale_ticks(0x78) < held {
+        hero.help.out.push(crate::help::HeroHelpOut::BumpMove(10));
+    } else if held < crate::hud::scale_ticks(0x1e) {
+        hero.help.pyro_taps = hero.help.pyro_taps.wrapping_add(1);
+    }
+    hero.weapons.pyro.hold = 0;
+    if 2 < hero.help.pyro_taps { hero.help.out.push(crate::help::HeroHelpOut::Request { msg: 0x4e24, rec: 0x4e }); }
 }
 
 /// `FastDecTimer` (s16): non-zero when the timer was 0 or reaches 0 now.
@@ -155,6 +182,8 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
     if hero.items.slot.item.as_ref().is_some_and(|it| it.anim.seq_b == 2) {
         if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = 4; }
         shut_down(hero, table, env, hits);
+    } else {
+        hold_stats(hero);
     }
     // The nozzle: joint list 0 of the item.
     let nozzle = super::guns::item_point(hero, env, 0);
@@ -226,18 +255,9 @@ fn ready(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn H
         if let Some(g) = hits.create_moby(table, GLOW_CLASS, env.frame as u64) {
             let rows = hero.items.slot.item.as_ref().map(|it| it.rows);
             let m = &mut table.mobys[g];
-            m.update_dist = 0xff;
-            m.draw_dist = 0xff;
-            m.visible = 1;
-            m.mode = 0x204 | 0x100;
-            m.alpha = 0x50;
-            m.state = 0;
-            m.rotation = [0.0; 4];
-            if let Some(r) = rows {
-                for (row, src) in m.rows.iter_mut().zip(r) { *row = [f32::from_bits(src[0]), f32::from_bits(src[1]), f32::from_bits(src[2]), 0.0]; }
-            }
-            m.position = [nozzle[0], nozzle[1], nozzle[2], 0.0];
-            if m.pvars.len() < 0x10 { m.pvars.resize(0x10, 0); }
+            let keep = [0, 1, 2].map(|i| [m.rows[i][0], m.rows[i][1], m.rows[i][2]]);
+            let r = rows.map_or(keep, |r| r.map(|src| [f32::from_bits(src[0]), f32::from_bits(src[1]), f32::from_bits(src[2])]));
+            crate::moby_update::classes::pyro_glow::init(m, r, Some(nozzle));
             pvar::set_ff(&mut m.pvars, glow_pv::SCALE, 0.5);
             hero.weapons.pyro.glow = Some(g);
         }

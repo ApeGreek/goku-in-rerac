@@ -644,6 +644,14 @@ impl AudioSystem {
         self.emitters.update(&mut self.slots, &self.data.sounds, &l, rng);
         // The reverb boxes (sound instance class 3) test the hero position 0x13f3d0.
         for b in &mut self.reverb_boxes { b.update(input.hero_pos, &mut self.reverb); }
+        self.sound_update_with(input, frame, rng, owner_pos);
+    }
+
+    /// `sound_update` (0x2a0638) alone, as the page menu's frame runs it (`SceneController` 0x28c990 after
+    /// `MobyUpdateLoop`, and once more on the close): the replies, the reverb command, the slots and `music_Update`;
+    /// no sound-instance update (0x2a19a8 runs from the level update 0x256810 only) and no reverb boxes.
+    pub fn sound_update_with(&mut self, input: &FrameInput, frame: u32, rng: &mut crate::rng::Rng, owner_pos: &dyn Fn(u32) -> Option<[f32; 3]>) {
+        let l = input.listener;
         for r in self.snd_replies.drain(..) { self.slots.apply_reply(r); }
         for r in self.stream_replies.drain(..) { self.music.reply(r); }
         let collision = self.data.collision.clone();

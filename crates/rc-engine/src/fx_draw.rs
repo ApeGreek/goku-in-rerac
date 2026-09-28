@@ -51,6 +51,9 @@
 //! `FastDrawQuadReal` with FX 0xb (the radial glow), CLAMP_1 5, TEX1 bilinear, **ALPHA 0x48** (additive, on display
 //! bytes like every callback draw here).
 //!
+//! **The census units' glow callbacks** (`Callback::UnitGlow`): the glow quads `rc_game::moby_update::classes::units::
+//! glow_quads` lists (the lamps 1060's `0x2df3d8`: one quad of size 1.2 / pull 0.5 on each visible lamp of the group).
+//!
 //! **The vendor's glow points** (class 11's callback `0x2ba9c0`, list 2; [`vendor_glow_points`]): after its beam
 //! (drawn by crate::vendor_render), four glow quads of size 0.1333 (0x3e087fcc), no pull, at the antenna tips
 //! `rows · (1.1·cos a, 1.1·sin a, 0.59) + position` for a = k·π/2 − π (k = 0..3), coloured `moby+0x90 & 0xffff0000`:
@@ -726,8 +729,17 @@ fn draw_list1(
                     }
                     // The Thruster-Pack's flames (crate::thruster_render).
                     Callback::ThrusterFlame => out.extend(crate::thruster_render::flame_groups(&p.game, id, cam)),
-                    // Drawn by crate::water_render / crate::sea_render.
-                    Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) => {}
+                    // A census unit port's glow quads (the lamps 1060, …).
+                    Callback::UnitGlow(i) => {
+                        let quads = rc_game::moby_update::classes::units::glow_quads(&p.game.mobys, &p.svc, i, id);
+                        if quads.is_empty() { continue; }
+                        let mut b = PrimBuf::default();
+                        for q in quads { glow_quad(&mut b, q.size, q.pull, q.point, q.rgba, cam); }
+                        out.push(FxGroup { fx: GLOW_FX, additive: true, prims: b });
+                    }
+                    // Drawn by crate::water_render / crate::sea_render; the Walloper's arcs by crate::walloper_render; the
+                    // range static by crate::visibomb_view.
+                    Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) | Callback::Walloper | Callback::RangeStatic => {}
                 }
             }
         }

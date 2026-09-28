@@ -51,9 +51,9 @@
 //!   countdown is 0; the countdown runs 7 → 0.
 //! * **State 2**: back to 0 once a spline index is set. **State 3**: the delay, then state 1.
 //!
-//! **Not ported (counted in `FxStats::unported`):** the kill on a hit 0x800000 (`flyer: kill`: skill point
-//! 0x13d408, level sound 1, banner 0x53d6, `SpawnBeamExplosion`, `FUN_0030be70` debris, `DeleteMoby` of the
-//! links and itself: the port does the state 0x65 and the deletes, not the effects); the group
+//! **Not ported (counted in `FxStats::unported`):** of the kill on a hit 0x800000 (state 0x65, `SpawnBeamExplosion`
+//! [`KILL_BEAM`], the links and itself deleted: ported), the first kill's skill point 0x13d408 / level sound 1 / banner
+//! 0x53d6 and the wreck `FUN_0030be70` (class 1510); the group
 //! synchronisation (group ≥ 0); the type-10 sparks of flag bit 0 (the draws are made); the level-3/9 combat
 //! block (hit 0x210000, the 0x13a hide timer); the class-specific sounds; the debug lines. `0x161b00`
 //! (gp−0x5100, "flyers paused", 0 on Novalis) is taken as 0.
@@ -366,11 +366,20 @@ pub fn update(w: &mut World, id: MobyId) {
     }
 }
 
-/// The hit branch: state 0x65, the linked mobys (P+0x140..0x14c) and the flyer deleted. The effects are not
-/// ported (module doc).
+/// `SpawnBeamExplosion(0, 0, 4, 2, 100000, 3, 15, ship, P+0xd0 − P+0xe0, pos, 20, 3, 4, 1, 1, 1, −1)`: the Blarg ships'
+/// kill blast, the same call in the flyer 660 (`0x2f45d4`) and the gunship 688 (`crate::moby_update::classes::gunship`).
+pub const KILL_BEAM: crate::moby_update::creature::fx::Beam = crate::moby_update::creature::fx::Beam {
+    damage_r: 0.0, damage: 0.0, flash: 4.0, flash2: 2.0, flash_dist: 100000.0, scale: 3.0, light: 15.0, streaks: 20, sparks: 3, puffs: 4, debris: 1, sound: 1, shake: true,
+};
+
+/// The hit branch: state 0x65, the blast ([`KILL_BEAM`]), the linked mobys (P+0x140..0x14c) and the flyer deleted.
+/// Not ported (module doc): the first kill's skill point 0x13d408 with the level sound 1 and banner 0x53d6 (G-SAV-007),
+/// the wreck 1510 of `0x30be70` (G-CLS-015).
 fn kill(w: &mut World, id: MobyId) {
-    w.svc.unported("flyer: kill effects (skill point, sound, banner, explosion, debris)");
+    w.svc.unported("flyer: kill skill point / sound / banner, wreck 1510 0x30be70");
     w.mm(id).state = DEAD;
+    let pos = crate::moby_update::creature::pos(w, id);
+    crate::moby_update::creature::fx::beam_explosion(w, &KILL_BEAM, Some(id), pos);
     for k in 0..4 {
         let link = p::i32(&w.m(id).pvars, 0x140 + 4 * k);
         if let Ok(e) = usize::try_from(link) {

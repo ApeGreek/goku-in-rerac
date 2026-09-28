@@ -38,6 +38,7 @@ pub fn build_list(l: &mut List, gs: &GameState, dest: i32, names: &[(u32, u32)])
 /// The planet list draw 0x290eb0 (panel-local). The sub-label's x anchor is lost in the decompile: 20 [M].
 pub fn list_draw(m: &mut PageMenu, w: u32, a: &MenuAssets, out: &mut Vec<MenuDraw>) -> u32 {
     let focus = m.pages.get(&m.current).map_or(0, |p| p.focus);
+    let swapped = m.text_swap == 2;
     let Some(wd) = m.widgets.get_mut(&w) else { return 1 };
     let [_, _, ww, wh] = wd.rect;
     let Data::List(l) = &mut wd.data else { return 1 };
@@ -66,14 +67,14 @@ pub fn list_draw(m: &mut PageMenu, w: u32, a: &MenuAssets, out: &mut Vec<MenuDra
             anchor = ww >> 1;
         }
         win.x_anchor = anchor as i16;
-        let label = a.msg(it.label as i32);
+        let label = a.msg_in(it.label as i32, swapped);
         let mut m1 = win;
         wtext::layout(&mut m1, label, -1, glyphs, !sel);
         push_window(out, font, win, col, label, sel);
         let mut y = win.y_start as i32 + m1.height as i32;
         let mut last_h = m1.height as i32;
         if it.sublabel != 0 {
-            let sub = a.msg(it.sublabel as i32);
+            let sub = a.msg_in(it.sublabel as i32, swapped);
             let mut w2 = win;
             w2.y_start = y as i16;
             w2.x_anchor = 20;
@@ -193,7 +194,10 @@ pub fn map_update(m: &mut PageMenu, w: u32, inp: &MenuInput, gs: &mut GameState,
         if inp.pressed_u & button::R1 != 0 && k < 0x13 && order[k + 1] != 0 { m.dest = order[k + 1]; }
         if inp.pressed_u & button::L1 != 0 && k != 0 && order[k - 1] != 0 { m.dest = order[k - 1]; }
     }
-    if m.dest != old { out.sounds.push(MenuSound::Cursor); }
+    if m.dest != old {
+        out.sounds.push(MenuSound::Cursor);
+        super::map_page::dest_changed(m, gs);
+    }
     0
 }
 

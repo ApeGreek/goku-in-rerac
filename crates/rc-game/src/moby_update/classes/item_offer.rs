@@ -75,6 +75,8 @@ pub fn update(w: &mut World, id: MobyId) {
             let price = w.svc.interact.tables.shop.gold_price(item) as i32;
             w.svc.counters.bolts -= price;
             w.svc.interact.handoffs.push(Handoff::GoldUpgrade { offer: id, item: item as i32 });
+            // FUN_002aea70 (the upgrade's mode 5) closes the help box (`FUN_002258b0`).
+            w.svc.help.kill();
         }
         2 => {
             if owned(w, k) { w.delete_moby(id); }

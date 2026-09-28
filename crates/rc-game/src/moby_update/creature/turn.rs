@@ -49,6 +49,34 @@ fn approach_rot(t: f32, step: f32, x: &mut f32) {
     *x = add_rot(*x, d);
 }
 
+/// `x += clamp(target − x, −step, step)`: the step `FUN_00270830` makes (the water managers' own `Approach` use too).
+fn approach_add(x: &mut f32, target: f32, step: f32) {
+    let d = target - *x;
+    *x += d.clamp(-step, step);
+}
+
+/// `FUN_00270830(target, accel, decel, vmax, &x, &v)`: `x` springs toward `target` with velocity `v` (accelerating
+/// by `accel`, braking by `decel` so that it stops there, at most `vmax` a tick): the linear twin of [`turn_toward`].
+/// Used by the water managers' levels and the census units (the Rilgar floodgates 852 / 853, …).
+pub fn spring(target: f32, accel: f32, decel: f32, vmax: f32, x: &mut f32, v: &mut f32) {
+    let d = target - *x;
+    if *v * d < 0.0 || d == 0.0 {
+        approach_add(v, 0.0, decel);
+        *x += *v;
+        return;
+    }
+    let stop = (*v * *v) / decel * 0.5;
+    if d.abs() < stop {
+        let k = if stop < d.abs() + v.abs() { 1.0 } else { 1.1 };
+        approach_add(v, 0.0, decel * k);
+    } else {
+        // `vec_length` (VU0 `vsqrt`) of 2·decel·d: the square root of the magnitude.
+        let s = (2.0 * decel * d).abs().sqrt().min(vmax);
+        approach_add(v, if d < 0.0 { -s } else { s }, accel);
+    }
+    if d.abs() <= v.abs() { *x = target } else { *x += *v }
+}
+
 /// `0x270cc0(target, accel, decel, vmax, &angle, &vel)`: turn `angle` toward `target` with an angular velocity that
 /// accelerates by `accel`, brakes by `decel` in time to stop on the target (`v²/decel/2` ahead; 1.1× the braking when
 /// already past that point), and is capped at `vmax`. Reversing or on target: brake to 0. Snaps onto the target when

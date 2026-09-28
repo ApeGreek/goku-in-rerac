@@ -24,8 +24,12 @@
 //! target's health left; at 0 (or with the target gone) the target joins the past targets and a new one is searched
 //! (`0x2e4bb8(π, π, 100, the item's position, the camera angles, the past targets)`), else a past one is picked at
 //! random (`rand() & (n + 1)` must be 0, then `rand() % n`); **5**: after the shot timer, target none, the count 0,
-//! back to 2. State 3 (the first-person variant with the red crosshair, FX 0x23) has no writer in the level code:
-//! not ported. The shot statistics (0x141738..) are not ported.
+//! back to 2. **State 3** (0x2e5264, ported 2026-09-28): the red crosshair (FX 0x23, 0xff0f0fff, size 1) at the screen
+//! centre every tick; with L1 or L2 held ○ fires the salvo as state 2 does ([`start_salvo`], the same code in the game),
+//! released → state 2. No code in the level overlays writes 3 to the item's +0x20 (every writer of the R.Y.N.O.'s state
+//! stores 0 / 1 / 2 / 4 / 5): the state is unreachable in play, kept for completeness and tested by setting it. The
+//! prologue's lock / marker upkeep also runs in state 3 (states 2 / 3). The shot statistics (0x141738..) are not ported
+//! (G-SAV-009).
 //!
 //! **Native.** Standard `f32`; the camera angles are the camera's yaw and its elevation (0x167250's `(x, −y, z)`: y
 //! is the pitch, positive down) from its forward row [M]. The item is not a table moby in the port: the missiles'
@@ -131,6 +135,22 @@ fn lock(r: &mut Ryno, table: &MobyTable, t: Option<MobyId>) {
     }
 }
 
+/// States 2 and 3 on ○ (the same code twice in `0x2e4e60`): with one ammo (`0x249450`), the shot statistics
+/// 0x141738.. (not kept: G-SAV-009), the swap lock 2, state 4, the shot timer, barrel and count 0, the weapon drawn
+/// (`0x22ee08`), the past targets cleared.
+fn start_salvo(hero: &mut Hero, id: i32) {
+    if !hero.weapons.use_ammo(id, 1) { return; }
+    hero.items.slot.swap = 2;
+    if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = 4; }
+    let r = &mut hero.weapons.ryno;
+    r.shot_timer = 0;
+    r.barrel = 0;
+    r.count = 0;
+    r.past = [None; 7];
+    r.next = 0;
+    hero.weapons.pending_draw = true;
+}
+
 /// `0x2e4e60`, the R.Y.N.O.'s update (from the slot loop with the slot ready).
 pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut Rng) {
     let Some(item) = hero.items.slot.item.as_ref() else { return };
@@ -189,16 +209,19 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
         2 => {
             if hero.state == 1 { hero.weapons.deferred = Some(0x1e); }
             if env.pad.pressed & hero.items.slot.fire_mask == 0 || hero.items.f13fc != 0 { return; }
-            if !hero.weapons.use_ammo(id, 1) { return; }
-            hero.items.slot.swap = 2;
-            set_state(hero, 4);
-            let r = &mut hero.weapons.ryno;
-            r.shot_timer = 0;
-            r.barrel = 0;
-            r.count = 0;
-            r.past = [None; 7];
-            r.next = 0;
-            hero.weapons.pending_draw = true;
+            start_salvo(hero, id);
+        }
+        3 => {
+            // The first-person variant (0x2e5264): the red crosshair at the screen centre (`FUN_0020fb60(1.0, 0, 90.0,
+            // item, 0xff0f0fff, none, 0x23, −1, 4)`) every tick; while L1 or L2 is held (0x13cae0 & 5) ○ fires the
+            // salvo as state 2 does; without them, back to state 2.
+            hero.weapons.markers.register(tick, Marker { size: 1.0, angle: 0.0, rgba: super::blaster::MARKER_RED, at: None, fx: MARKER_FX });
+            if env.pad.held & (crate::pad::button::L1 | crate::pad::button::L2) == 0 {
+                set_state(hero, 2);
+                return;
+            }
+            if env.pad.pressed & hero.items.slot.fire_mask == 0 || hero.items.f13fc != 0 { return; }
+            start_salvo(hero, id);
         }
         4 => {
             if !guns::dec16(&mut hero.weapons.ryno.shot_timer) { return; }

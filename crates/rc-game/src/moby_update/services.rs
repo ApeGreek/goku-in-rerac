@@ -527,6 +527,9 @@ pub trait SoundSink {
     /// `HeroTeleport` 0x2368e0 moved Ratchet to `pos` (its `EnvNearestSamplePoint`: reverb and music track). Default:
     /// nothing.
     fn hero_teleported(&mut self, _pos: [f32; 3]) {}
+    /// `SoundSetPitchBend(slot, pb)` 0x2a1988: the slot's pitch bend (+0x14), sent with its next parameters (the
+    /// Visibomb's loop). Default: nothing.
+    fn set_pitch_bend(&mut self, _slot: i32, _pb: i32) {}
     /// The checkpoint record `0x29ac10` saves the sound layer's reverb request. Default: nothing.
     fn checkpoint_saved(&mut self) {}
 }
@@ -815,9 +818,14 @@ pub struct Services {
     pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
     /// The frame's draw-callback lists 0x21afe0 / 0x21b198 ([`crate::moby_update::classes::draw_callbacks`]).
     pub draw_callbacks: crate::moby_update::classes::draw_callbacks::DrawCallbacks,
-    /// The Bomb Glove's reticle draw callbacks (`0x2c23c0`, list 1) registered by its bombs' landing preview
-    /// (`crate::targeting`).
+    /// The glove reticle draw callbacks (`0x2c23c0` and its copies `0x2bf420` / `0x2d8e28`, list 1) registered by the
+    /// bombs', mines' and decoys' landing previews (`crate::targeting`).
     pub reticles: crate::targeting::Reticles,
+    /// The Drone Device's drones' globals (0x141344..; [`crate::moby_update::classes::drone::Globals`]).
+    pub drones: crate::moby_update::classes::drone::Globals,
+    /// `0x1abe80`: this tick's target list (the scheduler builds it with the run list; the mines' proximity search
+    /// `classes::mine` walks it).
+    pub targets: Vec<MobyId>,
     /// The fire / smoke fields' globals and elements (classes 760 / 809, [`crate::moby_update::classes::fire_field`]).
     pub fire_fields: crate::moby_update::classes::fire_field::FireFieldState,
     /// The creature layer's globals ([`crate::moby_update::creature::Globals`]: rate limiters, class spheres).
@@ -843,6 +851,19 @@ pub struct Services {
     pub buried: crate::moby_update::classes::buried_bolts::Globals,
     /// The Sonic Summoner's mouse (0x1deb88): `classes::mouse`.
     pub mouse: crate::moby_update::classes::mouse::Globals,
+    /// The level words the census unit ports keep (`classes::units::Globals`).
+    pub units: crate::moby_update::classes::units::Globals,
+    /// The level's pvar shared data (gameplay section 0x4c, `rc_formats::gameplay::parse_pvar_shared_data`): a pvar
+    /// field the loader pointed into it holds the offset here (the lamps' per-group registration tick, …).
+    pub pvar_shared: Vec<u8>,
+    /// The help / hint message system (`Help_Request` 0x225818, `Help_Update` 0x225bd0, the records and the log:
+    /// [`crate::help`]); the classes request through it, the engine runs its update after the tick.
+    pub help: crate::help::Help,
+    /// The in-game map's live state (`crate::map`: the fog mask the hero reveals; moved into the page menu while it is open).
+    pub map: crate::map::MapState,
+    /// The Visibomb's globals (the missile 0x141330, the HUD / occlusion flags, the missile view's look, the range
+    /// static): [`crate::moby_update::classes::visibomb::Globals`].
+    pub visibomb: crate::moby_update::classes::visibomb::Globals,
 }
 
 impl Default for Services {
@@ -880,6 +901,8 @@ impl Services {
             camera_shakes: Vec::new(),
             draw_callbacks: Default::default(),
             reticles: Default::default(),
+            targets: Vec::new(),
+            drones: Default::default(),
             fire_fields: Default::default(),
             creatures: Default::default(),
             cranks: Default::default(),
@@ -891,7 +914,21 @@ impl Services {
             pickups_banner: Default::default(),
             buried: Default::default(),
             mouse: Default::default(),
+            units: Default::default(),
+            help: Default::default(), map: Default::default(),
+            visibomb: Default::default(),
+            pvar_shared: Vec::new(),
         }
+    }
+
+    /// The s32 at `ofs` of the pvar shared data (0 past its end, as an empty blob reads on levels without one).
+    pub fn shared_i32(&self, ofs: i32) -> i32 {
+        usize::try_from(ofs).ok().and_then(|o| self.pvar_shared.get(o..o + 4)).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()))
+    }
+
+    /// Writes the s32 at `ofs` of the pvar shared data (ignored past its end).
+    pub fn set_shared_i32(&mut self, ofs: i32, v: i32) {
+        if let Some(b) = usize::try_from(ofs).ok().and_then(|o| self.pvar_shared.get_mut(o..o + 4)) { b.copy_from_slice(&v.to_le_bytes()); }
     }
 
     /// The hero-block writes of the moby loop, for the tick to apply ([`HeroFields::apply`]); None: no class
@@ -1305,6 +1342,13 @@ impl<'a> World<'a> {
         if let Some(s) = self.sound.as_deref_mut() { s.release(slot, id); }
     }
 
+    /// `SoundSetPitchBend(slot, pb)` 0x2a1988 ([`SoundSink::set_pitch_bend`]; the game writes slot −1's field too:
+    /// memory before the table, nothing here).
+    pub fn set_pitch_bend(&mut self, slot: i32, pb: i32) {
+        if slot < 0 { return; }
+        if let Some(s) = self.sound.as_deref_mut() { s.set_pitch_bend(slot, pb); }
+    }
+
     /// `CreateMoby(o_class)` 0x263390 with the class as loaded (the game's init defaults, a zeroed 0x80-byte
     /// pvar block); decrements the free-slot count (`MobyTable::free_slots`, in [`MobyTable::create`]). The
     /// snapshot slot of the new moby is cleared.
@@ -1379,6 +1423,17 @@ impl<'a> World<'a> {
     /// last `MobyBuildMatrix` left (an update that turns the moby this tick still sees last tick's). Without the
     /// class's joint list or animation data the joint is the moby origin. Native `f32`.
     pub fn joint_point(&self, id: MobyId, list: usize) -> [f32; 4] {
+        let q = self.joint_local(id, list);
+        let m = &self.table.mobys[id];
+        let r = &m.rows;
+        let v: [f32; 4] = std::array::from_fn(|l| r[0][l] * q[0] + r[1][l] * q[1] + r[2][l] * q[2] + if l == 3 { q[3] } else { 0.0 });
+        [v[0] + m.position[0], v[1] + m.position[1], v[2] + m.position[2], v[3]]
+    }
+
+    /// The first half of [`World::joint_point`]: the joint's translation in the moby's frame, `P.r3.xyz · (scale /
+    /// 1024)` (w kept), before the rows and the position (`fun_00210850` then `VecScale(scale / 1024)`, as the
+    /// classes that keep a joint's offset call them).
+    pub fn joint_local(&self, id: MobyId, list: usize) -> [f32; 4] {
         let m = &self.table.mobys[id];
         let chain = self.svc.joint_lists.get(&m.o_class).and_then(|l| l.get(list)).filter(|c| !c.is_empty());
         let t = match (self.classes.anim(m.o_class), chain) {
@@ -1389,10 +1444,7 @@ impl<'a> World<'a> {
             _ => [0.0, 0.0, 0.0, 1.0],
         };
         let k = m.scale * (1.0 / 1024.0);
-        let q = [t[0] * k, t[1] * k, t[2] * k, t[3]];
-        let r = &m.rows;
-        let v: [f32; 4] = std::array::from_fn(|l| r[0][l] * q[0] + r[1][l] * q[1] + r[2][l] * q[2] + if l == 3 { q[3] } else { 0.0 });
-        [v[0] + m.position[0], v[1] + m.position[1], v[2] + m.position[2], v[3]]
+        [t[0] * k, t[1] * k, t[2] * k, t[3]]
     }
 
     /// The points the live type-26 and type-55 particle records follow ([`Particles::joint_anchors`]), after the moby

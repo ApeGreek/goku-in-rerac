@@ -177,6 +177,10 @@ impl SoundSink for ClassSoundSink<'_> {
     }
     /// `HeroTeleport`'s env sample point ([`AudioSystem::hero_teleported`]).
     fn hero_teleported(&mut self, pos: [f32; 3]) { self.audio.hero_teleported(pos); }
+    /// `SoundSetPitchBend(slot, pb)`: the slot's +0x14 (no owner test, as the game).
+    fn set_pitch_bend(&mut self, slot: i32, pb: i32) {
+        if let Some(s) = usize::try_from(slot).ok().and_then(|i| self.audio.slots.slots.get_mut(i)) { s.pb = pb; }
+    }
     /// The checkpoint record's reverb copy ([`AudioSystem::checkpoint_saved`]).
     fn checkpoint_saved(&mut self) { self.audio.checkpoint_saved(); }
 }

@@ -21,23 +21,29 @@
 //! | `0x2e4bb8` (the R.Y.N.O. 23, class 454; `crate::hero::ryno::search`) | the salvo's targets | creatures with a record and health ≥ 0, drawn (or not yet taken this salvo), within 97° of the camera's yaw and elevation and 80 (the salvo's re-targets: 180°, 100), score `d/5` within 5 else `yaw²·pitch²·d + d`, a clear line (flags 2) |
 //! | `0x2cf138` (the Tesla Claw 19, class 177; `crate::hero::tesla::build`) | the beam's target(s) | creatures with a record within 15 (2D) of the claw, 32° of the camera's yaw and 45° of Ratchet's; score `1.5·(32° − off)/32° + (15 − d)/15`, the best two (the second for the gold claw) |
 //! | `0x2c5778` (the gold Devastator missile's re-target) | | not ported (gold not mirrored) |
-//! | `0x2cc830`, `0x2cf138`, `0x2d2018`, `0x2d49f8`, `0x30d308`, `0x2bfe40` (the mines of class 190) | lures, the two-target scorer, the mines' seek | their own ranges and cones (not ported) |
+//! | `0x2d2018` (the Morph-o-Ray 21, class 185; `crate::hero::morph_ray::search`) | the beam's target | creatures with a record, not 0x58e / 0x452; within 2.5 (60° of Ratchet, 2 in height) at once, else within 8 in the 10° cone ([`cone_miss`]), the line clear or blocked by the target only |
+//! | `0x2bfe40` (the Mine Glove's mine, class 74; `crate::moby_update::classes::mine`) | the mine's seek | armed and landed: any target within 1.5 (3-D) sets it off; else the nearest (xy) non-crate within `4 + radius/8` (×3 lured), less than 2 above or below |
+//! | `0x2d49f8`, `0x30d308` | others | their own ranges and cones (not ported) |
 //!
 //! So the system here is one list and one record reader shared by every weapon, plus a search per weapon: the Bomb
 //! Glove's as a data row ([`AimRules`]), the guns' as their own functions (their rules differ in kind, not only in
 //! constants), sharing the cone test [`cone_miss`] (the Blaster and the Devastator) and the record readers.
 //!
-//! **The ground reticle is the Bomb Glove's alone.** The bomb (class 121) of the glove (class 0xc0) runs the landing
-//! preview `0x2c2be0` every tick from its update `0x2c3300` ([`arc_landing`]): from the launch point (held) or its
-//! position (flying), its velocity stepped 10 ticks at a time under gravity 11 u/s² (`p += v; v.z −= 11·dt²`), a line
-//! test per step (`CollLine_Fix(.., 0x10, bomb)`) for at most 300 ticks (the fuse when flying). A world face ends it
-//! at the hit; a moby's collision primitive **snaps** it to that moby's position (the hero and the glove only after
+//! **The ground reticle: the bomb's, the mine's and the decoy's.** The bomb (class 121) of the glove (class 0xc0) runs
+//! the landing preview `0x2c2be0` every tick from its update `0x2c3300` ([`arc_landing`]): from the launch point (held)
+//! or its position (flying), its velocity stepped 10 ticks at a time under gravity 11 u/s² (`p += v; v.z −= 11·dt²`), a
+//! line test per step (`CollLine_Fix(.., 0x10, bomb)`) for at most 300 ticks (the fuse when flying). A world face ends
+//! it at the hit; a moby's collision primitive **snaps** it to that moby's position (the hero and the glove only after
 //! 10 ticks; a primitive only while the arc is less than 2 above its start); water only while falling. The point is
 //! pulled 5 % toward the camera ([`pull_toward`]) and the draw callback `0x2c23c0` is registered on list 1
 //! ([`Reticles`]): two 2×2 quads in the plane of the hit face's normal ([`reticle_quads`]), FX textures 0x11 and 0x12
-//! at 0x80808080, ALPHA 0x48 (additive), turning once every 180 ticks in opposite directions. No other class
-//! registers `0x2c23c0` or calls `0x2c2be0` (the only caller is `0x2c3300`), so the Mine Glove, the Glove of Doom,
-//! the Decoy Glove and the Drone Device throw without one.
+//! at 0x80808080, ALPHA 0x48 (additive), turning once every 180 ticks in opposite directions. **Copies** (2026-09-28,
+//! docs/plan/hero_gameplay.md §13; corrects §8's "the Bomb Glove's only"): the mine 74's preview `0x2bfa78` (gravity
+//! 9.8, 120 ticks held, only faces end it: [`Prims::Ignore`]) with the draw `0x2bf420`, the decoy 203's `0x2d9760` and
+//! the Glove of Doom's canister's `0x2de0a8` (gravity 9, 300 ticks, primitives snapped without the height rule) with
+//! the draw `0x2d8e28` — the same quads and constants ([`BOMB_RETICLE`]). The decoy's and the canister's first update
+//! (state 0) takes the flying branch and marks "a new object in the glove" on itself, so in the game they never draw
+//! one (reproduced).
 //!
 //! Native `f32` throughout (`atan2` for `FastArcTan`).
 
@@ -284,6 +290,22 @@ pub struct ArcStart {
     pub own: [Option<MobyId>; 2],
     /// The gold glove while walking (0x13e52a and state 1): after the first test the velocity's xy ×1.5, z ÷1.5.
     pub gold: bool,
+    /// What a moby's collision primitive does to the arc (the copies differ: [`Prims`]).
+    pub prims: Prims,
+    /// Whether the first test (Ratchet → the start) can end the search (the Bomb and Decoy / Doom previews; the
+    /// Mine Glove's records its point but always steps on).
+    pub first_test: bool,
+}
+
+/// A collision primitive (a moby's sphere / cylinder, `CollOutput +0x1c ≤ 0`) on the arc, per copy of the preview.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Prims {
+    /// Snap to the moby (Ratchet / the glove only after 10 ticks of the budget); `max_rise`: only while the arc is
+    /// less than that above its start (the bomb's `0x2c2be0`: 2; the decoy's `0x2d9760` and the Glove of Doom's
+    /// `0x2de0a8`: no limit).
+    Snap { max_rise: Option<f32> },
+    /// Stepped over: only a face ends the arc (the mine's `0x2bfa78`).
+    Ignore,
 }
 
 /// `0x2c2be0`'s search: the first test from Ratchet to the start, then the stepped arc (module doc). `line(a, b,
@@ -310,7 +332,8 @@ pub fn arc_landing(
     let mut n = s.budget;
     let (mut p, mut v) = (s.from, s.vel);
     // The first test (Ratchet → the start): a face, or a primitive (Ratchet / the glove only once 10 ticks are gone).
-    if let Some(h) = line(s.first, p, s.first_ignore) {
+    let first = if s.first_test { line(s.first, p, s.first_ignore) } else { None };
+    if let Some(h) = first {
         if h.surface != 0 || 0.0 < v[2] {
             let found = match h.moby {
                 _ if h.kind > 0 => Some(Landing { point: h.point, normal: h.normal, snapped: None }),
@@ -338,7 +361,8 @@ pub fn arc_landing(
         if h.surface == 0 && 0.0 < v[2] { continue; }
         if h.kind > 0 { return Some(Landing { point: h.point, normal: h.normal, snapped: None }); }
         let Some(m) = h.moby else { continue };
-        if 2.0 <= p[2] - start_z { continue; }
+        let Prims::Snap { max_rise } = s.prims else { continue };
+        if max_rise.is_some_and(|r| r <= p[2] - start_z) { continue; }
         if own(m) && !(n < ticks_300 - ticks_10) { continue; }
         return Some(snap(m, &h));
     }
@@ -368,7 +392,8 @@ pub struct ReticleStyle {
     pub additive: bool,
 }
 
-/// The Bomb Glove's (`0x2c23c0`): FX 0x11 / 0x12, 2×2, 180 ticks a turn, 0x80808080, additive.
+/// The Bomb Glove's (`0x2c23c0`; the mine's `0x2bf420` and the decoy's `0x2d8e28` are copies): FX 0x11 / 0x12, 2×2,
+/// 180 ticks a turn, 0x80808080, additive.
 pub const BOMB_RETICLE: ReticleStyle = ReticleStyle { fx: [0x11, 0x12], half: 1.0, spin_ticks: 180, rgba: 0x8080_8080, additive: true };
 
 /// One registered reticle: the point and normal the callback reads (the bomb's pvars +0x10 / +0x20).
@@ -508,7 +533,7 @@ mod tests {
     }
 
     fn start(from: [f32; 3], vel: [f32; 3]) -> ArcStart {
-        ArcStart { from, vel, budget: 300, gravity: (1.0 / 3600.0) * 11.0, first: [from[0] - 0.8, from[1], from[2]], first_ignore: Some(9), ignore: Some(8), own: [Some(9), None], gold: false }
+        ArcStart { from, vel, budget: 300, gravity: (1.0 / 3600.0) * 11.0, first: [from[0] - 0.8, from[1], from[2]], first_ignore: Some(9), ignore: Some(8), own: [Some(9), None], gold: false, prims: Prims::Snap { max_rise: Some(2.0) }, first_test: true }
     }
 
     /// Flat ground at z = 0: the landing point is where the stepped arc crosses it (the 10-tick steps, the line

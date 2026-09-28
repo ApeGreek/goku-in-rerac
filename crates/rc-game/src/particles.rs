@@ -23,7 +23,7 @@
 //!   sparkles), 59 ([`type59`], hero sparkles), 60 ([`type60`], glints), 62 ([`type62`], the nanotech orbs and their
 //!   trails), and (2026-09-27) 16 ([`type16`], smoke), 19 / 55 ([`type19`], ribbons), 22 ([`type22`], rising puffs),
 //!   23 ([`type23`], glow puffs), 26 ([`type26`], moby glow), 35 ([`type35`], drops), 45 / 66 ([`type45`], flat
-//!   rings), 46 ([`type46`], water rings), 64 ([`type64`], bursting scorch); a record of any other type kills itself on its first update and is
+//!   rings), 46 ([`type46`], water rings), 64 ([`type64`], bursting scorch), and (2026-09-28) 32 ([`type32`], the Glove of Doom canister's glow); a record of any other type kills itself on its first update and is
 //!   counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
 //! * **RNG.** Updates draw from the `&mut Rng` given to [`Particles::update_parts`] (the game's one stream), in
 //!   pool order; only types 11 (its split spawns five children and its phase changes draw one value), 16 (the landing
@@ -60,6 +60,7 @@ pub mod type23;
 pub mod type25;
 pub mod type26;
 pub mod type27;
+pub mod type32;
 pub mod type34;
 pub mod type35;
 pub mod type44;
@@ -346,6 +347,9 @@ pub struct Particles {
     /// Moby positions for the records attached to a moby (type 62 kind 2 keeps the moby pointer at +0x24 and
     /// follows it), by moby index, written by the owning class during the moby loop.
     pub anchors: std::collections::HashMap<usize, [f32; 3]>,
+    /// The scales of the mobys in [`Particles::anchors`] that type-32 records follow (the Glove of Doom's canister
+    /// writes its position and scale every tick and removes both when it is deleted: [`type32`]).
+    pub anchor_scales: std::collections::HashMap<usize, f32>,
     /// The points of the mobys the live type-26 / 55 records follow, by (moby, joint list; −1 = the moby's position,
     /// type 26 moved 0.4 toward the camera), written by the moby loop at the end of its pass
     /// (`moby_update::services::World::refresh_particle_anchors`); a moby that is gone is not listed.
@@ -384,6 +388,7 @@ impl Particles {
         table[25] = Some(type25::update as UpdateFn);
         table[26] = Some(type26::update as UpdateFn);
         table[27] = Some(type27::update as UpdateFn);
+        table[32] = Some(type32::update as UpdateFn);
         table[34] = Some(type34::update as UpdateFn);
         table[35] = Some(type35::update as UpdateFn);
         table[44] = Some(type44::update as UpdateFn);
@@ -401,7 +406,7 @@ impl Particles {
         table[64] = Some(type64::update as UpdateFn);
         table[66] = Some(type45::update66 as UpdateFn);
         table[72] = Some(type72::update as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3] }
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3] }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -493,6 +498,27 @@ impl BSphereView {
             if neg(side) { return true; }
         }
         false
+    }
+
+    /// `FastBSphereCheck(far, sphere)` 0x2221f0 with its three results: −1 outside ([`BSphereView::culled`]), 1 fully
+    /// inside, 0 intersecting. Fully inside (0x2222a0..0x2222d4, from the disassembly): `r + c.z` below the far plane
+    /// 0x16d1b0.x = 0x16cf64 (745472 = 728·1024), `c.z − r` at least the near plane 0x16d1b4 = 0x16cf60 (32), and in x
+    /// and y `4·tan·c.z − (|c| + sec·r·k) ≥ 0` with the guard factor 0x16d190 = 0x16d0c8 / 0x16d0c0 = 4 and k =
+    /// 0x16d1a8 = (sec(atan 4·tan_x) / sec_x + sec(atan 4·tan_y) / sec_y) / 2 (`UpdateViewContext` 0x219580). Native
+    /// `f32` for the inside part [the −1 part is the PS2-exact `culled`].
+    pub fn check(&self, far: f32, sphere: [f32; 4]) -> i32 {
+        if self.culled(far, sphere) { return -1; }
+        let f = |b: F| f32::from_bits(b);
+        let v = sphere.map(|x| x * 1024.0);
+        let d = [0, 1, 2].map(|k| v[k] - f(self.cam[k]));
+        let c = [0, 1, 2].map(|k| f(self.rows[0][k]) * d[0] + f(self.rows[1][k]) * d[1] + f(self.rows[2][k]) * d[2]);
+        let r = v[3];
+        let (tan, sec) = ([f(self.tan[0]), f(self.tan[1])], [f(self.sec[0]), f(self.sec[1])]);
+        let sec4 = tan.map(|t| (1.0 + 16.0 * t * t).sqrt());
+        let k = (sec4[0] / sec[0] + sec4[1] / sec[1]) * 0.5;
+        let inside_depth = r + c[2] - 745_472.0 < 0.0 && c[2] - r - 32.0 >= 0.0;
+        let inside_sides = (0..2).all(|i| tan[i] * c[2] * 4.0 - (c[i].abs() + sec[i] * r * k) >= 0.0);
+        if inside_depth && inside_sides { 1 } else { 0 }
     }
 }
 

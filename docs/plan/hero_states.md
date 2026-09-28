@@ -111,10 +111,10 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x19 | ledge hang | 3 | 0x18, shimmy end | 0x1c (✕), 6 (back + ✕ / R1, 0x13f500 = 10 / 40), 0x1a / 0x1b (probe `HeroWallLedgeCheckC` 0x22d838 (L00 0x20c758) at ±90° 0.3) | as 0x18 | 0x21 | ledge.rs (P3) | P |
 | 0x1a / 0x1b | shimmy left / right | 3 | 0x19 + stick | 0x19 (wrap / no probe), 0x1c, 6 | two probes `HeroWallLedgeCheckB`, speed from table 0x1c4130 by frame | 0x24 / 0x25 | ledge.rs (P3) | P |
 | 0x1c | ledge climb / jump up | 4 | ✕ hanging | jump case | jump case: h 2.0, takeoff 10, g 25·dt²; carry follows 0x13f848 | 0x22 | ledge.rs (P3) | P |
-| 0x1d / 0x1f / 0x32 / 0x72 / 0x78 | scripted control (0x1413fc no control; 0x32 frozen; 0x78 vel = 0) | 9 | cutscene / moby scripts | set by the scripts | none / ground case | idle | (Scripted, later) | – |
+| 0x1d / 0x1f / 0x32 / 0x72 / 0x78 | scripted control (0x1413fc no control; 0x32 frozen; 0x78 vel = 0); **0x1d = steering the Visibomb** (ported 2026-09-28: scripted.rs, hero_gameplay.md §17; 0x72 also ported) | 9 | cutscene / moby scripts; 0x1d: the Visibomb's launch / end | set by the scripts | none / ground case | idle | Scripted | 0x1d, 0x72 |
 | 0x3b | bolt crank (was "item use") | 9 | `SetState(0x3b, 1)` by the bolt crank class 280 (`0x2e0c68`, levels 1 / 4 / 8): □ at the bolt with the wrench | 0 by the crank (□ after 60 ticks, or done); the hit intake | none (frozen 0x1413fd: the crank stores his position, yaw, target yaw and clears 0x13f430..0x13f4bf every tick) | 0x44 latch, 0x3f hold, 0x40 / 0x41 turn; wrench 0xb | crank.rs | P |
 | 0x1e | look stance (mobys) | 0 | four moby classes | 0 | ground case | `0x226f10(1)` | stance.rs (P2) | P |
-| 0x20 | gadget lunge | 6 | fire with a hand item (group < 3, 4, 5) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | melee.rs (later) | E |
+| 0x20 | gadget lunge (the Walloper) | 6 | ○ with the Walloper (group 0 / 1, or 4 once landed; not state 1) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | walloper.rs (hero_gameplay.md §15) | P |
 | 0x21 | wrench rebound | 0xa | wrench hit on a flag-2 target | 0 on wrap | speed → 0 by 24·dt², away from 0x13fdb8 | 0x27 + row | melee.rs (later) | – |
 | 0x22 | Thruster stomp | 0xb | R1/R2 in the air (7, 9, 0xd, 0xf, 0xe) with the Thruster | 0x10 (✕ early), 0 on wrap | up to 5.7 u/s (70·dt²) for 12 ticks, held until tick 33, then 100·dt² down; while coming down and airborne `coll_sphere_mobys` (0.8, feet − 0.5, flags 0x10, template 0x30000); camera shake 0x167260 on the ground (`hero::fx::shake`) | 0x2a | packs.rs (P4) | P |
 | 0x23 | glove throw | 6 | the throw gloves' ○ (items 10, 0x11, 0x14, 0x18, 0x19) standing / crouched / walking slowly; the holster check `0x2405f8` | 7 / crouch jumps (✕ within 11 after key time 19), 0 from 21 | aim (`0x2351d0(11, 50°, −1)`) or turn to it, SpeedStep(30, 35), gravity 54 (25 in the air + the steep-wall stop); the glove's update throws at tick 16 | 0x2c from 7 | weapons.rs | P |
@@ -522,7 +522,7 @@ owner's current anim keys at the placement `back − 1` ticks old, faded by the 
 |---|---|---|---|---|
 | 0x1409c0 Ratchet | Thruster long jump 0x10 (SetState) | 0x28 @ 2, 0x14 @ 4, 0x0a @ 6 | 2 a tick after tick 12 | `jump.rs` entry, `packs::thruster_trail` |
 | 0x1409c0 | Thruster high jump 0xd (SetState) | 0x28 @ 3, 0x14 @ 5 | 2 a tick after tick 12 | same |
-| 0x1409c0 | gadget lunge 0x20 (physics, tick 8) | 0x30 @ 2, 0x17 @ 4, 0x0c @ 6 | 5 a tick after tick 18 | not ported (the lunge is entry-only) |
+| 0x1409c0 | gadget lunge 0x20 (physics, tick 8) | 0x30 @ 2, 0x17 @ 4, 0x0c @ 6 | 5 a tick after tick 18 | `walloper::physics` (hero_gameplay.md §15) |
 | 0x1409c0 | ended by SetState (on foot), `HeroTeleport` 0x2368e0, the body switch 0x231348 | | | SetState: `states.rs`; the teleport's own kill and the body switch's are not wired (a teleport with a state ends it through SetState) |
 | 0x140b00 wrench | the Comet-Strike's throw `0x236da0` | 0x30 @ 3, 0x17 @ 5 | none; ended at the catch | `comet.rs` |
 

@@ -24,17 +24,18 @@
 //!   (`rc_formats::moby_anim::evaluate_layered`). The holster check `0x2405f8` ([`holster_check`]: stopped within 6
 //!   ticks of the draw → put away, `0x140064 = 2`, state 0x23). The Comet-Strike (0x15) is a full-body state: the
 //!   wrench's code never calls `0x22ee08`, so it has no layer.
-//! * **The Bomb Glove's update** (class 192, `0x2d8330`, [`glove_update`]: the row's `ItemUpdate::Slot`): 3 ticks
-//!   of warm-up; the launch point in the glove (joint list 0 + (0, −0.09, −0.02) in its frame); the look stance 1
-//!   becomes 0x1e (`SetState(0x1e, 1)`, made right after the slot loop: [`after_items`]); when the 20-tick fire timer
-//!   is out: **the throw** — the arm out 17 ticks, ○ in the first-person stance 0x1e with ammo (the first-person
-//!   throw: original behaviour), or 0x23 at tick 16 — voice 0x1a, one ammo used (`0x249450`, the ammo-used stat
-//!   0x13dea0), the glove's state 3; the aim of the held bomb every tick (a point 0.86 ahead-left of Ratchet, 0.49
-//!   up; 8.5 ahead, or in first person along the camera, clamped −80°..34°, to where the camera's line hits;
-//!   `0x2d80f0`: 8.5 u/s level, the vertical speed of the arc with gravity 11 (at most 5.5 u/s), aimed ahead
-//!   when the target is more than 50° off Ratchet's facing or closer than 1.5); state 3 releases the bomb
-//!   (`0x2c27a8`, `crate::moby_update::classes::bomb::release`) — a new one is created in the glove when there is
-//!   ammo (`0x2c2640`, `CreateMoby(0x79)` through the hit sink).
+//! * **The gloves' item update** (the Bomb Glove's `0x2d8330` and its three copies): `super::gloves` (one shared
+//!   update, a row per glove). The Bomb Glove's row: 3 ticks of warm-up; the hand point in the glove (joint list 0 +
+//!   (0, −0.09, −0.02) in its frame); the look stance 1 becomes 0x1e (`SetState(0x1e, 1)`, made right after the slot
+//!   loop: [`after_items`]); when the 20-tick fire timer is out: **the throw** — the arm out 17 ticks, ○ in the
+//!   first-person stance 0x1e with ammo (the first-person throw: original behaviour), or 0x23 at tick 16 — voice
+//!   0x1a, one ammo used (`0x249450`, the ammo-used stat 0x13dea0), the glove's state 3; the aim of the held bomb
+//!   every tick (a point 0.86 ahead-left of Ratchet, 0.49 up ([`launch_point`]); 8.5 ahead, or in first person along
+//!   the camera, clamped −80°..34°, to where the camera's line hits; `0x2d80f0` ([`launch_velocity`]): 8.5 u/s level,
+//!   the vertical speed of the arc with gravity 11 (at most 5.5 u/s), aimed ahead when the target is more than 50°
+//!   off Ratchet's facing or closer than 1.5); state 3 releases the bomb (`0x2c27a8`,
+//!   `crate::moby_update::classes::bomb::release`) — a new one is created in the glove when there is ammo
+//!   (`0x2c2640`, `CreateMoby(0x79)` through the hit sink).
 //!
 //! **Ammo** ([`Weapons::ammo`]): the game state's table 0x13d428 + id, mirrored like the owned items (the engine
 //! copies it in before the tick and back after; `uses_ammo` from the item records, +8).
@@ -46,9 +47,8 @@
 //! 1, 0x13fdac = its yaw). The bomb then previews the landing and registers the reticle
 //! (`crate::moby_update::classes::bomb`).
 //!
-//! Not ported: the melee aim-assist `0x22e238` over the same list, the gold glove (0x13e52a: 0), the throw stats record 0x1416d0
-//! (counted in [`Weapons::throws`]), the other gloves' own item updates (their rows are not in `HAND_ITEMS`: only the
-//! Bomb Glove's is ported), 0x141618.
+//! Not ported: the melee aim-assist `0x22e238` over the same list, the gold gloves (0x13e52a..: 0), the gloves' throw
+//! stats records 0x1416d0 / 0x141708 / 0x141720 / 0x141748 (counted in [`Weapons::throws`]), 0x141618.
 //!
 //! **Weapons that keep the arm raised** (item def +0x30 → 0x1413fa; the Pyrocitor, the Blaster, …): [`gun_stance`]
 //! (`0x242858`: the stop 3 (its SetState and its physics) or the walk's slow stop becomes the idle state in the weapon's
@@ -62,18 +62,12 @@
 //! classes 1 / 2, so the weapon stays in his hands and level while he runs; the firing arm layer takes over from them.
 
 use super::anim::{AnimCtl, AnimLayer};
-use super::items::{HitSink, ItemEnv};
-use super::packs::SoundCmd;
 use super::physics::*;
 use super::states::Ctx;
 use super::Hero;
 use crate::moby_runtime::{MobyId, MobyTable};
-use crate::moby_update::classes::bomb;
 use crate::pad::button;
 use crate::ps2v::Pf;
-use crate::rng::Rng;
-use crate::targeting;
-use rc_formats::moby_anim;
 
 /// The Bomb Glove (item 10).
 pub const BOMB_GLOVE: i32 = super::items::item::BOMB_GLOVE;
@@ -86,17 +80,20 @@ pub const THROW: i32 = 0x23;
 const DT: f32 = 1.0 / 60.0;
 const N: usize = rc_formats::save_game::ITEM_COUNT;
 
-/// The Bomb Glove's pvars (moby +0x78 of the glove).
+/// The hand glove's pvars (moby +0x78 of the glove; one record for whichever throw glove is in hand, the shared
+/// update `super::gloves`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Glove {
-    /// +0x58: warm-up ticks (3).
+    /// +0x58 (the Mine Glove's +0x5c): warm-up ticks (3; the Bomb and Mine Gloves).
     pub warmup: i32,
-    /// +0x50: the bomb in the glove.
-    pub bomb: Option<MobyId>,
-    /// +0x54: the fire lockout (20 ticks after a throw).
+    /// +0x50: the object in the glove (the bomb, mine, Doom canister or decoy).
+    pub held: Option<MobyId>,
+    /// +0x54 (the Mine Glove's +0x58): the fire lockout (20 ticks after a throw).
     pub fire_timer: i32,
-    /// +0x40: the launch point in the glove.
+    /// +0x40: the hand point in the glove.
     pub hand: [f32; 3],
+    /// The Mine Glove's +0x54: no new mine until it runs out (10 ticks after a throw).
+    pub respawn: i32,
 }
 
 /// The weapons' fields: the ammo mirror, the Bomb Glove's pvars, the weapon arm.
@@ -122,8 +119,8 @@ pub struct Weapons {
     pub layer_seq: i32,
     /// 0x1415e8: the item whose arm is out.
     pub arm_item: i32,
-    /// A SetState the item update asked for (`SetState(0x1e, 1)` of the glove update), made right after the slot
-    /// loop by [`after_items`].
+    /// A SetState the item update asked for (`SetState(0x1e, 1)` of the glove update, the Visibomb's launch
+    /// `SetState(0x1d, 1)`), made right after the slot loop by [`after_items`].
     pub deferred: Option<i32>,
     /// Throws (the stats record 0x1416d0 is not applied).
     pub throws: u32,
@@ -157,6 +154,8 @@ pub struct Weapons {
     pub markers: crate::targeting::Markers,
     /// The Suck Cannon's, the Taunter's and the Morph-o-Ray's pvars ([`super::reactive`]).
     pub reactive: super::reactive::Reactive,
+    /// The Visibomb's pvars ([`super::visibomb`]).
+    pub visibomb: super::visibomb::Visibomb,
 }
 
 impl Default for Weapons {
@@ -164,7 +163,7 @@ impl Default for Weapons {
         Weapons {
             ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 4], nodes_made: 0, layer_fade: 0, layer_seq: 0,
             arm_item: 0, deferred: None, throws: 0, defs: Vec::new(), gold: [0; N], pyro: Default::default(), pending_draw: false, pending_idle: false,
-            aim: None, aim_pos: [0.0; 3], blaster: Default::default(), ryno: Default::default(), devastator: Default::default(), tesla: Default::default(), pending_anim: None, markers: Default::default(), reactive: Default::default(),
+            aim: None, aim_pos: [0.0; 3], blaster: Default::default(), ryno: Default::default(), devastator: Default::default(), tesla: Default::default(), pending_anim: None, markers: Default::default(), reactive: Default::default(), visibomb: Default::default(),
         }
     }
 }
@@ -233,6 +232,16 @@ fn new_node(h: &mut Hero, list: u8) -> AnimLayer {
 
 /// The glove-holding layers' slots in [`Weapons::layers`] (0x140050 / 0x140054).
 pub const HOLD: usize = 2;
+
+/// What the hand swap `UpdateWrenchSelected` 0x2307e0 does to the weapons when it commits a change (before the item's
+/// blend to its sequence 2 and slot state 3): a weapon out is put away (0x1413f8 → `0x22efd8`), and both glove-holding
+/// nodes are told to fade out for good (0x140050 / 0x140054 +0x34 = 1): [`hold_update`] fades them by 0.1 a tick and
+/// frees them, and only then makes the new item's layers (weight 0, fading in). Without it a layer whose item no longer
+/// wants it would hold its weight: `0x22e660` fades an unwanted node and then, in its common tail, brings it back to 1.
+pub fn swap_commit(h: &mut Hero) {
+    if h.f13f8 != 0 { put_away(h); }
+    for l in h.weapons.layers[HOLD..].iter_mut().flatten() { l.kill = true; }
+}
 
 /// `0x22df10(seq)`: Ratchet's key-B sequences in which the glove-holding layers leave his arms to a fixed pose (the
 /// holding class's sequence 0): 0x1c / 0x1d / 0x1f, 0x31 / 0x32, 0x37, 0x4a / 0x4b, 0x50, 0x60, 0x6d / 0x6e. (The
@@ -583,7 +592,7 @@ pub(super) fn transitions(h: &mut Hero, c: &mut Ctx) {
 }
 
 // ------------------------------------------------------------------------------------------------
-// The Bomb Glove's update 0x2d8330
+// The throw's launch point and velocity (shared by the gloves' aims, super::gloves)
 
 fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
 fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
@@ -600,7 +609,8 @@ fn diff_rot(a: f32, b: f32) -> f32 {
     d.abs()
 }
 
-/// `0x2d80f0(g, ε, k, from, to)`: the bomb's velocity (u/tick) to land at `to` (see the module doc).
+/// `0x2d80f0(g, ε, k, from, to)`: the bomb's velocity (u/tick) to land at `to` (see the module doc). The Glove of
+/// Doom's `0x2dcf88` and the Decoy Glove's `0x2ece98` are the same code with gravity 9 and the reach `k` = 2.5 / 3.5.
 pub fn launch_velocity(g: f32, k: f32, hero_yaw: f32, from: [f32; 3], to: [f32; 3]) -> [f32; 3] {
     let mut t = to;
     if k < len3f(sub3(to, from)) { t = add3(from, setlen(sub3(to, from), k - 0.01)); }
@@ -618,163 +628,13 @@ pub fn launch_velocity(g: f32, k: f32, hero_yaw: f32, from: [f32; 3], to: [f32; 
     [yaw.cos() * h, yaw.sin() * h, vz]
 }
 
-/// `0x2d8330`, the Bomb Glove moby's update (from the slot loop with the slot ready).
-pub fn glove_update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut Rng) {
-    let Some(class) = hero.items.slot.item.as_ref().and_then(|m| env.data.class(m.o_class)).cloned() else { return };
-    let g = &mut hero.weapons.glove;
-    if g.warmup < 3 {
-        g.warmup += 1;
-        return;
-    }
-    // The launch point: joint list 0 + (0, −0.09, −0.02) in the glove's frame.
-    {
-        let it = hero.items.slot.item.as_ref().unwrap();
-        let rows: [[f32; 3]; 3] = [0, 1, 2].map(|i| [0, 1, 2].map(|k| f32::from_bits(it.rows[i][k])));
-        let base = class.chains.first().filter(|c| !c.is_empty()).map_or(from_f32x3(it.position), |chain| {
-            let p = moby_anim::evaluate_chains(&class.anim, &it.anim, it.snapshot.as_ref(), &[chain.as_slice()]);
-            super::melee::list_point(&p[0], &it.rows, it.position, it.scale)
-        });
-        let off: [f32; 3] = std::array::from_fn(|k| rows[1][k] * f32::from_bits(0xbdb8_51ec) + rows[2][k] * f32::from_bits(0xbca3_d70a));
-        hero.weapons.glove.hand = add3(to_f32x3(base), off);
-    }
-    if let Some(b) = hero.weapons.glove.bomb {
-        let m = &mut table.mobys[b];
-        if m.is_deleted() || m.o_class != bomb::BOMB_CLASS { hero.weapons.glove.bomb = None; } else { m.coll_disable = 1; }
-    }
-    if hero.state == 1 { hero.weapons.deferred = Some(0x1e); }
-    let st = hero.state;
-    // The fire lockout (`FastDecTimer` ≠ 0: out).
-    let g = &mut hero.weapons.glove;
-    if g.fire_timer > 0 { g.fire_timer -= 1; }
-    let ready = g.fire_timer == 0;
-    let id = hero.items.slot.id;
-    if ready && hero.items.f13fc == 0 {
-        let arm = hero.f13f8 != 0 && hero.f50c == ticks(0x11);
-        let look = env.pad.pressed & hero.items.slot.fire_mask != 0 && (st == 0x1e || hero.weapons.deferred == Some(0x1e)) && hero.weapons.has_ammo(id) != 0;
-        let state = st == THROW && hero.timer == ticks(0x10);
-        if arm || look || state {
-            hero.fx.item_voices.push(SoundCmd::Voice { index: THROW_VOICE, flags: 0 });
-            hero.weapons.use_ammo(id, 1);
-            if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = 3; }
-        }
-    }
-    // The aim of the bomb in the glove.
-    let mut launch = [0.0f32; 3];
-    if let Some(b) = hero.weapons.glove.bomb {
-        let fwd = to_f32x3(hero.moby_rows[0]);
-        let yawf = fwd[1].atan2(fwd[0]);
-        launch = launch_point(to_f32x3(hero.pos), fwd);
-        let k = 8.5f32;
-        let strafe = env.pad.held & button::STRAFE != 0;
-        let mut target = add3(launch, [fwd[0] * k, fwd[1] * k, fwd[2] * k]);
-        if !strafe || hero.items.f13fc != 0 {
-            // The target search over 0x1abe80 (crate::targeting); its line of sight from the camera, world only.
-            hero.weapons.aim = None;
-            let cam = env.camera.map(|c| c.0);
-            let clear = |p: [f32; 3]| match (cam, env.coll) {
-                (Some(c), Some(coll)) => line_world(coll, from_f32x3(c), from_f32x3(p), targeting::BOMB_GLOVE.los_flags).is_none(),
-                _ => true,
-            };
-            if let Some(t) = targeting::aim_search(&targeting::BOMB_GLOVE, table, env.targets, launch, yawf, clear) {
-                target = t.point;
-                hero.weapons.aim = Some(t.id);
-                let m = &table.mobys[t.id];
-                hero.weapons.aim_pos = [m.position[0], m.position[1], m.position[2]];
-            }
-        } else if let Some((cam, cf)) = env.camera {
-            let yaw = cf[1].atan2(cf[0]);
-            let pitch = cf[2].atan2(len2f(cf)).min(f32::from_bits(0x3f17_e9d8)).max(f32::from_bits(0xbfb2_b8c2));
-            let v = [yaw.cos() * k * pitch.cos(), yaw.sin() * k * pitch.cos(), pitch.sin() * k];
-            let mut l = len2f(v);
-            if l == 0.0 { l = 0.01; }
-            let slope = v[2] / l;
-            let gk = DT * DT * 11.0 * k;
-            let r = (gk * 0.5).sqrt();
-            let range = ((r + r) * r * (1.0 - slope)) / (DT * DT * 11.0);
-            if 0.0 < range {
-                let d = [yaw.cos() * range, yaw.sin() * range, slope * range];
-                let end = add3(cam, d);
-                let hit = env.coll.and_then(|c| line_world(c, from_f32x3(cam), from_f32x3(end), 2));
-                target = match hit {
-                    Some(o) => o.point,
-                    None => add3(cam, [d[0] * 5.0, d[1] * 5.0, d[2] * 5.0]),
-                };
-            }
-        }
-        let v = launch_velocity(DT * DT * 11.0, k, hero.rot[2].to_f32(), launch, target);
-        if let Some(m) = table.mobys.get_mut(b) {
-            if m.pvars.len() < 0x80 { m.pvars.resize(0x80, 0); }
-            crate::moby_update::services::pvar::set_v4f(&mut m.pvars, bomb::pv::VEL, [v[0], v[1], v[2], 0.0]);
-        }
-    }
-    let mstate = hero.items.slot.item.as_ref().map_or(0, |m| m.mstate);
-    match mstate {
-        0 | 1 => {
-            if mstate == 0 { hero.weapons.glove.bomb = None; }
-            if let Some(it) = hero.items.slot.item.as_mut() {
-                if mstate == 0 { it.mstate = 1; }
-                if it.anim.flags & 2 != 0 { it.mstate = 2; }
-            }
-        }
-        3 => match hero.weapons.glove.bomb {
-            None => create_bomb(hero, table, env, hits, rng),
-            Some(b) => {
-                let grind = if hero.group == 0xf { Some(to_f32x3(hero.disp)) } else { None };
-                bomb::release(&mut table.mobys[b], launch, grind);
-                // A wall between Ratchet (at the launch height) and the launch point: the bomb explodes there.
-                let r = &table.mobys[env.hero_moby];
-                let from = [r.position[0], r.position[1], launch[2]];
-                if let Some(o) = env.coll.and_then(|c| line_world(c, from_f32x3(from), from_f32x3(launch), 0)) {
-                    bomb::release_hit(&mut table.mobys[b], o.point);
-                }
-                hero.weapons.throws += 1;
-                hero.weapons.glove.bomb = None;
-                if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = 4; }
-                hero.weapons.glove.fire_timer = ticks(0x14);
-            }
-        },
-        4 => {
-            if !(st == THROW || hero.f13f8 != 0) {
-                if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = 2; }
-            }
-        }
-        5 => {
-            if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = 6; }
-        }
-        6 => {
-            if let Some(b) = hero.weapons.glove.bomb {
-                hits.delete_moby(table, b, env.frame as u64);
-            }
-        }
-        _ => {}
-    }
-    // The tail: no bomb in the glove → a new one when there is ammo (or the arm is out); else it follows the glove.
-    match hero.weapons.glove.bomb {
-        None => {
-            if hero.weapons.has_ammo(id) != 0 || hero.f13f8 != 0 { create_bomb(hero, table, env, hits, rng); }
-        }
-        Some(b) => {
-            let h = hero.weapons.glove.hand;
-            let m = &mut table.mobys[b];
-            m.position = [h[0], h[1], h[2], m.position[3]];
-        }
-    }
-}
-
-/// `0x2c2640`: a bomb in the glove (`CreateMoby(0x79)` through the hit sink).
-fn create_bomb(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut Rng) {
-    if let Some(b) = hits.create_moby(table, bomb::BOMB_CLASS, env.frame as u64) {
-        let fwd = to_f32x3(hero.moby_rows[0]);
-        bomb::init_held(&mut table.mobys[b], rng, hero.weapons.glove.hand, fwd[1].atan2(fwd[0]));
-        hero.weapons.glove.bomb = Some(b);
-    }
-}
-
 /// Right after the slot loop (`super::gadgets::after_items`): the SetState the glove's update made, the draw / put-away
 /// animations an item update asked for.
 pub(super) fn after_items(h: &mut Hero, c: &mut Ctx) {
     if let Some(s) = h.weapons.deferred.take() {
         if h.state == 1 && s == 0x1e { h.set_state(c, 0x1e, true); }
+        // The Visibomb's launch `0x2cb540`: `SetState(0x1d, 1)` (super::visibomb).
+        if s == super::scripted::MISSILE { h.set_state(c, s, true); }
     }
     apply_pending(h, c);
 }

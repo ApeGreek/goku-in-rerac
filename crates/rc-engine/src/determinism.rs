@@ -143,6 +143,26 @@ struct FrameDump {
 
 pub struct DeterminismPlugin;
 
+/// Frame-exact mode: clears this frame's keyboard, mouse and gamepad state right after Bevy's input systems, so no
+/// live device input reaches the game, the dev keys or the fly camera.
+fn no_live_input(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut motion: ResMut<bevy::input::mouse::AccumulatedMouseMotion>,
+    mut scroll: ResMut<bevy::input::mouse::AccumulatedMouseScroll>,
+    mut pads: Query<&mut bevy::input::gamepad::Gamepad>,
+) {
+    keys.reset_all();
+    mouse.reset_all();
+    motion.delta = Vec2::ZERO;
+    scroll.delta = Vec2::ZERO;
+    for mut g in &mut pads {
+        g.digital_mut().reset_all();
+        let axes: Vec<_> = g.analog().all_axes().copied().collect();
+        for a in axes { g.analog_mut().set(a, 0.0); }
+    }
+}
+
 impl Plugin for DeterminismPlugin {
     fn build(&self, app: &mut App) {
         let det = deterministic();
@@ -154,6 +174,9 @@ impl Plugin for DeterminismPlugin {
         app.add_observer(unlink_monitor);
         if det {
             app.insert_resource(Time::<Fixed>::from_hz(TICK_HZ)).insert_resource(TimeUpdateStrategy::FixedTimesteps(1));
+            // No live input in frame-exact mode: a key the OS delivers to the new window (a stray R respawned Ratchet in
+            // one of ten identical captures) must not change the run. Scripted pads (`RC_PLAY_SCRIPT`) are not device input.
+            app.add_systems(PreUpdate, no_live_input.after(bevy::input::InputSystems));
             match tick_pattern() {
                 Some(p) => {
                     app.add_systems(First, pattern_steps.before(bevy::time::TimeSystems));

@@ -90,6 +90,28 @@ impl Groups {
     }
 }
 
+/// The moby ids of group `g` (`0x1abcc0[g]`, list order; none for `g < 0`).
+pub fn group_ids(w: &World, g: i8) -> Vec<MobyId> {
+    if g < 0 { return Vec::new(); }
+    w.svc.groups.lists.get(g as usize).and_then(|l| l.clone()).map(|l| l.into_iter().map(|m| m as MobyId).collect()).unwrap_or_default()
+}
+
+/// `0x26e0e0(g, s)`: every live member's state byte = `s`.
+pub fn group_state(w: &mut World, g: i8, s: u8) {
+    for m in group_ids(w, g) {
+        if let Some(mm) = w.table.mobys.get_mut(m) {
+            if (mm.state as i8) >= 0 { mm.state = s; }
+        }
+    }
+}
+
+/// `0x26e090(g, c)`: every member's command byte +0xbc = `c`.
+pub fn group_cmd(w: &mut World, g: i8, c: u8) {
+    for m in group_ids(w, g) {
+        if let Some(mm) = w.table.mobys.get_mut(m) { mm.cmd = c; }
+    }
+}
+
 /// Scheduler state kept between ticks (the groups live in [`Services::groups`](crate::moby_update::Services)).
 #[derive(Clone, Debug, Default)]
 pub struct Scheduler {
@@ -249,6 +271,7 @@ impl Scheduler {
         // The last frame's draw callbacks (their state and rand parts), before any update: classes::draw_callbacks.
         classes::draw_callbacks::run_frame(w);
         let (list, targets) = build_active_list(w.table, w.camera, &w.svc.groups);
+        w.svc.targets.clone_from(&targets);
         self.targets = targets;
         if w.svc.snapshots.len() < w.table.mobys.len() { w.svc.snapshots.resize(w.table.mobys.len(), None); }
         for &id in &list { run_moby(w, id); }
@@ -283,6 +306,7 @@ pub fn class_info(class: &rc_formats::moby::MobyClass, slot: u8, update_fn: Opti
         mode_bits: h.mode_bits as u16,
         ty: h.ty,
         seq0: None,
+        has_sounds: h.sound_defs != 0,
     }
 }
 

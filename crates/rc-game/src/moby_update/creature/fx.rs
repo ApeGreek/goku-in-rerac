@@ -182,9 +182,26 @@ pub struct Beam {
 }
 
 /// `SpawnBeamExplosion(…, moby, pos, …)` 0x273310 with `param_17` = −1 (throttled when the frame loads sum over 1.7)
-/// and `param_18` = 0 (the normal colours). The debris burst (`param_16`, `0x2c4c20`) is not ported: counted, its
-/// draws are not made (no caller in the ported classes uses it).
-pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
+/// and `param_18` = 0 (the normal colours). The debris burst (`param_16`) makes the Bomb Glove's fireballs 122
+/// (`0x2c4c20`, ported 2026-09-28: hero_gameplay.md §14.1).
+pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) { beam_explosion_shift(w, b, moby, p, 0) }
+
+/// `FUN_00270fa8(rgba, shift)`: the colour with its channels swapped by the bits of `shift` (1: r ↔ g, 2: g ↔ b,
+/// 4: b ↔ r, in that order; `FUN_00270f48`); alpha kept. The gold chicken's burst (`param_18` = 1) and the Bomb
+/// Glove's colour shift use it.
+pub fn colour_shift(c: u32, shift: u8) -> u32 {
+    if shift == 0 { return c; }
+    let (mut r, mut g, mut b) = (c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff);
+    if shift & 1 != 0 { std::mem::swap(&mut r, &mut g); }
+    if shift & 2 != 0 { std::mem::swap(&mut g, &mut b); }
+    if shift & 4 != 0 { std::mem::swap(&mut b, &mut r); }
+    (c & 0xff00_0000) | b << 16 | g << 8 | r
+}
+
+/// [`beam_explosion`] with `param_18` = `shift`: the streaks', sparks' and puffs' colours through [`colour_shift`],
+/// the first two flashes 0x46 / 0x46 / 0x3c instead of 0x96 / 0x96 / 0x7f, and the light template 0x1b0720
+/// ([`LIGHT_BEAM_GOLD`]) instead of 0x1b06d0 (the gold chicken 270's burst).
+pub fn beam_explosion_shift(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V, shift: u8) {
     let (l0, l1) = frame_load(w);
     let throttle = (1.7 < l1 + l0) as i32;
     let base_z = super::DT * 8.0 * b.scale;
@@ -202,14 +219,36 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
         v[2] += super::DT * 3.0;
         let (t60, t120) = (w.ticks(60), w.ticks(120));
         let life = w.rng.rand_range(t60, t120) - throttle * 10;
-        let a = crate::particles::type15::Spawn { size: b.scale * 40000.0, pos: p, vel: v, c1: 0x4f00_7fff, c2: 0x1f00_007f, life, split: 1, def: -1, blend: -1 };
+        let a = crate::particles::type15::Spawn { size: b.scale * 40000.0, pos: p, vel: v, c1: colour_shift(0x4f00_7fff, shift), c2: colour_shift(0x1f00_007f, shift), life, split: 1, def: -1, blend: -1 };
         part15(w, &a);
     }
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     let dist = len3(sub(cam, p));
     if b.debris != 0 {
-        // The random direction (3 draws) and the debris of 0x2c4c20 (not ported).
-        w.svc.unported("creature fx: beam explosion debris 0x2c4c20");
+        // The debris (`param_16`): the fireballs 122 of `0x2c4c20` (`crate::moby_update::classes::bomb::fireball`, the
+        // Bomb Glove's). A random vector; within 14 of the camera one fireball drifting toward it; then `debris − 1`
+        // thrown out 15°..75° up at 7..10.5 × scale a second, one in three of the larger kind.
+        let r = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), 0.0];
+        if dist < 14.0 {
+            let mut d = sub(cam, p);
+            d[2] += dist * 0.5;
+            let v = super::set_len3(r, dist / 5.0 * super::DT);
+            let d = super::set_len3(d, 2.0 * dist * super::DT);
+            let v = super::clamp_len3(add(v, d), super::DT * 10.0);
+            let (t60, t90) = (w.ticks(60), w.ticks(90));
+            let life = w.rng.rand_range(t60, t90);
+            crate::moby_update::classes::bomb::fireball(w, p, v, life, 0);
+        }
+        for i in 0..(b.debris - 1).max(0) {
+            let pitch = w.rng.randf(f32::from_bits(0x3e86_0a92), f32::from_bits(0x3fa7_8d36));
+            let yaw = w.rng.rand_angle();
+            let sp = w.rng.randf(7.0, 10.5);
+            let mut v = polar(b.scale * sp * super::DT, yaw, pitch);
+            v[2] += super::DT + super::DT;
+            let (t60, t90) = (w.ticks(60), w.ticks(90));
+            let life = w.rng.rand_range(t60, t90);
+            crate::moby_update::classes::bomb::fireball(w, p, v, life, (i % 3 == 0) as u8);
+        }
     }
     let mut n = b.sparks;
     if dist < (b.sparks as f32) * 2.0 { n = (dist as i32) / 2; }
@@ -225,7 +264,7 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
         let t1 = w.rng.rand_range(t30, t45);
         let size = to_pf(b.scale * 400000.0);
         let basev = [Pf::ZERO, Pf::ZERO, to_pf(base_z), Pf::ZERO];
-        w.part11(size, to_pf(speed), pv(p), basev, SPARK_A[a], SPARK_B[c], life - throttle * 3, t1 - throttle * 5, 0, 0);
+        w.part11(size, to_pf(speed), pv(p), basev, colour_shift(SPARK_A[a], shift), colour_shift(SPARK_B[c], shift), life - throttle * 3, t1 - throttle * 5, 0, 0);
         let (t5, t10) = (w.ticks(5), w.ticks(10));
         let life2 = w.rng.rand_range(t5, t10);
         let (t15, t20) = (w.ticks(15), w.ticks(20));
@@ -242,18 +281,19 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
         let c = w.rng.randi(6) as usize;
         let (t30, t45) = (w.ticks(30), w.ticks(45));
         let life = w.rng.rand_range(t30, t45) - throttle * 5;
-        part08(w, 200_000.0, p, vel, SPARK_A[a], SPARK_B[c], life);
+        part08(w, 200_000.0, p, vel, colour_shift(SPARK_A[a], shift), colour_shift(SPARK_B[c], shift), life);
     }
     if let Some(m) = moby {
         if 0.0 < b.flash {
+            let (r0, b0, r1) = if shift != 0 { (0x46, 0x46, 0x3c) } else { (0x96, 0x96, 0x7f) };
             if l0 < 0.95 && b.flash_dist < dist {
                 let t = w.ticks(16);
-                flash_spawn(w, b.flash, m, p, [0.0; 4], t, 0x96, 0x96, 0x96, 0x20);
+                flash_spawn(w, b.flash, m, p, [0.0; 4], t, r0, 0x96, b0, 0x20);
                 let t = w.ticks(22);
-                flash_spawn(w, b.flash, m, p, [0.0; 4], t, 0x7f, 0x7f, 0x50, 0x20);
+                flash_spawn(w, b.flash, m, p, [0.0; 4], t, r1, 0x7f, 0x50, 0x20);
             }
             let t = w.ticks(30);
-            flash_spawn(w, b.flash, m, p, [0.0; 4], t, 0x7f, 0x7f, 0, 0x30);
+            flash_spawn(w, b.flash, m, p, [0.0; 4], t, r1, 0x7f, 0, 0x30);
         }
         if 0.0 < b.flash2 {
             let t = w.ticks(27);
@@ -269,7 +309,7 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
     if b.light != 0.0 && throttle == 0 && in_view(w, 100.0, p, b.light) {
         // The template's three radii are overwritten (the game writes them into 0x1b06d0 itself); param_18 = 0.
         let l = if b.light <= 0.0 { 15.0 } else { b.light };
-        let mut t = LIGHT_BEAM;
+        let mut t = if shift != 0 { LIGHT_BEAM_GOLD } else { LIGHT_BEAM };
         t.radius = [l, l, l];
         light_spawn(w, &t, p);
     }
@@ -279,7 +319,7 @@ pub fn beam_explosion(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V) {
 // The amoeboids' goo (0x2ef560 drips, 0x2ef770 bursts; gp block 0x1619b0..0x161a3c)
 
 /// `0x2747a0(r, v)`: `v.xyz += (randf(−r, r), randf(−r, r), randf(−r, r))`, in that order.
-fn jitter(w: &mut World, r: f32, v: &mut V) {
+pub fn jitter(w: &mut World, r: f32, v: &mut V) {
     for c in v.iter_mut().take(3) { *c += w.rng.randf(-r, r); }
 }
 
@@ -560,6 +600,13 @@ pub const LIGHT_BEAM: LightTemplate = LightTemplate {
     period_r: 0,
     hold_r: 0,
     delay: 0,
+};
+
+/// Template 0x1b0720: [`LIGHT_BEAM`] with its colour bytes for a shifted explosion (`param_18` ≠ 0: the gold chicken
+/// 270's burst; level01 data).
+pub const LIGHT_BEAM_GOLD: LightTemplate = LightTemplate {
+    bytes: [0x00, 0x00, 0x80, 0x00, 0x11, 0x0d, 0x00, 0xff, 0x00, 0x11, 0x0b, 0x00, 0x64, 0x00, 0x10, 0x0d],
+    ..LIGHT_BEAM
 };
 
 /// `0x20a930`, the Bomb Glove explosion's light (copied to the stack by `0x2c3300`, spawned at the explosion).

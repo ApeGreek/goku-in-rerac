@@ -198,7 +198,7 @@ fn aim_preview(w: &mut World, id: MobyId) -> bool {
         let vel = if h.group == 0xf { [vel[0] + d[0], vel[1] + d[1], vel[2] + d[2]] } else { vel };
         (from, vel, 300)
     } else {
-        if w.hero.weapons.glove.bomb.is_some() { p::set_i16(&mut w.mm(id).pvars, pv::FLAG56, 1); }
+        if w.hero.weapons.glove.held.is_some() { p::set_i16(&mut w.mm(id).pvars, pv::FLAG56, 1); }
         (v4(w.m(id).position), vel, p::i16(&w.m(id).pvars, pv::LIFE) as i32)
     };
     let hero_pos = w.hero_moby.and_then(|h| w.table.mobys.get(h)).map_or(from, |m| [m.position[0], m.position[1], m.position[2]]);
@@ -213,6 +213,8 @@ fn aim_preview(w: &mut World, id: MobyId) -> bool {
         // Ratchet (the glove is not a table moby in the port).
         own: [w.hero_moby, None],
         gold: w.hero.weapons.gold.get(10).is_some_and(|&g| g != 0) && w.hero.state == 1,
+        prims: tg::Prims::Snap { max_rise: Some(2.0) },
+        first_test: true,
     };
     let landing = {
         let ww: &World = w;

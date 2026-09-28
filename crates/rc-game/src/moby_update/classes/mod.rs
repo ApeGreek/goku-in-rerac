@@ -43,9 +43,16 @@
 //! | 457 (the R.Y.N.O.'s missile; created by the hand item) | 0x2e5a48 | [`ryno_missile`] (the intercept shared with 153: [`missile`]) |
 //! | 605 (buried bolt caches, the Metal Detector's targets; levels 1–18) | 0x2f2eb8 | [`buried_bolts`] |
 //! | 832 (Visibomb range limiters; levels 1–15, 18) | 0x302648 | [`rc_range`] |
+//! | 172 (the Visibomb's missile; launched by the hand item; every level) | 0x2cbda8 | [`visibomb`] |
+//! | 270 (the Morph-o-Ray's chicken), 428 (its feathers); every level | 0x2df448, 0x2e2f68 | [`chicken`] |
+//! | 203, 1900 (the Decoy Glove's decoys; created by the hand item; every level) | 0x2d9fe8 | [`decoy`] |
+//! | 74 (the Mine Glove's mines; created by the hand item; every level) | 0x2bfe40 | [`mine`] |
+//! | 479 (the Drone Device's drones; launched from the hand swap; every level) | 0x2e92b8 | [`drone`] |
+//! | 230 (the Glove of Doom's canister; created by the hand item), 186 (its bots); every level | 0x2de650, 0x2d5c10 | [`doom_canister`], [`doom_bot`] |
 //! | 604 / 1818 / 1633 (the Sonic Summoner's house, "mouse" and its shot; levels 1–6, 8, 11, 12, 14) | 0x2f2b68, 0x30df40, 0x30c9a8 | [`mouse`] |
 //! | 258 (activation zones; levels 5, 7, 9, 10, 12–15, 17) | level05 0x2f5200 | [`activation_zone`] |
 //! | 830 (floor switches; levels 5, 11, 15, 17, 18) | level05 0x30c5b0 | [`floor_switch`] |
+//! | the census class-port units (G-CLS-027; one row per unit, per level) | per unit | [`units`] (`ClassUpdate::Unit(i)`) |
 //! | 994, 879, 460, 1018, 327, 317, 1260, 1111, 1901 (the seas and liquid surfaces; levels 3, 5, 7–9, 11, 12, 14, 16) | per level | `crate::water::sea` (`ClassUpdate::Sea(i)`) |
 
 pub mod activation_zone;
@@ -59,10 +66,16 @@ pub mod buried_bolts;
 pub mod breakables;
 pub mod camera_trigger;
 pub mod checkpoint;
+pub mod chicken;
 pub mod crate_;
 pub mod critter;
 pub mod cutscene_fx;
 pub mod debris;
+pub mod decoy;
+pub mod drone;
+pub mod doom_bot;
+pub mod doom_canister;
+pub mod mine;
 pub mod devastator_missile;
 pub mod draw_callbacks;
 pub mod dropship;
@@ -92,7 +105,9 @@ pub mod swing_target;
 pub mod talking_npc;
 pub mod teleporter;
 pub mod thruster_flame;
+pub mod units;
 pub mod vendor;
+pub mod visibomb;
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -156,6 +171,7 @@ pub enum ClassUpdate {
     PyroGlow,
     BuriedBolts,
     RcRange,
+    Visibomb,
     MouseHouse,
     Mouse,
     MouseShot,
@@ -165,16 +181,25 @@ pub enum ClassUpdate {
     RynoMissile,
     DevastatorMissile,
     ThrusterFlame,
+    Chicken,
+    Feather,
+    Decoy,
+    Mine,
+    Drone,
+    DoomCanister,
+    DoomBot,
     /// A copy of the break template: `breakables::RECIPES[i]`.
     Breakable(u8),
     /// A water class: `crate::water::managers::PORTS[i]` (the ripple managers, the water plane).
     Water(u8),
     /// A sea / liquid surface class: `crate::water::sea::PORTS[i]`.
     Sea(u8),
+    /// A census class-port unit (G-CLS-027): `units::PORTS[i]`.
+    Unit(u16),
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 65] = [
+    pub const ALL: [ClassUpdate; 73] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -231,6 +256,7 @@ impl ClassUpdate {
         ClassUpdate::PyroGlow,
         ClassUpdate::BuriedBolts,
         ClassUpdate::RcRange,
+        ClassUpdate::Visibomb,
         ClassUpdate::MouseHouse,
         ClassUpdate::Mouse,
         ClassUpdate::MouseShot,
@@ -240,6 +266,13 @@ impl ClassUpdate {
         ClassUpdate::RynoMissile,
         ClassUpdate::DevastatorMissile,
         ClassUpdate::ThrusterFlame,
+        ClassUpdate::Chicken,
+        ClassUpdate::Feather,
+        ClassUpdate::Decoy,
+        ClassUpdate::Mine,
+        ClassUpdate::Drone,
+        ClassUpdate::DoomCanister,
+        ClassUpdate::DoomBot,
     ];
 
     /// The level01 class-table address of this update.
@@ -301,6 +334,7 @@ impl ClassUpdate {
             ClassUpdate::PyroGlow => pyro_glow::UPDATE_FN,
             ClassUpdate::BuriedBolts => buried_bolts::UPDATE_FN,
             ClassUpdate::RcRange => rc_range::UPDATE_FN,
+            ClassUpdate::Visibomb => visibomb::UPDATE_FN,
             ClassUpdate::MouseHouse => mouse::HOUSE_FN,
             ClassUpdate::Mouse => mouse::MOUSE_FN,
             ClassUpdate::MouseShot => mouse::SHOT_FN,
@@ -310,16 +344,24 @@ impl ClassUpdate {
             ClassUpdate::RynoMissile => ryno_missile::UPDATE_FN,
             ClassUpdate::DevastatorMissile => devastator_missile::UPDATE_FN,
             ClassUpdate::ThrusterFlame => thruster_flame::UPDATE_FN,
+            ClassUpdate::Chicken => chicken::UPDATE_FN,
+            ClassUpdate::Feather => chicken::FEATHER_FN,
+            ClassUpdate::Decoy => decoy::UPDATE_FN,
+            ClassUpdate::Mine => mine::UPDATE_FN,
+            ClassUpdate::Drone => drone::UPDATE_FN,
+            ClassUpdate::DoomCanister => doom_canister::UPDATE_FN,
+            ClassUpdate::DoomBot => doom_bot::UPDATE_FN,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].func,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].func,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].func,
+            ClassUpdate::Unit(i) => units::PORTS[i as usize].func,
         }
     }
 
     pub fn from_address(a: u32) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.address() == a) }
 
     /// [`ClassUpdate::ALL`] and every break-template copy (`Breakable(i)`).
-    pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)).chain(crate::water::managers::ids().map(ClassUpdate::Water)).chain(crate::water::sea::ids().map(ClassUpdate::Sea)) }
+    pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)).chain(crate::water::managers::ids().map(ClassUpdate::Water)).chain(crate::water::sea::ids().map(ClassUpdate::Sea)).chain(units::ids().map(ClassUpdate::Unit)) }
 
     /// The classes the level01 table maps to this function.
     pub fn classes(self) -> &'static [i16] {
@@ -380,6 +422,7 @@ impl ClassUpdate {
             ClassUpdate::PyroGlow => &pyro_glow::CLASSES,
             ClassUpdate::BuriedBolts => &buried_bolts::CLASSES,
             ClassUpdate::RcRange => &rc_range::CLASSES,
+            ClassUpdate::Visibomb => &visibomb::CLASSES,
             ClassUpdate::MouseHouse => &mouse::HOUSE_CLASSES,
             ClassUpdate::Mouse => &mouse::MOUSE_CLASSES,
             ClassUpdate::MouseShot => &mouse::SHOT_CLASSES,
@@ -389,16 +432,29 @@ impl ClassUpdate {
             ClassUpdate::RynoMissile => &ryno_missile::CLASSES,
             ClassUpdate::DevastatorMissile => &devastator_missile::CLASSES,
             ClassUpdate::ThrusterFlame => &thruster_flame::CLASSES,
+            ClassUpdate::Chicken => &chicken::CLASSES,
+            ClassUpdate::Feather => &chicken::FEATHER_CLASSES,
+            ClassUpdate::Decoy => &decoy::CLASSES,
+            ClassUpdate::Mine => &mine::CLASSES,
+            ClassUpdate::Drone => &drone::CLASSES,
+            ClassUpdate::DoomCanister => &doom_canister::CLASSES,
+            ClassUpdate::DoomBot => &doom_bot::CLASSES,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].classes,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].classes,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].classes,
+            ClassUpdate::Unit(i) => units::PORTS[i as usize].classes,
         }
     }
 }
 
 /// The registry by class number alone: the Rust port of `o_class`'s update on level 01 (the classes each port
 /// lists), if any. Levels use [`LevelPorts`], which reads the level's own class table.
-pub fn for_class(o_class: i16) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.classes().contains(&o_class)) }
+///
+/// Only the ports whose reference is level 01 take part: a port reversed on another level lists that level's class
+/// numbers, which on level 01 (and on every level whose table has no entry for them) are other classes or none at all
+/// (e.g. 367 is level 06's slider, U204, and a crate chunk without an update on level 01). Those ports run only
+/// where a level's table names their code ([`LevelPorts`]).
+pub fn for_class(o_class: i16) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.reference_level() == 1 && u.classes().contains(&o_class)) }
 
 impl ClassUpdate {
     /// The level whose overlay holds [`ClassUpdate::address`] (the swing target was reversed on level 03, every
@@ -411,6 +467,7 @@ impl ClassUpdate {
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].level,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].level,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].level,
+            ClassUpdate::Unit(i) => units::PORTS[i as usize].level,
             _ => 1,
         }
     }
@@ -460,7 +517,10 @@ impl LevelPorts {
                 for &a in external { for c in rel.copies(a) { ext_copies.entry(c).or_insert(a); } }
             }
         }
-        let table = vtbl.iter().map(|e| (e.o_class as i16, (e.update, copies.get(&e.update).copied()))).collect();
+        // An update that starts with `jr ra; nop` does nothing: the empty-update unit (`units::empty`).
+        let empty = units::row(units::empty::REFERENCE_LEVEL, units::empty::UPDATE_FN).map(ClassUpdate::Unit);
+        let port_of = |f: u32| copies.get(&f).copied().or_else(|| empty.filter(|_| f != 0 && target.code(f, 2).is_some_and(units::empty::is_empty)));
+        let table = vtbl.iter().map(|e| (e.o_class as i16, (e.update, port_of(e.update)))).collect();
         let external = vtbl.iter().filter_map(|e| Some((e.o_class as i16, *ext_copies.get(&e.update)?))).collect();
         LevelPorts { table, external }
     }
@@ -484,6 +544,12 @@ impl LevelPorts {
 
     /// The level's update function of `o_class` (None: not in the table; 0: no update).
     pub fn level_update(&self, o_class: i16) -> Option<u32> { self.table.get(&o_class).map(|e| e.0) }
+
+    /// Whether the loader fills `o_class`'s joint lists on this level: its port reads them, or a port of the level
+    /// reads that class's joint points (a unit port's `joints`).
+    pub fn needs_joint_lists(&self, o_class: i16) -> bool {
+        self.get(o_class).is_some_and(ClassUpdate::needs_joint_lists) || self.table.values().filter_map(|e| e.1).any(|u| u.reads_joints_of(o_class))
+    }
 
     /// The classes of the level's table with an update function that is not ported.
     pub fn unported(&self) -> Vec<i16> {
@@ -552,6 +618,7 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::PyroGlow => pyro_glow::update(w, id),
         ClassUpdate::BuriedBolts => buried_bolts::update(w, id),
         ClassUpdate::RcRange => rc_range::update(w, id),
+        ClassUpdate::Visibomb => visibomb::update(w, id),
         ClassUpdate::MouseHouse => mouse::house_update(w, id),
         ClassUpdate::Mouse => mouse::mouse_update(w, id),
         ClassUpdate::MouseShot => mouse::shot_update(w, id),
@@ -561,9 +628,17 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::RynoMissile => ryno_missile::update(w, id),
         ClassUpdate::DevastatorMissile => devastator_missile::update(w, id),
         ClassUpdate::ThrusterFlame => thruster_flame::update(w, id),
+        ClassUpdate::Chicken => chicken::update(w, id),
+        ClassUpdate::Feather => chicken::feather_update(w, id),
+        ClassUpdate::Decoy => decoy::update(w, id),
+        ClassUpdate::Mine => mine::update(w, id),
+        ClassUpdate::Drone => drone::update(w, id),
+        ClassUpdate::DoomCanister => doom_canister::update(w, id),
+        ClassUpdate::DoomBot => doom_bot::update(w, id),
         ClassUpdate::Breakable(i) => breakables::update(w, id, i),
         ClassUpdate::Water(i) => crate::water::managers::update(w, id, i),
         ClassUpdate::Sea(i) => crate::water::sea::update(w, id, i),
+        ClassUpdate::Unit(i) => units::update(w, id, i),
     }
 }
 
@@ -573,5 +648,18 @@ pub fn needs_joint_lists(o_class: i16) -> bool { for_class(o_class).is_some_and(
 
 impl ClassUpdate {
     /// The ports whose update reads joint points ([`needs_joint_lists`] by port, for [`LevelPorts`]).
-    pub fn needs_joint_lists(self) -> bool { matches!(self, ClassUpdate::Flyer | ClassUpdate::PathEnemy | ClassUpdate::Gunship | ClassUpdate::GoldBolt | ClassUpdate::Mouse) }
+    pub fn needs_joint_lists(self) -> bool {
+        match self {
+            ClassUpdate::Unit(i) => units::PORTS[i as usize].classes.iter().any(|c| units::PORTS[i as usize].joints.contains(c)),
+            _ => matches!(self, ClassUpdate::Flyer | ClassUpdate::PathEnemy | ClassUpdate::Gunship | ClassUpdate::GoldBolt | ClassUpdate::Mouse),
+        }
+    }
+
+    /// Whether this port reads the joint points of `o_class`'s mobys (its own classes: [`ClassUpdate::needs_joint_lists`]).
+    pub fn reads_joints_of(self, o_class: i16) -> bool {
+        match self {
+            ClassUpdate::Unit(i) => units::PORTS[i as usize].joints.contains(&o_class),
+            _ => self.needs_joint_lists() && self.classes().contains(&o_class),
+        }
+    }
 }

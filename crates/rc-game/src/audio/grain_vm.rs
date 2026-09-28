@@ -131,11 +131,13 @@ pub struct Snd989 {
     /// Grain types / tone kinds met but not ported, with counts (see the module docs).
     pub unimplemented: BTreeMap<&'static str, u32>,
     pub tones_started: u64,
+    /// The groups the last `snd_PauseAllSoundsInGroup` named, until continued ([`Snd989::set_groups_paused`]).
+    pub paused_groups: u32,
 }
 
 impl Default for Snd989 {
     fn default() -> Self {
-        Snd989 { vm: VoiceManager::default(), handlers: BTreeMap::new(), next_handle: 1, tick: 0, rng: IopRng::default(), block_reg: [0; 32], unimplemented: BTreeMap::new(), tones_started: 0 }
+        Snd989 { vm: VoiceManager::default(), handlers: BTreeMap::new(), next_handle: 1, tick: 0, rng: IopRng::default(), block_reg: [0; 32], unimplemented: BTreeMap::new(), tones_started: 0, paused_groups: 0 }
     }
 }
 
@@ -231,6 +233,16 @@ impl Snd989 {
 
     pub fn set_master_volume(&mut self, group: usize, vol: i32, spu: &mut Spu) { self.vm.set_master_volume(group, vol, spu); }
 
+    /// The pause flag of every handler whose group is in `mask` (`snd_PauseAllSoundsInGroup` /
+    /// `snd_ContinueAllSoundsInGroup`: OpenGOAL `BlockSoundHandler::Pause` / `Unpause`). Sounds started later play (the
+    /// command acts on the handlers that exist).
+    pub fn set_groups_paused(&mut self, mask: u32, paused: bool) {
+        if paused { self.paused_groups |= mask } else { self.paused_groups &= !mask }
+        for h in self.handlers.values_mut() {
+            if mask & (1 << (h.group & 31)) != 0 { h.paused = paused; }
+        }
+    }
+
     /// One 240 Hz tick of every handler; finished handlers are dropped.
     pub fn tick(&mut self, bank: &Bank, spu: &mut Spu) {
         self.tick += 1;
@@ -239,7 +251,7 @@ impl Snd989 {
             let mut h = self.handlers.remove(&key).unwrap();
             // Voices that ended (envelope stopped, or taken by another tone) leave the handler.
             h.voices.retain(|v| self.vm.owns(spu, v.spu, VoiceUse::Tone { handle: key }));
-            for k in 0..4 { self.lfo_tick(&mut h, k, key, bank, spu); }
+            if !h.paused { for k in 0..4 { self.lfo_tick(&mut h, k, key, bank, spu); } }
             let finished = h.done && h.voices.is_empty();
             if !finished {
                 if !h.paused && !h.done {
@@ -275,7 +287,8 @@ impl Snd989 {
                 if !self.vm.owns(spu, v.spu, VoiceUse::Tone { handle: key }) { continue; }
                 let base = self.vm.make_volume(127, 0, h.cur_volume, h.cur_pan, v.g_vol, v.g_pan);
                 self.vm.voices[v.spu].basevol = base;
-                spu.voices[v.spu].vol = self.vm.voice_registers(base, h.group as usize);
+                // A paused sound keeps its voices silent; the continue applies the new volume.
+                if !h.paused { spu.voices[v.spu].vol = self.vm.voice_registers(base, h.group as usize); }
             }
         }
     }
@@ -283,6 +296,7 @@ impl Snd989 {
     fn update_pitch(&mut self, h: &mut Handler, key: u32, spu: &mut Spu) {
         h.cur_pm = h.app_pm + h.lfo_pm;
         h.cur_pb = (h.app_pb + h.lfo_pb).clamp(i16::MIN as i32, i16::MAX as i32);
+        if h.paused { return; }
         for v in &h.voices {
             if self.vm.owns(spu, v.spu, VoiceUse::Tone { handle: key }) { spu.voices[v.spu].pitch = tone_pitch(&v.tone, h.cur_pb, h.cur_pm); }
         }

@@ -172,6 +172,11 @@ impl Plugin for GameplayPlugin {
                     gs.global.bolts = n;
                     println!("game state: RC_GIVE_BOLTS: {n} bolts");
                 }
+                // RC_GAME_BEATEN=1: the game-beaten flag (save chunk 31) set (debug): the pause menu's Goodies entry (0x2917d8).
+                if std::env::var("RC_GAME_BEATEN").is_ok_and(|v| v.trim() == "1") {
+                    gs.global.game_beaten = 1;
+                    println!("game state: RC_GAME_BEATEN=1: Goodies on the pause menu");
+                }
                 if let Some(ids) = give_items() {
                     use rc_game::inventory::{debug_grant, GrantEquip};
                     // With the ammo `GiveItem` grants (the item record's +0x12), so a given weapon can fire.
@@ -320,15 +325,21 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
 
 /// The hero's hit sink: the moby system's hit log and moby collision (borrowed per call: the moby hook borrows
 /// the services too) and the level collision.
-struct CellHits<'a, 'b> {
+struct CellHits<'a, 'b, 'c> {
     svc: &'a RefCell<&'b mut Services>,
     classes: &'a dyn ClassData,
     coll: &'a Collision,
     /// The particles, for the hand items' calls into the moby world (the Suck Cannon's vortex strands).
     parts: Option<&'a RefCell<Option<&'b mut ParticleSim>>>,
+    /// What else the moby loop's world has, for the hand items' calls into class code (the Suck Cannon's vacuum:
+    /// `bolt::start_fly`'s pickup sound, `pickup::collect`'s `AddAmmo` and sound): the item tables (with Ratchet's
+    /// ammo), the missions, the sound layer and the listener the hero update hears with, Ratchet's moby.
+    items: Option<&'a rc_game::moby_update::classes::pickup::ItemTables>,
+    missions: Option<&'a LevelMissions>,
+    audio: Option<(&'a RefCell<Option<&'c mut crate::audio_out::AudioOut>>, rc_game::audio::voices::Listener, MobyId)>,
 }
 
-impl HitSink for CellHits<'_, '_> {
+impl HitSink for CellHits<'_, '_, '_> {
     fn sphere(&mut self, table: &mut MobyTable, r: rc_game::ps2v::Pf, centre: [rc_game::ps2v::Pf; 4], flags: u32, ignore: Option<MobyId>, tmpl: &HitTemplate) -> Option<MobyId> {
         let mut s = self.svc.borrow_mut();
         ServiceHits { svc: &mut s, classes: self.classes, coll: Some(self.coll) }.sphere(table, r, centre, flags, ignore, tmpl)
@@ -380,9 +391,15 @@ impl HitSink for CellHits<'_, '_> {
     fn world(&mut self, table: &mut MobyTable, hero: &rc_game::hero::Hero, rng: &mut rc_game::rng::Rng, counter: u64, f: &mut dyn FnMut(&mut rc_game::moby_update::services::World)) -> bool {
         let mut s = self.svc.borrow_mut();
         let mut p = self.parts.map(|c| c.borrow_mut());
+        let inv = self.items.map(|i| i.clone().with_hero(hero));
+        let mut a = self.audio.map(|(c, l, h)| (c.borrow_mut(), l, h));
+        let mut sink = a.as_mut().and_then(|(r, l, h)| r.as_deref_mut().map(|o| ClassSoundSink { audio: o.system(), listener: *l, hero: Some(*h) }));
         let mut w = rc_game::moby_update::services::World::new(table, hero, rng, self.classes, &mut s, counter);
         w.coll = Some(self.coll);
         w.particles = p.as_deref_mut().and_then(|p| p.as_deref_mut()).map(|p| &mut p.sys);
+        if let Some(i) = &inv { w.inventory = i; }
+        if let Some(m) = self.missions { w.missions = m; }
+        w.sound = sink.as_mut().map(|s| s as &mut dyn rc_game::moby_update::services::SoundSink);
         f(&mut w);
         true
     }
@@ -408,7 +425,10 @@ fn item_globals(state: Option<&GameState>, session: Option<&SessionState>) -> It
         g.previous = gs.global.last_hand_item;
         g.wrench_flag = gs.global.wrench_held;
     }
-    if let Some(s) = session { g.request = s.temp_hand; }
+    if let Some(s) = session {
+        g.request = s.temp_hand;
+        g.drone = s.drone;
+    }
     g
 }
 
@@ -493,6 +513,10 @@ pub struct Play {
     ratchet_hidden: bool,
     /// The weapon arm layers' joints (Ratchet's joint lists 12 / 13, `rc_game::hero::weapons::ARM_LISTS`).
     arm_joints: [Vec<u8>; 2],
+    /// The help voice line loaded for the dialogue player (rc_game::help::VoiceCmd::Load), played on its `Play`.
+    help_vag: Option<std::sync::Arc<[u8]>>,
+    /// `RC_HUD_HELP=<id>`: the help message forced at the first tick (dev switch; the first-input gate skipped).
+    help_debug: Option<i32>,
 }
 
 impl Play {
@@ -520,6 +544,133 @@ pub fn level_ports() -> &'static rc_game::moby_update::classes::LevelPorts {
         };
         LevelPorts::from_overlays(&target, &overlay, &[EMITTER_UPDATE])
     })
+}
+
+/// The help system's part of the tick (rc_game::help): the hero's help calls and record writes (the Pyrocitor, the
+/// Tesla Claw, the first-person look), the hero update's own hints `0x228498` (its normal update only), then
+/// `Help_Update` with `force_help_message(5, 0)` (`InLevelFrameUpdate` only: the scene / vendor frames run just the
+/// dialogue player's step), its opening sound and the voice line (`help_audio[lang·150 + n]`), and the records and
+/// log back into the saved game.
+fn help_frame(p: &mut Play, report: &rc_game::tick::TickReport, other_frame: bool, gs: Option<&mut GameState>, audio: Option<&mut crate::audio_out::AudioOut>) {
+    use rc_game::help::{self, HelpInputs, VoiceCmd};
+    help::apply_hero(&mut p.svc.help, &mut p.game.hero.help);
+    let h = &p.game.hero;
+    if !other_frame && h.mode == 0 && matches!(report.hero, HeroTick::Ran) {
+        let types: Vec<i32> = p.item_data.as_ref().map_or_else(Vec::new, |d| d.defs.iter().map(|d| d.slot).collect());
+        let counter = p.game.counter as i32 - 1;
+        for (msg, rec) in help::hero_hints(h.state, h.group, &h.owned.0, &types, counter, &p.svc.help.records) { p.svc.help.request(msg, rec); }
+    }
+    if let Some(id) = p.help_debug.take() {
+        p.svc.help.bx.enabled = true;
+        let rec = p.svc.help.log_index(id).unwrap_or(0) as i32;
+        p.svc.help.request = -1;
+        p.svc.help.request(id, rec);
+    }
+    if other_frame {
+        p.svc.help.voice_frame();
+    } else {
+        let (text_on, voice_on) = (p.svc.help.bx.text_on, p.svc.help.bx.voice_on);
+        let inp = HelpInputs { mode: p.svc.game_mode, held: p.game.pad.held, pressed: p.game.pad.pressed, play_time: p.svc.help.play_time, level: p.level as i32, text_on, voice_on };
+        help::tick(&mut p.svc, &inp);
+    }
+    let out = std::mem::take(&mut p.svc.help.out);
+    let mut audio = audio;
+    if let Some(a) = audio.as_deref_mut() {
+        let listener = rc_game::audio::class_sounds::listener_of(&p.game.camera.out);
+        let mut rng = rc_game::rng::Rng::new();
+        for &(index, flags) in &out.sounds { a.system().play_level_sound_at_moby(index, flags, None, None, &listener, &mut rng, p.game.counter); }
+    }
+    for cmd in out.voice {
+        match cmd {
+            VoiceCmd::Load { id } => {
+                let n = p.svc.help.text.lang as i32 * help::VOICE_PER_LANGUAGE + id - help::VOICE_BASE;
+                let root = crate::level_load::extracted_root();
+                let vag = (id >= help::VOICE_BASE).then(|| crate::disc_source::read(&root, &format!("global/help_audio/{n:03}.bin")).ok()).flatten();
+                let len = vag.as_deref().and_then(help::vag_ticks);
+                println!("help: tick {}: voice line {id} (help_audio {n:03}): {}", p.game.counter, len.map_or("missing".to_string(), |t| format!("{t} ticks")));
+                p.help_vag = vag.filter(|_| len.is_some()).map(std::sync::Arc::from);
+                p.svc.help.voice_loaded(len);
+            }
+            VoiceCmd::Play { audible } => {
+                if let (Some(vag), Some(a), true) = (p.help_vag.clone(), audio.as_deref_mut(), audible) {
+                    a.system().scene_command(rc_game::audio::scene::SceneAudioCmd::Speech { vag });
+                }
+            }
+            VoiceCmd::Stop => {
+                // Only a help line still on the speech voice in gameplay (a scene's own speech replaces it).
+                if p.help_vag.take().is_some() && p.svc.game_mode == 0 {
+                    if let Some(a) = audio.as_deref_mut() { a.system().scene_command(rc_game::audio::scene::SceneAudioCmd::StopSpeech); }
+                }
+            }
+        }
+    }
+    if let Some(gs) = gs { p.svc.help.sync_out(gs); }
+}
+
+/// The help system's level data (rc_game::help): the level text and the small font's glyphs (the box sizing), and the
+/// help log's id table 0x1798d0 from the level's overlay (relocated against level 01's).
+fn help_setup(svc: &mut Services, lv: &crate::level_load::LoadedLevel, index: u32) {
+    if let Some(h) = lv.hud.as_ref() {
+        svc.help.text = rc_game::help::HelpText { messages: std::sync::Arc::new(h.messages.clone()), small: Some(h.glyphs[rc_formats::font::Font::Small as usize]), lang: h.lang };
+    }
+    let root = crate::level_load::extracted_root();
+    let (Ok(target), reference) = (crate::disc_source::level_file(&root, index, "overlay.bin"), crate::disc_source::level_file(&root, 1, "overlay.bin").ok()) else {
+        eprintln!("gameplay: overlay not read: no help log table");
+        return;
+    };
+    svc.help.log_ids = std::sync::Arc::new(rc_game::help::load_log_ids(&target, reference.as_deref()));
+}
+
+/// The level entry's map part (`FUN_0025a4c0`, rc_game::map): the overlay's tables, the level's map file (the
+/// Map-o-Matic set when owned[33]) and its fog mask (the saved chunk 3002, else the zone tiles).
+fn map_setup(svc: &mut Services, index: u32, gs: Option<&GameState>) {
+    let root = crate::level_load::extracted_root();
+    let (Ok(target), Ok(reference)) = (crate::disc_source::level_file(&root, index, "overlay.bin"), crate::disc_source::level_file(&root, 1, "overlay.bin")) else {
+        eprintln!("gameplay: overlay not read: no map");
+        return;
+    };
+    let Some(tables) = rc_game::menus::Overlay::relocated(&target, &reference).ok().and_then(|ov| rc_game::map::Tables::read(&ov)) else {
+        eprintln!("gameplay: map tables not found: no map");
+        return;
+    };
+    let owned = gs.is_some_and(|g| g.global.owned[rc_game::map::MAP_O_MATIC] != 0);
+    let file = map_file(rc_game::map::file_index(index as usize, owned));
+    let saved = gs.and_then(|g| g.levels.get(index as usize)).map_or(Vec::new(), |l| l.map_mask.to_vec());
+    svc.map = rc_game::map::MapState::enter(&tables, index as i32, owned, file, &saved);
+    println!(
+        "gameplay: map {} (file {}), {} of {} pixels fogged",
+        if svc.map.file.is_some() { "loaded" } else { "missing" },
+        rc_game::map::file_index(index as usize, owned),
+        svc.map.mask.fogged_count(),
+        rc_game::map::SIZE * rc_game::map::SIZE
+    );
+}
+
+/// Map file `index` of the global TOC field 0x820 (`global/unknown_0820/NNN.bin`), WAD-decompressed.
+pub fn map_file(index: usize) -> Option<rc_game::map::MapFile> {
+    let root = crate::level_load::extracted_root();
+    let f = rc_formats::disc::RAC1_GLOBAL_FIELDS.iter().find(|f| f.offset as u32 == rc_game::map::FIELD)?;
+    let raw = crate::disc_source::read(&root, &format!("global/{}/{index:03}.bin", f.name)).ok()?;
+    let bytes = if rc_formats::wad::is_wad(&raw) { rc_formats::wad::decompress(&raw).ok()? } else { raw.to_vec() };
+    rc_game::map::MapFile::parse(bytes)
+}
+
+/// The fog writer after the hero update (`FUN_0025c4f8` from 0x228a1c unless movement group 22 or state 50, and
+/// always from the alternative update 0x228088 of the other player modes).
+fn map_tick(p: &mut Play, report: &rc_game::tick::TickReport, gs: Option<&GameState>) {
+    if !matches!(report.hero, HeroTick::Ran) { return; }
+    let h = &p.game.hero;
+    if h.mode == 0 && (h.group == 22 || h.state == 50) { return; }
+    let inp = rc_game::map::FogInput {
+        pos: [h.pos[0].to_f32(), h.pos[1].to_f32(), h.pos[2].to_f32()],
+        level: p.level as i32,
+        alt: p.svc.map.alt,
+        group: h.group,
+        f0634: h.f0634,
+        magnetic: h.f658,
+    };
+    let flags = gs.map_or([0u8; 128], |g| g.global.flags);
+    p.svc.map.reveal(&inp, &flags);
 }
 
 /// The loaded level's ported class reaction tables (`rc_game::moby_update::creature::react::tables_from_overlay`: the
@@ -598,7 +749,7 @@ fn class_table(lv: &crate::level_load::LoadedLevel, ext: &dyn Fn(i16) -> Option<
 /// The joint lists of the classes whose update reads joint points (`rc_game::moby_update::classes::needs_joint_lists`,
 /// `Services::joint_lists`), from their blobs in the level core (as `menu_render::load_frame_class`).
 fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
-    class_joint_lists_where(lv, |o| level_ports().get(o).is_some_and(|u| u.needs_joint_lists()))
+    class_joint_lists_where(lv, |o| level_ports().needs_joint_lists(o))
 }
 
 /// [`class_joint_lists`] for the level's classes `want` picks.
@@ -841,11 +992,16 @@ fn setup(
     // The moby loop's services and the load pass (counter 0) on the game's stream.
     let mut svc = Services::new();
     svc.level = level_index;
+    // The help system (rc_game::help): the level text and small font it sizes with, the help log's id table.
+    help_setup(&mut svc, lv, level_index);
+    // The map system's level entry (rc_game::map, FUN_0025a4c0): tables, the level's map file, its fog mask.
+    map_setup(&mut svc, level_index, state.as_ref().map(|s| &s.0));
     // The class reaction tables of the level's `lvl.vtbl` (rc_game::moby_update::creature::react).
     svc.creatures.react.tables = level_reactions().clone();
     // The level's water (rc_game::water::world: the ripple managers' tables, the module, the underwater look).
     if let Some(d) = lv.water.data.clone() { svc.water = rc_game::water::world::WaterWorld::new(d); }
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }
+    svc.pvar_shared = rc_formats::gameplay::parse_pvar_shared_data(&lv.gameplay).unwrap_or_default();
     // The volume sections (cuboids, spheres, cylinders, pills, paths, grind paths) for the trigger tests.
     match rc_formats::volumes::parse_volumes(&lv.gameplay) {
         Ok(v) => {
@@ -987,6 +1143,8 @@ fn setup(
         sounds: HashMap::new(),
         ratchet_hidden: false,
         arm_joints,
+        help_vag: None,
+        help_debug: std::env::var("RC_HUD_HELP").ok().and_then(|v| v.trim().parse().ok()),
         debug_hits: std::env::var("RC_DEBUG_HIT").ok().map(|v| {
             v.split(',').filter_map(|h| {
                 let (a, b) = h.trim().split_once('@')?;
@@ -1282,6 +1440,9 @@ fn tick(
         p.game.hero.weapons.ammo = gs.0.global.ammo;
         p.game.hero.owned.0 = gs.0.global.owned;
         svc_cell.borrow_mut().interact.sync_game(&gs.0);
+        // The help records, log, play time and options (rc_game::help), and the hero's copy of the records.
+        svc_cell.borrow_mut().help.sync_in(&gs.0);
+        p.game.hero.help.records = svc_cell.borrow().help.records.clone();
         // Max health 0x15eda0 (the nanotech orbs heal up to it) and the bolt grabber 0x13d4e2 (item 34: the pickup
         // volume 12 / 4.5).
         svc_cell.borrow_mut().counters.max_hp = gs.0.global.max_hp;
@@ -1298,7 +1459,7 @@ fn tick(
         p.game.hero.back_slot.slot.request = s.0.temp_back;
         p.game.hero.back_slot.clank_hidden = s.0.clank_hidden;
     }
-    let mut hits = CellHits { svc: &svc_cell, classes, coll, parts: Some(&parts_cell) };
+    let mut hits = CellHits { svc: &svc_cell, classes, coll, parts: Some(&parts_cell), items: Some(&item_base), missions: Some(missions), audio: Some((&audio_cell, class_sounds::listener_of(&p.game.camera.out), hero_id)) };
     // The sound step (after the camera, before the counter increment).
     let mut sound = |table: &MobyTable, hero: &Hero, cam: &CameraView, rng: &mut Rng, counter: u64| {
         let mut audio_ref = audio_cell.borrow_mut();
@@ -1332,6 +1493,7 @@ fn tick(
     }
     if let Some(s) = session.as_mut() {
         if s.0.temp_hand != g.request { s.0.temp_hand = g.request; }
+        if s.0.drone != g.drone { s.0.drone = g.drone; }
         let b = p.game.hero.back_slot.slot.request;
         if s.0.temp_back != b { s.0.temp_back = b; }
         let (f, h) = (p.game.hero.feet_slot.request, p.game.hero.head_slot.request);
@@ -1366,6 +1528,10 @@ fn tick(
             rc_game::hero::melee::apply_melee_stats(&mut p.game.hero.melee, &mut gs.0, &s.0);
         }
     }
+    // The help system (rc_game::help), then the play time 0x15eea4 (`FUN_002ab960` at the tick's end).
+    help_frame(p, &report, scene_frame || world_frame, state.as_deref_mut().map(|s| &mut s.0), audio_cell.borrow_mut().as_deref_mut());
+    map_tick(p, &report, state.as_deref().map(|s| &s.0));
+    if let Some(gs) = state.as_mut() { gs.0.global.play_time += 1; }
     // Moby sounds: queued and counted (no moby-sound entry in rc_game::audio yet).
     for ev in p.svc.sounds.drain(..) { *p.sounds.entry((ev.o_class, ev.index)).or_default() += 1; }
     // The talk system's saved-game writes (moby_update::interact::GameWrite).

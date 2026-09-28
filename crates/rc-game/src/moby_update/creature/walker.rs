@@ -219,3 +219,124 @@ pub fn step(w: &mut World, id: MobyId, j: usize, k: f32, target: V, out: &mut V)
     if d < w32(w, id, j, 11) { r |= 4; }
     r
 }
+
+/// `0x26de80(m, J, target, &out)`: the walk toward `target`: `out` cleared; bit 4 when within J11 (3-D); the turn
+/// (`SpringTurn2(heading, J15, J16, J17, m, &J5)`); bit 0x10 when facing away by J10 or more; the step timer J18
+/// (`FastDecTimer`, and kept at least 4 ticks while facing within J10); while it runs, [`step`] scaled by how well it
+/// faces the target (`(J10 − diff) / J10`), its bit 1 dropped when more than 0.1 off. Returns the bits. The mouse 1818
+/// (its record in its pvars) and the Glove of Doom's bots 186 (the globals 0x141210, kept per bot) use it.
+pub fn walk_to(w: &mut World, id: MobyId, j: usize, target: V, out: &mut V) -> u32 {
+    *out = [0.0; 4];
+    let mut r = 0;
+    if super::dist3(super::pos(w, id), target) < w32(w, id, j, 11) { r = 4; }
+    let p = super::pos(w, id);
+    let a = super::atan(target[0] - p[0], target[1] - p[1]);
+    let (acc, damp, max) = (w32(w, id, j, 15), w32(w, id, j, 16), w32(w, id, j, 17));
+    super::turn::spring_turn2_pvar(w, id, a, acc, damp, max, j + 0x14);
+    let d = super::diff_rots(a, super::yaw(w, id));
+    let lim = w32(w, id, j, 10);
+    if lim <= d { r |= 0x10; }
+    let t4 = w.ticks(4);
+    let mut tm = super::pi32(w, id, j + 0x48);
+    super::dec_timer_i32(&mut tm);
+    if d < lim && tm < t4 { tm = t4; }
+    super::set_pi32(w, id, j + 0x48, tm);
+    if tm != 0 {
+        let s = step(w, id, j, (lim - d) / lim, target, out);
+        r = if 0.1 < d { r | (s & !2) } else { r | s };
+    }
+    r
+}
+
+/// `0x26d270(up, radius, max_dz, max_slope, moby, &from, &to, flags)`: a free move from `from` to `to` over the ground
+/// (the chicken 270's walk; census: 749, 238, 1023, 294 and the floating pushables 695 call it too). Returns 1 when the
+/// move went through untouched, 0 when it was refused or pushed; `to` is the point reached (z as the pushes left it)
+/// and `from.xy` becomes `to.xy` (the caller's copy of the position; its z is not written).
+///
+/// 1. The ground under `to` (`GroundHeight(0.5, to + up, 0x20)`, `0x26e690`): more than `max_dz` from `from.z` → back
+///    to `from` (0) — going up always, going down only without flag 1.
+/// 2. Unless refused, a line from `from + up` along the move, `1.2·radius` long (flags `(flags & 2) | 0x24`): a
+///    world face (`CollOutput +0x1c > 0`) whose slope from vertical is at least `max_slope` slides the move along the
+///    wall (the normal flattened and normalised; the part of the move into it removed; 0); any such hit sets
+///    `to = from + move`.
+/// 3. Without flag 2, up to six sphere push-outs (radius `radius`, centre `to + up + radius`, flags 0x24): a moby hit,
+///    or a hit point whose elevation from `to` exceeds `max_slope`, moves `to` to the pushed centre (0).
+/// 4. The ground test of 1 again on the result.
+#[allow(clippy::too_many_arguments)]
+pub fn move_ground(w: &mut World, id: MobyId, up: f32, radius: f32, max_dz: f32, max_slope: f32, from: &mut V, to: &mut V, flags: u32) -> i32 {
+    move_ground_in(w, id, [up, radius, max_dz, max_slope], from, Some(to), flags)
+}
+
+/// [`move_ground`] with `from` and `to` the same point (the chicken's "stay" calls pass one buffer for both): the
+/// line of 2 has no length, the push-outs of 3 move the point (and so the `from` of the ground tests).
+#[allow(clippy::too_many_arguments)]
+pub fn settle(w: &mut World, id: MobyId, up: f32, radius: f32, max_dz: f32, max_slope: f32, p: &mut V, flags: u32) -> i32 {
+    move_ground_in(w, id, [up, radius, max_dz, max_slope], p, None, flags)
+}
+
+fn move_ground_in(w: &mut World, id: MobyId, k: [f32; 4], from: &mut V, to: Option<&mut V>, flags: u32) -> i32 {
+    let [up, radius, max_dz, max_slope] = k;
+    let alias = to.is_none();
+    let mut own = *from;
+    let to: &mut V = match to { Some(t) => t, None => &mut own };
+    let mut ok = 1;
+    let ground_z = |w: &World, p: V| -> f32 {
+        let mut q = p;
+        q[2] += up;
+        // FUN_0026e690 = GroundHeight(0.5, q, 0x20).
+        super::ground::ground(w, q, 0.5, 0x20).z
+    };
+    let refuse = |g: f32, from: &V| max_dz < (g - from[2]).abs() && ((flags ^ 1) & 1 != 0 && g < from[2] || from[2] < g);
+    let g = ground_z(w, *to);
+    if refuse(g, from) {
+        *to = *from;
+        ok = 0;
+    }
+    let mut d = if alias { [0.0; 4] } else { sub(*to, *from) };
+    let dir = set_len3(d, radius * 1.2);
+    let mut a = *from;
+    a[2] += up;
+    let b = super::add(a, dir);
+    if ok != 0 && !alias {
+        if let Some(o) = w.coll_line(pv(a), pv(b), (flags & 2) | 0x24, Some(id)) {
+            if 0 < o.kind {
+                let n = [o.normal[0], o.normal[1], o.normal[2], 0.0];
+                let slope = super::atan(n[2], len2(n));
+                if max_slope <= slope {
+                    let flat = set_len3([n[0], n[1], 0.0, 0.0], 1.0);
+                    let into = -d[0] * flat[0] - d[1] * flat[1];
+                    if 0.0 < into {
+                        ok = 0;
+                        d = super::add(d, scale(flat, into));
+                    }
+                }
+                *to = super::add(*from, d);
+            }
+        }
+    }
+    if flags & 2 == 0 {
+        let lift = up + radius;
+        for _ in 0..6 {
+            let mut c = *to;
+            c[2] += lift;
+            let Some(o) = w.coll_sphere(pv(c), crate::moby_update::services::pf(radius), 0x24, Some(id)) else { break };
+            let hp = [o.point[0], o.point[1], o.point[2], 0.0];
+            let elev = super::atan(len2(sub(*to, hp)), hp[2] - to[2]);
+            if o.moby.is_some() || max_slope < elev {
+                if let Some(pc) = o.pushed_centre { *to = [pc[0], pc[1], pc[2], to[3]]; }
+                ok = 0;
+                to[2] -= lift;
+                if alias { *from = *to; }
+            }
+        }
+    }
+    let g = ground_z(w, *to);
+    if refuse(g, from) {
+        *to = *from;
+        ok = 0;
+    }
+    let (x, y) = (to[0], to[1]);
+    from[0] = x;
+    from[1] = y;
+    ok
+}

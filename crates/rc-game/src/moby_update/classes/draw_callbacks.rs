@@ -42,6 +42,17 @@ pub enum Callback {
     /// A Thruster-Pack flame 0xa7 (level01 `0x2c9290`, list 2): its frame from the pack's pose and four `randf` corner
     /// jitters here ([`super::thruster_flame::draw_callback`]); `rc-engine`'s thruster_render draws it.
     ThrusterFlame,
+    /// A census unit port's glow callback (`super::units::PORTS[i]`; draw only): the glow quads (`0x2781d0`)
+    /// [`super::units::glow_quads`] lists for it (the lamps 1060's `0x2df3d8`, …); `rc-engine`'s fx_draw draws them.
+    UnitGlow(u16),
+    /// The Walloper's arcs and fist glow (level01 `0x2d1768`, list 2), registered by the hand item's update
+    /// (`crate::hero::walloper`; the hand item is not a table moby: registered on Ratchet's). The state part is the
+    /// glow's `randi(4)` flicker (`0x2d1e08`), stored in [`DrawCallbacks::walloper_dim`]; `rc-engine`'s walloper_render
+    /// draws it.
+    Walloper,
+    /// The Visibomb range limiter 832's static (level01 `0x302438`, list 2): its `randi(32)` pairs and quads here
+    /// ([`super::rc_range::draw_callback`]); `rc-engine`'s visibomb_view draws them.
+    RangeStatic,
 }
 
 /// The lists (registration order).
@@ -57,6 +68,9 @@ pub struct DrawCallbacks {
     /// For the draw-only callbacks that draw in a joint's frame (the ship glass: `0x264508(m, 0, M)`): the matrix
     /// (rows x, y, z, point) of the registering moby this tick, taken where the port has the pose (a scene actor's).
     pub matrices: std::collections::HashMap<MobyId, [[f32; 4]; 4]>,
+    /// The Walloper glow's flicker drawn by the last [`run_frame`] (`randi(4) ≠ 0`: the dim colour 0x307f4040, else the
+    /// bright 0x7f7f4040); None: no Walloper draw ran.
+    pub walloper_dim: Option<bool>,
 }
 
 impl DrawCallbacks {
@@ -96,8 +110,13 @@ pub fn run_frame(w: &mut World) {
         match cb {
             Callback::FireField760 => super::fire_field::draw_callback(w, id),
             Callback::ThrusterFlame => super::thruster_flame::draw_callback(w, id),
+            Callback::RangeStatic => super::rc_range::draw_callback(w, id),
+            Callback::Walloper => {
+                let dim = w.rng.randi(4) != 0;
+                w.svc.draw_callbacks.walloper_dim = Some(dim);
+            }
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
-            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) => {}
+            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) => {}
         }
     }
 }

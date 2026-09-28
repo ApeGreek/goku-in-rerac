@@ -232,7 +232,26 @@ fn range_on(level: u32) {
         lv.tick(&h);
         assert_eq!(p::i32(&lv.table.mobys[ctl].pvars, rc_range::COUNTER), 0, "level {level:02}: back in range");
     }
-    assert!(lv.svc.fx.unported.contains_key("832 static overlay 0x302438"));
+    // Out of range again with the missile view on (0x15f30c, set by the launch `0x2cb338`): the static 0x302438 is
+    // registered on list 2 and drawn by the next frame (a 17 × 14 grid of quads); past ticks(90) outside the flight
+    // ends (0x2cb788: the missile deleted, Ratchet's SetState(0, 1)).
+    lv.svc.visibomb.view.overlay = true;
+    lv.table.mobys[missile].pvars.resize(0x80, 0);
+    lv.table.mobys[missile].position = [3.0, 3.0, 1000.0, 1.0];
+    lv.tick(&h);
+    assert_eq!(p::i32(&lv.table.mobys[ctl].pvars, rc_range::COUNTER), 1);
+    use rc_game::moby_update::classes::draw_callbacks::Callback;
+    assert!(lv.svc.draw_callbacks.list2.iter().any(|&(c, id)| c == Callback::RangeStatic && id == ctl), "level {level:02}: the static registered");
+    lv.tick(&h);
+    assert_eq!(lv.svc.visibomb.static_quads.len(), 17 * 14, "level {level:02}: the static drawn");
+    for _ in 0..88 { lv.tick(&h); }
+    assert_eq!(p::i32(&lv.table.mobys[ctl].pvars, rc_range::COUNTER), 90);
+    assert!(lv.table.mobys[missile].state < 0x80, "still flying at 90 ticks out");
+    lv.tick(&h);
+    assert!(lv.table.mobys[missile].state >= 0x80, "level {level:02}: the flight ended past ticks(90)");
+    let calls = lv.svc.hero_writes.as_ref().map(|(_, f)| f.calls).unwrap_or_default();
+    assert!(calls.contains(&Some(rc_game::moby_update::services::HeroCall::SetState { id: 0, play: true })), "{calls:?}");
+    assert!(!lv.svc.visibomb.view.overlay && lv.svc.visibomb.missile.is_none());
 }
 
 #[test]

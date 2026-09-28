@@ -242,8 +242,8 @@ chunk_struct! {
     LevelState {
         /// 0x13dd58: 0 never, 1 visited, 2 left / completed.
         3001 visited: u8,
-        /// 0x141ec0: packed moby / map state (codec 0x1fa860 not ported: opaque bytes).
-        3002 moby_pack: [u8; 0x800],
+        /// 0x141ec0: the level's map fog mask as the saves pack it (`crate::map::Mask::pack` / `unpack`).
+        3002 map_mask: [u8; 0x800],
         /// 0x14bec0: gold bolts collected.
         3003 gold_bolts: [u8; 4],
         /// 0x14c050: mission bytes (0xff done).
@@ -294,10 +294,13 @@ pub struct SessionState {
     pub clank_hidden: i16,
     /// 0x15ed68: `fun_001f96f8` tick scale (1.0 NTSC).
     pub tick_scale: f32,
+    /// 0x141345: launch the Drone Device's drones (the quick select / the vendor set it; the hand swap takes it:
+    /// `crate::hero::items::ItemGlobals::drone`).
+    pub drone: bool,
 }
 
 impl Default for SessionState {
-    fn default() -> Self { SessionState { hp: 0, temp_hand: 0, temp_feet: 0, temp_head: 0, temp_back: 0, clank_hidden: 0, tick_scale: 1.0 } }
+    fn default() -> Self { SessionState { hp: 0, temp_hand: 0, temp_feet: 0, temp_head: 0, temp_back: 0, clank_hidden: 0, tick_scale: 1.0, drone: false } }
 }
 
 impl SessionState {
@@ -473,7 +476,8 @@ impl GameState {
     /// the clock (chunk 4, kept), then — with `pretend` = Some(p) — encodes the global section with
     /// `level = p` and `visited[p]` raised to 1 if 0 (both only for the save), and writes it plus the
     /// **current** level's section; the other sections of `card_file` are left as they were. Landmark
-    /// capture (0x208770) and the 3002 packer (0x207b08) are not ported: those chunks save as held.
+    /// capture (0x208770) is not ported (chunk 15 saves as held); the 3002 packer is `crate::map::MapState::pack`, which
+    /// the caller runs first (the game's `memcard_Save` packs the current level's mask before it writes).
     pub fn save_incremental(&mut self, card_file: &mut [u8], pretend: Option<i32>, clock: [u8; 8]) -> Result<()> {
         self.global.save_clock = clock;
         let cur = self.global.level;

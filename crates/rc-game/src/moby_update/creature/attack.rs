@@ -50,3 +50,33 @@ pub fn group_command(w: &mut World, group: i8, v: u8) {
         if let Some(m) = w.table.mobys.get_mut((e & 0x7fff) as usize) { m.cmd = v; }
     }
 }
+
+/// `coll_sphere_mobys(r, centre, 0x10, attacker, 0)` then `0x26f8f8(damage, push, push_z, attacker, &centre, list, n,
+/// ignore, flags, type, subtype)`: every moby the sphere lists (but `ignore`) gets a hit (`0x26e968`) pushing it away
+/// from `centre` — dir `(cos a·push, sin a·push, push_z)` with `a` the heading from `centre` to it and the exact-push
+/// marker w = 5627.925 — from `attacker` (its class at +0x1a), `flags` at +0x14 and +0x20, the type bytes, `damage`.
+/// The chicken 270's gold burst uses it (the Bomb Glove's and the Devastator's blasts call the same code with their
+/// own values). Returns the number of mobys listed.
+#[allow(clippy::too_many_arguments)]
+pub fn area_hit(w: &mut World, r: f32, centre: V, attacker: MobyId, damage: f32, push: f32, push_z: f32, ignore: Option<MobyId>, flags: u32, b18: u8, b19: u8) -> usize {
+    use crate::moby_update::services::{pf, pv, sphere_mobys_in};
+    let list = sphere_mobys_in(w.table, w.svc, w.classes, pf(r), pv(centre), 0x10, Some(attacker), None);
+    area_push(w, &list, centre, attacker, damage, push, push_z, ignore, flags, b18, b19);
+    list.len()
+}
+
+/// `0x26f8f8(damage, push, push_z, attacker, &centre, list, n, ignore, flags, type, subtype)` on a list a caller made
+/// itself (the Glove of Doom's bots list with their own sphere, `coll_sphere_mobys(1, pos + 0.5 up, 0x15)`, and push
+/// from their position): each listed moby but `ignore` gets the hit of [`area_hit`].
+#[allow(clippy::too_many_arguments)]
+pub fn area_push(w: &mut World, list: &[MobyId], centre: V, attacker: MobyId, damage: f32, push: f32, push_z: f32, ignore: Option<MobyId>, flags: u32, b18: u8, b19: u8) {
+    use crate::moby_update::services::{pf, HitTemplate};
+    let class = w.m(attacker).o_class as u16;
+    for &t in list {
+        if Some(t) == ignore { continue; }
+        let q = w.m(t).position;
+        let a = super::atan(q[0] - centre[0], q[1] - centre[1]);
+        let tmpl = HitTemplate { dir: [pf(a.cos() * push), pf(a.sin() * push), pf(push_z), Pf::b(0x45af_df66)], attacker: Some(attacker), flags, b18, b19, h1a: class, damage: pf(damage), w20: flags };
+        w.deliver_hit(t, &tmpl);
+    }
+}

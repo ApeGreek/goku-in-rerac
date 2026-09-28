@@ -168,10 +168,10 @@ pub struct HeroFx {
     /// The hand item's looping class sounds' slots, by channel: [`LOOP_FLAME`] the item update's own loop (the
     /// Pyrocitor's flame +0x4a), [`LOOP_HUM`] the Tesla Claw's hum (+0x48), [`LOOP_CLICK`] the Blaster's empty click (its pvar +0x0c,
     /// kept while it plays), [`LOOP_SEQ`] the item's sequence loop sound (moby +0x7d: the Blaster's firing sequence 4).
-    pub item_loops: [Option<i32>; 5],
+    pub item_loops: [Option<i32>; 6],
     /// Whether each [`HeroFx::item_loops`] slot was still playing at the last flush (`SoundIsAlive` as the next
     /// update reads it: the Taunter's whistle).
-    pub item_loop_alive: [bool; 5],
+    pub item_loop_alive: [bool; 6],
     /// The class sound [`LOOP_SEQ`]'s slot plays (the item's +0x7c when it was started).
     pub seq_loop: Option<i32>,
     /// Footsteps the transitions played this tick (`HeroFootstepSound(class, foot, 1)` of the landing), in order:
@@ -204,6 +204,9 @@ pub const LOOP_HUM: usize = 3;
 /// The Suck Cannon's suction (class sound 2, its pvar +0x04) and the Taunter's whistle (its pvar +0x04): their own
 /// channel (channel 0 is released every tick by the Pyrocitor's `item_gone` when another item is in the hand).
 pub const LOOP_ITEM: usize = 4;
+/// The Morph-o-Ray's beam hum (class sound 0 looping; the game keeps its slot in its own global 0x1617f8): its own
+/// channel, so no other item's release can cut it.
+pub const LOOP_MORPH: usize = 5;
 
 /// A camera shake request (the writer's stores into 0x167260 for [`ShakeAxis::Up`], 0x167270 for
 /// [`ShakeAxis::Forward`]): `amp` units for `ticks` ticks.

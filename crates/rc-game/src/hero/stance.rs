@@ -62,6 +62,8 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, _old_sub: i3
         1 => {
             h.f15d4 = 4;
             h.group = 0;
+            // gp−0x7578 (0x15f688): the first-person look timer (crate::help::HeroHelp).
+            h.help.look_timer = super::physics::ticks(0x3c);
             let s = h.stance_seq();
             if h.f13fa == 0 && c.anim.view().seq_b != s && play { h.set_anim(c.anim, c.rng, blend(18), s, 0); }
         }
@@ -113,12 +115,18 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, _old_sub: i3
 
 /// The look stances' turn under the first-person camera (the ground case of `0x2370b8` with state 1 / 0x1e and
 /// 0x1413f5): the stick direction 0x13f4c0 = the camera's forward, the target yaw = the camera's 0x167258, and
-/// `TurnTo(1, 0, 10000°/s)` (Ratchet faces the view at once). The 60-tick stats timer of the first-person view
-/// (`gp−0x7578`, record 0x1418d8) is not applied.
+/// `TurnTo(1, 0, 10000°/s)` (Ratchet faces the view at once). Then the look statistic: the timer `gp−0x7578` (0x15f688,
+/// `ScaleTicks(60)` from SetState 1) runs out → move record 18 (0x1418d8) bumped, the timer −1 and the look count
+/// `gp−0x7574` (0x15f68c) + 1 (the Novalis help director reads both).
 pub(super) fn first_person_turn(h: &mut Hero, env: &Env) {
     h.stick_world = env.cam_rows[0];
     h.target_yaw = env.cam_yaw;
     h.turn_to(SCALE64, SCALE64 * Pf::ZERO, DT * Pf::b(0x432e_886e));
+    if 0 < h.help.look_timer && crate::moby_update::creature::dec_timer_i32(&mut h.help.look_timer) != 0 {
+        h.help.out.push(crate::help::HeroHelpOut::BumpMove(18));
+        h.help.look_timer = -1;
+        h.help.looks += 1;
+    }
 }
 
 /// Per-state physics; false = not ported (the hero freezes).

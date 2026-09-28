@@ -18,7 +18,8 @@
 //! and within 55° of Ratchet's facing (seen from Ratchet), the record's +0x18 = the Taunter unless a nearer lure holds
 //! it; the crates 500 / 501 / 505 / 511 within 12 in the same cone count, and the `randi(max(+0x14, 1))`-th of them
 //! gets a hit (`0x26eaa8`: damage 1, flags 0x10000, from Ratchet's feet, 1.5 along taunter → crate). The Mine Glove's
-//! mines (list 0x1b0c30: pvar +0x78 = the Taunter) are the second loop (the mines are batch 2: not ported).
+//! mines (list 0x1b0c30: pvar +0x78 = the Taunter) are the second loop (within the reach in xy and 55° of Ratchet's
+//! facing; `crate::moby_update::classes::mine` triples its seek reach while lured).
 //!
 //! **Native / inferred.** Standard `f32`. [L] The hand item is not a table moby: the lure's position and the lure moby
 //! are Ratchet's (the whistle sits in his hand; the classes only test the field for non-zero); the whistle's
@@ -27,7 +28,7 @@
 //! each whistle and its lures lasted one tick). **The rings** ([`Rings`], `0x2cd000` + draw callback `0x2cd1d0`):
 //! while the whistle sequence plays, a ring every 10 ticks leaves the horn (the item's joint list 0) along −row 1 at
 //! 20 u/s for 30 ticks, growing from 0.3 to 10 and fading from alpha 0x14 (FX 8, colour 0x7f5050, additive: faint by
-//! the game's constants). Not ported: the stats 0x1416f0.., the mines' lure (batch 2).
+//! the game's constants). Not ported: the stats 0x1416f0...
 
 use super::items::{HitSink, ItemEnv};
 use super::packs::SoundCmd;
@@ -321,6 +322,19 @@ pub fn lure(w: &mut World, list: &[MobyId], from: [f32; 3], range: f32, crates: 
                 c::set_pi32(w, m, slot, me as i32 + 1);
                 out.push(m);
             }
+        }
+    }
+    // The second loop: the Mine Glove's mines (list 0x1b0c30: the table's mines, not deleted) within `range` (xy) and
+    // 55° of Ratchet's facing are lured (+0x78; `classes::mine` triples its reach and clears it each tick).
+    use crate::moby_update::classes::mine;
+    let mines: Vec<MobyId> = w.table.mobys.iter().enumerate().filter(|(_, x)| x.o_class == mine::CLASS && x.state < 0x80).map(|(i, _)| i).collect();
+    for m in mines {
+        let p = c::pos(w, m);
+        if !(c::dist2(at, p) < range) { continue; }
+        if diff_rots(hyaw, c::atan(p[0] - hp[0], p[1] - hp[1])) < CONE {
+            if w.m(m).pvars.len() < mine::pv::SIZE { w.mm(m).pvars.resize(mine::pv::SIZE, 0); }
+            c::set_pi32(w, m, mine::pv::LURED, me as i32 + 1);
+            out.push(m);
         }
     }
     (out, t10)

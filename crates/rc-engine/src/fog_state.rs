@@ -31,7 +31,7 @@ use crate::fly_cam::FlyCam;
 use crate::game_camera::{game_eye, GameFog, LevelFog, TfragFog};
 use crate::tfrag_render::game_to_bevy;
 use anyhow::{Context, Result};
-use bevy::core_pipeline::fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin};
+use bevy::core_pipeline::fullscreen_material::FullscreenMaterial;
 use bevy::ecs::schedule::ScheduleConfigs;
 use bevy::ecs::system::BoxedSystem;
 use bevy::prelude::*;
@@ -94,6 +94,8 @@ pub struct FogState {
     /// For the log line: the zone and t last printed.
     last_zone: Option<usize>,
     last_t: f32,
+    /// The Visibomb's saved fog and the last of its writes applied (crate::visibomb_view).
+    visibomb: crate::visibomb_view::FogSwap,
 }
 
 impl FogState {
@@ -110,6 +112,7 @@ impl FogState {
             force_underwater: match env("RC_UNDERWATER").as_deref() { Some("1") => Some(true), Some("0") => Some(false), _ => None },
             last_zone: None,
             last_t: 0.0,
+            visibomb: Default::default(),
         }
     }
 
@@ -147,7 +150,7 @@ pub struct FogStatePlugin;
 
 impl Plugin for FogStatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(FullscreenMaterialPlugin::<UnderwaterTint>::default())
+        app.add_plugins(crate::gs_post::GsPostPlugin::<UnderwaterTint>::default())
             .configure_sets(PostUpdate, FogSet.before(crate::occlusion::OcclusionSet))
             .add_systems(PostUpdate, update_fog_state.in_set(FogSet))
             .add_systems(
@@ -187,6 +190,8 @@ fn update_fog_state(
 ) {
     let Some(mut state) = state else { return };
     let state = &mut *state;
+    // The Visibomb's missile view writes the level fog globals during the ticks (crate::visibomb_view).
+    if let Some(p) = play.as_deref() { crate::visibomb_view::apply_fog(&p.svc.visibomb, &mut state.level, &mut state.underwater.flag, &mut state.visibomb); }
     // 1. UpdateFog (end of the previous frame's render): what this frame draws with.
     let (view, far12) = fog_zones::update_fog(&state.level, state.underwater.flag, &state.look);
     let view = LevelFog::from_globals(&view);
@@ -201,6 +206,9 @@ fn update_fog_state(
     let was = state.underwater.flag;
     if let Some(forced) = state.force_underwater {
         state.underwater.flag = forced;
+    } else if play.as_deref().is_some_and(|p| p.game.camera.type6_active()) {
+        // UnderwaterTest 0x20e9f0: 0 while the active camera is of type 6 (`+0x86 == 6`: the Visibomb's view).
+        state.underwater.flag = false;
     } else if let Some(mesh) = &state.mesh {
         // Water height: 0x26ed38 = the level's water (`Services::water`: the active ripple patch, then the flat
         // plane), falling back to the hit point; without the game tick the plugin's Novalis ripples.

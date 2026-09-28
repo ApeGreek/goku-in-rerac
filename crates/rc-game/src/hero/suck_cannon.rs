@@ -38,8 +38,14 @@
 //! `randi(10)`; on 0 a bolt or an ammo pickup within 30 of Ratchet and near a strong node is taken. **Sounds**: the
 //! suction loop (class sound 2) on its own channel ([`super::fx::LOOP_ITEM`]: channel 0 is released every tick by the
 //! Pyrocitor's `item_gone` when another item is in the hand — the cause of the "sucks for a moment" report).
-//! Not ported: the held-count HUD element (`queue_animation_update(4, 0x753f, …)`), the stats 0x1416c8.., the gold
-//! cannon 0x13e529 (not mirrored: 5 slots), the input latch 0x13cae8.
+//! **What it takes** (docs/plan/hero_gameplay.md §10.2, the full coverage table): the pull only mobys whose class has a
+//! reaction table (never a crate: every crate class keeps the default table on all 19 levels), the vacuum only bolts
+//! and the 8 ammo pickups. Its calls into class code run on the moby world the hit sink builds, with the moby loop's
+//! item tables and sound layer (the vacuumed bolts' pickup sound `bolt::start_fly`, `pickup::collect`'s `AddAmmo`,
+//! whose hero-block write goes to Ratchet in the same tick).
+//! Not ported: the held-count HUD element (`queue_animation_update(4, 0x753f, …)`: G-UI-011), the stats 0x1416c8..
+//! (G-SAV-009), the gold cannon 0x13e529 (not mirrored: 5 slots; G-WPN-009), the pad's released mask 0x13cae8 |= 5 as
+//! it goes away (G-HERO-025), the aim with the weapon lowered at a wall 0x141618 (G-WPN-011).
 
 use super::guns::{self, add3, len3, scale3, sub3};
 use super::items::{HitSink, ItemEnv};
@@ -242,13 +248,19 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
                 let mut v = std::mem::take(&mut hero.weapons.reactive.suck.vortex);
                 let mut taken = Vec::new();
                 let mut vac = 0;
+                let mut writes = None;
                 hits.world(table, &*hero, rng, tick, &mut |w| {
                     // 0x302bd0: the vortex (0x3067d0), then the run list: the pull, and the vacuum for the others.
                     v.update(w, rows, [mouth[0], mouth[1], mouth[2]], Some(hero_moby), tick);
                     w.camera = [cam[0], cam[1], cam[2], 1.0].map(crate::ps2v::Pf::f);
                     let list = crate::moby_update::scheduler::build_active_list(w.table, w.camera, &w.svc.groups).0;
                     (taken, vac) = pull(w, &list, pos, mouth, yaw, pitch, group_blocked, Some(&v));
+                    // The vacuum's `AddAmmo` (0x2db850) stores into 0x13d428 at once: its hero-block writes of this
+                    // tick go to Ratchet now, not at the next moby loop.
+                    let now = w.counter;
+                    writes = w.svc.hero_writes.take_if(|(c, _)| *c == now).map(|(_, f)| f);
                 });
+                if let Some(f) = writes { f.apply(hero); }
                 hero.weapons.reactive.suck.vortex = v;
                 hero.weapons.reactive.suck.pulled = taken;
                 hero.weapons.reactive.suck.vacuumed += vac;
@@ -309,7 +321,6 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
                 let cam = env.camera.map_or(at, |c| c.0);
                 let hero_pos = to_f32x3(hero.pos);
                 let hero_yaw = hero.rot[2].to_f32();
-                let coll = env.coll;
                 let mut fired = false;
                 hits.world(table, &*hero, rng, tick, &mut |w| {
                     let r = &mut w.svc.creatures.react;
@@ -318,12 +329,12 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
                     let obj = (r.slots[i] - 1) as usize;
                     r.slots[i] = 0;
                     w.mm(obj).position = [at[0], at[1], at[2], w.m(obj).position[3]];
-                    w.build_matrix(obj);
+                    react::sphere_lerp(w, obj);
                     if !look {
-                        if let Some(t) = fire_search(w, &targets, obj, at, vel, cam, hero_pos, hero_yaw, coll) { target = Some(t); }
+                        if let Some(t) = fire_search(w, &targets, obj, at, vel, cam, hero_pos, hero_yaw) { target = Some(t); }
                     }
-                    w.mm(obj).mode |= mode::KEEP_MATRIX;
-                    w.build_matrix(obj);
+                    // FUN_00302840(cannon, moby, gp−0x4d50): the cannon's rows turned by (π/2, 0, π/2).
+                    react::cannon_frame(w, obj, react::FIRE_EULER);
                     react::slot_fire(w, obj, dz, [vel[0], vel[1], vel[2], 0.0], target);
                     fired = true;
                 });
@@ -471,13 +482,14 @@ pub fn vacuum(w: &mut crate::moby_update::services::World, m: MobyId, v: &super:
 }
 
 /// State 5's search (0x303000, outside first person): over the run list's targetable creatures (class type 5), a
-/// creature within 2.5 that Ratchet faces (60°, below 45° of elevation) at once; else the nearest inside the 26° cone
-/// around the shot (the bounding radius +0x0c / 1024 widening it), each checked with a clear camera line (flags 6) —
-/// a blocked one ends the search.
+/// creature within 2.5 that Ratchet faces (60°, below 45° of elevation) at once; else inside the 26° cone around the
+/// shot (the bounding radius +0x0c / 1024 widening it), nearer than the best so far, with a clear camera line (flags 6;
+/// a blocked one ends the search): its distance and elevation become the search's best and pitch, and it is taken —
+/// the cone's yaw turning to it — only when its yaw is within 10° of the cone's (`FastDiffRots`).
 #[allow(clippy::too_many_arguments)]
-pub fn fire_search(w: &crate::moby_update::services::World, list: &[MobyId], obj: MobyId, from: [f32; 3], vel: [f32; 3], cam: [f32; 3], hero_pos: [f32; 3], hero_yaw: f32, _coll: Option<&rc_formats::collision::Collision>) -> Option<MobyId> {
-    let yaw = atan(vel[0], vel[1]);
-    let pitch = -atan(len2(vel), vel[2]);
+pub fn fire_search(w: &crate::moby_update::services::World, list: &[MobyId], obj: MobyId, from: [f32; 3], vel: [f32; 3], cam: [f32; 3], hero_pos: [f32; 3], hero_yaw: f32) -> Option<MobyId> {
+    let mut yaw = atan(vel[0], vel[1]);
+    let mut pitch = -atan(len2(vel), vel[2]);
     let mut best = 10000.0f32;
     let mut found = None;
     for &m in list {
@@ -487,8 +499,10 @@ pub fn fire_search(w: &crate::moby_update::services::World, list: &[MobyId], obj
         let h = crate::targeting::aim_height(mo).unwrap_or(0.5);
         let t = [mo.position[0], mo.position[1], mo.position[2] + h];
         if mo.mode & mode::TARGETABLE == 0 || !mo.has_class || w.classes.info(mo.o_class).map(|i| i.ty) != Some(5) { continue; }
+        let ty = atan(t[0] - from[0], t[1] - from[1]);
         let d = len3(sub3(t, from));
         let el = atan(d, t[2] - from[2]);
+        let dy = diff_rots(yaw, ty);
         if d < 2.5 {
             let hy = atan(mo.position[0] - hero_pos[0], mo.position[1] - hero_pos[1]);
             if diff_rots(hero_yaw, hy) < std::f32::consts::FRAC_PI_3 && el.abs() < std::f32::consts::FRAC_PI_4 { return Some(m); }
@@ -503,14 +517,21 @@ pub fn fire_search(w: &crate::moby_update::services::World, list: &[MobyId], obj
             if r < d { ang -= std::f32::consts::FRAC_PI_2 - (d / hh).clamp(-1.0, 1.0).asin(); }
         }
         if ang < FIRE_CONE {
-            let clear = w.line(cam.map(crate::ps2v::Pf::f).into_iter().chain([crate::ps2v::Pf::ZERO]).collect::<Vec<_>>().try_into().unwrap(), [t[0], t[1], t[2], 0.0].map(crate::ps2v::Pf::f), 6, Some(obj)).is_none();
+            let clear = w.line([cam[0], cam[1], cam[2], 0.0].map(crate::ps2v::Pf::f), [t[0], t[1], t[2], 0.0].map(crate::ps2v::Pf::f), 6, Some(obj)).is_none();
             if !clear { return found; }
             best = d;
-            found = Some(m);
+            pitch = -el;
+            if dy < TURN_MAX {
+                yaw = ty;
+                found = Some(m);
+            }
         }
     }
     found
 }
+
+/// The fire search's turn limit (0.17453292: 10°).
+pub const TURN_MAX: f32 = 0.174_532_92;
 
 #[cfg(test)]
 mod tests {

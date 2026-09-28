@@ -1,10 +1,11 @@
 //! The Bomb Glove bomb's water effects (class 121, level01 `0x2c3300`; read from the decomp and its calls). The
-//! Mine Glove's mine (class 74, `0x2bfe40`, not ported) makes the same water entry and sinking bubbles with the same
-//! calls, so these are written once for both.
+//! Mine Glove's mine (class 74, `0x2bfe40`, `super::mine`) makes the same water entry, sinking bubbles, bubble burst
+//! and scorch with the same calls (its own counts: [`MINE_SCORCH`], the bubbles downward), so these are written once
+//! for both.
 //!
 //! * [`entry`] — falling onto a water face (surface 0) with vz < 0: `RippleDisturb(x, y, 0.5, −0.35, every patch,
 //!   additive)` (0x2b82a8), the splash moby 775 of size 2 at (x, y, the hit z) with alpha 0x70 (`FUN_002ff768`,
-//!   `splash::spawn`), then 15 type-35 drops from the same point: `rand_angle`, speed `randf(0, 3·dt)` out,
+//!   `splash::spawn`), then 16 type-35 drops (the loop counts 0xf down to −1: corrected 2026-09-28, was 15) from the same point: `rand_angle`, speed `randf(0, 3·dt)` out,
 //!   `randf(3·dt, 6.5·dt)` up, life `rand_range(90, 120)`, kind `randi(2)` (`PartType35Spawn` 0x2845a8). The caller
 //!   sets +0x68 = 1 and the sinking velocity (0, 0, −1.5·dt).
 //! * [`sink_bubble`] — every tick in water, 1 in `ticks(6) − 1` (`randi`): a type-34 bubble (`PartType34Spawn`
@@ -93,7 +94,7 @@ pub fn entry(w: &mut World, id: MobyId, surface_z: f32) {
     ripple(w, p[0], p[1], 0.5, f32::from_bits(0xbeb3_3333), true);
     let at = [p[0], p[1], surface_z, p[3]];
     if let Some(s) = splash::spawn(w, 2.0, at) { w.mm(s).alpha = 0x70; }
-    for _ in 0..15 {
+    for _ in 0..16 {
         let a = w.rng.rand_angle();
         let s = w.rng.randf(dt() * 0.0, dt() * 3.0);
         let vz = w.rng.randf(dt() * 3.0, dt() * 6.5);
@@ -118,10 +119,16 @@ pub fn sink_bubble(w: &mut World, id: MobyId, vel: V) {
 pub fn deep_burst(w: &mut World, id: MobyId, k: f32) {
     let pos = w.m(id).position;
     let level = water_level(w, [pos[0], pos[1], pos[2] + 1.0, pos[3]]);
+    bubbles(w, pos, level, k, 2.0);
+}
+
+/// 150 type-34 bubbles from `pos` popping at `level`: direction `(randf(±1), randf(±1), randf(−0.5, z_hi))` at
+/// `randf(4·dt, 8·dt)·k` (the bomb's deep burst: `z_hi` 2; the mine's explosion in water `0x2bfe40`: −2, `k` 1).
+pub fn bubbles(w: &mut World, pos: V, level: f32, k: f32, z_hi: f32) {
     for _ in 0..150 {
         let x = w.rng.randf(-1.0, 1.0);
         let y = w.rng.randf(-1.0, 1.0);
-        let z = w.rng.randf(-0.5, 2.0);
+        let z = w.rng.randf(-0.5, z_hi);
         let s = w.rng.randf(dt() * 4.0, dt() * 8.0);
         let v = setlen([x, y, z], k * s);
         let size = w.rng.randf(f32::from_bits(0x3d4c_cccd), f32::from_bits(0x3dcc_cccd)) * 210000.0;
@@ -136,15 +143,32 @@ pub fn shallow_scorch(w: &mut World, id: MobyId) {
     let surf = w.ground_height(Pf::f(0.5), probe, 0).to_f32();
     let ground = w.ground_height(Pf::f(0.5), probe, 0x20).to_f32();
     if surf == ground || surf - ground >= 1.2 { return; }
-    for _ in 0..100 {
+    scorch(w, pos, surf, &BOMB_SCORCH);
+}
+
+/// The scorch's constants: the count, the top of the upward speed (×dt), the size range.
+pub struct Scorch {
+    pub n: usize,
+    pub vz_hi: f32,
+    pub size: (f32, f32),
+}
+
+/// The bomb's (`0x2c3300`): 100, 14, 0.25..1.
+pub const BOMB_SCORCH: Scorch = Scorch { n: 100, vz_hi: 14.0, size: (0.25, 1.0) };
+/// The mine's in water (`0x2bfe40`, always, from the surface over it): 150, 16, 0.35..1.25.
+pub const MINE_SCORCH: Scorch = Scorch { n: 150, vz_hi: 16.0, size: (0.35, 1.25) };
+
+/// The scorch (type 64) and the 20 sparks (type 15) from the water surface `surf` at `pos` (module doc).
+pub fn scorch(w: &mut World, pos: V, surf: f32, c: &Scorch) {
+    for _ in 0..c.n {
         let vx = w.rng.randf(dt() * -0.75, dt() * 0.75);
         let vy = w.rng.randf(dt() * -0.75, dt() * 0.75);
-        let vz = w.rng.randf(dt() * 4.0, dt() * 14.0);
+        let vz = w.rng.randf(dt() * 4.0, dt() * c.vz_hi);
         let r = w.rng.randf(0.0, f32::from_bits(0x3eb3_3333));
         let a = w.rng.rand_angle();
         let at = [a.cos() * r + pos[0], a.sin() * r + pos[1], surf + 0.5, pos[3]];
         let vel = [vx, vy, vz - r * dt() * 8.0, 0.0];
-        let size = w.rng.randf(0.25, 1.0);
+        let size = w.rng.randf(c.size.0, c.size.1);
         part64(w, &type64::Spawn { size, floor: surf, g: dt2() * 20.0, pos: at, vel, life: 0, rgba: 0x167f_6060, rgba2: 0x7f_6060, additive: true });
     }
     let def = w.particles.as_deref().map_or(-1, |p| p.def_first(11) as i32);
@@ -168,7 +192,7 @@ pub fn shallow_scorch(w: &mut World, id: MobyId) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     //! The bomb-in-water rand ledger: a Bomb Glove bomb dropped into a hand-built pool, tick by tick, against the
     //! draws the game's code makes (the dry ledger is `bomb::tests::dry_explosion_rand_stream_matches_the_game_ledger`;
     //! the per-call counts are the module doc's and `bomb.rs`'s).
@@ -183,7 +207,7 @@ mod tests {
     use rc_formats::collision::Collision;
 
     /// Floor quads (surface 1) at `floor` and water quads (surface 0) at `water` over x, y in 0..48.
-    fn pool(floor: f32, water: f32) -> Collision {
+    pub(crate) fn pool(floor: f32, water: f32) -> Collision {
         let mut cells = Vec::new();
         for cx in 0..12i16 {
             for cy in 0..12i16 {
@@ -203,13 +227,74 @@ mod tests {
         mesh(cells)
     }
 
-    fn classes() -> ClassTable {
+    fn classes() -> ClassTable { classes_with(&[]) }
+
+    /// The bomb's classes (bomb, fireball, flash, explosion light, splash) plus `extra`, each with its port's update
+    /// (the other gloves' objects' tests use it too).
+    pub(crate) fn classes_with(extra: &[i16]) -> ClassTable {
         let mut t = ClassTable::default();
-        for (slot, oc) in [(1u8, BOMB_CLASS), (2, FIREBALL_CLASS), (3, FLASH_CLASS), (4, crate::moby_update::creature::fx::LIGHT_CLASS), (5, crate::moby_update::classes::splash::CLASS)] {
-            let info = ClassInfo { slot, update_fn: scheduler::port_update_fn(oc), scale: 1.0, ..Default::default() };
+        let base = [BOMB_CLASS, FIREBALL_CLASS, FLASH_CLASS, crate::moby_update::creature::fx::LIGHT_CLASS, crate::moby_update::classes::splash::CLASS];
+        for (slot, &oc) in base.iter().chain(extra).enumerate() {
+            let info = ClassInfo { slot: slot as u8 + 1, update_fn: scheduler::port_update_fn(oc), scale: 1.0, ..Default::default() };
             t.classes.insert(oc, (info, None));
         }
         t
+    }
+
+    /// A small moby world for the glove objects' tests: Ratchet's moby 0 (no update), a class table, the collision,
+    /// the particles and the scheduler; `tick` runs one moby loop (with an optional camera view).
+    pub(crate) struct Bench {
+        pub table: MobyTable,
+        pub hero: Hero,
+        pub rng: Rng,
+        pub svc: Services,
+        pub sched: Scheduler,
+        pub parts: crate::particles::Particles,
+        pub ct: ClassTable,
+        pub coll: Collision,
+        pub camera: [Pf; 4],
+        pub counter: u64,
+    }
+
+    impl Bench {
+        pub(crate) fn new(coll: Collision, extra: &[i16], hero_at: [f32; 3]) -> Bench {
+            let mut h = Moby::init_instance(0, 0, Some(&ClassInfo { scale: 1.0, has_collision: false, ..Default::default() }));
+            h.mode |= crate::moby_runtime::mode::NO_UPDATE;
+            h.position = [hero_at[0], hero_at[1], hero_at[2], 1.0];
+            let mut hero = Hero::new();
+            hero.pos = crate::hero::physics::v4(hero_at[0], hero_at[1], hero_at[2]);
+            let mut rng = Rng::new();
+            rng.srand(crate::rng::LEVEL_SEED);
+            Bench {
+                table: MobyTable::new(vec![h], 96),
+                hero,
+                rng,
+                svc: Services::new(),
+                sched: Scheduler::new(),
+                parts: crate::particles::Particles::new(None, Vec::new()),
+                ct: classes_with(extra),
+                coll,
+                camera: [Pf::f(50.0), Pf::f(20.0), Pf::f(13.0), Pf::ONE],
+                counter: 0,
+            }
+        }
+        /// A moby of `o_class` (the class table's init).
+        pub(crate) fn create(&mut self, o_class: i16) -> usize {
+            let info = self.ct.classes.get(&o_class).map(|c| &c.0);
+            self.table.create(o_class, info, self.counter).unwrap()
+        }
+        pub(crate) fn tick(&mut self, view: Option<&crate::particles::BSphereView>) {
+            self.counter += 1;
+            self.table.free_slot_pass(self.counter);
+            let mut w = World::new(&mut self.table, &self.hero, &mut self.rng, &self.ct, &mut self.svc, self.counter);
+            w.camera = self.camera;
+            w.coll = Some(&self.coll);
+            w.particles = Some(&mut self.parts);
+            w.view = view;
+            self.sched.tick(&mut w);
+        }
+        pub(crate) fn parts(&self, ty: u8) -> u64 { self.svc.fx.part_spawns.get(&ty).copied().unwrap_or(0) }
+        pub(crate) fn alive(&self, o_class: i16) -> usize { self.table.mobys.iter().filter(|m| m.o_class == o_class && m.state < 0xfd).count() }
     }
 
     fn draws(from: u32, to: u32) -> usize {
@@ -284,8 +369,8 @@ mod tests {
                 let exploded = table.mobys[b].state != FLYING || table.mobys[b].o_class != BOMB_CLASS;
                 if wet0 == 0 && counter & 7 == 0 { want += 11; }
                 if wet0 == 0 && wet1 == 1 && !exploded {
-                    // The entry: the splash's rand_angle, 15 drops × (5 + PartType35Spawn's 2).
-                    want += 1 + 15 * 7;
+                    // The entry: the splash's rand_angle, 16 drops × (5 + PartType35Spawn's 2).
+                    want += 1 + 16 * 7;
                     out.entry = true;
                 }
                 let mut deep_n = 0;

@@ -85,11 +85,18 @@ impl Overlay {
 /// page walk): the level / planet name table 0x1c22c0 and the galaxy points 0x1c23a8, the planet name offset
 /// 0x15f650, the quick-select gp block 0x15f718 and d-pad defaults 0x17e098, the frame's corner lists 0x161fe0
 /// and light 0x160280 / 0x160290, the menu constants 0x160270..0x160328, the Gadgets page's item preview table
-/// 0x1c4988 and grid cell size 0x160350 / 0x160354.
+/// 0x1c4988 and grid cell size 0x160350 / 0x160354, the help log's id table 0x1798d0 (`crate::help`), the map's
+/// tables 0x182c90 / 0x183020 / 0x184370 (`crate::map::Tables`).
 pub const DATA_LABELS: &[u32] = &[
     0x1c22c0, pause::PLANET_POINTS_BASE, 0x15f650, quick_select::GP_BASE, quick_select::DPAD_DEFAULTS, pause::frame::CORNER_LISTS_ADDR,
     pause::frame::LIGHT_DIR_ADDR, pause::frame::LIGHT_COLOR_ADDR, 0x160270, 0x160274, 0x160278, 0x16027c, 0x160318, 0x160328,
-    pause::gadgets::PREVIEW_TABLE, pause::gadgets::CELL_W, pause::gadgets::CELL_H,
+    pause::gadgets::PREVIEW_TABLE, pause::gadgets::CELL_W, pause::gadgets::CELL_H, crate::help::LOG_IDS,
+    pause::pages::data::WEAPON_CELLS, pause::pages::data::GADGET_ITEMS[0], pause::pages::data::GADGET_ITEMS[1],
+    pause::pages::data::GADGET_ITEMS[2], pause::pages::data::GADGET_ITEMS[3], pause::pages::data::WEAPON_TEXTS,
+    pause::pages::data::GADGET_TEXTS_A, pause::pages::data::GADGET_TEXTS_B, pause::pages::data::MOVES_HELI,
+    pause::pages::data::MOVES_NO_HELI, pause::pages::data::MOVIE_LISTS, crate::map::TRANSFORM_POINTS, crate::map::ZONES,
+    crate::map::DEFAULT_PANS, crate::map::PREDICATES, pause::map_page::GLOBE_RADII, pause::map_page::MISSION_LISTS,
+    pause::map_page::MARKER_LISTS, pause::map_page::MARKER_SIZES, pause::map_page::PRICES,
 ];
 
 /// The pad fields the menus read (the `PAD` record at 0x13c940 after this frame's `UpdatePad`).
@@ -111,6 +118,9 @@ pub struct MenuInput {
     pub stick_active: bool,
     /// `0x13cadc != 0`: a pad is connected and readable.
     pub connected: bool,
+    /// 0x13ca40..0x13ca4c (+0x100..+0x10c): right stick x / y, left stick x / y (after the mirror; the map's zoom and
+    /// pan).
+    pub sticks: [Pf; 4],
 }
 
 impl MenuInput {
@@ -127,6 +137,7 @@ impl MenuInput {
             stick_y: pad.analog_copy[3],
             stick_active: pad.stick_active,
             connected,
+            sticks: [pad.rx, pad.ry, pad.lx, pad.ly],
         }
     }
 }
@@ -160,9 +171,48 @@ pub enum MenuDraw {
     /// A draw of the panels' noise / scan lines / glass ([`screen_static`], `fun_00223e28`), in screen pixels;
     /// composed over everything else of the page, the 3D views included.
     Static(screen_static::StaticDraw),
+    /// `DrawTexturedQuad(x, y, w, h, u, v, tw, th, rgba, fun_00204cf0(buffer))`: a streamed picture (a PIF of a global
+    /// lump, or a picture the port composes) over (x, y, w, h), texels (u, v)..(u + tw, v + th), MODULATE `rgba`.
+    Image { src: ImageSrc, x: i32, y: i32, w: i32, h: i32, u: i32, v: i32, tw: i32, th: i32, rgba: u32 },
+    /// A textured quad with free corners (panel pixels, order top-left, top-right, bottom-left, bottom-right) and texel
+    /// coordinates: the map page's grid (CLAMP_1 = REPEAT), its picture and the rotated sprites (`fun_00200600`).
+    Quad { tex: QuadTex, pos: [[i32; 2]; 4], uv: [[i32; 2]; 4], rgba: u32, repeat: bool },
 }
 
-/// Sound requests (`fun_0022da68(n, 0x11, moby)`: class-0x472 sound n; the ring plays none).
+/// A [`MenuDraw::Quad`]'s texture.
+#[derive(Clone, Debug, PartialEq)]
+pub enum QuadTex {
+    Frame(usize),
+    Image(ImageSrc),
+}
+
+/// Where a [`MenuDraw::Image`]'s picture comes from.
+#[derive(Clone, Debug)]
+pub enum ImageSrc {
+    /// Entry `index` of the global TOC field at offset `field` (`rc_formats::disc::RAC1_GLOBAL_FIELDS`, the widget's
+    /// `+0x30` − 0x137b80): `global/<name>/NNN.bin`, a WAD-compressed PIF.
+    Lump { field: u32, index: u32 },
+    /// A picture made by the port (the in-game map's composition), raw GS bytes; `key` changes with the content.
+    Pixels { key: u64, tex: std::sync::Arc<rc_formats::texture::Texture> },
+}
+
+impl ImageSrc {
+    /// The identity of the picture (equal keys = equal pixels).
+    pub fn key(&self) -> (u32, u64) {
+        match self {
+            ImageSrc::Lump { field, index } => (*field, *index as u64),
+            ImageSrc::Pixels { key, .. } => (u32::MAX, *key),
+        }
+    }
+}
+
+impl PartialEq for ImageSrc {
+    fn eq(&self, o: &ImageSrc) -> bool { self.key() == o.key() }
+}
+
+/// Sound requests (`PlayClassSound(n, 0x11, moby)` 0x2a1618, boot-hash name `fun_0022da68`: class-0x472 sound n; the
+/// ring plays none). The game passes the widget's frame moby (+0x14); the owner only places and privileges the slot, and
+/// the sounds are 2-D, so one owner stands for all 14 [L].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuSound {
     Confirm = 0,
@@ -172,15 +222,35 @@ pub enum MenuSound {
     PageChange = 4,
 }
 
+/// The owner the class-0x472 sounds are played for: a frame moby (not a table moby: no world position;
+/// the sounds are 2-D).
+pub const MENU_SOUND_OWNER: usize = usize::MAX - 0x472;
+
+impl MenuSound {
+    /// `PlayClassSound(n, 0x11, frame moby)` (0x2a1618): class 0x472's sound `n`, flags 0x11 (2-D, fixed volume), for the audio
+    /// system's `play_class_sound`.
+    pub fn event(self, tick: u64) -> crate::moby_update::services::SoundEvent {
+        let class = crate::audio::class_sounds::PRIVILEGED_CLASS;
+        crate::moby_update::services::SoundEvent { index: self as i32, flags: 0x11, moby: MENU_SOUND_OWNER, o_class: class, sound_class: class, pos: [256.0, 256.0, 64.0], tick }
+    }
+}
+
 /// What the menus read from the level: HUD icons / frame sizes, glyph tables, the level text, the overlay.
 #[derive(Clone, Debug)]
 pub struct MenuAssets {
     pub hud: HudAssets,
     pub overlay: Overlay,
+    /// The global `all_text` in the game's language (the Help Log page swaps the message table to it:
+    /// `MenuTextLoad` 0x290d40); empty until the engine gives it.
+    pub all_text: Vec<Message>,
 }
 
 impl MenuAssets {
-    pub fn new(hud: HudAssets, overlay: Overlay) -> MenuAssets { MenuAssets { hud, overlay } }
+    pub fn new(hud: HudAssets, overlay: Overlay) -> MenuAssets { MenuAssets { hud, overlay, all_text: Vec::new() } }
+    /// `msg_string__Fi(id)` with the message table swapped to `all_text` (`MenuTextLoad`) when `swapped`.
+    pub fn msg_in(&self, id: i32, swapped: bool) -> &[u8] {
+        if swapped && !self.all_text.is_empty() { strings::lookup(&self.all_text, id) } else { self.msg(id) }
+    }
     /// `msg_string__Fi(id)`; the port's own text ids ([`pause::port::text`], negative, never on the disc)
     /// resolve to the port's strings instead.
     pub fn msg(&self, id: i32) -> &[u8] { pause::port::text::get(id).unwrap_or_else(|| strings::lookup(&self.hud.messages, id)) }

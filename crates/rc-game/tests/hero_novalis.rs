@@ -370,6 +370,8 @@ fn novalis_hero_digest() {
             text = text.replace(&format!(", blend: {:?}", rc_game::follow_camera::CamBlend::default()), "");
             // The script camera (cinematics) while idle.
             text = text.replace(&format!(", script: {:?}", rc_game::follow_camera::script::ScriptCamera::default()), "");
+            // The type-6 camera (the Visibomb's missile view) while idle.
+            text = text.replace(&format!(", type6: {:?}", rc_game::follow_camera::type6::Type6::default()), "");
             // The hand slot's hand point 0x1403c0 (the thrown wrench's target; no hand item in these runs).
             text = text.replace(", hand_point: [0.0, 0.0, 0.0]", "");
             // The water effects (hero water pass): the effect counters 0x13fc54..58 and the breath timer 0x13fc40 while

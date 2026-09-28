@@ -18,7 +18,7 @@
 //! * **The damage record** (the creature header's +0x00, `FUN_002711f8`) carries two more weapon inputs: **+0x18 the
 //!   lure** (the Taunter's `0x2cc830` writes its moby; 577 turns it into its 240-tick alert, 572 into its alert,
 //!   459 into its 600-tick alert — the classes already read it, as `ALERT`), +0x04 (s16) the Morph-o-Ray's full meter
-//!   and +0x0e the morph's keep byte (1 → 2 instead of deleted; [`morph_target`]).
+//!   and +0x0e the morph's keep byte (1 → 2 instead of deleted; [`morph_target`], the chicken 270's module).
 //! * **Decoys**: the enemies' own target search (`0x274b78`, [`super::target`]) prefers the Decoy Glove's 0xcb / 0x76c
 //!   and a gold Morph-o-Ray chicken (0x10e with +0xbc ≠ 0).
 //!
@@ -119,6 +119,12 @@ pub const AMOEBOID_572: Wrappers = Wrappers { seqs: [1; 9], ..AMOEBOID_866 };
 /// 270's table (0x2e0a28, 0x2e0a78, 0x2e0ac8, 0x2e0b78, 0x2e0ba8); record: see the chicken module.
 pub const CHICKEN: Wrappers = Wrappers { held: 5, start_only: None, bounce_sound: Some(1), seqs: [2, 2, 2, 0, 0, 0, 0, 0, 0], record: 0xe0 };
 
+/// `0x2defb0(target)`: the Morph-o-Ray's morph (a spawn and a delete: `crate::moby_update::classes::chicken::morph`).
+pub fn morph_target(w: &mut World, target: MobyId) -> Option<MobyId> {
+    let gold = w.svc.creatures.react.gold_morph;
+    crate::moby_update::classes::chicken::morph(w, target, gold)
+}
+
 /// The level-01 reference functions of the tables' slot +0x00 ([`table_kind`] matches a level's table by them).
 pub const REF_CRITTER: u32 = 0x2f1c78;
 pub const REF_AMOEBOID: u32 = 0x2efa88;
@@ -162,9 +168,12 @@ pub struct Globals {
     pub cannon_seq4: bool,
     /// Ratchet's moby (the port's owner of the hand item; the records' +0x60).
     pub hero: Option<MobyId>,
-    /// 0x1dd580[20] and gp−0x537c: the Morph-o-Ray's chickens (moby + 1) and the next slot.
+    /// 0x1dd580[20] and gp−0x537c: the Morph-o-Ray's chickens (moby + 1) and the next slot
+    /// (`crate::moby_update::classes::chicken`).
     pub chickens: [u32; 20],
     pub chicken_next: usize,
+    /// 0x13e535: the gold Morph-o-Ray (not mirrored: 0; the chickens' and feathers' gold size read it).
+    pub gold_morph: u8,
     /// The cannon's class sound 5 asked for by a swallow (played by its next update).
     pub cannon_sound5: u32,
     /// Suck bursts made (stats).
@@ -253,7 +262,35 @@ fn moby_ref(w: &World, r: usize, id: MobyId, o: usize) -> Option<MobyId> {
     (v > 0).then(|| (v - 1) as MobyId).filter(|&m| m < w.table.mobys.len())
 }
 
-fn dead(w: &World, id: MobyId) -> bool { w.m(id).state >= 0x80 }
+/// The handlers' "gone" test (`state == −2 || state == −3`: deleted, dynamic or static; not every state ≥ 0x80).
+fn dead(w: &World, id: MobyId) -> bool {
+    let s = w.m(id).state;
+    s == crate::moby_runtime::state::DELETED || s == crate::moby_runtime::state::DELETED_STATIC
+}
+
+/// `gp−0x4d60` (level01 0x161ea0): the swallow's Euler (−π/2, 0, −π/2); `gp−0x4d50` (0x161eb0): the fire's (π/2, 0, π/2).
+pub const SWALLOW_EULER: [f32; 3] = [-PI / 2.0, 0.0, -PI / 2.0];
+pub const FIRE_EULER: [f32; 3] = [PI / 2.0, 0.0, PI / 2.0];
+
+/// `MobyAnimSphereLerp` 0x265d78 (boot `fun_0020e098`, what every handler here calls after moving or turning a moby):
+/// `MobyBuildMatrix` without the rows from the Euler angles — the stored rows stay (row 1 negated with mode 0x8000,
+/// as the build does on kept rows), the bounding sphere, the change counter, the grid.
+pub fn sphere_lerp(w: &mut World, id: MobyId) {
+    let m = w.m(id).mode;
+    w.mm(id).mode |= mode::KEEP_ROWS;
+    w.build_matrix(id);
+    w.mm(id).mode = m;
+}
+
+/// `FUN_00302840(cannon, moby, euler)`: the moby's rows = `Euler(euler)` in the cannon's rows (the product order as
+/// the pull's orientation target [L]), mode |= 4 (kept matrix), its matrix built.
+pub fn cannon_frame(w: &mut World, id: MobyId, euler: [f32; 3]) {
+    if let Some(c) = w.svc.creatures.react.cannon {
+        set_rows3(w, id, mul_rows(euler_rows(euler), c.rows));
+    }
+    w.mm(id).mode |= mode::KEEP_MATRIX;
+    sphere_lerp(w, id);
+}
 
 fn seq(w: &World, id: MobyId, k: usize) -> u8 { wrappers(w, id).map_or(0, |x| x.seqs[k]) }
 
@@ -400,10 +437,9 @@ pub fn swallow(w: &mut World, id: MobyId, point: V) -> i32 {
     let Some(r) = record(w, id) else { return 0 };
     if rs(w, r, id, rec::STATE) == 8 { return 0; }
     super::set_pos(w, id, point);
-    // FUN_00302840(cannon, moby): mode |= 4, build the matrix (twice in the game).
-    w.mm(id).mode |= mode::KEEP_MATRIX;
-    w.build_matrix(id);
-    w.build_matrix(id);
+    // FUN_00302840(record +0x60, moby, gp−0x4d60): the cannon's rows turned by (−π/2, 0, −π/2), then the matrix again.
+    cannon_frame(w, id, SWALLOW_EULER);
+    sphere_lerp(w, id);
     // `if (0x1403e0 && its class == 0x351) fun_0022da68(5, 0)`: the cannon's sound 5 (made by its next update).
     if w.svc.creatures.react.cannon.is_some() { w.svc.creatures.react.cannon_sound5 += 1; }
     crate::moby_update::classes::crate_::set_death_bits(w, id, 0, -1);
@@ -624,13 +660,13 @@ pub fn carried(w: &mut World, id: MobyId, knock: usize) -> i32 {
 }
 
 fn tail_none(w: &mut World, id: MobyId) -> i32 {
-    if w.m(id).mode & mode::KEEP_MATRIX != 0 { w.build_matrix(id); }
+    if w.m(id).mode & mode::KEEP_MATRIX != 0 { sphere_lerp(w, id); }
     0
 }
 
 /// The carried update's end (LAB_003060a0): the matrix with mode 4; below state 4 the let-go countdown.
 fn tail(w: &mut World, id: MobyId, r: usize) -> i32 {
-    if w.m(id).mode & mode::KEEP_MATRIX != 0 { w.build_matrix(id); }
+    if w.m(id).mode & mode::KEEP_MATRIX != 0 { sphere_lerp(w, id); }
     if rs(w, r, id, rec::STATE) < 4 {
         let h = rf(w, r, id, rec::HOLD);
         if h <= 0.0 { slot_let_go(w, id); }
@@ -687,7 +723,7 @@ fn pulled(w: &mut World, id: MobyId, r: usize) {
         let step = super::set_len3(super::sub(tgt, p), sp);
         let np = super::add(p, [step[0], step[1], step[2], 0.0]);
         super::set_pos(w, id, [np[0], np[1], np[2], p[3]]);
-        w.build_matrix(id);
+        sphere_lerp(w, id);
         return;
     }
     // Arrived: swallowed (slot +0x04), no longer a target.
@@ -729,7 +765,9 @@ fn flight(w: &mut World, id: MobyId, r: usize) -> i32 {
             let aa = s * s - len2sq(a);
             let bb = dot(a, b) * -2.0;
             let cc = len2sq(b);
-            let disc = (bb * bb - aa * 4.0 * -cc).sqrt();
+            // `fun_001f9988` (0x2210f0) is the VU0 `vsqrt`, which roots the magnitude: a negative discriminant (a target
+            // moving faster than the shot) gives a number in the game, not NaN — the same value here.
+            let disc = (bb * bb - aa * 4.0 * -cc).abs().sqrt();
             let t1 = (-bb + disc) / (aa + aa);
             let t2 = (-bb - disc) / (aa + aa);
             let t = if t1 <= 0.0 || t2 <= 0.0 {
@@ -829,7 +867,7 @@ pub fn land(w: &mut World, id: MobyId, r: usize, with_burst: bool) {
     w.mm(id).coll_disable = c as u32;
     w.mm(id).rotation = [0.0; 4];
     set_rows3(w, id, euler_rows([0.0; 3]));
-    w.build_matrix(id);
+    sphere_lerp(w, id);
     w.mm(id).mode &= !mode::KEEP_MATRIX;
     let sc = class_scale(w, id);
     w.mm(id).scale = sc;
@@ -840,7 +878,8 @@ pub fn land(w: &mut World, id: MobyId, r: usize, with_burst: bool) {
 /// `0x304798(moby)`: the burst of a fired moby: the Bomb Glove's explosion effects at size k = 1 (2 gold) and half
 /// the fireballs (all gold): 10/n low and 4/n high fireballs (`0x2c4c20`), one toward the camera, the type-11 rings,
 /// the flashes (`0x309a68`), the camera shake, the light (template 0x20b7d0 = the bomb's 0x20a930); area hits (radius
-/// 3, `0x26f8f8` damage 2 flags 0x830000) only with the gold cannon.
+/// 3, `0x26f8f8` damage 2 flags 0x830000) only with the gold cannon. The low / high fireballs, the rings and the
+/// flashes carry the base velocity `(0, 0, 2·dt·k)` (sp+0x60: the bomb's drift in its explosion). No sound.
 pub fn burst(w: &mut World, id: MobyId) {
     w.svc.creatures.react.bursts += 1;
     let gold = w.svc.creatures.react.gold;
@@ -851,6 +890,7 @@ pub fn burst(w: &mut World, id: MobyId) {
     let to_cam = super::sub(cam, pos);
     let dcam = super::len3(to_cam);
     let up: V = [0.0, 0.0, 1.0, 0.0];
+    let base: V = [0.0, 0.0, 2.0 * super::DT * k, 0.0];
     let spread = |w: &mut World, lo: f32, hi: f32| -> V {
         let x = w.rng.randf(-1.0, 1.0);
         let y = w.rng.randf(-1.0, 1.0);
@@ -860,7 +900,7 @@ pub fn burst(w: &mut World, id: MobyId) {
         let u = w.rng.randf(0.0, 1.0);
         v = super::add(v, super::scale(up, u));
         let s = w.rng.randf(lo, hi);
-        super::set_len3(v, k * s * super::DT)
+        super::add(super::set_len3(v, k * s * super::DT), base)
     };
     for _ in 0..10 / n {
         let v = spread(w, 3.5, 6.5);
@@ -890,16 +930,16 @@ pub fn burst(w: &mut World, id: MobyId) {
         let c2 = crate::moby_update::classes::bomb::RING_C2[w.rng.randi(6) as usize];
         let life = w.rng.rand_range(15, 20);
         let t1 = w.rng.rand_range(25, 30);
-        w.part11(Pf::f(k * 400_000.0), Pf::f(speed), pos.map(Pf::f), [Pf::ZERO; 4], c1, c2, life, t1, 0, 0);
+        w.part11(Pf::f(k * 400_000.0), Pf::f(speed), pos.map(Pf::f), base.map(Pf::f), c1, c2, life, t1, 0, 0);
     }
     let fl = crate::moby_update::classes::bomb::flash;
     if 9.0 < dcam {
-        fl(w, k * 4.0, id, pos, [0.0; 4], 15, 0x7f, 0x7f, 0x7f, 0x20);
-        fl(w, k * 4.0, id, pos, [0.0; 4], 24, 0x7f, 0x20, 0, 0x20);
+        fl(w, k * 4.0, id, pos, base, 15, 0x7f, 0x7f, 0x7f, 0x20);
+        fl(w, k * 4.0, id, pos, base, 24, 0x7f, 0x20, 0, 0x20);
     }
-    fl(w, k * 4.0, id, pos, [0.0; 4], 20, 0x7f, 0x3f, 0, 0x30);
-    fl(w, k * 3.5, id, pos, [0.0; 4], 27, 0x60, 0x10, 0, 0x40);
-    fl(w, k * 3.0, id, pos, [0.0; 4], 29, 0x20, 0, 0, 0x20);
+    fl(w, k * 4.0, id, pos, base, 20, 0x7f, 0x3f, 0, 0x30);
+    fl(w, k * 3.5, id, pos, base, 27, 0x60, 0x10, 0, 0x40);
+    fl(w, k * 3.0, id, pos, base, 29, 0x20, 0, 0, 0x20);
     let amp = if dcam < 20.0 { 0.4 - dcam * 0.0175 } else { f32::from_bits(0x3d4c_ccd0) };
     let t = w.ticks(25);
     w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp, ticks: t });
@@ -929,6 +969,50 @@ mod tests {
         let a = rows_quat(euler_rows([0.0; 3]));
         assert!((slerp(0.0, a, q).iter().zip(a).map(|(x, y)| (x - y).abs()).sum::<f32>()) < 1e-5);
         assert!((slerp(1.0, a, q).iter().zip(q).map(|(x, y)| (x - y).abs()).sum::<f32>()) < 1e-5);
+    }
+
+    fn world_parts() -> (crate::hero::Hero, crate::rng::Rng, crate::moby_update::ClassTable, crate::moby_update::Services) {
+        (crate::hero::Hero::new(), crate::rng::Rng::new(), crate::moby_update::ClassTable::default(), crate::moby_update::Services::new())
+    }
+
+    /// `0x302840` with `gp−0x4d60` (the swallow) and `gp−0x4d50` (the fire): the moby's rows are the Euler's rows in
+    /// the cannon's, its matrix kept (mode 4); the swallow puts it at the mouth with those rows.
+    #[test]
+    fn swallow_and_fire_take_the_cannons_rows() {
+        use crate::moby_runtime::{Moby, MobyTable};
+        let critter = Moby { o_class: 577, has_class: true, state: 1, spawn_flag: 0xfe, pvars: vec![0; 0x60 + rec::SIZE], ..Moby::default() };
+        let mut t = MobyTable::new(vec![critter], 4);
+        let (hero, mut rng, classes, mut svc) = world_parts();
+        let cannon = euler_rows([0.2, -0.4, 1.3]);
+        svc.creatures.react.cannon = Some(Cannon { pos: [1.0, 2.0, 3.0], mouth: [1.5, 2.0, 3.5], rows: cannon });
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
+        let close = |a: [[f32; 3]; 3], b: [[f32; 3]; 3]| (0..3).all(|i| (0..3).all(|j| (a[i][j] - b[i][j]).abs() < 1e-5));
+        assert_eq!(swallow(&mut w, 0, [1.5, 2.0, 3.5, 1.0]), 1);
+        assert!(close(rows3(&w, 0), mul_rows(euler_rows(SWALLOW_EULER), cannon)), "swallowed: {:?}", rows3(&w, 0));
+        assert_eq!(w.m(0).position[..3], [1.5, 2.0, 3.5]);
+        assert!(w.m(0).mode & mode::KEEP_MATRIX != 0);
+        assert_eq!(rs(&w, 0x60, 0, rec::STATE), 4);
+        cannon_frame(&mut w, 0, FIRE_EULER);
+        assert!(close(rows3(&w, 0), mul_rows(euler_rows(FIRE_EULER), cannon)), "fired: {:?}", rows3(&w, 0));
+    }
+
+    /// `0x304798`: the flashes (and the fireballs and rings) carry the base velocity (0, 0, 2·dt·k) (sp+0x60), k = 1.
+    #[test]
+    fn burst_carries_the_base_velocity() {
+        use crate::moby_runtime::{Moby, MobyTable};
+        let mut t = MobyTable::new(vec![Moby { o_class: 577, position: [0.0, 0.0, 10.0, 1.0], ..Moby::default() }], 40);
+        let (hero, mut rng, classes, mut svc) = world_parts();
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
+        burst(&mut w, 0);
+        let base = [0.0, 0.0, 2.0 * super::super::DT, 0.0];
+        let vel = |m: &Moby| std::array::from_fn::<f32, 4, _>(|k| f32::from_le_bytes(m.pvars[4 * k..4 * k + 4].try_into().unwrap()));
+        let flashes: Vec<[f32; 4]> = w.table.mobys.iter().filter(|m| m.o_class == crate::moby_update::classes::bomb::FLASH_CLASS && m.state < 0x80).map(vel).collect();
+        assert_eq!(flashes.len(), 5, "the camera is 10 away: five flashes");
+        assert!(flashes.iter().all(|v| *v == base), "{flashes:?}");
+        let balls: Vec<[f32; 4]> = w.table.mobys.iter().filter(|m| m.o_class == crate::moby_update::classes::bomb::FIREBALL_CLASS && m.state < 0x80).map(vel).collect();
+        assert_eq!(balls.len(), 5 + 2 + 1);
+        // The low and high ones: a spread with a non-negative up part, plus the base.
+        assert!(balls[..7].iter().all(|v| v[2] >= base[2] - 1e-6), "{balls:?}");
     }
 
     #[test]

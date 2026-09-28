@@ -89,12 +89,12 @@ pub fn euler_rows(e: [f32; 3]) -> R3 {
 }
 
 /// `fast_add_rotations` / `fast_subtract_rotations`: wrapped once into [−π, π).
-fn wrap(a: f32) -> f32 {
+pub(super) fn wrap(a: f32) -> f32 {
     if a >= PI { a - 2.0 * PI } else if a < -PI { a + 2.0 * PI } else { a }
 }
 
 /// `Cam_InterpValues` 0x20ce40.
-fn spring(cur: f32, tgt: f32, k: f32, d: f32, max: f32, vel: &mut f32) -> f32 {
+pub(super) fn spring(cur: f32, tgt: f32, k: f32, d: f32, max: f32, vel: &mut f32) -> f32 {
     let e = tgt - cur;
     *vel += k * e - d * *vel;
     if max != 0.0 { *vel = vel.clamp(-max, max); }
@@ -103,7 +103,7 @@ fn spring(cur: f32, tgt: f32, k: f32, d: f32, max: f32, vel: &mut f32) -> f32 {
 }
 
 /// `0x20cf28`: the same on an angle (wrapped difference and sum).
-fn angle_spring(cur: f32, tgt: f32, k: f32, d: f32, max: f32, vel: &mut f32) -> f32 {
+pub(super) fn angle_spring(cur: f32, tgt: f32, k: f32, d: f32, max: f32, vel: &mut f32) -> f32 {
     let e = wrap(tgt - cur);
     *vel += k * e - d * *vel;
     if max != 0.0 { *vel = vel.clamp(-max, max); }
@@ -118,6 +118,14 @@ fn spherical(p: [f32; 3], c: [f32; 3]) -> [f32; 3] {
     let yaw = if d[0] == 0.0 && d[1] == 0.0 { 0.0 } else { d[1].atan2(d[0]) };
     let elev = if xy == 0.0 && d[2] == 0.0 { 0.0 } else { d[2].atan2(xy) };
     [yaw, elev, (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()]
+}
+
+/// `0x20f180(out, s, c)`: the point at (yaw, elevation, distance) `s` about `c`.
+pub(super) fn sph_point(s: [f32; 3], c: [f32; 3]) -> [f32; 3] {
+    let [yaw, elev, dist] = s;
+    let (se, ce) = elev.sin_cos();
+    let (sy, cy) = yaw.sin_cos();
+    [dist * ce * cy + c[0], dist * ce * sy + c[1], dist * se + c[2]]
 }
 
 /// `(1 − cos πt)/2`.
@@ -182,10 +190,7 @@ impl ScriptCamera {
                 // 0x26cd50(t, anchor, anchor, hero) and 0x20f180(pos, orbit, anchor).
                 let s = if t == 0.0 { 0.0 } else if t == 1.0 { 1.0 } else { ease(t) };
                 for k in 0..3 { self.anchor[k] += (hero[k] - self.anchor[k]) * s; }
-                let [yaw, elev, dist] = self.orbit;
-                let (se, ce) = elev.sin_cos();
-                let (sy, cy) = yaw.sin_cos();
-                self.pos = [dist * ce * cy + self.anchor[0], dist * ce * sy + self.anchor[1], dist * se + self.anchor[2]];
+                self.pos = sph_point(self.orbit, self.anchor);
                 for k in 0..3 { self.euler[k] = rot_ease(self.euler[k], self.target_euler[k], t); }
             }
             _ => {

@@ -159,6 +159,8 @@ pub enum Handoff {
 pub enum GameWrite {
     /// `0x13d388[i] = 0` (a purchase with condition kind 4, e.g. Pokitaru's Raritanium trade).
     ClearFlag(usize),
+    /// `0x13d388[i] = v` written by a class update ([`set_global_flag`]).
+    Flag(usize, u8),
     /// `0x13e520[item] = 1` (a gold weapon bought, `ItemOfferUpdate`).
     GoldWeapon(usize),
     /// `UnlockPlanet(p)` 0x2756d0 (Novalis' Water Pump Worker: the Infobot to Aridia).
@@ -448,6 +450,13 @@ pub struct Interact {
     pub writes: Vec<GameWrite>,
 }
 
+/// A class update's store into the global flags `0x13d388[i] = v`: the mirror the classes read this tick
+/// ([`TalkGame::flags`]) and the saved-game write ([`GameWrite::Flag`], applied after the tick).
+pub fn set_global_flag(w: &mut World, i: usize, v: u8) {
+    if let Some(b) = w.svc.interact.game.flags.get_mut(i) { *b = v; }
+    w.svc.interact.writes.push(GameWrite::Flag(i, v));
+}
+
 /// The saved-game values of the talk conditions.
 #[derive(Clone, Debug, Default)]
 pub struct TalkGame {
@@ -531,6 +540,7 @@ impl Interact {
         for x in &w {
             match *x {
                 GameWrite::ClearFlag(i) => { if let Some(b) = gs.global.flags.get_mut(i) { *b = 0; } }
+                GameWrite::Flag(i, v) => { if let Some(b) = gs.global.flags.get_mut(i) { *b = v; } }
                 GameWrite::GoldWeapon(i) => { if let Some(b) = gs.global.gold_weapons.get_mut(i) { *b = 1; } }
                 GameWrite::UnlockPlanet(pl) => gs.unlock_planet(pl),
                 GameWrite::Talked(i, v) => { if let Some(l) = gs.global.landmarks.get_mut(i) { l.flags = v; } }
@@ -670,6 +680,8 @@ pub fn talk_refresh(w: &mut World, id: MobyId, advance: bool) {
 fn start_scene(w: &mut World, id: MobyId, scene: i16) {
     if scene == -1 { return; }
     w.svc.interact.talk_shown = false;
+    // DialogStreamStart 0x2ac330 / StartPssMovie 0x2ad0c0 close the help box (`FUN_002258b0`).
+    w.svc.help.kill();
     if scene as u16 & 0x4000 == 0 {
         w.mm(id).mode |= 1;
         w.svc.interact.handoffs.push(Handoff::Scene { scene: scene as i32, npc: Some(id) });

@@ -303,5 +303,72 @@ clamped (exact over opaque HUD pixels), no per-blend COLCLAMP inside the HUD tar
 `RC_HUD_DEMO=1`, `RC_HUD_TEXT`, `RC_HUD_TEXT_WINDOW=1`, `RC_HUD_HELP=<id>`, `RC_LANG`, `RC_HUD=0` (hud_render.rs).
 
 **Not done**: vendor screen, quick-select ring (slot 3), boss/vehicle meters (slot 4), race timer (slot 12),
-nearby-bolt alert (slot 7), `FontPrintWindow` float path (flag 8), help voice lines / stream waits and the
-first-input gate (the port starts help enabled), `all_text` menus, PAL layout, PCSX2 pixel comparison.
+nearby-bolt alert (slot 7), `FontPrintWindow` float path (flag 8) (help voice lines, stream waits and the first-input
+gate: done, "Help system" below), `all_text` menus, PAL layout, PCSX2 pixel comparison.
+
+## Help system (2026-09-28)
+
+**A system** (docs/plan/menus.md §10): one copy of `Help_Request` / `Help_Update` / the log / the records in every
+overlay; the callers are each their owner's own code. Port: `crates/rc-game/src/help.rs` (`Help` in `Services::help`),
+drawn by the HUD from `Help::bx` (`HudState::set_help`; `crate::hud` keeps only the draw-owned 0x1798a8 / 0x1798ac),
+run by `crate::gameplay::help_frame` after the tick (`InLevelFrameUpdate` order: moby loop → hero → `Help_Update`).
+Records / log mirrored from `GameState` before the tick (`Help::sync_in`) and written back after it (`sync_out`).
+
+State block (0x179890): +0 state, +4 t, +0x20 index (0x1798b0), +0x24 request (0x1798b4), +0x28 rec (0x1798b8), +0x30
+enabled (0x1798c0), +0x34 first-input count, +0x38 hold (s16), +0x3a reopened (s16), +0x3c reopen timer. All overlay
+.bss: zero on every level load, so help is off until `ScaleTicks(120)` after the level's first direction input
+(held 0x13cae0 & 0xf000, stick directions included) — the port no longer starts it enabled.
+
+**Coverage: `Help_Request` 0x225818** [H]
+
+| address | what | port |
+|---|---|---|
+| 0x225818 state ≠ 0 / request ≠ −1 | refused | `help::Help::request` |
+| 0x151720 ≠ 0 / 0x1516ec ≠ −1 | refused while the dialogue player is busy or a line is requested | `request` (`Voice::busy / request`) |
+| `help[rec].count` (s16) = −1 | refused ("never again") | `request` (`Records::help_count`, out of range refused) |
+| store msg / rec, `FUN_00226a70(msg)` | request, record, log | `request` → `log_append` |
+
+**Coverage: `Help_Update` 0x225bd0** (disassembly; the decompile drops 12 blocks) [H]
+
+| address / case | what | port |
+|---|---|---|
+| 0x225bf0..0x225c50 | first-input gate: count from the first 0xf000 held, enabled at `ScaleTicks(120)` | `Help::update` |
+| 0x225c5c | mode 0x15f5c4 ≠ 0 or disabled: state 0, t 0, request −1 | `update` |
+| case 0 | request → `Help_FindIndex` (0x225978) → `Help_ComputeSize` | `update` → `compute_size` |
+| cases 1–5, 7 | `force_help_message(5, 0)` | `HelpOut::force_prompt` → `help::tick` → `Interact::force_prompt(5, 0)` |
+| case 1 | the voice line request `0x1516ec = audio + 30000` when the player is free; △ → bump, state 7, t = 8 − t; t ≥ 6 → 2 | `update` |
+| case 2 | △ → bump, 7; t ≥ `ScaleTicks(24)` → 3 unless the line is this message's and not yet buffered (0x15172a ≠ 3) | `update` |
+| case 3 | △ → bump, 7; t ≥ 8 → 4 | `update` |
+| case 4 | △ → bump, 6, t = 4 − t; t ≥ 4 → `continue_audio_stream_if_ready` 0x279e78 (its line buffered) → 5 | `update` (`VoiceCmd::Play`) |
+| case 5 | hold until t ≥ `ScaleTicks(420)` and its line no longer plays, or △ → bump, 6 | `update` |
+| case 6 | text option 0x15ee1d on: 4 ticks (△ skips) → 7 | `update` |
+| case 7 | its line still running → stop (0x15172a = 5); t ≥ 8 → 8 if held, else 0 (index −1) | `update` |
+| case 8 | held: wait; else reopen after `FastDecTimer(0x1798cc)` (`ComputeSize`, +0x3a = 1), or bump (index ≥ 0) / time + mask only (index < 0), → 0 | `update` |
+| the bump (inline ×6) | `count++` unless 0xffff, `time = max(time, ScaleTicks(play)/600)`, `mask |= 1 << level \| 0x80000000` | `help::bump` (= `hero::melee::bump_record`), `help::touch` |
+| `Help_ComputeSize` 0x225a98 | state 1, `PlayLevelSoundAtMoby(0, 1, 0)` when text or voice option on, small-font measure (flags 7), box at (256, H − 60) moved up past H − 12 | `compute_size`; the sound → `HelpOut::sounds` → `AudioSystem::play_level_sound_at_moby` |
+| `FUN_002258b0` | kill: stop its line, state / t / index / request cleared (no bump) | `Help::kill`; callers `cinematic::{start_scene, start_movie}`, the talker's scene / movie hand-off, `OpenVendorMenu` (vendor 11), `FUN_002aea70` (item offer); ship take-off not ported (G-LVL-001) |
+| `FUN_00225a28` / `FUN_00225a88` / `FUN_00225790` | suspend (close the box, reopen timer 60, idle → 8) / resume | `Help::suspend` / `resume`; caller the Visibomb's launch 0x2c8cc0 / end 0x2cb788: **not wired** (the Visibomb is another agent's; G-UI-017 consumer) |
+| `FUN_00226a70` + `fun_001fecc8` | the log: the message's index in 0x1798d0 appended, or moved to the end when logged (entry 0 = the welcome, length starts at 1) | `Help::log_append`; table `help::load_log_ids` (relocated per level; identical on all 19) |
+| draw 0x2266c0 / `Help_DrawPrompt` 0x2265d8 | as §3.4; nothing unless the text option is on | `HudState::draw_help` |
+| music_Update 0x27a688 (dialogue part) + `fun_002156d8` | request → start stream `help_audio[lang·150 + n]` (volume 0 with the voice option off) when free, else stop the running one; states 1 → 3 buffered → 4 playing → 7 | `Help::voice_frame` (every frame, the scene / vendor frames too), `VoiceCmd::{Load, Play, Stop}` → `gameplay::help_frame` (reads the VAG, its length from the header [L: stream latency not modelled; ready on the next tick]) |
+
+**Coverage: the callers.**
+
+| caller | what | port |
+|---|---|---|
+| Novalis director 1341 `0x30acb8` (U82) | the 9 rules of `units::help_director` (records 0x40..0x44, 0x51, 0x72, 1, 2, 4..6; move records 9, 11..13, 22, 23, 29; planet bits; cuboids; cranks 280; clusters 806 with `FastBSphereCheck` 0 / 1 / −1) | `moby_update::classes::units::help_director` (records bumps M[13], M[22], M[23]; H[0x44] := 0xffff) |
+| hero `0x228498` | Hydro-Pack hint 20014 (rec 0x78: owned[4], `FUN_0022dea8` in water); QuickSelect hint 20006 (rec 0x50) every 128 ticks with > 8 weapons | `help::hero_hints` (engine after the hero's normal update) |
+| Pyrocitor `0x2cde98` | the hold counter +0x50, move record 10 on a long fire, taps 0x141404 on short ones, 20004 (rec 0x4e) after 3 | `hero::pyrocitor::hold_stats` → `HeroHelp::out` |
+| Tesla Claw `0x2ce448` | 20016 (rec 0x81) after 3 short shots (0x141405) in group ok; move record 26 counted (> ticks(70)) / touched on every shot | `hero::tesla::update` → `HeroHelp::out` |
+| first-person look (`SetState` 1, `HeroStatePhysics`) | gp 0x15f688 timer 60 → move record 18 bumped, 0x15f68c + 1 (read by the director) | `hero::stance::{entry, first_person_turn}` |
+| class 1290 `0x30a6d0` (L09 U307) | 9000 (rec 0x34) with its item gift | not ported (G-UI-017 consumer) |
+| `mode_freezeInit(5)` | logs 20011 (save notice) | not ported (the save notice dialog, G-SAV-002) |
+| the other 17 levels' directors / NPCs (38 census units) | their own rules | not ported: G-UI-017 consumers (level_scripting.md §3) |
+
+Tests: `help::tests` (gate and log, the log's move-to-end, the state timings and the close bump, △ skip + prompt,
+first-input gate and mode, voice wait / play / stop / kill, suspend / reopen, hero hints), `hud::tests::help_box_draws_from_the_help_system`,
+`units::help_director::tests`, `tests/help_novalis.rs` (the log table on all 19 levels; the director's look and map
+hints in its real cuboids; a whole Infobot box on the level text with its voice line). Frame: Ratchet placed in the
+director's look cuboid (`RC_HERO_AT=240.7,175.4,96 RC_PLAY_SCRIPT="2-6:stick 0 -0.3" RC_SCREENSHOT_FRAME=215`): the
+gate opens at tick 124, 1004 "To enter look-around mode, press and hold L1." with voice line 30064; two runs identical.
+`RC_HUD_HELP=<id>` moved to `crate::gameplay` (forces the request at the first tick, skipping the gate).

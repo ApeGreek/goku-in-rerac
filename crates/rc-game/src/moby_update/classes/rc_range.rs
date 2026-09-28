@@ -12,11 +12,15 @@
 //! counter is 0. Otherwise the counter is incremented and the records are walked in order: the missile (its
 //! position) is inside a record when (it has a path, floor < z < ceiling and the point is in the path polygon) or
 //! it is in the record's cuboid; the first record that holds it zeroes the counter. Then, with the counter ≥ 1:
-//! the static overlay is registered (when the draw flag gp−0x78f4 is set) and, past `ticks(90)`, the missile's
-//! flight ends.
+//! the static overlay is registered (when the missile view's flag 0x15f30c = gp−0x78f4 is set:
+//! `RegisterDrawCallback2(0x302438, m)`) and, past `ticks(90)`, the missile's flight ends
+//! ([`super::visibomb::end_flight`], `0x2cb788`).
 //!
-//! In the port the Visibomb is not ported (no class 172 is ever created), so the controller stays at 0; the
-//! overlay draw and `0x2cb788` are counted as unported when reached ([`crate::moby_update::Services::unported`]).
+//! **The static** ([`draw_callback`], `0x302438`, list 2; read from the disassembly): over the whole frame (0x13e500 ×
+//! 0x13e504) a grid of 32×32 quads from (−16, −16) of effect texture 0x1e, each sampling a random 32×32 window
+//! (`randi(32)` for u, then v: the game's stream, at the frame render), colour 0x7f7fff with alpha
+//! `trunc(counter·127.5 / ticks(90))`. The quads go to [`super::visibomb::Globals::static_quads`] for the engine's
+//! static layer.
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{pvar as p, World};
@@ -65,9 +69,33 @@ pub fn update(w: &mut World, id: MobyId) {
     if in_range(w, &w.m(id).pvars, q) { n = 0; }
     p::set_i32(&mut w.mm(id).pvars, COUNTER, n);
     if n < 1 { return; }
-    w.svc.unported("832 static overlay 0x302438");
+    if w.svc.visibomb.view.overlay { w.svc.draw_callbacks.register2(super::draw_callbacks::Callback::RangeStatic, id); }
     if n <= w.ticks(LIMIT) { return; }
-    w.svc.unported("832 end of the Visibomb flight 0x2cb788");
+    super::visibomb::end_flight(w, m);
+}
+
+/// The static's quad size and texture (`GetEffectTex(0x1e)`).
+pub const STATIC_FX: usize = 0x1e;
+pub const STATIC_QUAD: i32 = 32;
+
+/// `0x302438` (module docs): the state part (the `rand` draws) and the quads for the renderer.
+pub fn draw_callback(w: &mut World, id: MobyId) {
+    use crate::menus::screen_static::{StaticDraw, StaticTex};
+    let n = p::i32(&w.m(id).pvars, COUNTER);
+    let alpha = ((n as f32 * 127.5) / w.ticks(LIMIT) as f32) as i32;
+    let rgba = ((alpha as u32) << 24).wrapping_add(0x00ff_7f7f);
+    let (cols, rows) = ((crate::hud::SCREEN_W >> 5) + 1, (crate::hud::SCREEN_H >> 5) + 1);
+    let mut quads = Vec::with_capacity((cols * rows) as usize);
+    for i in 0..cols {
+        for j in 0..rows {
+            let u = w.rng.randi(0x20);
+            let v = w.rng.randi(0x20);
+            let q = STATIC_QUAD;
+            quads.push(StaticDraw { tex: StaticTex::Fx(STATIC_FX), x: i * q - q / 2, y: j * q - q / 2, w: q, h: q, u, v, tw: q, th: q, rgba, additive: false, pass: 2 });
+        }
+    }
+    w.svc.visibomb.static_quads = quads;
+    w.svc.visibomb.static_at = Some(w.counter);
 }
 
 #[cfg(test)]
@@ -88,5 +116,29 @@ mod tests {
         let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
         update(&mut w, 0);
         assert_eq!((p::i32(&w.m(0).pvars, COUNTER), w.m(0).update_dist), (0, 0xff));
+    }
+
+    /// `0x302438` with the counter at 45: a 17 × 14 grid of 32-pixel quads from (−16, −16), colour 0x7f7fff with alpha
+    /// `trunc(45·127.5/90)` = 63, each sampling `(randi(32), randi(32))` (u first) of effect texture 0x1e.
+    #[test]
+    fn static_grid() {
+        let mut m = Moby { state: 1, pvars: vec![0; COUNTER + 4], ..Moby::default() };
+        p::set_i32(&mut m.pvars, COUNTER, 45);
+        let mut t = MobyTable::new(vec![m], 4);
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        rng.srand(7);
+        let mut want = rng;
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = crate::moby_update::Services::new();
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 5);
+        draw_callback(&mut w, 0);
+        let q = &w.svc.visibomb.static_quads;
+        assert_eq!((q.len(), w.svc.visibomb.static_at), (17 * 14, Some(5)));
+        let (u, v) = (want.randi(32), want.randi(32));
+        assert_eq!((q[0].x, q[0].y, q[0].w, q[0].u, q[0].v, q[0].rgba), (-16, -16, 32, u, v, 0x3fff_7f7f));
+        assert_eq!((q[1].x, q[1].y, q[14].x, q[14].y), (-16, 16, 16, -16), "rows inside columns");
+        for _ in 1..q.len() { want.randi(32); want.randi(32); }
+        assert_eq!(w.rng.state, want.state, "two draws a quad");
     }
 }

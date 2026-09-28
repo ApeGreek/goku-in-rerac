@@ -31,9 +31,16 @@ pub const NONE: u8 = 0xff;
 /// The +0x7c / +0x7e part of `InitMobyInstance` (0x263488): `update_moby_animation_state` on sequence 0 when the
 /// class has sequences (moby +0x7d stays 0xff).
 pub fn init(m: &mut Moby, class: Option<&MobyAnimClass>) {
-    let Some(q) = class.and_then(|c| c.sequence(0)) else { return };
-    m.b7c = q.header.loop_sound;
-    m.anim.trigger_count = q.header.trigger_count;
+    if let Some(lp) = class.and_then(|c| init_state(&mut m.anim, c)) { m.b7c = lp; }
+}
+
+/// The animation part of [`init`] on any spawned animation state (the table mobys, and the hand item that
+/// `HeroItemsCreate` makes with `CreateMoby`, which the port keeps in the hero block): +0x7e = sequence 0's trigger
+/// count, so the item's sequence 0 (its take-out) plays its trigger sounds. Returns sequence 0's loop sound (+0x7c).
+pub fn init_state(anim: &mut moby_anim::AnimState, class: &MobyAnimClass) -> Option<u8> {
+    let q = class.sequence(0)?;
+    anim.trigger_count = q.header.trigger_count;
+    Some(q.header.loop_sound)
 }
 
 /// +0x7c after a sequence change (`hard_cut` 0x26c5a8 / `MobyAnimBlend` 0x26c660, both through

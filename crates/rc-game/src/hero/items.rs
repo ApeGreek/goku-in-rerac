@@ -105,6 +105,9 @@ pub struct ItemGlobals {
     pub previous: i32,
     /// 0x15ed90: the hand shows the wrench (`wrench_held`).
     pub wrench_flag: i32,
+    /// 0x141345: launch the Drone Device's drones (the quick select, the vendor and the Gadgets page set it instead of
+    /// asking for item 0x18; `UpdateWrenchSelected` launches them: `crate::moby_update::classes::drone::launch`).
+    pub drone: bool,
 }
 
 /// The item moby of the hand slot (moby fields the hand code uses).
@@ -274,6 +277,7 @@ impl HeroItems {
 #[allow(clippy::too_many_arguments)]
 pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: &dyn AnimCtl, rng: &mut Rng, env: &ItemEnv, hits: &mut dyn HitSink) {
     super::melee::jump_attack_shockwave(hero, table, env, hits);
+    super::walloper::deliver_hits(hero, table, env, hits, rng);
     // 0x22f390 in HeroItemsUpdate, before the slots: the glove-holding layers 0x22e660, then the weapon arm's
     // upkeep 0x22f068.
     super::weapons::hold_update(hero, anim);
@@ -326,6 +330,8 @@ fn create_hand(hero: &mut Hero, g: &ItemGlobals, env: &ItemEnv) {
         hit_timer: 0,
         flight: Default::default(),
     };
+    // CreateMoby → InitMobyInstance → update_moby_animation_state: +0x7e from sequence 0 (the take-out's sounds).
+    crate::moby_update::anim_sound::init_state(&mut m.anim, &class.anim);
     it.slot.state = 2;
     if id == item::WRENCH {
         it.slot.fire_mask = button::SQUARE;
@@ -335,6 +341,8 @@ fn create_hand(hero: &mut Hero, g: &ItemGlobals, env: &ItemEnv) {
     }
     it.f13fb = def.b18;
     it.slot.item = Some(m);
+    // A new glove moby's pvars (warm-up, lockout, the object in the glove) start clear [L] (super::gloves).
+    if is_glove(id) { hero.weapons.glove = Default::default(); }
 }
 
 /// Ratchet's hand joints a glove's joints 1.. copy (the table at 0x17aa40 + 4, −1 terminated).
@@ -484,6 +492,7 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
     if hero.items.slot.id != super::blaster::BLASTER { super::blaster::item_gone(hero, hits); }
     if hero.items.slot.id != super::devastator::DEVASTATOR { super::devastator::item_gone(hero, hits); }
     if hero.items.slot.id != super::tesla::TESLA { super::tesla::item_gone(hero, hits); }
+    if hero.items.slot.id != super::morph_ray::MORPH && hero.weapons.reactive.morph.beam.drawn.is_some() { super::morph_ray::item_gone(hero, hits); }
     // The item's sequence loop goes with its moby.
     if hero.items.slot.item.is_none() && hero.fx.item_loops[super::fx::LOOP_SEQ].is_some() {
         hero.fx.item_voices.push(super::packs::SoundCmd::ItemRelease { n: super::fx::LOOP_SEQ });
@@ -491,12 +500,14 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
     }
     if hero.items.slot.item.is_none() {
         update_hand_selected(hero, g, rng, env);
+        super::gadgets::launch_drones(hero, table, env, hits, rng);
         return;
     }
     match hero.items.slot.state {
         2 => {
             hero.items.slot.ticks_ready += 1;
             update_hand_selected(hero, g, rng, env);
+            super::gadgets::launch_drones(hero, table, env, hits, rng);
             // (slot 0: the joint-modifier records 0x140ce0.. are refreshed by FUN_00227050: not ported.)
             if let Some(it) = hero.items.slot.item.as_mut() {
                 if it.anim.flags & 2 != 0 && it.anim.seq_b == 0 { blend(it, env.data, 1, 0, 2); }
@@ -564,7 +575,14 @@ pub fn update_hand_selected(hero: &mut Hero, g: &mut ItemGlobals, rng: &mut Rng,
             changed = true;
         }
     }
-    // 0x141345 (Drone Device) and request 0x1f (FUN_00230770 path) are not reachable on foot here.
+    // 0x141345: the Drone Device's launch (`0x2e8c20`), made right after this function by the slot loop (it creates
+    // mobys: `super::gadgets::launch_drones`); the request is cleared. Request 0x1f (FUN_00230770 path) is not reachable on foot here.
+    if g.drone {
+        g.drone = false;
+        hero.gadgets.drone_launch = true;
+        g.request = 0;
+    }
+    let it = &mut hero.items;
     let r = g.request;
     if r != 0 {
         if r == it.target {
@@ -596,7 +614,9 @@ pub fn update_hand_selected(hero: &mut Hero, g: &mut ItemGlobals, rng: &mut Rng,
         it.f161e = 3;
         it.f52c = ticks(0x46) as i16;
     }
-    // 0x1413f8 (weapon out) is 0 here: FUN_0022efd8 not reached.
+    // The weapon put away (0x1413f8: FUN_0022efd8) and the glove-holding layers faded out for good (+0x34 = 1).
+    super::weapons::swap_commit(hero);
+    let it = &mut hero.items;
     g.wrench_flag = (t == item::WRENCH) as i32;
     it.slot.detached = 0;
     g.request = 0;

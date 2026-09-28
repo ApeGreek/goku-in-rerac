@@ -23,7 +23,7 @@
 //! **Users** (every call site in level01): Ratchet's record 0x1409c0 — the Thruster-Pack long jump 0x10 (SetState
 //! 0x23cf98: ghosts 0x28 / 0x14 / 0x0a at 2 / 4 / 6 ticks back) and high jump 0xd (0x28 / 0x14 at 3 / 5), faded by 2 a
 //! tick after tick 12 (`HeroStatePhysics` 0x2370b8), and the gadget lunge 0x20 (the physics: 0x30 / 0x17 / 0x0c at
-//! 2 / 4 / 6 from tick 8, faded by 5 after tick 18; the lunge's physics is not ported); every SetState of the on-foot
+//! 2 / 4 / 6 from tick 8, faded by 5 after tick 18: `crate::hero::walloper`); every SetState of the on-foot
 //! body (0x1413f4 = 0), `HeroTeleport` 0x2368e0 and the body switch 0x231348 end it (the port: SetState only). The
 //! thrown wrench's record
 //! 0x140b00 — the Comet-Strike's throw `0x236da0` (0x30 / 0x17 at 3 / 5 ticks back), updated without fade by the flight

@@ -244,6 +244,8 @@ pub struct ClassInfo {
     pub ty: u8,
     /// +0x48 sequence 0 header: frame count (+0x10) and bit 7 of the loop-sound byte (+0x11). (+0x0c = sequence count.)
     pub seq0: Option<Seq0Info>,
+    /// +0x28 the class's sound definitions are present (the classes that test it before `PlayClassSound`).
+    pub has_sounds: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

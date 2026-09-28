@@ -31,6 +31,7 @@ pub mod collision;
 pub mod occlusion;
 pub mod particle_tex;
 pub mod hud;
+pub mod pif;
 pub mod font;
 pub mod level_overlay;
 pub mod strings;

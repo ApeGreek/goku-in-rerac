@@ -28,6 +28,8 @@ use super::world::WaterWorld;
 use super::RippleSim;
 use crate::moby_runtime::MobyId;
 use crate::moby_update::classes::draw_callbacks::Callback;
+use crate::moby_update::creature::turn::spring;
+use crate::moby_update::scheduler::{group_cmd, group_ids as group, group_state};
 use crate::moby_update::services::{pvar, World};
 use crate::ps2v::Pf;
 
@@ -195,49 +197,6 @@ fn in_view(w: &World, id: MobyId, far: f32) -> bool {
 fn approach(x: &mut f32, target: f32, step: f32) {
     let d = target - *x;
     *x += d.clamp(-step, step);
-}
-
-/// `FUN_00270830(target, accel, decel, vmax, &x, &v)`: `x` springs toward `target` with velocity `v` (accelerating
-/// by `accel`, braking by `decel` so that it stops there, at most `vmax` a tick).
-fn spring(target: f32, accel: f32, decel: f32, vmax: f32, x: &mut f32, v: &mut f32) {
-    let d = target - *x;
-    if *v * d < 0.0 || d == 0.0 {
-        approach(v, 0.0, decel);
-        *x += *v;
-        return;
-    }
-    let stop = (*v * *v) / decel * 0.5;
-    if d.abs() < stop {
-        let k = if stop < d.abs() + v.abs() { 1.0 } else { 1.1 };
-        approach(v, 0.0, decel * k);
-    } else {
-        // `vec_length` (VU0 `vsqrt`) of 2·decel·d: the square root of the magnitude.
-        let s = (2.0 * decel * d).abs().sqrt().min(vmax);
-        approach(v, if d < 0.0 { -s } else { s }, accel);
-    }
-    if d.abs() <= v.abs() { *x = target } else { *x += *v }
-}
-
-/// The moby ids of group `g` (`0x1abcc0[g]`).
-fn group(w: &World, g: i8) -> Vec<MobyId> {
-    if g < 0 { return Vec::new(); }
-    w.svc.groups.lists.get(g as usize).and_then(|l| l.clone()).map(|l| l.into_iter().map(|m| m as MobyId).collect()).unwrap_or_default()
-}
-
-/// `0x26e0e0(g, s)`: every live member's state byte = `s`.
-fn group_state(w: &mut World, g: i8, s: u8) {
-    for m in group(w, g) {
-        if let Some(mm) = w.table.mobys.get_mut(m) {
-            if (mm.state as i8) >= 0 { mm.state = s; }
-        }
-    }
-}
-
-/// `0x26e090(g, c)`: every member's command byte +0xbc = `c`.
-fn group_cmd(w: &mut World, g: i8, c: u8) {
-    for m in group(w, g) {
-        if let Some(mm) = w.table.mobys.get_mut(m) { mm.cmd = c; }
-    }
 }
 
 fn pi(w: &World, id: MobyId, o: usize) -> i32 { pvar::i32(&w.m(id).pvars, o) }

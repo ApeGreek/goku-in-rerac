@@ -7,4 +7,5 @@
 pub struct Reactive {
     pub suck: super::suck_cannon::SuckCannon,
     pub taunter: super::taunter::Taunter,
+    pub morph: super::morph_ray::MorphRay,
 }

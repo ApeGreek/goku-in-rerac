@@ -24,7 +24,9 @@
 
 pub mod frame;
 pub mod gadgets;
+pub mod map_page;
 mod options;
+pub mod pages;
 pub mod planet_select;
 pub mod port;
 
@@ -76,6 +78,10 @@ pub struct Addrs {
     pub port_quit: u32,
     pub port_model_few: u32,
     pub port_model_many: u32,
+    /// The Help / Weapons and Help / Gadgets label tables (`pages::data::WEAPON_TEXTS`, `GADGET_TEXTS_A` / `_B`).
+    pub help_texts: [u32; 3],
+    /// The Moves label's tables (Heli-Pack owned / not: `pages::data::MOVES_HELI`, `MOVES_NO_HELI`).
+    pub moves_tables: [u32; 2],
 }
 
 impl Addrs {
@@ -100,6 +106,8 @@ impl Addrs {
             port_quit: a(port::QUIT_PAGE),
             port_model_few: a(port::MODEL_FEW),
             port_model_many: a(port::MODEL_MANY),
+            help_texts: [a(pages::data::WEAPON_TEXTS), a(pages::data::GADGET_TEXTS_A), a(pages::data::GADGET_TEXTS_B)],
+            moves_tables: [a(pages::data::MOVES_HELI), a(pages::data::MOVES_NO_HELI)],
         }
     }
 }
@@ -178,6 +186,12 @@ pub mod func {
     pub const GALAXY_UPDATE: u32 = 0x295310;
     pub const GALAXY_DRAW: u32 = 0x295338;
     pub const MAP_UPDATE: u32 = 0x28f868;
+    /// The map widget's draw 0x292d38 (→ `UNK_NoMapAvailable` 0x25b1c0) and the map page's legend 0x292d70.
+    pub const MAP_DRAW: u32 = 0x292d38;
+    pub const MAP_LEGEND_DRAW: u32 = 0x292d70;
+    /// The globe: draw 0x294258, enter 0x2904d0.
+    pub const GLOBE_DRAW: u32 = 0x294258;
+    pub const GLOBE_ENTER: u32 = 0x2904d0;
     pub const CONFIRM_UPDATE: u32 = 0x295370;
     pub const MISSIONS_UPDATE: u32 = 0x28fec8;
 }
@@ -310,6 +324,15 @@ pub enum Data {
     Grid(gadgets::Grid),
     Preview(gadgets::Preview),
     Model,
+    /// The pause pages' other widgets ([`pages`]).
+    Image(pages::Image),
+    Controls { state: i32 },
+    Slots { slots: [i32; 8], cursor: i32 },
+    Ammo,
+    AmmoModel(pages::AmmoModel),
+    GoldBolt,
+    IconList(pages::IconList),
+    Skill,
     Other,
 }
 
@@ -434,6 +457,26 @@ pub struct PageMenu {
     /// The 3D widgets of the last draw (the engine renders them) and the 3D Ratchet widget while it exists.
     pub view: gadgets::GadgetsView,
     pub view_model: Option<u32>,
+    /// `MenuTextLoad`'s state (+0x50 of the Help Log's text widget): 0 the level's table, 1 `all_text` streaming, 2 the
+    /// message table swapped to `all_text` ([`pages::text_update`]).
+    pub text_swap: i32,
+    /// Label id tables the page enters build (0x1ba6f8, 0x1ba7c8, 0x1ba800: [`pages::help_weapons_enter`]), by address.
+    pub label_tables: BTreeMap<u32, Vec<u32>>,
+    /// The items the Help / Weapons and Help / Gadgets enters walk (the Weapons page grid's 15 cells, the Gadgets page
+    /// grids' 14), read at load.
+    pub help_items: pages::HelpItems,
+    /// The In-Level Movies lists by level (`0x1b8aa8[level]`), read at load.
+    pub movie_lists: Vec<Vec<Item>>,
+    /// The help log's id table 0x1798d0 (`crate::help`), read at load.
+    pub log_ids: Vec<(i16, i16)>,
+    /// 0x15ed88: the language (the Controls page's pictures, the Items page's German hyphen).
+    pub lang: u32,
+    /// The price records' `{u16 has ammo (+8), u16 max ammo (+0xe)}` by item (0x1c4530 + 0x18·id), from the engine.
+    pub ammo_records: Vec<(u16, u16)>,
+    /// The Items page's gold bolt moby while it exists: its turn about x (`pages::gold_enter`).
+    pub gold_spin: Option<f32>,
+    /// The map page (`map_page`; the live map system moved in while the menu is open).
+    pub map: map_page::MapPage,
 }
 
 fn stub(m: &mut BTreeMap<&'static str, u64>, name: &'static str) { *m.entry(name).or_default() += 1; }
@@ -474,6 +517,15 @@ impl PageMenu {
             unusable_back: false,
             view: gadgets::GadgetsView::default(),
             view_model: None,
+            text_swap: 0,
+            label_tables: BTreeMap::new(),
+            help_items: pages::HelpItems::read(ov),
+            movie_lists: pages::read_movie_lists(ov),
+            log_ids: crate::help::read_log_ids(ov),
+            lang: 0,
+            ammo_records: Vec::new(),
+            gold_spin: None,
+            map: map_page::MapPage::new(ov),
         };
         let a = &m.addrs;
         let mut todo = vec![a.root, a.map, a.map_missions, a.planet_select, a.planet_confirm];
@@ -513,6 +565,8 @@ impl PageMenu {
         self.ticks = 0;
         self.post = 0;
         self.dest = if g.level < 0x13 { g.level } else { 0 };
+        // FUN_00262760 (0x28c0ec): the destination's missions.
+        map_page::enter(self, gs);
         // 0x1ba2a4 / 0x1ba2a8 (0x14161b is not modelled: 0).
         self.unusable_head = g.level == 0xd;
         self.unusable_back = g.level == 0 || g.level == 0xe;
@@ -552,6 +606,8 @@ impl PageMenu {
             self.return_page = 0;
         }
         self.current = self.target;
+        // FUN_0025a8d0 for the map and the planet select (kinds 0xb / 0xf).
+        if matches!(self.kind, 0xb | 0xf) { map_page::setup(self, gs); }
         // The 14 mobys start on the page's seqs at their last frame.
         if let Some(p) = self.page(self.current) {
             let seqs = p.seqs;
@@ -646,8 +702,10 @@ impl PageMenu {
                 self.call_enter(pending, true, gs);
             }
         }
-        // MobyUpdateLoop 0x2793d8: the frame mobys (advance, MenuMobyUpdate, corners).
+        // MobyUpdateLoop 0x2793d8: the frame mobys (advance, MenuMobyUpdate, corners) and the pages' own mobys (the
+        // Items page's gold bolt turns).
         if let Some(f) = self.frames.as_mut() { f.update(); }
+        pages::gold_tick(self);
         if self.post != 0 && self.ticks >= 10 {
             // PageMenuClose 0x28c6c8.
             let ws = self.page(self.current).map(|p| p.widgets).unwrap_or([0; 14]);
@@ -686,11 +744,27 @@ impl PageMenu {
                 if let Some(Data::List(l)) = self.wm(w).map(|x| &mut x.data) { planet_select::build_list(l, gs, dest, &names); }
                 self.level_names = names;
             }
+            pages::func::IMAGE_ENTER => pages::image_enter(self, w),
+            func::GLOBE_ENTER => map_page::globe_enter(self),
+            pages::func::SLOTS_ENTER => pages::slots_enter(self, w, gs),
+            pages::func::GOLD_ENTER => pages::gold_enter(self, w),
+            pages::func::LOG_LIST_ENTER => {
+                let ids = std::mem::take(&mut self.log_ids);
+                pages::log_list_enter(self, w, gs, &ids);
+                self.log_ids = ids;
+            }
+            pages::func::TEXT_ENTER => pages::text_enter(self, w),
+            pages::func::HELP_WEAPONS_ENTER => pages::help_weapons_enter(self, gs),
+            pages::func::HELP_GADGETS_ENTER => pages::help_gadgets_enter(self, gs),
+            pages::func::MOVES_LABEL_ENTER => pages::moves_label_enter(self, w, gs),
+            pages::func::MOVIES_ENTER => pages::movies_enter(self, w, gs),
+            // fun_00225ac0(1): the stream buffers' layout (memory only).
+            pages::func::STREAM_LAYOUT_ENTER => {}
             _ => stub(&mut self.stub_calls, "widget enter"),
         }
     }
 
-    fn call_leave(&mut self, w: u32, _out: &mut MenuOut, _gs: &mut GameState) {
+    fn call_leave(&mut self, w: u32, _out: &mut MenuOut, gs: &mut GameState) {
         let Some(leave) = self.w(w).map(|x| x.leave) else { return };
         match leave {
             0 | 0x28dd10 | 0x28dd18 => {}
@@ -698,6 +772,11 @@ impl PageMenu {
             func::SOUND_LEAVE => stub(&mut self.stub_calls, "sound leave mixer 0x290508"),
             gadgets::func::MODEL_LEAVE => gadgets::model_leave(self, w),
             gadgets::func::PREVIEW_LEAVE => gadgets::preview_leave(self, w),
+            pages::func::IMAGE_LEAVE => pages::image_leave(self, w),
+            pages::func::SLOTS_LEAVE => pages::slots_leave(self, w, gs),
+            pages::func::GOLD_LEAVE => pages::gold_leave(self, w),
+            pages::func::LOG_LIST_LEAVE => {}
+            pages::func::TEXT_LEAVE => pages::text_leave(self),
             _ => stub(&mut self.stub_calls, "widget leave"),
         }
     }
@@ -739,7 +818,13 @@ impl PageMenu {
                 if inp.pressed_u & button::CROSS != 0 { self.target = self.addrs.planet_confirm; }
                 0
             }
-            func::MAP_UPDATE => planet_select::map_update(self, w, inp, gs, out),
+            func::MAP_UPDATE => {
+                // 0x28f868: fun_00205440 (pan / zoom), the keys, then the compose.
+                map_page::pan_zoom(self, inp);
+                let r = planet_select::map_update(self, w, inp, gs, out);
+                map_page::compose(self, gs);
+                r
+            }
             func::CONFIRM_UPDATE => planet_select::confirm_update(self, inp, gs, out),
             func::MISSIONS_UPDATE => planet_select::missions_update(self, w, inp, gs, out),
             port::UPDATE => port::update(self, w, inp, out),
@@ -747,6 +832,20 @@ impl PageMenu {
             // `LoadHandGadget` 0x297d70: the models follow the page's copy of the saved items (engine side).
             gadgets::func::MODEL_UPDATE => 0,
             gadgets::func::PREVIEW_UPDATE => gadgets::preview_update(self, w),
+            pages::func::IMAGE_UPDATE => pages::image_update(self, w, gs),
+            pages::func::CONTROLS_UPDATE => {
+                let lang = self.lang;
+                pages::controls_update(self, w, lang)
+            }
+            pages::func::SLOTS_UPDATE => pages::slots_update(self, w, inp, gs, out),
+            pages::func::AMMO_UPDATE => 0,
+            pages::func::AMMO_MODEL_UPDATE => pages::ammo_model_update(self, w),
+            pages::func::TEXT_UPDATE => {
+                pages::text_update(self, w);
+                if !self.is_focus(w) { return 0; }
+                self.generic_keys(inp, false, gs.global.level).unwrap_or(0)
+            }
+            pages::func::ICONS_UPDATE => pages::icons_update(self, w, inp, gs, out),
             _ => {
                 let _ = env;
                 stub(&mut self.stub_calls, "widget update");
@@ -927,6 +1026,28 @@ impl PageMenu {
             gadgets::func::GRID_DRAW => gadgets::grid_draw(self, w, a, gs, env.vsync, out),
             gadgets::func::MODEL_DRAW => gadgets::model_draw(self, w, gs),
             gadgets::func::PREVIEW_DRAW => gadgets::preview_draw(self, w, a, gs),
+            pages::func::IMAGE_DRAW => pages::image_draw(self, w, gs, out),
+            pages::func::CONTROLS_DRAW => {
+                let lang = self.lang;
+                pages::controls_draw(self, w, lang, out)
+            }
+            pages::func::SLOTS_DRAW => pages::slots_draw(self, w, a, gs, env.vsync, out),
+            pages::func::AMMO_DRAW => {
+                let rec = std::mem::take(&mut self.ammo_records);
+                let r = pages::ammo_draw(self, w, a, gs, &rec, out);
+                self.ammo_records = rec;
+                r
+            }
+            pages::func::AMMO_MODEL_DRAW => pages::ammo_model_draw(self, w, a, gs, out),
+            pages::func::GOLD_DRAW => {
+                let lang = self.lang;
+                pages::gold_draw(self, w, a, gs, lang, out)
+            }
+            pages::func::ICONS_DRAW => pages::icons_draw(self, w, a, env.vsync, out),
+            pages::func::SKILL_DRAW => pages::skill_draw(self, w, a, out),
+            func::MAP_DRAW => map_page::draw(self, w, a, gs, out),
+            func::MAP_LEGEND_DRAW => map_page::legend_draw(self, w, a, gs, out),
+            func::GLOBE_DRAW => map_page::globe_draw(self, w, env.vsync, out),
             _ => {
                 stub(&mut self.stub_calls, "widget draw");
                 out.push(MenuDraw::Stub("widget draw"));
@@ -940,6 +1061,7 @@ impl PageMenu {
         let focus = self.page(self.current).map_or(0, |p| p.focus);
         let s = scale_ticks(self.consts.hl_ticks);
         let sh = self.consts.shadow;
+        let swapped = self.text_swap == 2;
         let Some(wd) = self.wm(w) else { return 1 };
         let [_, _, ww, wh] = wd.rect;
         let Data::List(l) = &mut wd.data else { return 1 };
@@ -947,7 +1069,7 @@ impl PageMenu {
         let n = l.items.len() as i32;
         let step = if l.flags & lf::STEP_FROM_FONT != 0 { size + 3 } else { wh / (n + 1) };
         let mut y = step - size / 2 - 1;
-        let msg = |id: i16| a.msg(id as i32);
+        let msg = |id: i16| a.msg_in(id as i32, swapped);
         let mut maxw = 0;
         if l.flags & lf::COMMON_CENTRE != 0 {
             for it in &l.items { maxw = maxw.max(a.width(font, msg(it.label))); }
@@ -968,7 +1090,7 @@ impl PageMenu {
             } else {
                 hl_colour(it.hl as i32, s, LIGHT_BLUE, YELLOW)
             };
-            let t = if it.action == 2 { a.msg(20308) } else { msg(it.label) };
+            let t = if it.action == 2 { a.msg_in(20308, swapped) } else { msg(it.label) };
             let tw = a.width(font, t);
             let x = if l.flags & lf::LEFT != 0 {
                 4
@@ -1004,6 +1126,21 @@ impl PageMenu {
         let dest = self.dest;
         let level = gs.global.level;
         let focus_item = gadgets::focused_item(self);
+        let swapped = self.text_swap == 2;
+        // Source 0x100: the focused grid / icon list's cursor cell (shown only while its item is owned or its flag set).
+        let focus_cell = match self.w(focus).map(|x| &x.data) {
+            Some(Data::Grid(g)) => Some((g.cursor, g.cells.get(g.cursor.max(0) as usize).copied())),
+            Some(Data::IconList(l)) => Some((l.cursor, l.cells.get(l.cursor.max(0) as usize).copied())),
+            _ => None,
+        };
+        // Source 0x1000: the focused list's cursor item's label, looked up in the help log's table (`fun_001fecc8(label,
+        // 1, &+0x34)`): the help message of a Help Log entry.
+        let focus_log = match self.w(focus).map(|x| &x.data) {
+            Some(Data::List(l)) => Some((l.cursor, l.items.get(l.cursor.max(0) as usize).map_or(0, |it| it.label))),
+            _ => None,
+        };
+        let log_msg = focus_log.and_then(|(_, t)| self.log_ids.iter().find(|e| e.1 == t).map(|e| e.0 as u16 as u32));
+        let tables = self.label_tables.clone();
         let Some(wd) = self.wm(w) else { return 1 };
         let [_, _, ww, wh] = wd.rect;
         let Data::Label(l) = &mut wd.data else { return 1 };
@@ -1027,9 +1164,19 @@ impl PageMenu {
             let Some(item) = focus_item else { return 1 };
             variant = gs.global.gold_weapons.get(item.max(0) as usize).is_some_and(|&b| b != 0) as i32;
             item
+        } else if l.flags & 0x100 == 0 {
+            // 0x1000: the entry's help message id into +0x34 (0xffff: none).
+            let Some((cursor, _)) = focus_log else { return 1 };
+            l.id = log_msg.unwrap_or(0xffff);
+            cursor
         } else {
-            // The list-cursor sources (0x100, 0x1000) belong to unported pages.
-            return 1;
+            // 0x100: the cell's item owned (kind 0) or its global flag set (kind 1), else −1.
+            let Some((cursor, cell)) = focus_cell else { return 1 };
+            let set = cell.is_some_and(|c| {
+                let t = if c.kind == 0 { &gs.global.owned[..] } else { &gs.global.flags[..] };
+                t.get(c.item.max(0) as usize).is_some_and(|&b| b != 0)
+            });
+            if set { cursor } else { -1 }
         };
         if l.timer == -1 {
             l.timer = s;
@@ -1057,15 +1204,23 @@ impl PageMenu {
         let mut t: Vec<u8> = if l.flags & 4 != 0 {
             if l.id == 0 { return 1; }
             id = l.id;
-            a.msg(l.id as i32).to_vec()
+            a.msg_in(l.id as i32, swapped).to_vec()
+        } else if l.flags & 0x1000 != 0 {
+            if l.id == 0xffff { return 1; }
+            id = l.id;
+            a.msg_in(l.id as i32, swapped).to_vec()
+        } else if l.flags & 0x100 != 0 && content < 0 {
+            Vec::new()
         } else if l.id != 0 && content >= 0 {
             // `*(table + (content·stride & ~3) + variant·4)`, the table in the overlay (`MenuAssets::overlay`).
             let addr = l.id.wrapping_add((content as u32).wrapping_mul(l.stride) & !3).wrapping_add(variant as u32 * 4);
-            id = match &l.table {
-                Some(t) => t.get(content as usize).copied().unwrap_or(0),
-                None => a.overlay.u32(addr).unwrap_or(0),
+            id = match (&l.table, tables.get(&l.id)) {
+                (Some(t), _) => t.get(content as usize).copied().unwrap_or(0),
+                // A table a page enter built (the Help / Weapons and Help / Gadgets descriptions).
+                (None, Some(t)) => t.get(content as usize).copied().unwrap_or(0),
+                (None, None) => a.overlay.u32(addr).unwrap_or(0),
             };
-            a.msg(id as i32).to_vec()
+            a.msg_in(id as i32, swapped).to_vec()
         } else {
             b"default".to_vec()
         };
@@ -1190,7 +1345,7 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
             cursor: raw[4] as i32,
             scroll: raw[5] as i32,
         }),
-        (func::LABEL_UPDATE, func::LABEL_DRAW) | (0, func::LABEL_DRAW) => {
+        (func::LABEL_UPDATE, func::LABEL_DRAW) | (0, func::LABEL_DRAW) | (pages::func::TEXT_UPDATE, func::LABEL_DRAW) => {
             Data::Label(Label { flags: raw[0], id: raw[1], stride: raw[2], scroll: raw[3] as i32, timer: raw[5] as i32, content: raw[6] as i32, variant: raw[7] as i32, table: None })
         }
         (func::TOGGLE_UPDATE, _) => Data::Toggle(options::Toggle::read(ov, &raw)),
@@ -1204,6 +1359,14 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
         (gadgets::func::GRID_UPDATE, _) => Data::Grid(gadgets::Grid::read(ov, a)?),
         (gadgets::func::PREVIEW_UPDATE, _) => Data::Preview(gadgets::Preview { flags: raw[0], angle: f32::from_bits(raw[2]), class: -1, ..Default::default() }),
         (gadgets::func::MODEL_UPDATE, _) => Data::Model,
+        (pages::func::IMAGE_UPDATE, _) => Data::Image(pages::Image::read(&raw)),
+        (pages::func::CONTROLS_UPDATE, _) => Data::Controls { state: -1 },
+        (pages::func::SLOTS_UPDATE, _) => Data::Slots { slots: [0; 8], cursor: 0 },
+        (pages::func::AMMO_UPDATE, _) => Data::Ammo,
+        (pages::func::AMMO_MODEL_UPDATE, _) => Data::AmmoModel(pages::AmmoModel::default()),
+        (0, pages::func::GOLD_DRAW) => Data::GoldBolt,
+        (pages::func::ICONS_UPDATE, _) => Data::IconList(pages::IconList::default()),
+        (0, pages::func::SKILL_DRAW) => Data::Skill,
         _ => Data::Other,
     };
     Some(Widget { addr: a, update, draw, enter: ov.label(u(8)?), leave: ov.label(u(0xc)?), dflags: u(0x10)?, moby: u(0x14)? as i32, rect: [0; 4], raw, data })

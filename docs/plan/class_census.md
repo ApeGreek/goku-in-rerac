@@ -14,6 +14,10 @@ the sea port landed during the run and took 10), in **448 class-port units**. Th
 system verdict exists for **429 units / 5,485 created instances (99.1 %)**; 19 units / 48 instances call an untagged
 function and nothing else the port lacks.
 
+**Re-run 2026-09-28 (after the cheap-wins batches and the other ports of that day):** 548 unported class-levels,
+4,526 placed / **4,030 created** instances in 417 units; verdicts cheap 197 units / 1,308, missing 161 / 2,470, partly
+40 / 204, unknown 19 / 48. The unit ids change between runs (they are numbered by instances).
+
 | verdict (per unit) | units | created instances |
 |---|---|---|
 | **cheap**: every shared call is one the port has (or trivial arithmetic, or the class family's own level code) | 226 | 2,794 |
@@ -175,6 +179,68 @@ in the appendix, verdict "cheap"); "private" is the unit's own code in 32-bit wo
 Notes: U21 (class 1060, 334 lamps on 00 / 02 / 05 / 18) is a pulsing ambient colour plus a draw callback of glow
 quads over its group; U92 (12 classes on 10 levels, 67 instances) has a 2-word update (`jr ra`): it does nothing, so
 a registry entry is the whole port. Under G-CLS-027 (new) these are one batch of class ports.
+
+### In the port: cheap wins, levels 00–08 (2026-09-28, G-CLS-027 part A)
+
+Unit ids below are the census's after the re-run of 2026-09-28 (the run renumbers them: U21 above is U27 here). Each
+unit is one row of `rc_game::moby_update::classes::units::PORTS` (`ClassUpdate::Unit(i)`, shared with the 09–18 half),
+found on every level by code identity; the module doc of each port carries the unit's coverage table (every call,
+branch and side effect of the update and its private helpers, with the file / function or the gap).
+
+| unit | classes (levels) | created | reference | port | notes |
+|---|---|---|---|---|---|
+| U27 | 1060 lamps (00, 02, 05, 18) | 334 | level00 0x2df4f8 | `units::lamp` | colour pulse, ambient (red, blue, 0: the game's argument slip, kept), one glow callback per group and tick through the pvar **shared data** (gameplay 0x4c, now loaded: `Services::pvar_shared`); `Callback::UnitGlow` drawn by `rc-engine` fx_draw with the shared glow quad `0x2781d0` |
+| U99 | 12 classes on 10 levels | 67 | level02 0x2dd4d0 | `units::empty` | `jr ra; nop`: `LevelPorts` maps every table entry that starts with `jr ra; nop` (and has no other port) to it; also the unplaced 433 / 531 / 618 / 1289 … of every level (Novalis included: they were parked with mode 2, the game updates them) |
+| U268 | 21 loose-piece classes (08) | 85 | level08 0x2dba40 | `units::loose_piece` | rest (state 2) until set loose by another moby: tumble about an anchor, bounce (`coll_sphere` + reflect ×0.5), fade, delete below z 5; the mover is outside the unit |
+| U95 | 296, 652, 653 conveyors (02, 12) | 42 | level02 0x2dc6b0 | `units::conveyor` | carry riders by a heading velocity (`triggers::carry_riders`); one-way or reversing every 180 ticks |
+| U241 | 886 timed switches (07, 12) | 30 | level07 0x30bf90 | `units::timed_switch` | group state machine (`scheduler::group_state` / `group_cmd`), countdown ticks, mission done |
+| U247 | 9 mover classes (07, 13) | 28 | level07 0x310df0 | `units::linked_mover` | slides out / back on a linked moby's states; the in-game map zone flags `0x184528[i]` it writes are not ported (G-UI-001) |
+| U229 | 1512 vents (06) | 26 | level06 0x308c68 | `units::vent` | steam puffs / spark bursts (type 2), the delayed death explosion |
+| U280 | 621 rail mines (08) | 25 | level08 0x2f44c0 | `units::grind_mine` | a hit or a grinding Ratchet → `SpawnBeamExplosion`; the path mode's path pointer is taken as a spline index [L] |
+| U185 | 852, 853 rising blocks (05) | 21 | level05 0x314eb0 | `units::rising_block` | `0x270830` spring (moved from the water managers to `creature::turn::spring`: two consumers) |
+| U221 | 1091–1098, 1103 bobbing blocks (06) | 21 | level06 0x300df0 | `units::bob_block` | |
+| U281 | 648 smoke emitters (08, 10) | 21 | level08 0x2f5830 | `units::smoke_emitter` | the default plume's third jitter lands on x again (kept) |
+| U139 | 915–917 markers (03, 10) | 19 | level03 0x2dc310 | `units::marker` | deleted by their first update |
+| U170 | 341 Hydrodisplacer pads (05, 07, 11, 12, 18) | 17 | level05 0x2f8080 | `units::hydro_pad` | |
+
+**Not cheap after all** (found while porting): U180 (838, 05: 26) and U186 (855, 05: 7) hand one looping voice between
+the group's emitters (the nearest to the camera rewrites the slot record's owner and position, `0x13e5d8 + slot·0x70`):
+G-AUD-010. **Census artefacts**: U36 (class 27, 01: 10) is the particle emitter the engine runs as an external
+(`LevelPorts::external`); the census counts only `LevelPorts::get`. Not reached (budget): U211, U168, U182, U248, U207,
+U123, U208, U278, U215 and the smaller units of the appendix (G-CLS-027).
+
+Tests: `rc-game/tests/cheap_classes_a.rs` (every unit resolves on exactly its census levels with the census's counts;
+unit addresses distinct; one headless behaviour test per unit on one of its levels); unit tests in each module.
+
+### In the port: cheap wins, levels 09–18 (2026-09-28, G-CLS-027 part B)
+
+Same registry and conventions as part A (unit ids of the re-run before it). The coverage tables are in
+docs/plan/class_units_levels_09_18.md and the module docs; tests `rc-game/tests/cheap_classes_b.rs`.
+
+| unit | classes (levels) | created | reference | port | notes |
+|---|---|---|---|---|---|
+| U408 | 212, 1412 asteroids (13) | 130 | level13 0x2e1638 | `units::asteroid` | idle spin; drift / split / respawn ported, the wake needs the ship-combat mode (G-LVL-009) |
+| U303 | 1181 chain links (09) | 124 | level09 0x304360 | `units::chain_link` | the break runs down the chain and tells the platform core |
+| U553 | 885…936 grouped pieces (18) | 119 | level18 0x2e9768 | `units::barricade` | a hit sets the group flying (`scheduler::group_state`) |
+| U294 | 1182–1189 tethered platforms (09) | 80 | level09 0x2c26c8 | `units::tethered_platform` | bob / wobble, pieces on the core's joint, the fall into the lava, global-flag writes (`interact::set_global_flag`) |
+| U417 | 1261 explosive tanks (13) | 55 | level13 0x307b10 | `units::explosive_tank` | + its fireball class 1634 (0x30c3b8) |
+| U533 | 1359…1373 sliding doors (17) | 52 | level17 0x2e87d8 | `units::fleet_door` | |
+| U477 | 937 cogs (15) | 48 | level15 0x2e46b0 | `units::linked_cog` | |
+| U563 | 1584 carriers (18) | 38 | level18 0x2fa728 | `units::veldin_carrier` | |
+| U500 | 650 floats (16) | 29 | level16 0x2d5cb8 | `units::rising_float` | |
+| U479 | 1250 belts (15) | 18 | level15 0x2e73c0 | `units::quartu_belt` | |
+| U499 | 647 pieces (16) | 16 | level16 0x2d59e0 | `units::extending_piece` | |
+| U559 | 1432 (18) | 13 | level18 0x2f7ab0 | `units::hidden_prop` | |
+| U493 | 482 (16) | 8 | level16 0x2cb600 | `units::marker::update` | `DeleteMoby(self)` |
+| U484 | 1425 bubble vents (15) | 6 | level15 0x2eb928 | `units::bubble_vent` | |
+| U456 | 1397 (14) | 6 | level14 0x3061d8 | `units::oltanis_switchboard` | |
+
+**Not cheap after all**: U543 (1843, 17: 60) and U370 (1319, 11: 52), one fighter source per level, need Ratchet's
+ship-combat mode (hero state 0x32 with the ship moby 0x140940): G-LVL-009. Not attempted: U474 (408: its own draw
+callback) and the rest of the part B appendix (117 units / 959 instances after the re-run).
+
+**Re-run after both halves (2026-09-28):** 548 unported class-levels, 4,526 placed / **4,030 created** instances, 417
+units; verdicts: cheap 197 units / 1,308, missing 161 / 2,470, partly 40 / 204, unknown 19 / 48.
 
 ## Unique classes: the ones that need something no other class needs
 

@@ -246,28 +246,9 @@ fn target_hover(w: &mut World, id: MobyId) {
     c::set_pv4(w, id, pvo::TARGET, t);
 }
 
-/// `0x26de80(m, J, target, &out)`: the walk toward `target` (the walker's turn, then its step scaled by how well it
-/// faces the target). Returns the step's bits (4 within J11; 0x10 facing away by J10 or more).
-pub fn walk_to(w: &mut World, id: MobyId, target: V, out: &mut V) -> u32 {
-    *out = [0.0; 4];
-    let mut r = 0;
-    if c::dist3(c::pos(w, id), target) < jw(w, id, 11) { r = 4; }
-    let a = heading_to(w, id, target);
-    turn_to(w, id, a);
-    let d = diff_rots(a, c::yaw(w, id));
-    let lim = jw(w, id, 10);
-    if lim <= d { r |= 0x10; }
-    let t4 = w.ticks(4);
-    let mut tm = c::pi32(w, id, WALKER + 0x48);
-    c::dec_timer_i32(&mut tm);
-    if d < lim && tm < t4 { tm = t4; }
-    c::set_pi32(w, id, WALKER + 0x48, tm);
-    if tm != 0 {
-        let s = walker::step(w, id, WALKER, (lim - d) / lim, target, out);
-        r = if 0.1 < d { r | (s & !2) } else { r | s };
-    }
-    r
-}
+/// `0x26de80(m, J, target, &out)` on the mouse's walker record: [`walker::walk_to`] (shared with the Glove of Doom's
+/// bots).
+pub fn walk_to(w: &mut World, id: MobyId, target: V, out: &mut V) -> u32 { walker::walk_to(w, id, WALKER, target, out) }
 
 /// `0x30d880`: the flight toward the target (module doc of the game's function in the port's words: aim, steer, move
 /// with collision, keep 1.1 from Ratchet, tilt).

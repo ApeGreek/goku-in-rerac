@@ -131,8 +131,32 @@ pub const PVAR_MOBY_LINK_FIXUPS_POINTER: usize = 0x50;
 pub const PVAR_POINTER_FIXUPS_POINTER: usize = 0x5c;
 /// 0x4c: shared data blob `{s32 size, s32 count, pad[2], data[size], {u16 pvar_index, u16 byte_offset,
 /// s32 data_offset}[count]}`; each record stores the absolute address `blob + data_offset` into the pvar
-/// (loader, before the spline copy). Empty on Novalis (size 0, count 0); not applied by [`parse_pvars`].
+/// (loader, before the spline copy). Empty on Novalis (size 0, count 0). [`parse_pvars_spawned`] applies the records
+/// the port's way: the field gets `data_offset` (blob-relative; [`parse_pvar_shared_data`] gives the blob, which the
+/// moby system keeps as `Services::pvar_shared`). Levels 00 / 02 / 05 / 18 use it for the lamps 1060 (one word per
+/// moby group: the tick the group's glow callback was last registered), 05 for 838 / 855, and others (census).
 pub const PVAR_SHARED_DATA_POINTER: usize = 0x4c;
+
+/// The shared data blob of section 0x4c (`data[size]`; empty when the section is absent or empty).
+pub fn parse_pvar_shared_data(gameplay: &[u8]) -> Result<Vec<u8>> {
+    let g = Buf(gameplay);
+    let p = g.u32(PVAR_SHARED_DATA_POINTER)? as usize;
+    if p == 0 { return Ok(Vec::new()); }
+    let size = g.i32(p)?;
+    if size < 0 { return invalid("negative shared data size"); }
+    Ok(g.sub(p + 0x10, size as usize, "pvar shared data")?.bytes().to_vec())
+}
+
+/// The records of section 0x4c: `(pvar_index, byte_offset, data_offset)`.
+pub fn parse_pvar_shared_records(gameplay: &[u8]) -> Result<Vec<(u16, u16, i32)>> {
+    let g = Buf(gameplay);
+    let p = g.u32(PVAR_SHARED_DATA_POINTER)? as usize;
+    if p == 0 { return Ok(Vec::new()); }
+    let (size, count) = (g.i32(p)?, g.i32(p + 4)?);
+    if size < 0 || count < 0 { return invalid("negative shared data size / count"); }
+    let r = p + 0x10 + size as usize;
+    (0..count as usize).map(|k| Ok((g.u16(r + 8 * k)?, g.u16(r + 8 * k + 2)?, g.i32(r + 8 * k + 4)?))).collect()
+}
 
 /// The two pvar fixup lists (terminated lists of `(pvar_index, byte_offset)`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -178,7 +202,8 @@ pub fn parse_pvars(gameplay: &[u8]) -> Result<Vec<Option<Vec<u8>>>> {
 ///   an instance index and becomes `0x1acc00[index]`, the runtime index: the number of spawned instances
 ///   before it, or −1 when it did not spawn (`spawned[index] == false`; an index past the instance list
 ///   also gives −1 here, the game would read its uninitialised table);
-/// * pointer fixups (0x5c): `+= copy address` in the game; the port leaves the block-relative offset.
+/// * pointer fixups (0x5c): `+= copy address` in the game; the port leaves the block-relative offset;
+/// * shared data (0x4c): `= blob + data_offset` in the game; the port stores `data_offset` ([`PVAR_SHARED_DATA_POINTER`]).
 ///
 /// "Copied" = used by a spawned moby, a camera or a level callback (the loader copies those three kinds
 /// and checks `table.offset ≥ gameplay base`, true only after the copy). The port applies the fixups to
@@ -221,6 +246,11 @@ pub fn parse_pvars_spawned(gameplay: &[u8], spawned: &[bool]) -> Result<Vec<Opti
         }
     }
     for &f in &fixups.pointers { field(&blocks, f)?; } // validated only: kept block-relative
+    // Shared data (0x4c): the field points into the blob; the port stores the blob-relative offset.
+    for (index, ofs, data) in parse_pvar_shared_records(gameplay)? {
+        let Some((b, o)) = field(&blocks, (index as i32, ofs as i32))? else { continue };
+        blocks[b].as_mut().unwrap()[o..o + 4].copy_from_slice(&data.to_le_bytes());
+    }
     Ok(blocks)
 }
 

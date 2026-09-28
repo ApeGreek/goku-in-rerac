@@ -12,7 +12,7 @@ use rc_game::hero::items::{ItemClass, ItemData, ItemDef, HERO_LISTS};
 use rc_game::hero::swingshot::{PULL_CLASS, SWINGSHOT, SWING_CLASS};
 use rc_game::hero::Hero;
 use rc_game::moby_runtime::{mode, MobyTable, Seq0Info};
-use rc_game::moby_update::scheduler::{self, class_info, load_static_mobys, Groups, Scheduler};
+use rc_game::moby_update::scheduler::{class_info, load_static_mobys, Groups, Scheduler};
 use rc_game::moby_update::services::{SharedServices, World};
 use rc_game::moby_update::{ClassTable, Services};
 use rc_game::pad::{button, PadInput};
@@ -43,6 +43,12 @@ fn load(n: u32) -> Option<Lv> {
     let gp = rc_formats::test_data::gameplay(n)?;
     let settings = rc_formats::test_data::gameplay_section(n, "level_settings")?;
     let core = level::parse_level_core(&idx, data.len()).unwrap();
+    // The level's own class table (code identity): the swing targets are level 03's port, not level 01's.
+    let overlay = |l: u32| -> Option<Arc<rc_formats::level_overlay::LevelOverlay>> {
+        let b = std::fs::read(rc_formats::test_data::level_dir(l).join("overlay.bin")).ok()?;
+        Some(Arc::new(rc_formats::level_overlay::LevelOverlay::parse(&b).ok()?))
+    };
+    let ports = rc_game::moby_update::classes::LevelPorts::from_overlays(&*overlay(n)?, &overlay, &[]);
     let mesh = collision::parse_collision(&core, &data).unwrap();
     let instances = gameplay::parse_moby_instances(&gp).unwrap();
     let pvars = gameplay::parse_pvars(&gp).unwrap();
@@ -57,11 +63,11 @@ fn load(n: u32) -> Option<Lv> {
         let parsed = rc_formats::test_data::core_block(n, &format!("moby_class/{:04}", e.o_class)).and_then(|b| rc_formats::moby::parse_moby_class(&b).ok().map(|c| (b, c)));
         if let Some((blob, c)) = parsed {
             let anim = MobyAnimClass::new(&c, parse_sequences(&blob, &c).unwrap_or_default());
-            let mut info = class_info(&c, slot as u8, scheduler::port_update_fn(oc));
+            let mut info = class_info(&c, slot as u8, ports.update_fn(oc));
             info.seq0 = anim.sequence(0).map(|q| Seq0Info { frame_count: q.header.frame_count, loop_sound_bit7: q.header.loop_sound & 0x80 != 0 });
             classes.classes.insert(oc, (info, Some(anim)));
         } else {
-            let info = rc_game::moby_runtime::ClassInfo { slot: slot as u8, no_header: true, update_fn: scheduler::port_update_fn(oc), ..Default::default() };
+            let info = rc_game::moby_runtime::ClassInfo { slot: slot as u8, no_header: true, update_fn: ports.update_fn(oc), ..Default::default() };
             classes.classes.entry(oc).or_insert((info, None));
         }
     }

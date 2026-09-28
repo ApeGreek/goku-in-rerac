@@ -371,24 +371,26 @@ fn alpha_toward(w: &mut World, id: MobyId, target: f32) {
     w.mm(id).alpha = a as i32 as u8;
 }
 
-/// `0x2db850(pickup)`: collected: `AddAmmo`, the banner, the picked-up stat, state 2 (flying to Ratchet), scale ×1.2,
-/// the rise `8·dt`, sound 0 of class 213 at most every `ticks(10)`. Also the Suck Cannon's vacuum's take
-/// (`crate::hero::suck_cannon::vacuum`). True when taken (not already flying).
+/// `0x2db850(pickup)`: collected when `AddAmmo` raised the ammo: the banner, the picked-up stat, state 2 (flying to
+/// Ratchet), scale ×1.2, the rise `8·dt`, sound 0 of class 213 at most every `ticks(10)`. Also the Suck Cannon's
+/// vacuum's take (`crate::hero::suck_cannon::vacuum`). True when taken; with the ammo already full (or the pickup
+/// already flying) nothing happens and it stays.
 pub fn collect(w: &mut World, id: MobyId) -> bool {
     if w.m(id).state == 2 { return false; }
     let item = p::i32(&w.m(id).pvars, 8);
     let i = item.clamp(0, N as i32 - 1) as usize;
     let old = item_ammo(w, i);
     let amount = p::i32(&w.m(id).pvars, 0);
-    add_ammo(w, i, amount);
+    let over = add_ammo(w, i, amount);
     let new = item_ammo(w, i);
-    if old < new {
-        let n = new - old;
-        let text = w.inventory.pickup_text(i, n == 1);
-        let b = &mut w.svc.pickups_banner;
-        *b = Banner { seq: b.seq.wrapping_add(1), text, arg: n };
-        w.hero_fields_mut().ammo_picked[i] += n;
-    }
+    if new <= old { return false; }
+    let n = new - old;
+    let text = w.inventory.pickup_text(i, n == 1);
+    let b = &mut w.svc.pickups_banner;
+    *b = Banner { seq: b.seq.wrapping_add(1), text, arg: n };
+    // `(float)overflow < (float)amount`: always, once the ammo rose.
+    if over >= amount { return true; }
+    w.hero_fields_mut().ammo_picked[i] += n;
     {
         let m = w.mm(id);
         m.state = 2;
@@ -1028,5 +1030,36 @@ mod tests {
         recs[10][0xe] = 40;
         let t = ItemTables::new(&recs, [10, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         assert_eq!((t.max_ammo(10), t.pickup_amount(10), t.ammo_list()[0]), (40, 3, 10));
+    }
+
+    /// `0x2db850`: with the ammo full nothing happens (the pickup stays, no sound, no stat); below the max the ammo
+    /// rises (clamped), the pickup flies (state 2) and plays sound 0 of class 213; a flying one is not taken again.
+    #[test]
+    fn collect_only_when_the_ammo_rises() {
+        use crate::moby_runtime::{Moby, MobyTable};
+        let mut recs = vec![[0u8; 0x18]; N];
+        recs[10][0xe] = 40;
+        let mut pv = vec![0u8; 0x30];
+        p::set_i32(&mut pv, 0, 5);
+        p::set_i32(&mut pv, 8, 10);
+        let mut t = MobyTable::new(vec![Moby { o_class: 222, state: 1, pvars: pv, ..Moby::default() }], 4);
+        let (mut hero, mut rng, classes, mut svc) = (crate::hero::Hero::new(), crate::rng::Rng::new(), crate::moby_update::ClassTable::default(), crate::moby_update::Services::new());
+        hero.weapons.ammo[10] = 40;
+        let full = ItemTables::new(&recs, [0xff; 12]).with_hero(&hero);
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 100);
+        w.inventory = &full;
+        assert!(!collect(&mut w, 0), "full: not taken");
+        assert_eq!(w.m(0).state, 1, "it stays");
+        assert!(w.svc.sounds.is_empty());
+        assert_eq!(w.hero_fields().ammo_picked[10], 0);
+        svc.hero_writes = None;
+        hero.weapons.ammo[10] = 37;
+        let low = ItemTables::new(&recs, [0xff; 12]).with_hero(&hero);
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 100);
+        w.inventory = &low;
+        assert!(collect(&mut w, 0), "taken");
+        assert_eq!((w.m(0).state, w.hero_fields().ammo[10], w.hero_fields().ammo_picked[10]), (2, 40, 3), "clamped to 40, 3 picked");
+        assert_eq!(w.svc.sounds.iter().map(|e| (e.sound_class, e.index, e.flags)).collect::<Vec<_>>(), [(PICKUP_SOUND_CLASS, 0, 0)]);
+        assert!(!collect(&mut w, 0), "already flying");
     }
 }

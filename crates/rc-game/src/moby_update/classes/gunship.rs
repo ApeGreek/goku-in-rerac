@@ -277,8 +277,7 @@ fn volley(w: &mut World, id: MobyId) -> bool {
 /// A hit (mask 0x800000): the explosion, the links and the ship deleted (module doc).
 fn kill(w: &mut World, id: MobyId, _f: f32) {
     w.svc.unported("gunship 688: kill skill point / sound / banner / debris 0x30be70");
-    let b = fx::Beam { damage_r: 0.0, damage: 0.0, flash: 4.0, flash2: 2.0, flash_dist: 100000.0, scale: 3.0, light: 15.0, streaks: 20, sparks: 3, puffs: 4, debris: 1, sound: 1, shake: true };
-    fx::beam_explosion(w, &b, Some(id), c::pos(w, id));
+    fx::beam_explosion(w, &flyer::KILL_BEAM, Some(id), c::pos(w, id));
     for k in 0..4 {
         if let Some(l) = link(w, id, P_LINKS + 4 * k) { w.delete_moby(l); }
     }

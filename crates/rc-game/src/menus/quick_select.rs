@@ -435,6 +435,7 @@ impl QuickSelect {
                     stat(&mut g.move_help[20], gate.held_item != item, g.play_time, g.level);
                     let req = if item == DRONE {
                         ev.drone = true;
+                        s.drone = true;
                         s.temp_hand
                     } else {
                         item

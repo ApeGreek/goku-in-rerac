@@ -666,6 +666,8 @@ impl Vendor {
             }
             if let (Some(s), Some(c)) = (self.salesman.as_mut(), salesman_class.as_ref()) { s.request_at(c, 2, rng, self.vsync); }
             gs.give_item(e.item, true, items, session);
+            // 0x2af7e8: buying the Drone Device launches its drones (0x141345 = 1).
+            if e.item == 0x18 { session.drone = true; }
             self.bought = e.item as i32;
             gs.global.bolts -= price;
             out.purchase = Some((e.item, false, price, 1));

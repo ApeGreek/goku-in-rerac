@@ -21,6 +21,12 @@ fn novalis_ports_are_the_class_number_registry() {
     let placed: std::collections::HashSet<i16> = rc_formats::gameplay::parse_moby_instances(&gp).unwrap().iter().map(|m| m.o_class as i16).collect();
     for e in ov.vtbl() {
         let oc = e.o_class as i16;
+        if for_class(oc).is_none() && ov.code(e.update, 2).is_some_and(rc_game::moby_update::classes::units::empty::is_empty) {
+            // An update that is `jr ra; nop` and no port of its own (433, 1289: worn head items; 531: a ship; 618):
+            // the empty-update unit, as on every level (`units::empty`).
+            assert_eq!(p.get(oc).map(|u| u.address()), Some(rc_game::moby_update::classes::units::empty::UPDATE_FN), "level 01 class {oc}");
+            continue;
+        }
         if oc == 731 {
             // The third mission NPC class: the table runs MissionNpcUpdate for it too (not placed on Novalis).
             assert!(!placed.contains(&oc));

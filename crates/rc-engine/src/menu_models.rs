@@ -65,6 +65,10 @@ enum Role {
     /// The item preview's moby and its Clank.
     Item,
     ItemClank,
+    /// The Weapons page's ammo model (`rc_game::menus::pause::pages::ammo_model_draw`) and the Items page's gold bolt
+    /// (`pages::gold_draw`).
+    Ammo,
+    GoldBolt,
 }
 
 struct Part {
@@ -88,8 +92,8 @@ struct PreviewRt {
     chains: Vec<(usize, Vec<u8>)>,
     bank: Option<rc_formats::tfrag_light::LightBank>,
     menu_cam: Mat4,
-    /// The canvases of the 3D Ratchet and the item preview.
-    canvases: [CanvasId; 2],
+    /// The canvases of the 3D Ratchet, the item preview, the ammo model and the gold bolt.
+    canvases: [CanvasId; 4],
     last_frame: u64,
 }
 
@@ -117,7 +121,12 @@ fn setup(
     if *done { return; }
     let Some(mut canvases) = canvases else { return };
     *done = true;
-    let ids = [canvases.create_over_hud(&mut commands, &mut images, "menu 3D Ratchet"), canvases.create_over_hud(&mut commands, &mut images, "menu item preview")];
+    let ids = [
+        canvases.create_over_hud(&mut commands, &mut images, "menu 3D Ratchet"),
+        canvases.create_over_hud(&mut commands, &mut images, "menu item preview"),
+        canvases.create_over_hud(&mut commands, &mut images, "menu ammo model"),
+        canvases.create_over_hud(&mut commands, &mut images, "menu gold bolt"),
+    ];
     let lv = &level.0;
     let m = &lv.mobys;
     let (ratchet_blob, gadgets) = match crate::moby_attach::load_blobs() {
@@ -157,6 +166,12 @@ fn setup(
             specs.push((r, c.clone(), a.clone(), layer));
         }
     }
+    // The ammo pickups' classes (item definitions +0x3a; `SpawnHandGadgetMoby` makes one only when the level has the
+    // class) and the gold bolt 0x46e.
+    for o in [226, 204, 222, 1006, 214, 225, 213, 223, 1438, 1447, 1449] {
+        if let Some((c, a)) = level_class(o) { specs.push((Role::Ammo, c, a, 2)); }
+    }
+    if let Some((c, a)) = level_class(rc_game::menus::pause::pages::GOLD_BOLT_CLASS) { specs.push((Role::GoldBolt, c, a, 3)); }
     let mut parts = Vec::new();
     let mut palette_len = 0u32;
     for (role, class, anim, _) in &specs {
@@ -192,7 +207,7 @@ fn setup(
         bank
     });
     let menu_cam = Transform::from_translation(crate::tfrag_render::game_to_bevy(frame::CAMERA_POS)).looking_to(Vec3::X, Vec3::Y).to_matrix();
-    println!("menu models: {} parts ({} palette slots) on two canvases over the HUD", parts.len(), palette_len);
+    println!("menu models: {} parts ({} palette slots) on four canvases over the HUD", parts.len(), palette_len);
     commands.insert_resource(PreviewRt { parts, extra, chains, bank, menu_cam, canvases: ids, last_frame: 0 });
 }
 
@@ -225,15 +240,19 @@ fn update(
     let Some(main_t) = main.iter().next().copied() else { return };
     let in_menu = mode.is_some_and(|m| m.state.mode == rc_game::menus::mode::Mode::Menu);
     let view = if in_menu { gp.view } else { GadgetsView::default() };
-    let rects = [view.model.map(|m| m.rect), view.preview.map(|p| p.rect)];
+    let rects = [view.model.map(|m| m.rect), view.preview.map(|p| p.rect), view.ammo.map(|p| p.rect), view.gold_bolt.map(|p| p.rect)];
     // Each widget's canvas: the panel, the game projection's focal lengths, the view axis on the panel's centre, the
     // navy 0x80100808 clear.
     let proj = crate::game_camera::GameProjection::default();
     let focal = [crate::game_camera::SCREEN_W * 0.5 / proj.tan_x, crate::game_camera::SCREEN_H * 0.5 / proj.tan_y];
-    for (id, rect) in rt.canvases.iter().zip(rects) {
+    for (k, (id, rect)) in rt.canvases.iter().zip(rects).enumerate() {
+        // The Items page's gold-bolt panel shares its target with the 2D text (`DrawItemsMenu` 0x292528 draws the moby,
+        // then "Found / Used / Remain" over it): its canvas is cleared transparent so the panel's navy and text (HUD
+        // primitives, under the canvas) show around the bolt [L: the bolt lands over the text where they overlap].
+        let clear = if k == 3 { Color::NONE } else { Color::srgb_u8(0x08, 0x08, 0x10) };
         let view = rect.map(|[x, y, w, h]| {
             let r = [x as f32, y as f32, w as f32, h as f32];
-            CanvasView { rect: r, focal, centre: [r[0] + r[2] * 0.5, r[1] + r[3] * 0.5], clear: Color::srgb_u8(0x08, 0x08, 0x10) }
+            CanvasView { rect: r, focal, centre: [r[0] + r[2] * 0.5, r[1] + r[3] * 0.5], clear }
         });
         canvases.show_exact(*id, view, (proj.tan_x, proj.tan_y));
     }
@@ -328,6 +347,22 @@ fn update(
                 let s = pv.seq.min(p.anim.sequences.len().saturating_sub(1) as u8);
                 moby_anim::hard_cut(&mut p.state, &p.anim, s, 0);
                 p.cut_for = key;
+            }
+            for _ in 0..steps { moby_anim::advance(&mut p.state, &p.anim); }
+            placed[k] = Some(Placed { rows, pos, pose: moby_anim::evaluate_with_snapshot(&p.anim, &p.state, None) });
+        }
+    }
+    // The ammo model and the gold bolt: one moby each, on its sequence 0.
+    for (v, role) in [(view.ammo, Role::Ammo), (view.gold_bolt, Role::GoldBolt)] {
+        let Some(pv) = v else { continue };
+        let rows = moby_light::rotation_rows(pv.rot);
+        let pos = [0, 1, 2].map(|k| frame::CAMERA_POS[k] + pv.offset[k]);
+        for (k, p) in rt.parts.iter_mut().enumerate() {
+            if p.role != role || p.o_class as i32 != pv.o_class { continue; }
+            if p.cut_for != pv.o_class {
+                p.state = AnimState::spawn(&p.anim);
+                moby_anim::hard_cut(&mut p.state, &p.anim, 0, 0);
+                p.cut_for = pv.o_class;
             }
             for _ in 0..steps { moby_anim::advance(&mut p.state, &p.anim); }
             placed[k] = Some(Placed { rows, pos, pose: moby_anim::evaluate_with_snapshot(&p.anim, &p.state, None) });

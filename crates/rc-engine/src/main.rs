@@ -33,6 +33,7 @@ mod game_camera;
 mod gameplay;
 mod gs_state;
 mod hud_render;
+mod hud_images;
 mod input_map;
 mod interact_render;
 mod level_load;
@@ -52,6 +53,9 @@ mod render_settings;
 mod reticle_render;
 mod marker_render;
 mod tesla_render;
+mod walloper_render;
+mod visibomb_view;
+mod gs_post;
 mod reactive_render;
 mod scene_render;
 mod sea_render;
@@ -151,9 +155,11 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(afterimage_render::AfterImagePlugin)
     .add_plugins(reticle_render::ReticlePlugin)
     .add_plugins(tesla_render::TeslaPlugin)
+    .add_plugins(walloper_render::WalloperPlugin)
     .add_plugins(reactive_render::ReactivePlugin)
     .add_plugins(sky_stars::SkyStarsPlugin)
     .add_plugins(fog_state::FogStatePlugin)
+    .add_plugins(visibomb_view::VisibombViewPlugin)
     .add_plugins(hud_render::HudPlugin)
     // The game tick (hero, pad, follow camera) driving Ratchet and the view; RC_PLAY=0 keeps the fly camera only.
     .add_plugins(gameplay::GameplayPlugin)

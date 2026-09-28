@@ -48,7 +48,8 @@
 //! Environment: `RC_HUD=0` disables the HUD; `RC_HUD_DEMO=1` sets bolts to 1234 at tick 60 and drops HP to
 //! 3 at tick 180; `RC_HUD_TEXT="…"` shows it as a banner (`ShowBanner` path, 180 ticks) from tick 1, or with
 //! `RC_HUD_TEXT_WINDOW=1` as `FontPrintWindow` text (regular font) centred in a `DrawUIFrame` at y = 100;
-//! `RC_HUD_HELP=<id>` opens the help box with that level message at tick 1; `RC_LANG` = game language
+//! `RC_HUD_HELP=<id>` opens the help box with that level message at the first gameplay tick (crate::gameplay, the
+//! help system's first-input gate skipped); `RC_LANG` = game language
 //! (0 En, 2 Fr, 3 De, 4 Es, 5 It).
 
 use crate::gs_state::GsPass;
@@ -102,6 +103,8 @@ pub enum Tex {
     Frame(usize),
     /// FX texture n (`GetEffectTex(n)`: 1..3 fonts, 4 the Gadgetron logo).
     Fx(usize),
+    /// A streamed picture's atlas slot (crate::hud_images).
+    Dyn(usize),
 }
 
 /// One GS primitive: four corners in strip order (v0 v1 v2 v3: triangles 012, 123), game pixels, with texel UVs.
@@ -485,16 +488,22 @@ fn setup(
         eprintln!("hud: no HUD data for this level");
         return;
     };
-    let atlas = build_atlas(&lh.frames, &lh.fx);
+    let mut atlas = build_atlas(&lh.frames, &lh.fx);
+    // The streamed pictures' slots below the frames (crate::hud_images); the image stays in the main world so the slots
+    // can be rewritten.
+    let dyn_y = atlas.height;
+    atlas.height += crate::hud_images::ROWS;
+    atlas.rgba.resize((ATLAS_W * atlas.height * 4) as usize, 0);
     let mut img = Image::new(
         Extent3d { width: ATLAS_W, height: atlas.height, depth_or_array_layers: 1 },
         TextureDimension::D2,
         atlas.rgba,
         TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD,
+        RenderAssetUsages::all(),
     );
     img.sampler = bevy::image::ImageSampler::nearest();
     let atlas_handle = images.add(img);
+    commands.insert_resource(crate::hud_images::HudImages::new(atlas_handle.clone(), dyn_y));
     let target = images.add(Image::new_target_texture(W as u32, H as u32, TextureFormat::Rgba16Float, None));
 
     commands.spawn((
@@ -599,7 +608,7 @@ fn tick_and_build(
     (state, session, held): GameInputs,
     feed: Res<HudFeed>,
     play: Option<Res<crate::gameplay::Play>>,
-    mut audio: Option<ResMut<crate::audio_out::AudioOut>>,
+    dyn_images: Option<Res<crate::hud_images::HudImages>>,
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
@@ -639,36 +648,28 @@ fn tick_and_build(
         let t = rt.ticks_done;
         if t == 1 {
             if let Some(text) = rt.env.text.clone().filter(|_| !rt.env.text_window) { rt.state.show_banner(&text, None); }
-            if let Some(id) = rt.env.help { rt.state.help_request(id); }
         }
         if rt.env.demo {
             if t == 60 { rt.game.bolts = 1234; }
             if t == 180 { rt.game.hp = 3; }
         }
+        // The help box of the game tick (rc_game::help runs in crate::gameplay's tick; the HUD draws it).
+        if let Some(p) = play.as_deref() { rt.state.set_help(&p.svc.help.bx); }
         rt.draws = rt.state.tick(rt.game);
-        play_level_sounds(&mut rt.state, audio.as_deref_mut(), play.as_deref(), t);
         if let Some(text) = rt.env.text.clone().filter(|_| rt.env.text_window) { window_text_demo(&rt.state, &rt.glyphs, &text, &mut rt.draws); }
     }
     rt.hud2d.clear();
     // The guns' screen markers (`DrawWorld`'s 2D overlay before the HUD: crate::marker_render).
     if let Some(p) = play.as_deref().filter(|_| !hook.replace_hud && !scene.hide_hud) { rt.hud2d.prims.extend(crate::marker_render::prims(p)); }
     let mut st = crate::text_render::TextState::default();
-    if !hook.replace_hud && !scene.hide_hud { crate::text_render::execute(&mut rt.hud2d, &mut st, &rt.glyphs, &rt.draws); }
+    // HudDraw 0x24fb50 skips the HUD in a frame whose tick set 0x17e988 (the Visibomb's flight: crate::visibomb_view).
+    let hud_off = crate::visibomb_view::hud_off(play.as_deref());
+    if !hook.replace_hud && !scene.hide_hud && !hud_off { crate::text_render::execute(&mut rt.hud2d, &mut st, &rt.glyphs, &rt.draws); }
     rt.hud2d.prims.extend(hook.prims.iter().copied());
     rt.hud2d.prims.extend(scene.prims.iter().copied());
-    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.atlas_frames, &rt.atlas_fx));
-    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &rt.atlas_frames, &rt.atlas_fx)); }
-}
-
-/// The HUD's `PlayLevelSoundAtMoby(index, flags, 0)` calls (the help box's opening sound) into the audio system: 2-D at
-/// the play camera. Level defs 0 and 1 have no pitch-bend range on any level (rc-game `tests/reverb_conformance.rs`), so
-/// these plays draw nothing from the game's stream and a local stream stands in for it.
-fn play_level_sounds(state: &mut HudState, audio: Option<&mut crate::audio_out::AudioOut>, play: Option<&crate::gameplay::Play>, tick: u64) {
-    let calls = std::mem::take(&mut state.level_sounds);
-    let Some(a) = audio else { return };
-    let listener = play.map(|p| rc_game::audio::class_sounds::listener_of(&p.game.camera.out)).unwrap_or_default();
-    let mut rng = rc_game::rng::Rng::new();
-    for (index, flags) in calls { a.system().play_level_sound_at_moby(index, flags, None, None, &listener, &mut rng, tick); }
+    let dyns = dyn_images.as_deref().map_or([None; crate::hud_images::SLOTS], |d| d.rects());
+    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.atlas_frames, &rt.atlas_fx, &dyns));
+    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &rt.atlas_frames, &rt.atlas_fx, &dyns)); }
 }
 
 /// `RC_HUD_TEXT_WINDOW=1`: the text in a `DrawUIFrame` sized from a `FontPrintWindow` measure (regular font,
@@ -697,7 +698,7 @@ fn empty_mesh() -> Mesh {
 }
 
 /// The primitives as one triangle list in submission order (the GPU blends triangles of one draw in order).
-fn build_mesh(prims: &[Prim], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>]) -> Mesh {
+fn build_mesh(prims: &[Prim], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>]) -> Mesh {
     if prims.is_empty() { return empty_mesh(); }
     let n = prims.len() * 4;
     let (mut pos, mut uv, mut rgba, mut tex, mut sc, mut idx) =
@@ -707,6 +708,7 @@ fn build_mesh(prims: &[Prim], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>]) -> M
             Tex::None => None,
             Tex::Frame(i) => frames.get(i).copied(),
             Tex::Fx(i) => fx.get(i).copied().flatten(),
+            Tex::Dyn(i) => dyns.get(i).copied().flatten(),
         };
         let t = match rect {
             Some([x, y, w, hh]) => [x | y << 16, w | hh << 16, 1 | if p.repeat { 2 } else { 0 } | if p.nearest { 4 } else { 0 }, 0],
@@ -766,7 +768,7 @@ mod tests {
         h.prims[2].nearest = true;
         h.rect(0, 4, 0, 4, 0x8000_0000);
         let fx = vec![None; 26].into_iter().chain([Some([64u32, 0, 32, 32])]).collect::<Vec<_>>();
-        let m = build_mesh(&h.prims, &[], &fx);
+        let m = build_mesh(&h.prims, &[], &fx, &[]);
         let Some(VertexAttributeValues::Uint32x4(t)) = m.attribute(ATTRIBUTE_TEX) else { panic!("no tex attribute") };
         assert_eq!([t[0][2], t[4][2], t[8][2], t[12][2]], [1, 3, 7, 0]);
     }

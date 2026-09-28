@@ -410,6 +410,12 @@ pub(super) fn thruster_trail_start(h: &mut Hero, ghosts: &[(u8, i32)]) {
 fn thruster_trail(h: &mut Hero, v: &super::AnimView) {
     if h.state != id::THRUSTER_LONG_JUMP && h.state != id::THRUSTER_HIGH_JUMP { return; }
     let fade = if ticks(12) < h.timer { 2 } else { 0 };
+    hero_trail_update(h, v, fade);
+}
+
+/// `0x277508(0x1409c0, fade)` from Ratchet's state physics: his moby as the last write-back left it and his anim keys
+/// now (the Thruster jumps here, the gadget lunge 0x20 in super::walloper).
+pub(super) fn hero_trail_update(h: &mut Hero, v: &super::AnimView, fade: u8) {
     let f = &h.fx.frame;
     let place = crate::afterimage::Place { rows: f.rows, position: f.position };
     let pose = crate::afterimage::Pose { seq_a: v.seq_a, seq_b: v.seq_b, frame_a: v.frame_a, frame_b: v.frame_b, t: v.t };

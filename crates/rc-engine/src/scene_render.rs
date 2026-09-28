@@ -71,7 +71,7 @@ use crate::moby_render::{self, ExtraMobys, MobyMaterial};
 use crate::tfrag_render::game_to_bevy;
 use anyhow::{Context, Result};
 use bevy::camera::visibility::VisibilitySystems;
-use bevy::core_pipeline::fullscreen_material::{fullscreen_material_system, FullscreenMaterial, FullscreenMaterialPlugin};
+use bevy::core_pipeline::fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin};
 use bevy::ecs::schedule::ScheduleConfigs;
 use bevy::ecs::system::BoxedSystem;
 use bevy::prelude::*;
@@ -121,7 +121,7 @@ impl FullscreenMaterial for SceneFade {
         system
             .after(bevy::core_pipeline::Core3dSystems::PostProcess)
             .after(bevy::ui_render::ui_pass)
-            .after(fullscreen_material_system::<crate::fog_state::UnderwaterTint>)
+            .after(crate::gs_post::pass::<crate::fog_state::UnderwaterTint>)
             .before(bevy::core_pipeline::upscaling::upscaling)
     }
 }
@@ -314,7 +314,12 @@ fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Pers
             }
             // Taken right after its tick by fade_take (a request left here was already applied).
             R::FadeToBlack { .. } => {}
-            R::Save => println!("scene: memcard_Save (the in-memory game state holds every write; no card writer yet)"),
+            R::Save => {
+                // memcard_Save 0x261448 packs the level's map mask into chunk 3002 first (rc_game::map, 0x25deb8).
+                let packed = play.svc.map.pack();
+                if let Some(l) = state.as_deref_mut().and_then(|s| s.0.levels.get_mut(level)) { l.map_mask = packed; }
+                println!("scene: memcard_Save (map mask packed; the in-memory game state holds every write; no card writer yet)");
+            }
             R::ShipHidden(h) => {
                 if let Some(id) = play.ship_moby() {
                     let m = &mut play.game.mobys.mobys[id];

@@ -540,3 +540,185 @@ sub-pages (`crates/rc-game/src/menus/pause/port.rs`, `PageMenu::install_port_pag
   it; frame-exact runs (`RC_SCREENSHOT_FRAME` / `RC_DETERMINISTIC=1`) ignore the default file.
 * `RC_SETTINGS_PAGE=0`: no entry, no page: every record is as read from the overlay (Options frames byte-identical to the
   game's layout). Without the variable, frames of every page but Options (8 rows instead of 7) are unchanged.
+
+## 10. Help messages, pause pages, the in-game map: what is a system (2026-09-28)
+
+Evidence gathered before the port (level01 addresses; "boot-hash-match" = the same object code as the boot ELF, i.e.
+the engine's, compiled once for all levels).
+
+| area | shared mechanism (one port) | per-page / per-level / per-object code (ported as what it is) |
+|---|---|---|
+| **Help messages** | **Yes, a system.** `Help_Request` 0x225818, `Help_Update` 0x225bd0 (boot 0x1fde90), size 0x225a98, draw 0x2266c0, the kill 0x2258b0, suspend / resume 0x225a28 / 0x225a88, the help log `FUN_00226a70` + its id table 0x1798d0 (`fun_001fecc8`), the records 0x141968 (help, chunk 16) and the bump rule. One state block 0x179890..0x1798cc. | The **callers**: every one is its owner's own code. Level 01 has 6 caller functions: the Novalis director 1341 `0x30acb8` (13 calls), the hero's `0x228498` (Hydro hint 0x4e2e, Quick-Select hint 0x4e26), the Pyrocitor `0x2cde98` (0x4e24), the Tesla Claw `0x2ce448` (0x4e30), class `0x30a6d0` (9000) and `mode_freezeInit(5)` (help log only, 0x4e2b). On the other 17 levels the directors (1413, 1324, 1342, …, level_scripting.md §3) are unique code. No shared "hint director". |
+| help voice | The dialogue player 0x151720 (music_Update 0x27a688: request 0x1516ec, `PlayDialogue` 0x279cd8 → 30000.. = `help_audio[lang·150 + n]`, TOC field 0x1ab8 = 0x139638) — the audio system's; the help box drives it. | — |
+| **Pause pages** | **The page machinery** (§3, ported) and a few **widget types used by several pages** (dispatch by callback): grid 0x28f260 / 0x291350 (Weapons, Quick Select ×2, Items, Gadgets), the **streamed image** 0x2937d0 / 0x293d50 (Items, Help, Moves, Help/Weapons, Help/Gadgets, Goodies, Skill Points, Options: 8 pages, TOC lump in +0x30), label / list (§3), the 3D item models 0x291c38 / 0x2919a0 (Weapons, Quick Select, Help/Weapons, Help/Gadgets), the icon list 0x28d818 / 0x28d9a8 (Help/Weapons, Help/Gadgets), the class-0x472 **menu sounds** `fun_0022da68(n, 0x11, moby)` (every page). | Page-only code: the Quick Select slot ring 0x2901a8 / 0x294528 (+ enter 0x2903d0 / leave 0x290468), the Items 3D view `DrawItemsMenu` 0x292528, the Help Log list (enter 0x290b70 / leave 0x290bf8 / text 0x290d40), the Controls image 0x294050 / 0x294198, the skill-point draw 0x295af8, the Weapons stats panel 0x28f7a0 / 0x292b60. |
+| **In-game map** | **Yes, an engine system** (every function boot-hash-matched): the fog writer `FUN_0025c4f8` (hero update 0x228870 / 0x228000, every tick), world → map `fun_00208408`, the zone tiles `FUN_0025dd98`, the mask pack / unpack `fun_00207b08` / `fun_00207bb0` (chunk 3002 = 0x141ec0 + 0x800·lvl), compose `0x2053d8`, the map widget 0x28f868 (streams TOC field 0x820: 19 maps + 19 Map-o-Matic maps, chosen by owned[33] 0x13d4e1), pan / zoom `fun_00205440`, the draw `UNK_NoMapAvailable` 0x25b1c0 with its markers. | **Per-level data**: the zone table 0x183020 (19 levels × 16 zones × {z min, z max, flags, arg}) and a per-level predicate table 0x184410 (19 × 8 function pointers) whose entries are small hand-written map-pixel tests (half-planes `compute_cross_product_sign`, distances, hero state), compiled into the engine for every level. Ported as the game has them: one table of per-level predicates. |
+
+**Reuse plan (Step 0).**
+* Help: `hud::Help` (box states, sizing, draw) and `HudState::help_request` exist; `GameState` types chunks 16 / 17 / 18 /
+  1010 / 1011; `hero::melee::bump_record` is the bump rule; `Interact::force_prompt` is `force_help_message`;
+  `cinematic::{start_scene, start_movie}` are the kill's callers; `audio::class_sounds::level_sound::HELP_OPEN` the opening
+  sound; `scene_command(Speech)` plays a VAG. New: `rc_game::help` (the one help state machine, gate, log, records mirror,
+  dialogue-player view), wired into `Services` and read by the HUD draw; the box state moves there from `HudState`.
+* Pages: `PageMenu` dispatch by callback, `gadgets.rs` (grid, preview, model), `options.rs`, `planet_select.rs`,
+  `screen_static`, `screen_canvas`; new widgets are added to the same dispatch, no second page system.
+* Map: `planet_select::map_update` (the keys) exists; the map image, fog, markers are new (`rc_game::map`), loaded through
+  `rc_data` / `disc_source` like the other global lumps.
+
+## 12. The pause pages and the menu audio (ported 2026-09-28)
+
+Code: `rc-game/src/menus/pause/pages.rs` (the widgets below, dispatched by callback from `PageMenu` like every other
+widget: no second page system), `rc-game/src/audio/scene.rs` (`AudioSystem::menu_open` / `menu_close`,
+`pause_groups` / `continue_groups`), `rc-game/src/audio.rs` (`sound_update_with`), `rc-game/src/menus/mod.rs`
+(`MenuSound::event`), `rc-engine/src/menu_render.rs` (the calls, `menu_sound_frame`, `MenuDraw::Image` → the HUD atlas
+slots of `rc-engine/src/hud_images.rs`), `rc-formats/src/pif.rs` (the pictures). Tests:
+`rc-game/tests/pause_pages_novalis.rs` (9 tests, disc data), `audio::scene::tests::menu_open_holds_music_and_world_sounds_and_plays_menu_sounds`,
+the page-machine tests in `menus/pause/tests.rs`, `tests/gadgets_novalis.rs`.
+
+**What the game does to the audio** (the play-test finding "the music keeps playing"). `EnterMenuMode` 0x28bf50 calls
+`snd_PauseAllSoundsInGroup(0x1d)` (boot 0x12e3e8: 989snd groups 0, 2, 3, 4 hold where they are), `music_Pause(0)` and
+`snd_FlushSoundCommands`. Every menu frame (`SceneController` 0x28c990) runs `MobyUpdateLoop` then **`sound_update`
+alone** (the level's sound instances, 0x2a19a8, run only from the level update 0x256810, so no ambient sound starts
+in the menu). The close (kind 0x14 at the end of its 2 ticks) calls `snd_ContinueAllSoundsInGroup(0x1d)` (0x12e418),
+**`music_Unpause` unless the post-action is 2 (ship travel: the music stays held into the flight)**, the flush and
+`sound_update`. Neither a duck nor a separate menu track: the music is paused and resumed. The vendor's
+`music_Pause` / `music_Unpause` (mode 5) are the same helpers; its frame now also runs `sound_update` alone.
+
+| address | what it does | ported / NOT ported / n/a |
+|---|---|---|
+| 0x28bf50 | `snd_PauseAllSoundsInGroup(0x1d)`: the handlers of groups 0, 2, 3, 4 stop (grains, LFOs), their voices hold (pitch, volume 0) | `AudioSystem::pause_groups` via `menu_open` (grain_vm `set_groups_paused`) |
+| 0x28bf50 | `music_Pause(0)` | `AudioSystem::music_pause` via `menu_open` |
+| 0x28bf50 | `snd_FlushSoundCommands` 0x12dc80 | n/a (the port's commands apply at once) |
+| 0x28c990 | per frame: `sound_update` 0x2a0638 (slots, reverb command, `music_Update`), no sound instances | `menu_render::menu_sound_frame` → `AudioSystem::sound_update_with` |
+| 0x28c990 | per frame: `PlayClassSound(3 / 4, 0x11, frame moby 0)` on a transition start (3 = the same page: the open; 4 = another page, △ back included) | `PageMenu::tick`, played by `menu_render::play_menu_sounds` |
+| 0x28c990 close | waits for 0x1516d8 == 0 (no dialogue stream read pending) | n/a (the port's reads never pend) |
+| 0x28c990 close | `snd_ContinueAllSoundsInGroup(0x1d)`: the held voices take their pitch and group volume back | `AudioSystem::continue_groups` via `menu_close` |
+| 0x28c990 close | `music_Unpause` unless post-action 2 | `menu_close(unpause_music)`, false for `PostAction::ShipTravel` |
+| 0x28c990 close | flush, `sound_update` | the close frame's `menu_sound_frame` |
+| 0x28c990 close | camera restore, fog, resource tables, the post-action fades / movies | pre-existing (§3); the movie / scene post-actions G-UI-004 |
+
+**Every menu sound.** `PlayClassSound(n, 0x11, moby)` (0x2a1618, boot-hash name `fun_0022da68`) with class 0x472's
+table: 0 confirm, 1 cursor, 2 denied, 3 open, 4 page change. There is **no close sound and no separate back sound**:
+△ back and Start / Select close go through the transition (4) or the close (none). All 31 call sites of level 01's page
+code, by function:
+
+| function | sounds | port | test |
+|---|---|---|---|
+| 0x28c990 SceneController | 3 open, 4 page change (forward and △ back) | `PageMenu::tick` | `open_transition_is_12_raw_ticks_with_the_seqs_reversed` |
+| 0x28d818 icon list | 1 (Up / Down moved) | `pages::icons_update` | `help_weapons_icon_list` (none at the end) |
+| 0x28e600 list | 2 (action 2), 0 (actions 4, 5, 6, 7, 8, 10, 11), 1 (cursor or pending focus moved) | `PageMenu` list update | `highlight_timer_and_focus_moves`, `help_page_streamed_image_states`, `goodies_skill_points_and_movies` (locked entry: none) |
+| 0x28f260 grid | 1 (moved), 0 (✕ select), 2 (✕ denied) | `gadgets::grid_update` | `gadgets_page_equips_the_packs` |
+| 0x28f868 map widget | 1, 0 | `planet_select::map_update` (Part 3 extends it) | planet-select tests |
+| 0x28fec8 missions | 1 (×2) | `planet_select::missions_update` | planet-select tests |
+| 0x2901a8 Quick Select ring | 1 (R1 / L1) | `pages::slots_update` | `quick_select_assigns_slots_and_writes_them_back` |
+| 0x290538 Sound options | 1, 0 | `options.rs` | options tests |
+| 0x294830 toggles | 0, 1 | `options.rs` | options tests |
+| 0x294cc0 camera | 1, 0 | `options.rs` | options tests |
+| 0x295370 confirm page | 0 (×2) | `planet_select::confirm_update` | planet-select tests |
+| 0x295770 Sketchbook pager (30 pages) | 1 | NOT ported (G-UI-004: locked Goodies pages) | — |
+| 0x295858 Epilogue pager (12 pages) | 1 (×2) | NOT ported (G-UI-004) | — |
+| 0x296990 / 0x296ce0 / 0x296fc0 memory-card pages | 1, 0 | NOT ported (G-SAV-002) | — |
+
+The sounds reach the audio system as `MenuSound::event` (class 0x472, flags 0x11, one owner for all 14 frame mobys:
+the owner only places and privileges the slot, and the sounds are 2-D [L]). Test: all five sounds get a slot and a
+sounding voice while the menu holds the world's voices (`menu_open_holds_music_and_world_sounds_and_plays_menu_sounds`).
+
+**The pages' widgets** (addresses level01; every function boot-hash-matched).
+
+| address | what it does | ported / NOT / n/a | test |
+|---|---|---|---|
+| 0x2936e8 image enter | +0x44 = 0, +0x50 / +0x54 = −1, +0x5c = 0; the Controls widget shares it | `pages::image_enter` (Image and Controls) | `help_page_streamed_image_states`, `help_controls_page_two_pictures` |
+| 0x293780 image leave | +0x44 = −1, indices −1 | `pages::image_leave` | `help_page_streamed_image_states` |
+| 0x2937d0 image update | index by flags 4 (grid cursor), 8 (cell +8), 0x100 (memcard preview), else list cursor (0x4000: action 2 → 9), 0x2000 (skill point not earned → 0x1e); two-buffer states 0..6 | `pages::image_update`; flags 1 / 2 / 0x400 / 0x1000 are the front end's (n/a in-level); 0x100 NOT ported (G-SAV-002) | `help_page_streamed_image_states` (states 0→1→2, 3→4, 4→2, 4→5→6→2) |
+| 0x293d50 image draw | state < 2: nothing (0x100: "Checking memory card" text, G-SAV-002); flag 4: only when the cell's item is owned / flag set; buffer A in states 2, 3, B in ≥ 4, over the panel, return 0x10 | `pages::image_draw` → `MenuDraw::Image` | same |
+| 0x294050 Controls update | states 0→1 (`help_controls[lang]`), 2→3 (`[6 + lang]`), each after the stream is idle | `pages::controls_update` | `help_controls_page_two_pictures` |
+| 0x294198 Controls draw | the two 256×256 pictures side by side, return 8 | `pages::controls_draw` | same |
+| 0x2903d0 QS enter | copy 0x141ea0, cursor = first empty slot | `pages::slots_enter` | `quick_select_…` |
+| 0x2901a8 QS update | R1 / L1 ±1 mod 8 (sound 1); ✕ on an owned focused item: move record 21 bump, the item out of its old slot, into the cursor's, cursor + 1 | `pages::slots_update` | `quick_select_…` |
+| 0x290468 QS leave | **writes 0x141ea0** (the NTSC writer of the quick-select slots) | `pages::slots_leave` | `quick_select_…` |
+| 0x294528 QS draw | ring of 8 at r = min(w, h)/2 − 40, the cursor's pulsing frame, empty squares 0x40404040, icons (gold variant 4), shoulder tabs | `pages::slots_draw` | `quick_select_…` (7 empties); frame `qs_a.png` |
+| 0x292b60 ammo text | "ammo/max" (`%d,%03d` over 999) or "(no ammo)" 0x4f52 | `pages::ammo_draw` | `weapons_page_ammo_text_and_model` |
+| 0x2919a0 ammo model | the focused item's ammo pickup class (item +0x3a) spawned at camera + (6, 0, −0.3), angle π, replaced in place on a change, freed for none; its update turns 0.01 rad / tick | `pages::ammo_model_update` (moby: `menu_models` role Ammo) | same |
+| 0x291b18 ammo model draw | not owned: nothing; no class: "Uses no ammo" 0x4f4d | `pages::ammo_model_draw` | same |
+| 0x292450 / 0x2924f8 gold bolt enter / leave | class 0x46e at camera + (8, 0.5, −0.1), pitch −1.9, spun 0.02 rad / tick; freed | `pages::gold_enter` / `gold_leave` / `gold_tick` | `items_page_gold_bolts_and_picture` |
+| 0x292528 Items draw | "Gold Bolts", Found / Used / Remain (0x14bec0 count ≤ 40, 4 × gold weapons ≤ 10, the rest) | `pages::gold_draw`, `gold_counts` | same |
+| 0x290b70 / 0x290bf8 Help Log list | items = log newest first, titles from 0x1798d0 | `pages::log_list_enter` | `help_log_page_lists_the_log_and_shows_the_message` |
+| 0x290c00 / 0x290d40 / 0x290cd0 text | `all_text` streamed and swapped in (hidden until loaded), swapped back on leave | `pages::text_enter` / `text_update` / `text_leave` | same |
+| label source 0x1000 | the focused log entry's help message | `PageMenu` label draw | same |
+| 0x28d818 / 0x28d9a8 icon list | Up / Down without wrap, scroll, arrows | `pages::icons_update` / `icons_draw` | `help_weapons_icon_list` |
+| 0x295000 / 0x2950c8 Help Weapons / Gadgets enter | owned items of the Weapons grid / Gadgets grids; text tables (+0x40 / +0x42 gold / +0x44) | `pages::help_weapons_enter` / `help_gadgets_enter` | `help_weapons_icon_list` |
+| 0x2904a0 Moves label enter | Heli-Pack owned → 0x1b4c50, else 0x1b4c88 | `pages::moves_label_enter` | `help_moves_table_follows_the_heli_pack` |
+| 0x2904e8 | stream buffer layout | n/a (memory only) | — |
+| 0x295af8 Skill Points draw | the entry's location / planet names, or "All Levels" | `pages::skill_draw` | `goodies_skill_points_and_movies` |
+| 0x295730 In-Level Movies enter | the list = 0x1b8aa8[level % 19] | `pages::movies_enter` | same |
+| Goodies entries | Credits (11), Cinematics, Movies post-actions; Sketchbook / Epilogue / Making Of / Commercials locked (−1) | lists ported; post-actions G-UI-004; locked pages NOT ported (G-UI-004) | same (locked: no action, no sound) |
+| Cheats page 0x1b7fb0 | the cheat list | NOT ported (G-SAV-006) | — |
+| Save / Load pages | memory-card slots, previews | NOT ported (G-SAV-002) | — |
+
+**Pictures.** The widgets name a global TOC field (`+0x30` − 0x137b80) and an index; the engine reads
+`global/<field>/NNN.bin` through `disc_source`, WAD-decompresses and decodes the PIF (`rc_formats::pif`: "2FIP", PSMT8,
+CT32 palette at +0x20, pixels at +0x420), and copies it into one of 4 slots of 512×512 below the HUD atlas (least
+recently drawn replaced). No extractor change: the lumps were already extracted.
+
+Frames (two runs each, identical): `scratchpad/helpmap/frames/{weapons,qs,items,help,help_log,controls,moves,help_weapons,goodies,skill}_a.png`.
+
+## 13. The in-game map (ported 2026-09-28)
+
+Code: `rc-game/src/map.rs` (files, masks, transforms, zones, the fog writer), `rc-game/src/map/predicates.rs` (the
+per-level reveal predicates), `rc-game/src/menus/pause/map_page.rs` (the page: compose, pan / zoom, draw, globe,
+legend, missions' status, markers), the engine's `gameplay.rs` (`map_setup`, `map_file`, `map_tick`),
+`menu_render.rs` (the open / close hand-over, the Select / R3 rule, the map-used record, the palettes and hooks),
+`scene_render.rs` (the save's pack). Tests: `rc-game/tests/map_levels.rs` (6, disc data, all 19 levels),
+`map::predicates::tests` (53 predicates against the game's own code), `menus::pause::map_page::tests` (3).
+Frames: `scratchpad/helpmap/frames/{map01,map05,map13,mapfog,mapomatic}_{a,b}.png`.
+
+**What is a system.** One engine system for every level (§10): the same functions and the same tables in all 19
+overlays (`tables_on_every_level` compares the zone table, the default pans, the predicate slots, the mission and
+marker lists, the marker sizes and the prices). The per-level parts are data (zones 0x183020, transforms 0x182c90,
+lists 0x1870f0 / 0x187140) and small per-level functions (the reveal predicates 0x184410, the mission callbacks
+0x262b40..0x262d78), ported as tables keyed by level. No per-level code in the port.
+
+**Data.** The map files are the global TOC field 0x820 (38 entries, WAD): 0..18 plain, 19..37 Map-o-Matic
+(`crate::map::MapFile`: zone tiles, run table, fogged / revealed pictures, three globe PIFs). No extractor change
+(the lump was already extracted as `global/unknown_0820`). The picture's palette is the HUD grid icon's (0xe999, frame
+= the level): the draw's TEX0 takes its CBP from that frame; the CLUT the compose uploads to 0x3ff0 (the picture's
+first KB) is never sampled.
+
+| address | what it does | ported / NOT ported / n/a |
+|---|---|---|
+| 0x25a4c0 level entry | default pans 0x184370, zoom 0.65 ×19; the world → map transforms from 0x182c90; the level's map file (Map-o-Matic set by owned[33], 0x1848a0); the zone tiles copied; the mask from chunk 3002 (first byte ≠ 0: `fun_00207bb0`) else from the tiles (`fun_00206710`); the tile cache (8 × 0x200); the brush 0x184814 | `MapState::enter` (the tiles decoded once instead of the 8-tile cache: n/a, memory only), `map::brush_open` |
+| 0x25e800 `fun_00208408` | world → map (0..1) per level; level + 100 on level 6 with gp−0x6e08: the quarter-turned map | `map::world_to_map` |
+| 0x25c4f8 fog writer | hero pixel + 1; zone rules per zone (z range, flags 1 / 2 riding, 4 / 8 group 0x10, 0x10 / 0x20 group 0xf, 0x40 magnetic floor, 0x80 zone flag 0x184928[arg], 0x100 << k predicate k); every fogged pixel of the 32 × 32 square in the brush and in an open zone cleared | `MapState::zones_open`, `MapState::reveal` (tests `fog_writer_reveals_the_brush`, `zone_rules`) |
+| 0x228a1c / 0x228088 callers | the hero update (not in movement group 22 or state 50) and the other player modes' update, every tick | `gameplay::map_tick` |
+| 0x184410 predicates | 53 functions on 14 levels (`side` 0x25ec10, riding, flags, zone flags, z ranges, a 2D distance 0x221398) | `map::predicates::call` (test: 20,000 inputs each against the level01 code) |
+| 0x25c3e0 `fun_00206860` | a tile's run-length nibbles | `MapFile::tile` (test: every tile of the 38 files decodes to 1024 pixels) |
+| 0x25c290 `fun_00206710` | the mask from the tiles (zone ≠ 0 → fogged) | `Mask::initial` |
+| 0x25af58 compose | fogged picture where the mask is set, revealed elsewhere | `map::compose` |
+| 0x25deb8 `fun_00207b08` pack | run coding over the run table (`FUN_00222328`), else the 4 × 4 downsample (`fun_00208030`); the length into 0x13d560[level] (a statistic) | `Mask::pack`, `MapState::pack` (the statistic kept as `packed_len`) (test `pack_and_unpack`) |
+| 0x25df60 `fun_00207bb0` unpack | `fun_00207c28` (runs) / `fun_00207e58` (coarse) | `Mask::unpack` |
+| 0x261448 / 0x29a5c8 savers | pack the current level's mask into chunk 3002 before writing | the engine's `EngineRequest::Save` (`scene_render`); the card write itself is G-SAV-002 |
+| 0x2aba68 Select / R3 | ≥ 8 frames in mode 0, not state 0x72 / 0x32 / 0x1d, not group 22, HP > 0 → `EnterMenuMode(10)` | `menu_render` (group 22 added) |
+| 0x2abfb0 | while 0x184694 (the map page found a map) is set, move record 9 bumped every mode-0 frame | `menu_render` (`help::bump`) |
+| 0x28bf50 → 0x262760 | the destination's (the level's) mission status at every menu open | `map_page::enter` |
+| 0x28c128 → 0x25a8d0 (kinds 0xb / 0xf) | map available = the level has one; a Map-o-Matic picked up since the entry switches the current level's picture set; shown = −2; `FUN_00262da0(dest, 1)` | `map_page::setup` |
+| 0x2904d0 globe enter | shown = −1 | `map_page::globe_enter` |
+| 0x28f868 widget update | pan / zoom `fun_00205440`; the keys (Start / Select / R3 close, △ back, ✕ missions page, ○ Infobot movie, L1 / R1 previous / next unlocked planet: sound 1 and `FUN_00262760`); on a destination change the compose (the live mask on the current level, the saved mask of a visited level, the tiles otherwise), the globe layers, `FUN_00262da0(dest, 0)` | `map_page::pan_zoom`, `planet_select::map_update`, `map_page::compose` (test `map_page_on_novalis`) |
+| 0x28f868 streaming | the stream-buffer cache of map files (slots 0x1848e8, 0x184910), prefetching | n/a (the engine reads the file when composed; memory management) |
+| 0x28f7a8 widget leave | stream break | n/a (no streams) |
+| 0x25afc0 `fun_00205440` | not after Select / R3; zoom × (1 − 0.02·ry) in 0.65..4; pan += stick·3·10⁶ / zoom; clamped | `map_page::pan_zoom` |
+| 0x292d38 → 0x25b1c0 draw | the grid tile 0xe999 (repeated), the picture, the markers, the hero arrow 0xe99a frame 5 on the current level (yaw, +π/2 in group 0xf or level 6's alternative, mirror cheat) | `map_page::draw` |
+| 0x25b1c0 "No Map Available" | debug-font text when the level has no map | n/a (all 19 levels have one) |
+| 0x25b1c0 tile-cache rects | debug (0x18469c) | n/a (debug flag, never set) |
+| 0x25e950 `fun_00208508` | only with 0x18468c, never written | n/a |
+| 0x294258 globe | stations 6 / 13 / 17: the three layers, two blinking; planets: the margin 0x1c24e8, the surface's u scroll | `map_page::globe_draw` (aspect crop [L]) |
+| 0x292d70 legend | View Missions / Play Infobot (not level 0) / Previous / Next Map / Track/Zoom / Exit | `map_page::legend_draw` |
+| 0x262760 mission status | per record: flag 4 waits for the visit; first condition → 1, both → 2; the callbacks' values; "none open" | `map_page::mission_status`, `condition` (`fun_0020baf0` 0x262900), `callback` (tests `conditions`, `callbacks`, `mission_status_rules`) |
+| 0x262da0 markers | the destination's list when visited; centre the view on the hero (with 1); the points (fixed −1..−9, hook mobys 0x179638 on the current level, landmarks 0x13d5b0 elsewhere); shown by the mission's status; flag 0x1000 needs the landmark's flag 1; the label box sizing | `map_page::setup_markers` (the box sizing at the draw) |
+| 0x25b1c0 markers | rectangles (icon size × 1.5 / zoom / (2z + 5) / 13), pairwise push-apart, backing (0x40), icon or turned sprite (0x100; sizes gp−0x6de8.., landmark flag 2 → next frame), label box (UI frame + small font) | `map_page::draw_markers` |
+| 0x25e630 label text | `%b` → the price 0x1c4530, else "error" | `map_page::label_text` |
+| missions page 0x1b3bf8 | the mission list 0x293090 (`fun_0020bc00`), the mission picture 0x293398 / 0x293670 (`mission_ss`), the selection marks | NOT ported (G-UI-001) |
+| level 6's gp−0x6e08 | set by level 6's class code (0x302578) | the flag is `MapState::alt`; its writer NOT ported (G-UI-001) |
+| 0x184928 zone flags | written by level classes (L07 / L13 movers …) | `MapState::zone_flags`; the writers NOT ported (G-UI-001) |
+
+**[L] notes.** The globe's copy "aspect crop" (return 4) keeps the target's centre at the panel's aspect. The map's
+coordinates are converted from 1/16 pixels to whole pixels when drawn. The file is read when composed (the game
+streams and keeps a cache; the picture appears the same update here).

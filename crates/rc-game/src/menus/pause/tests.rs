@@ -59,6 +59,15 @@ fn menu() -> PageMenu {
         unusable_back: false,
         view: super::gadgets::GadgetsView::default(),
         view_model: None,
+        text_swap: 0,
+        label_tables: BTreeMap::new(),
+        help_items: Default::default(),
+        movie_lists: Vec::new(),
+        log_ids: Vec::new(),
+        lang: 0,
+        ammo_records: Vec::new(),
+        gold_spin: None,
+        map: Default::default(),
     };
     let labels = [20194, 20195, 20196, 20197, 20198, 20199, 20418];
     for (i, &a) in ROOT_W.iter().enumerate() {
@@ -85,7 +94,7 @@ fn press(bits: u32) -> MenuInput { MenuInput { pressed_u: bits, raw_pressed: bit
 fn hold(bits: u32) -> MenuInput { MenuInput { held_u: bits, connected: true, ..Default::default() } }
 const NONE: MenuInput = MenuInput {
     held: 0, pressed: 0, raw_pressed: 0, raw_released: 0, held_u: 0, pressed_u: 0,
-    stick_x: crate::ps2v::Pf::ZERO, stick_y: crate::ps2v::Pf::ZERO, stick_active: false, connected: true,
+    stick_x: crate::ps2v::Pf::ZERO, stick_y: crate::ps2v::Pf::ZERO, stick_active: false, connected: true, sticks: [crate::ps2v::Pf::ZERO; 4],
 };
 
 fn open(m: &mut PageMenu, g: &mut GameState, kind: i32) -> Vec<MenuOut> {

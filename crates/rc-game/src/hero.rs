@@ -50,6 +50,7 @@ pub mod surface;
 pub mod swingshot;
 pub mod comet;
 pub mod weapons;
+pub mod gloves;
 pub mod pyrocitor;
 pub mod guns;
 pub mod blaster;
@@ -60,6 +61,9 @@ pub mod reactive;
 pub mod suck_cannon;
 pub mod suck_vortex;
 pub mod taunter;
+pub mod morph_ray;
+pub mod walloper;
+pub mod visibomb;
 pub mod crank;
 pub mod scripted;
 pub mod worn;
@@ -447,6 +451,12 @@ pub struct Hero {
     /// (`rc_formats::moby_anim::list_target`; 0xff: none), set by the loader ([`Hero::set_joint_targets`]). Empty:
     /// his joint-modifier list is not written to his moby. Not part of the game's hero block.
     pub joint_targets: std::sync::Arc<Vec<u8>>,
+    /// The hero's help calls and their counters (0x141404 / 0x141405, gp 0x15f688 / 0x15f68c) and the help records as the
+    /// tick started ([`crate::help::HeroHelp`]).
+    pub help: crate::help::HeroHelp,
+    /// The Walloper's arcs, glow and the gadget lunge's queued hits ([`walloper`]; the game's globals 0x1dc020.. and
+    /// 0x1616fc..).
+    pub walloper: walloper::Walloper,
 }
 
 /// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
@@ -513,7 +523,7 @@ impl Hero {
             owned: Owned::default(), back_slot: idle::BackSlot::default(), feet_slot: idle::ItemSlot::default(), head_slot: idle::ItemSlot::default(), worn: worn::Worn::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
-            joint_targets: Default::default(),
+            joint_targets: Default::default(), help: Default::default(), walloper: Default::default(),
         }
     }
 

@@ -40,6 +40,8 @@ pub mod fog_zones;
 pub mod sky_stars;
 pub mod water;
 pub mod hud;
+pub mod help;
+pub mod map;
 pub mod audio;
 pub mod game_state;
 pub mod inventory;

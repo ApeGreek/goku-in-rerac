@@ -204,7 +204,7 @@ galaxy page = 0x13d510. First-visit story flights exist for 0, 0→1, 4, from 7,
   template). No serde; plain little-endian byte writes.
 * **One struct** `GameState { g: Global, lv: [Level; 20] }`: every chunk is a named field with its exact type
   (`bolts: i32`, `ammo: [i32; 37]`, `owned: [u8; 37]`, `vendor: [u8; 12]`, `landmarks: [Landmark; 121]`,
-  `help: [HelpRec; 148]`, …; opaque ones as `[u8; N]`, e.g. `moby_pack: [u8; 0x800]`). One `const fn` per chunk
+  `help: [HelpRec; 148]`, …; opaque ones as `[u8; N]`, e.g. `map_mask: [u8; 0x800]`). One `const fn` per chunk
   maps id → `&mut [u8]` view via explicit (de)serialisers so `encode(decode(x)) == x` byte for byte.
 * **Restore rules** copy `RestoreData` exactly (id match, min/truncate on size mismatch, error count); bad CRC
   keeps defaults for that section.

@@ -6,7 +6,8 @@
 //!
 //! The comet strike 0x15 (crouch + □) has its entry here and its physics, the throw and the wrench's flight
 //! states 10 / 11 in [`super::comet`]; the glove throw 0x23 has the group-6 entry here and the rest in
-//! [`super::weapons`]. Not ported: 0x20/0x51, the rebound 0x21
+//! [`super::weapons`]; the gadget lunge 0x20 has the group-6 entry here and the rest in [`super::walloper`] (with the
+//! melee aim search `0x22e238`, [`aim_search`]). Not ported: 0x51, the rebound 0x21
 //! (needs the targets' records: the port has none), the aim-assist target search `0x22e238` (targets need a
 //! mode-0x20 record no ported class has: always none), the wall-hit spark line and the jump-attack
 //! ground sparks (cosmetic + sounds) and the trail counters of the wrench (pvar +0x70/+0x74/+0x7c). The stats
@@ -283,6 +284,7 @@ impl Hero {
                 if self.hand_is_wrench() { self.items.pending_blend = Some((10, 4, b + 2)); }
             }
             0x23 => super::weapons::throw_entry(self, c, play),
+            0x20 => super::walloper::entry(self, c, play),
             0x15 => {
                 self.melee.combo = 3;
                 self.items.restore = 0;
@@ -612,6 +614,101 @@ pub fn jump_attack_shockwave(hero: &mut Hero, table: &mut MobyTable, env: &ItemE
     hits.sphere(table, Pf::b(0x3ecc_cccd), p, 0x10, Some(env.hero_moby), &tmpl);
 }
 
+/// One moby of the target list 0x1abe80 as the melee aim search `0x22e238` reads it: its position (+0x10), its record's
+/// health (`FUN_002711f8(m)` +0x00; mobys without a record are skipped when the list is built), mode 0x1000 and the
+/// crate test `0x273278` (classes 500..=540).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeleeTarget {
+    pub id: MobyId,
+    pub pos: [f32; 3],
+    pub health: f32,
+    pub targetable: bool,
+    pub is_crate: bool,
+}
+
+/// The target list `list` (0x1abe80, `crate::targeting::target_list`) as [`MeleeTarget`]s (the mobys with a record).
+pub fn melee_targets(table: &MobyTable, list: &[MobyId]) -> Vec<MeleeTarget> {
+    list.iter()
+        .filter_map(|&id| {
+            let m = table.mobys.get(id)?;
+            let health = crate::targeting::record_health(m)?;
+            let pos = [m.position[0], m.position[1], m.position[2]];
+            let targetable = m.mode & crate::moby_runtime::mode::TARGETABLE != 0;
+            Some(MeleeTarget { id, pos, health, targetable, is_crate: (0..=40).contains(&(m.o_class as i32 - 500)) })
+        })
+        .collect()
+}
+
+/// `FUN_0022dff0(aim, range, cone, cone2, moby, &reject)`: the score of one target for the melee aim search, None when
+/// rejected: farther than `range` (3D, from Ratchet's position; in the jump attack 0x14 from his ground height
+/// 0x13f628), more than `cone` (> 0) from `aim` in yaw or more than `cone2` (> 0) in elevation; the score is `d +
+/// yaw_off·d`, + 7 for a crate. The look stances' branch (states 1 / 0x1e: the angles from the camera) is not reachable
+/// from its callers (their SetState entries and physics run in their own states) and is not ported.
+pub fn aim_score(from: [f32; 3], aim: f32, range: f32, cone: f32, cone2: f32, t: &MeleeTarget) -> Option<f32> {
+    let d = [t.pos[0] - from[0], t.pos[1] - from[1], t.pos[2] - from[2]];
+    let dist = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    let mut reject = range < dist;
+    let yaw_off = crate::moby_update::creature::diff_rots(d[1].atan2(d[0]), aim);
+    let flat = (d[0] * d[0] + d[1] * d[1]).sqrt();
+    let pitch_off = crate::moby_update::creature::diff_rots(d[2].atan2(flat), 0.0);
+    if 0.0 < cone && cone < yaw_off { reject = true; }
+    if 0.0 < cone2 && cone2 < pitch_off { reject = true; }
+    if reject { return None; }
+    let mut score = dist + yaw_off * dist;
+    if t.is_crate { score += 7.0; }
+    Some(score)
+}
+
+/// `FUN_0022e238(range, aim, cone, cone2)`: the best-scoring (lowest, the first on a tie) target of the list with a
+/// non-zero health that is targetable ([`aim_score`]).
+pub fn aim_search(targets: &[MeleeTarget], from: [f32; 3], aim: f32, range: f32, cone: f32, cone2: f32) -> Option<MeleeTarget> {
+    let mut best = 1e8f32;
+    let mut out = None;
+    for t in targets {
+        if t.health == 0.0 || !t.targetable { continue; }
+        if let Some(s) = aim_score(from, aim, range, cone, cone2, t) {
+            if s < best {
+                best = s;
+                out = Some(*t);
+            }
+        }
+    }
+    out
+}
+
+impl Hero {
+    /// `FUN_002351d0(range, cone, cone2)` with its target search: unless already aimed (0x13fda8), the facing, or the
+    /// stick's direction when it is past 0.5 (then aimed, the target cleared); a target of [`aim_search`] from there
+    /// turns the aim toward it and becomes 0x13fda4 (a target kept from before with the stick not taken keeps the
+    /// aim). Its callers in the port: the gadget lunge 0x20 (`super::walloper`, (11, 50°, −1)). The wrench states still
+    /// use [`Hero::melee_aim`] without the search (G-WPN-008).
+    pub(super) fn aim_assist(&mut self, env: &Env, range: f32, cone: f32, cone2: f32) {
+        let mut a = self.melee.aim_yaw;
+        if self.melee.aimed == 0 {
+            a = self.rot[2];
+            if Pf::b(0x3f00_0000) < self.stick_mag {
+                self.stick_target(env, Pf::ONE);
+                self.melee.aimed = 1;
+                self.melee.target = None;
+                a = self.target_yaw;
+            }
+            let mut from = super::physics::to_f32x3(self.pos);
+            if self.state == 0x14 { from[2] = self.ground_z.to_f32(); }
+            let targets = env.world.map_or(&[][..], |w| w.melee_targets());
+            if let Some(t) = aim_search(targets, from, a.to_f32(), range, cone, cone2) {
+                if self.melee.target.is_some() && self.melee.aimed == 0 {
+                    self.melee.aim_yaw = a;
+                    return;
+                }
+                let h = super::physics::to_f32x3(self.pos);
+                a = fast_arctan(Pf::f(t.pos[0]) - Pf::f(h[0]), Pf::f(t.pos[1]) - Pf::f(h[1]));
+                self.melee.target = Some(t.id);
+            }
+        }
+        self.melee.aim_yaw = a;
+    }
+}
+
 /// For the tests: the view fields the melee code reads.
 pub fn frame_of(v: &AnimView) -> Pf { Pf::f(v.frame) }
 
@@ -795,7 +892,7 @@ mod tests {
         defs[8] = ItemDef { slot: 0, attach: 0, o_class: 0x47, b18: 0 };
         defs[10] = ItemDef { slot: 0, attach: 6, o_class: 0xc0, b18: 0 };
         let data = ItemData { defs, hero_chains: vec![], classes: vec![cls(0x47), cls(0xc0)] };
-        let mut g = ItemGlobals { request: 10, saved: 10, previous: 0, wrench_flag: 1 };
+        let mut g = ItemGlobals { request: 10, saved: 10, previous: 0, wrench_flag: 1, drone: false };
         let mut rng = Rng::new();
         let mut table = crate::moby_runtime::MobyTable::new(vec![crate::moby_runtime::Moby::zeroed()], 4);
         let pad = crate::pad::PadState::default();

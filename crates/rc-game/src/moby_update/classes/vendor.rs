@@ -135,6 +135,8 @@ pub fn update(w: &mut World, id: MobyId) {
                 let lease = show && w.svc.interact.try_prompt(owner::VENDOR, PROMPT) != 0;
                 if w.svc.interact.triangle() && can_use && lease {
                     w.svc.interact.handoffs.push(Handoff::OpenVendor { vendor: Some(id) });
+                    // OpenVendorMenu 0x2ae1a0 closes the help box (`FUN_002258b0`).
+                    w.svc.help.kill();
                     // OpenVendorMenu's `SetState(100, 1)` inside the moby loop: Ratchet's update of this tick already
                     // runs state 100 (nothing moves; he is hidden from the next frame on).
                     crate::cinematic::hero_state(w, 100, true);

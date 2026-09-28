@@ -111,16 +111,39 @@ pub fn start(w: &mut World, id: MobyId, kr: usize, angle: f32, seq: u8, ticks: i
     w.anim_blend(id, seq, frame, ticks);
 }
 
+/// `FUN_00271258(moby, vel, prims)`: the burn's fire puffs. Up to 20 points in the moby's collision volume (density 14,
+/// the primitives of `prims`: `crate::moby_update::classes::breakables::volume_points`, 0x26fba0), each a type-4 puff
+/// flying off at `1.8·dt` in a random direction (two `rand_angle`) plus the flight's velocity and `0.9·dt` up, colours
+/// 0x7000a0ff / 0xff (the gold Pyrocitor 0x13e530: 0x7000ffa0 / 0xff00), life `ticks(rand_range(20, 35))`, size 0x1e
+/// growing by `rand_range(40, 60)`, additive.
+pub fn burn_sparks(w: &mut World, id: MobyId, vel: super::V, prims: u32) {
+    let pts = crate::moby_update::classes::breakables::volume_points(w, id, 14.0, 20, prims);
+    let gold = w.hero.weapons.gold[crate::hero::pyrocitor::PYROCITOR as usize] != 0;
+    let (c1, c2) = if gold { (0x7000_ffa0, 0xff00) } else { (0x7000_a0ff, 0xff) };
+    for p in pts {
+        let a = w.rng.rand_angle();
+        let b = w.rng.rand_angle();
+        let mut v = add(super::fx::polar(super::DT * 1.8, a, b), vel);
+        v[2] += super::DT * 0.9;
+        let n = w.rng.rand_range(20, 35);
+        let life = w.ticks(n);
+        let growth = w.rng.rand_range(40, 60) as i16;
+        let s = crate::particles::type04::Spawn { pos: p, vel: v, c1, c2, life, base: 0x1e, growth, additive: true };
+        super::fx::part04(w, &s);
+    }
+}
+
 /// `0x271558(moby, K)`: one tick of the flight (module doc). Returns the result bits ([`res`]).
 pub fn update(w: &mut World, id: MobyId, kr: usize) -> u32 {
     let mut out = 0u32;
     let g = |w: &World, o: usize| super::pf(w, id, kr + o);
     let mut vel = super::pv4(w, id, kr + k::VEL);
     vel[2] -= g(w, k::GRAVITY);
-    if super::pu8(w, id, kr + k::BURN) == 1 && super::pu8(w, id, kr + k::SPARKS) != 0 {
-        // FUN_00271258: sparks from the class's joints (type 4, `randf`/`rand_range` draws per joint); only the
-        // burning attack kind 4 sets the marker (no Novalis weapon of the port does).
-        w.svc.unported("creature knock: burn sparks 0x271258");
+    let sparks = super::pu8(w, id, kr + k::SPARKS);
+    if super::pu8(w, id, kr + k::BURN) == 1 && sparks != 0 {
+        // The burning attack kind 4 (the resolver's type 5: the Pyrocitor's and the Tesla Claw's hits) marks the
+        // flight: FUN_00271258(moby, K, the primitive mask +0x2f).
+        burn_sparks(w, id, vel, sparks as u32);
     }
     let phase = super::pi16(w, id, kr + k::PHASE);
     let mut l = super::len2(vel);
@@ -134,10 +157,11 @@ pub fn update(w: &mut World, id: MobyId, kr: usize) -> u32 {
     let g0 = super::ground::ground(w, p, 0.5, 0);
     let mut gz = g0.z;
     if g0.surface == 0 {
-        // Water under the flight: the entry splash once (FUN_002ff768(3.0, p), the ripple class's splash; not ported).
+        // Water under the flight: the entry splash once (`FUN_002ff768(3.0, p)` with p's z the water's: the splash 775,
+        // crate::moby_update::classes::splash).
         if g(w, k::WATER) == 0.0 && gz <= p[2] && p[2] + vel[2] < gz {
             super::set_pf(w, id, kr + k::WATER, 1.0);
-            w.svc.unported("creature knock: water splash 0x2ff768");
+            crate::moby_update::classes::splash::spawn(w, 3.0, [p[0], p[1], gz, p[3]]);
         }
         gz = super::ground::ground(w, super::pos(w, id), 0.5, 0x20).z;
     } else if super::pi32(w, id, kr + k::FLAGS) & 0x10 != 0 || phase == 2 {
@@ -252,4 +276,43 @@ pub fn update(w: &mut World, id: MobyId, kr: usize) -> u32 {
     super::set_pv4(w, id, kr + k::VEL, vel);
     let _ = (pvar::u8, Pf::ZERO);
     ret
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::moby_runtime::{ClassInfo, Moby, MobyTable};
+    use crate::moby_update::{ClassTable, Services};
+
+    /// A knocked creature crossing a water face (surface 0) makes the splash 775 at the water's height (`FUN_002ff768(3,
+    /// p)`), once (the flight's water marker +0x5c).
+    #[test]
+    fn knocked_into_water_splashes_once() {
+        let mut mesh = crate::hero::testkit::floor(10.0, 5, 7, 5, 7);
+        for c in &mut mesh.cells { for f in &mut c.faces { f.surface = 0; } }
+        let mut classes = ClassTable::default();
+        classes.classes.insert(775, (ClassInfo { slot: 1, scale: 1.0, ..Default::default() }, None));
+        classes.classes.insert(577, (ClassInfo { slot: 2, scale: 1.0, ..Default::default() }, None));
+        let mut m = Moby::init_instance(0, 577, Some(&classes.classes[&577].0));
+        m.position = [24.0, 24.0, 10.2, 0.0];
+        m.pvars = vec![0; 0x80];
+        let set = |p: &mut Vec<u8>, o: usize, x: f32| p[o..o + 4].copy_from_slice(&x.to_le_bytes());
+        set(&mut m.pvars, k::VEL, 0.1);
+        set(&mut m.pvars, k::VEL + 8, -0.3);
+        set(&mut m.pvars, k::AIR_SPEED, 0.1);
+        set(&mut m.pvars, k::UP, 1.0);
+        let mut table = MobyTable::new(vec![m], 8);
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        let mut svc = Services::new();
+        let mut w = World::new(&mut table, &hero, &mut rng, &classes, &mut svc, 1);
+        w.coll = Some(&mesh);
+        update(&mut w, 0, 0);
+        let splashes: Vec<[f32; 4]> = w.table.mobys.iter().filter(|x| x.o_class == 775).map(|x| x.position).collect();
+        assert_eq!(splashes.len(), 1, "one splash");
+        assert!((splashes[0][2] - 10.0).abs() < 1e-3 && splashes[0][0] == 24.0, "at the water: {splashes:?}");
+        assert_eq!(super::super::pf(&w, 0, k::WATER), 2.0, "marked (1), then counted in the same update");
+        update(&mut w, 0, 0);
+        assert_eq!(w.table.mobys.iter().filter(|x| x.o_class == 775).count(), 1, "once");
+    }
 }

@@ -94,6 +94,9 @@ pub trait HeroWorld {
     /// The camera as the previous tick's update left it: position 0x167240, yaw 0x167258 and pitch 0x167254
     /// (positive looking down). None: no camera (tests).
     fn camera(&self) -> Option<([f32; 3], f32, f32)> { None }
+    /// The target list 0x1abe80 as the melee aim search `0x22e238` reads it ([`super::melee::MeleeTarget`]; empty: no
+    /// targets).
+    fn melee_targets(&self) -> &[super::melee::MeleeTarget] { &[] }
 }
 
 /// The carriers of a moby table as the moby loop left it (built once per tick, before the hero update).
@@ -108,6 +111,8 @@ pub struct Carriers {
     pub grind: std::sync::Arc<Vec<rc_formats::volumes::GrindPath>>,
     /// The Swingshot targets ([`HeroWorld::swing_targets`]; the caller sets them, `Carriers::collect` leaves none).
     pub targets: super::swingshot::Targets,
+    /// The melee aim search's targets ([`HeroWorld::melee_targets`]; the caller sets them, `Carriers::collect` leaves none).
+    pub melee: Vec<super::melee::MeleeTarget>,
 }
 
 impl Carriers {
@@ -125,7 +130,7 @@ impl Carriers {
             .collect();
         let hero_slot = table.mobys.get(hero_moby).map_or(0, |m| m.class_slot);
         let ledge_mobys = table.mobys.iter().enumerate().filter(|(_, m)| triggers::record_ledge_flag(m)).map(|(i, _)| i).collect();
-        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default() }
+        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new() }
     }
 }
 
@@ -136,6 +141,7 @@ impl HeroWorld for Carriers {
     fn grind_paths(&self) -> &[rc_formats::volumes::GrindPath] { &self.grind }
     fn swing_targets(&self) -> Option<&super::swingshot::Targets> { Some(&self.targets) }
     fn camera(&self) -> Option<([f32; 3], f32, f32)> { Some((self.targets.camera, self.targets.cam_yaw, self.targets.cam_pitch)) }
+    fn melee_targets(&self) -> &[super::melee::MeleeTarget] { &self.melee }
 }
 
 /// The carry fields of the hero block.

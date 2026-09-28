@@ -277,10 +277,11 @@ pub fn after_tick(
                 vr.cone_scroll = 0.0;
                 vr.opened_at = Some(std::time::Instant::now());
                 apply_anim(play, vendor, &out.anim);
+                // `snd_PauseAllSoundsInGroup(0x1d)`, `music_Pause(0)` (before the open sound, as `OpenVendorMenu`); the
+                // world ticks of mode 5 are the scene form (no camera update).
+                if let Some(a) = audio.as_deref_mut() { a.system().menu_open(); }
                 let listener = rc_game::audio::class_sounds::listener_of(&play.game.camera.out);
                 play_sounds(play, audio.as_deref_mut(), vendor, &out.sounds, &listener);
-                // music_Pause(0); the world ticks of mode 5 are the scene form (no camera update).
-                if let Some(a) = audio.as_deref_mut() { a.system().music_pause(); }
                 play.game.camera_paused = true;
                 mode.set(Mode::Vendor);
             }
@@ -342,7 +343,8 @@ fn sound_frame(play: &mut Play, audio: &mut crate::audio_out::AudioOut, listener
     let table = &game.mobys;
     let (sys, buf) = audio.parts();
     buf.clear();
-    sys.game_frame_with(&input, counter, &mut game.rng, &|id| rc_game::audio::class_sounds::owner_position(table, id));
+    // sound_update only: the sound instances (0x2a19a8) run from the level update, which mode 5 does not run.
+    sys.sound_update_with(&input, counter, &mut game.rng, &|id| rc_game::audio::class_sounds::owner_position(table, id));
     sys.render(rc_game::audio::SAMPLES_PER_FRAME, buf);
     audio.push_frame();
 }
@@ -499,7 +501,8 @@ pub fn vendor_frame(
             calls.push(rc_game::cinematic::CinematicCall::CameraRelease { kind: 2, level });
             if let Some(a) = audio.as_deref_mut() { a.system().hero_teleported(pos); }
         }
-        if let Some(a) = audio { a.system().music_unpause(); }
+        // `VendorExit`: `snd_ContinueAllSoundsInGroup(0x1d)` (0x2ae7c0), `music_Unpause`.
+        if let Some(a) = audio { a.system().menu_close(true); }
         play.game.camera_paused = false;
         println!("interact: frame {frame}: VendorExit: mode 0 (bolts {}, ammo {:?})", gs.global.bolts, &gs.global.ammo[10..20]);
         vr.vendor = None;

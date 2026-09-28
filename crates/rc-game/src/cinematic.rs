@@ -18,6 +18,7 @@
 //! | `UnlockPlanet(p)` 0x2756d0 | [`unlock_planet`] | the saved game's planet bits and map order (+ banner) |
 //! | `memcard_Save(0, −1)` | [`save`] | logged: the in-memory game state is the save |
 //! | `SetMissionDone(m)` 0x265080 | [`set_mission_done`] | the level's mission byte done (the live bytes and the saved game) |
+//! | `0x317d88` / `0x317aa0` / `0x317e70` | [`camera_type6`] | the type-6 camera's switch / tracking / hand-back (the Visibomb) |
 //!
 //! The camera calls are queued here and applied by the tick right after the moby loop ([`Cinematic::calls`],
 //! `crate::tick`); the hero calls go through the hero-block channel ([`crate::moby_update::services::HeroFields`]);
@@ -43,6 +44,9 @@ pub enum CinematicCall {
     CameraResetBehindHero,
     /// A creature script's `SetState` (the gunship queues it with its camera call): run with the hero calls.
     HeroState { state: i32, play: bool },
+    /// The type-6 camera's switch `0x317d88`, tracking `0x317aa0` and hand-back `0x317e70` (the Visibomb's missile:
+    /// [`crate::follow_camera::type6`]).
+    Type6(crate::follow_camera::type6::Call),
 }
 
 /// What the engine has to do for the moby loop (outside the gameplay tick).
@@ -145,11 +149,22 @@ pub fn hero_teleport(w: &mut World, pos: [f32; 3], euler: [f32; 3], state: i32, 
     if let Some(s) = w.sound.as_deref_mut() { s.hero_teleported(pos); }
 }
 
+/// A call into the type-6 camera (`0x317d88` / `0x317aa0` / `0x317e70`).
+pub fn camera_type6(w: &mut World, c: crate::follow_camera::type6::Call) { w.svc.cinematic.calls.push(CinematicCall::Type6(c)); }
+
 /// `DialogStreamStart(k)`.
-pub fn start_scene(w: &mut World, scene: usize, arrival: bool) { w.svc.cinematic.requests.push(EngineRequest::StartScene { scene, arrival }); }
+pub fn start_scene(w: &mut World, scene: usize, arrival: bool) {
+    // DialogStreamStart 0x2ac330 closes the help box at once (`FUN_002258b0`).
+    w.svc.help.kill();
+    w.svc.cinematic.requests.push(EngineRequest::StartScene { scene, arrival });
+}
 
 /// `DialogStreamUpdate(n)`.
-pub fn start_movie(w: &mut World, movie: i32) { w.svc.cinematic.requests.push(EngineRequest::StartMovie { movie }); }
+pub fn start_movie(w: &mut World, movie: i32) {
+    // StartPssMovie 0x2ad0c0 closes the help box (`FUN_002258b0`).
+    w.svc.help.kill();
+    w.svc.cinematic.requests.push(EngineRequest::StartMovie { movie });
+}
 
 /// `FadeToBlack(n)` from a class (see [`EngineRequest::FadeToBlack`]).
 pub fn fade_to_black(w: &mut World, frames: i32) { w.svc.cinematic.requests.push(EngineRequest::FadeToBlack { frames }); }
@@ -235,6 +250,7 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             // were applied just before).
             CinematicCall::CameraResetBehindHero => cam.reset(inp),
             CinematicCall::HeroState { .. } => {}
+            CinematicCall::Type6(c) => cam.type6_call(&c, inp),
         }
     }
 }

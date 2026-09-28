@@ -1,7 +1,8 @@
 //! The in-game HUD: the 13-slot element system, health / bolts / weapon elements, the banner, the help box and
 //! the game's word-wrap layout (`FontPrintWindow`). Spec: docs/plan/hud_text.md §2–§4; addresses are level01.elf.
 //!
-//! [`HudState::tick`] runs one 60 Hz game tick (the HUD update loop 0x24f880, `Help_Update` 0x225bd0) and returns
+//! [`HudState::tick`] runs one 60 Hz game tick (the HUD update loop 0x24f880; the help box's `Help_Update` 0x225bd0 is
+//! `crate::help`'s, the HUD draws its box: [`HudState::set_help`]) and returns
 //! the frame's draw calls in the game's order: slots 0..12 (`HudDraw` 0x24fb50), the banner, the help box
 //! (0x2266c0). A [`Draw`] is one call of the game's 2D layer (`HudSprite` family, `FontPrint`,
 //! `FontPrintWindow`, `DrawUIFrame`, `DrawTexturedQuad`); the engine turns them into GS primitives.
@@ -230,36 +231,8 @@ pub struct Banner {
     pub text: Vec<u8>,
 }
 
-/// Help / Infobot box (`Help_Update` 0x225bd0, draw 0x2266c0); fields at 0x179890.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Help {
-    /// 0x179890: 0 idle, 1 open, 2 logo prompt, 3 grow, 4 text fade-in, 5 hold, 6 text fade-out, 7 shrink.
-    pub state: u8,
-    /// 0x179894: ticks in the state (incremented before the state's rule runs).
-    pub t: i32,
-    /// 0x1798b4: requested message id, −1 none.
-    pub request: i32,
-    /// 0x1798b0: index of the shown message.
-    pub index: Option<usize>,
-    /// 0x179898 / 0x17989c: full half-size; 0x1798a0 / 0x1798a4: centre; 0x1798a8 / 0x1798ac: current half-size.
-    pub half_w: i32,
-    pub half_h: i32,
-    pub cx: i32,
-    pub cy: i32,
-    pub cur_w: i32,
-    pub cur_h: i32,
-    /// 0x1798c0: help allowed. The game opens it `ScaleTicks(120)` ticks after the first d-pad input of the
-    /// level (0x1798c4 counter, pad bits 0xf000); the port starts it open.
-    pub enabled: bool,
-}
-
-impl Default for Help {
-    fn default() -> Self { Help { state: 0, t: 0, request: -1, index: None, half_w: 0, half_h: 0, cx: 0, cy: 0, cur_w: 0, cur_h: 0, enabled: true } }
-}
-
-/// Help box text: small font, window x 44..468, y 240..480, anchor 256, line height 16.
+/// Help box text colour (small font, `0x80ffa888` with the state's alpha).
 const HELP_COLOUR: u32 = 0x00ff_a888;
-fn help_window(y: i32, flags: u16) -> text::Window { text::Window::new(0xf0, 0x1e0, 0x2c, 0x1d4, 0x100, y as i16, 0x10, flags) }
 
 /// Per-tick game values the HUD elements read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -301,12 +274,9 @@ pub struct HudState {
     pub bolts_pinned: bool,
     bolts_pin_handle: Option<u32>,
     pub banner: Banner,
-    pub help: Help,
-    /// △ pressed this tick (pad 0x13cae4 bit 0x10): skips the help box.
-    pub triangle: bool,
-    /// `PlayLevelSoundAtMoby(index, flags, 0)` calls of the HUD code since the owner last drained them (the help box's
-    /// opening sound: crate::audio::class_sounds::level_sound).
-    pub level_sounds: Vec<(i32, u32)>,
+    /// The help box as `crate::help` (the system: `Help_Update` 0x225bd0 runs in the game tick) last left it; the HUD
+    /// draws it (0x2266c0) and owns only its current size 0x1798a8 / 0x1798ac ([`HudState::set_help`]).
+    pub help: crate::help::HelpBox,
     inputs: Inputs,
     last: Option<(i32, i32)>,
 }
@@ -326,9 +296,7 @@ impl HudState {
             bolts_pinned: false,
             bolts_pin_handle: None,
             banner: Banner { y: 100, ..Default::default() },
-            help: Help::default(),
-            triangle: false,
-            level_sounds: Vec::new(),
+            help: crate::help::HelpBox::default(),
             inputs: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: 0 },
             last: None,
         }
@@ -439,12 +407,8 @@ impl HudState {
         s.shown = s.value;
     }
 
-    /// Asks for message `id` in the help box (`FUN_00225818`); false while a box is up or pending.
-    pub fn help_request(&mut self, id: i32) -> bool {
-        if self.help.state != 0 || self.help.request != -1 { return false; }
-        self.help.request = id;
-        true
-    }
+    /// The help box of the game tick (`crate::help::Help::bx`), before this tick's draw.
+    pub fn set_help(&mut self, b: &crate::help::HelpBox) { self.help.copy_logic_from(b); }
 
     /// `ShowBanner(msg, ticks)` with the text already formatted; `ticks` defaults to `ScaleTicks(180)`.
     pub fn show_banner(&mut self, text: &[u8], ticks: Option<i32>) {
@@ -494,9 +458,7 @@ impl HudState {
             }
             _ => {}
         }
-        self.help_update();
         self.update_slots();
-        self.triangle = false;
         let mut out = Vec::new();
         self.draw(&mut out);
         out
@@ -608,100 +570,7 @@ impl HudState {
         Self::ramp(s, WEAPON_STEPS, WEAPON_STEPS, down);
     }
 
-    /// `Help_Update` (0x225bd0) without the voice system (no stream ever plays).
-    fn help_update(&mut self) {
-        let h = &mut self.help;
-        if !h.enabled {
-            h.state = 0;
-            h.t = 0;
-            h.request = -1;
-            return;
-        }
-        h.t += 1;
-        if h.state == 0 {
-            if h.request >= 0 {
-                let idx = strings::find_index(&self.assets.messages, h.request);
-                self.help.request = -1;
-                self.help.index = idx;
-                if idx.is_some() { self.help_size(); }
-            }
-            return;
-        }
-        let tri = self.triangle;
-        match h.state {
-            1 => {
-                if tri {
-                    h.t = 8 - h.t;
-                    h.state = 7;
-                } else if h.t >= 6 {
-                    h.state = 2;
-                    h.t = 0;
-                }
-            }
-            2 | 3 => {
-                if tri {
-                    h.state = 7;
-                    h.t = 0;
-                } else if h.state == 2 && h.t >= scale_ticks(24) {
-                    // Stream status never 3 and no voice line playing: straight on.
-                    h.state = 3;
-                    h.t = 0;
-                } else if h.state == 3 && h.t >= 8 {
-                    h.state = 4;
-                    h.t = 0;
-                }
-            }
-            4 => {
-                if tri {
-                    h.state = 6;
-                    h.t = 4 - h.t;
-                } else if h.t >= 4 {
-                    h.state = 5;
-                    h.t = 0;
-                }
-            }
-            5 => {
-                if h.t >= scale_ticks(420) || tri {
-                    h.state = 6;
-                    h.t = 0;
-                }
-            }
-            6 => {
-                // 0x15ee1d (help text option) = 1.
-                if h.t >= 4 || tri {
-                    h.state = 7;
-                    h.t = 0;
-                }
-            }
-            7 if h.t > 7 => {
-                h.state = 0;
-                h.index = None;
-                h.t = 0;
-            }
-            _ => {}
-        }
-    }
-
     fn help_text(&self) -> &[u8] { self.help.index.and_then(|i| self.assets.messages.get(i)).map_or(&[][..], |m| &m.text) }
-
-    /// 0x225a98: the opening sound `PlayLevelSoundAtMoby(0, 1, 0)` (the help text or voice option 0x15ee1d / 0x15ee1c
-    /// is on: the port has the text on), measure the text (small font, window flags 7) and size the box.
-    fn help_size(&mut self) {
-        self.level_sounds.push((crate::audio::class_sounds::level_sound::HELP_OPEN, 1));
-        let mut win = help_window(0x168, 7);
-        text::layout(&mut win, self.help_text(), -1, self.assets.glyphs(Font::Small), true);
-        let h = &mut self.help;
-        h.state = 1;
-        h.t = 0;
-        let hh = win.height >> 1;
-        h.cy = SCREEN_H - 0x3c;
-        h.half_h = hh as i32 + 5;
-        h.half_w = (win.max_width >> 1) as i32 + 10;
-        h.cx = 0x100;
-        h.cur_w = 8;
-        h.cur_h = 8;
-        if SCREEN_H - 12 < h.cy + h.half_h { h.cy = SCREEN_H - (hh as i32 + 0x11); }
-    }
 
     /// `HudDraw` 0x24fb50 (slots, banner) then the help box 0x2266c0.
     fn draw(&mut self, out: &mut Vec<Draw>) {
@@ -939,7 +808,8 @@ impl HudState {
     fn draw_help(&mut self, out: &mut Vec<Draw>) {
         let text = self.help_text().to_vec();
         let h = &mut self.help;
-        if h.state == 0 || !h.enabled { return; }
+        // Every state's frame needs the text option 0x15ee1d (the voice option alone plays the line, draws nothing).
+        if h.state == 0 || !h.enabled || !h.text_on { return; }
         let frame = |top, bottom, left, right, alpha| Draw::UiFrame { top, bottom, left, right, alpha };
         let logo = |cx: i32, cy: i32, a: i32| Draw::FxQuad { fx: 4, x: cx - 0x20, y: cy - 0x20, w: 0x40, h: 0x40, u: 0, v: 0, tw: 0x40, th: 0x40, rgba: (a as u32) << 24 | 0x0080_8080 };
         match h.state {
@@ -970,7 +840,7 @@ impl HudState {
                     6 => HELP_COLOUR | ((4 - h.t) as u32) << 29,
                     _ => 0x80ff_a888,
                 };
-                out.push(Draw::TextWindow { font: Font::Small, window: help_window(h.cy, 3), rgba, text });
+                out.push(Draw::TextWindow { font: Font::Small, window: crate::help::window(h.cy, 3), rgba, text });
             }
             7 => {
                 let hh = h.cur_h - (h.cur_h - 8) * h.t / 8;
@@ -1274,20 +1144,38 @@ mod tests {
         assert_eq!((h.slots[0].slide, h.slots[0].alpha, h.slots[0].flags), (0, 0, 0));
     }
 
+    /// The help box of the game tick (crate::help) drawn by the HUD: sized with the small font, centred at (256, H − 60),
+    /// the grow frame and logo, then the frame and the text window.
     #[test]
-    fn help_box_states_and_timings() {
-        let mut h = HudState::new(assets());
-        assert!(h.help_request(1000));
-        let mut states = Vec::new();
-        for _ in 0..500 {
-            h.tick(inputs(4, 0));
-            states.push(h.help.state);
+    fn help_box_draws_from_the_help_system() {
+        let a = assets();
+        let mut help = crate::help::Help {
+            text: crate::help::HelpText { messages: std::sync::Arc::new(a.messages.clone()), small: Some(a.glyphs[Font::Small as usize]), lang: 0 },
+            ..Default::default()
+        };
+        help.bx.enabled = true;
+        help.log_ids = std::sync::Arc::new(vec![(1000, 21107)]);
+        assert!(help.request(1000, 4));
+        let mut h = HudState::new(a);
+        let mut seen = Vec::new();
+        for _ in 0..45 {
+            help.voice_frame();
+            // The engine answers the line's load (its length in ticks).
+            if help.out.voice.contains(&crate::help::VoiceCmd::Load { id: 30004 }) { help.voice_loaded(Some(30)); }
+            help.out = Default::default();
+            help.update(&crate::help::HelpInputs { text_on: true, voice_on: true, ..Default::default() });
+            h.set_help(&help.bx);
+            let d = h.tick(inputs(4, 0));
+            seen.push((help.bx.state, d.iter().any(|x| matches!(x, Draw::FxQuad { fx: 4, .. })), d.iter().any(|x| matches!(x, Draw::TextWindow { .. }))));
         }
-        let first = |s: u8| states.iter().position(|&x| x == s).unwrap();
-        assert_eq!([first(1), first(2), first(3), first(4), first(5), first(6), first(7)], [0, 6, 30, 38, 42, 462, 466]);
-        assert_eq!(states[474], 0);
-        // Box centred at (256, H − 60) with the measured half-size.
         assert_eq!((h.help.cx, h.help.cy), (256, 356));
+        assert!(seen.iter().any(|&(s, logo, _)| s == 2 && logo));
+        assert!(seen.iter().any(|&(s, _, text)| s == 5 && text));
+        // The text option off: nothing is drawn.
+        let mut b = help.bx.clone();
+        b.text_on = false;
+        h.set_help(&b);
+        assert!(!h.tick(inputs(4, 0)).iter().any(|x| matches!(x, Draw::TextWindow { .. } | Draw::UiFrame { .. })));
     }
 
     #[test]

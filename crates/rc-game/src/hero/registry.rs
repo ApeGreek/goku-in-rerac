@@ -52,7 +52,8 @@ pub enum Module {
     Weapons,
     /// `crank.rs`: the bolt crank 0x3b (set and driven by the crank class 280).
     Crank,
-    /// `scripted.rs`: the scripted / cutscene control states (0x72 ported: the cinematics' hold).
+    /// `scripted.rs`: the scripted / cutscene control states (0x72 ported: the cinematics' hold; 0x1d: the Visibomb's
+    /// flight).
     Scripted,
     /// Later: the other bodies (Clank, Giant Clank, Hologuise disguise).
     Bodies,
@@ -109,10 +110,10 @@ pub static STATES: [StateInfo; 0x83] = [
     s("ledge shimmy left", 3, Ledge, true),                       // 0x1a
     s("ledge shimmy right", 3, Ledge, true),                      // 0x1b
     s("ledge climb / jump up", 4, Ledge, true),                   // 0x1c
-    s("scripted (no control)", 9, Scripted, false),               // 0x1d
+    s("steering the Visibomb (no control)", 9, Scripted, true),   // 0x1d
     s("look stance (set by mobys)", 0, Stance, true),             // 0x1e
     s("scripted idle", 9, Scripted, false),                       // 0x1f
-    s("gadget lunge (hand item swing)", 6, Melee, false),         // 0x20
+    s("gadget lunge (the Walloper)", 6, Melee, true),             // 0x20
     s("wrench rebound", 10, Melee, false),                        // 0x21
     s("Thruster-Pack stomp (R1 in the air)", 0xb, Packs, true),   // 0x22
     s("glove throw (hand item)", 6, Weapons, true),                // 0x23
@@ -275,6 +276,7 @@ impl Hero {
                 0x13 => self.phys_combo(env, anim),
                 0x14 => self.phys_jump_attack(env, anim),
                 0x15 => return super::comet::physics(self, env, anim),
+                0x20 => return super::walloper::physics(self, env, anim),
                 _ => return false,
             },
             Weapons if s == 0x23 => return super::weapons::physics(self, env),
@@ -305,7 +307,7 @@ impl Hero {
             Air => self.tr_fall(c),
             Jump if implemented(s) => self.tr_jump(c),
             Melee => {
-                if matches!(s, 0x13..=0x15) { self.tr_melee(c) }
+                if matches!(s, 0x13..=0x15) { self.tr_melee(c) } else if s == 0x20 { super::walloper::transitions(self, c) }
             }
             Weapons if s == 0x23 => super::weapons::transitions(self, c),
             Swim => match s {
@@ -352,10 +354,14 @@ mod tests {
         want.extend([0x24, 0x25, 0x26, 0x2c, 0x2d]);
         // Weapons + first person (comet.rs, weapons.rs).
         want.extend([0x15, 0x23]);
+        // The gadget lunge (walloper.rs).
+        want.push(0x20);
         // The bolt crank (crank.rs).
         want.push(0x3b);
         // The scripted hold (scripted.rs, the cinematics) and the scene body 99 / 100.
         want.extend([0x72, 0x63, 0x64]);
+        // The Visibomb's flight (scripted.rs).
+        want.push(0x1d);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));

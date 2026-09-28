@@ -182,6 +182,7 @@ pub fn run_level(level: u32, ticks: u32) -> Option<Outcome> {
     let mut svc = Services::new();
     svc.level = level;
     svc.set_splines(&splines);
+    svc.pvar_shared = gameplay::parse_pvar_shared_data(&gp).unwrap();
     svc.groups = statics.groups(&gp);
     svc.set_moby_collision(coll_blobs);
     svc.set_volumes(rc_formats::volumes::parse_volumes(&gp).unwrap());

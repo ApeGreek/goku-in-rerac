@@ -382,7 +382,12 @@ mod tests {
             assert_eq!(ClassUpdate::from_address(u.address()), Some(*u), "{u:?} {:#x}", u.address());
         }
         for (i, r) in RECIPES.iter().enumerate() {
-            for c in r.classes { assert_eq!(crate::moby_update::classes::for_class(*c), Some(ClassUpdate::Breakable(i as u8))); }
+            // The class-number registry is level 01's (`classes::for_class`): the other levels' copies run through
+            // their tables (`LevelPorts`, tests/breakables_levels.rs).
+            for c in r.classes {
+                let got = crate::moby_update::classes::for_class(*c);
+                if r.level == 1 { assert_eq!(got, Some(ClassUpdate::Breakable(i as u8)), "{c}") } else { assert_ne!(got, Some(ClassUpdate::Breakable(i as u8)), "{c}") }
+            }
         }
     }
 

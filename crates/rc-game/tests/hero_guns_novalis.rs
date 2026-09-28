@@ -192,6 +192,20 @@ struct Row {
     /// The hand item as `HeroItemsAttach` placed it this tick: position and rows; Ratchet's facing row.
     item: Option<([f32; 3], [[f32; 3]; 3])>,
     facing: [f32; 3],
+    /// The hand item's class sounds played this tick (`HeroSounds::item_sound`: class, index).
+    sounds: Vec<(i16, i32)>,
+}
+
+/// The hero's sounds of a run: the hand item's class sounds, recorded per tick (no audio, no RNG draws).
+#[derive(Default)]
+struct RecSounds(Vec<(i16, i32)>);
+
+impl rc_game::hero::HeroSounds for RecSounds {
+    fn anim_advanced(&mut self, _: &rc_game::moby_runtime::Moby, _: &rc_game::hero::anim::AnimView, _: &rc_game::hero::anim::AnimView, _: &mut Rng) {}
+    fn item_sound(&mut self, o_class: i16, _pos: [f32; 3], index: i32, _flags: u32, _rng: &mut Rng) -> i32 {
+        self.0.push((o_class, index));
+        -1
+    }
 }
 
 /// What a run gives and watches.
@@ -214,8 +228,13 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
 
 /// [`run`], with (`hold`) or without Ratchet's glove-holding classes on his animation (without: the holding layers run
 /// but are not evaluated, the arms play his own run).
-fn run_with(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32, hold: bool) -> Vec<Row> {
-    let (gs, session) = give(lv, s.item);
+fn run_with(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32, hold: bool) -> Vec<Row> { run_swaps(lv, s, input, ticks, hold, &[], &[]) }
+
+/// [`run_with`] owning also `more` items (not equipped), with the hand requests `swaps` (tick, item: the quick
+/// select's request 0x141408) made before those ticks.
+fn run_swaps(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32, hold: bool, more: &[i32], swaps: &[(u32, i32)]) -> Vec<Row> {
+    let (mut gs, mut session) = give(lv, s.item);
+    for &m in more { gs.give_item(m as usize, false, &lv.tables, &mut session); }
     let classes = Arc::new(ClassTable { classes: lv.classes.classes.clone() });
     let mut ct = ClassTable { classes: lv.classes.classes.clone() };
     let statics = load_level_mobys(&lv.instances, &mut ct, &lv.pvars, &lv.tests);
@@ -284,7 +303,9 @@ fn run_with(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32, hol
         // in view in these runs.
         for &i in &watch { if game.mobys.mobys[i].state < 0x80 { game.mobys.mobys[i].visible = 1; } }
         let mut hits = CellHits { svc: &svc_cell, classes: &classes, coll: &lv.mesh };
-        let r = game.tick_with_hits(Some(&input(t).bytes()), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks, &mut hits);
+        if let Some(&(_, id)) = swaps.iter().find(|x| x.0 == t) { game.item_globals.request = id; }
+        let mut rec = RecSounds::default();
+        let r = game.tick_with_hero_sounds(Some(&input(t).bytes()), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks, &mut hits, None, &mut rec);
         assert_eq!(r.hero, rc_game::hero::HeroTick::Ran, "hero stopped in state {:#x} at tick {t}", game.hero.state);
         let h = &game.hero;
         let p = parts_cell.borrow();
@@ -318,6 +339,7 @@ fn run_with(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32, hol
             hold: [2, 3].map(|i| h.weapons.layers[i].map(|l| (l.seq_a, l.seq_b, l.weight))),
             item: h.items.slot.item.as_ref().map(|m| (m.position, m.rows.map(|r| [0, 1, 2].map(|k| f32::from_bits(r[k]))))),
             facing: rc_game::hero::physics::to_f32x3(h.moby_rows[0]),
+            sounds: rec.0,
         });
     }
     rows
@@ -835,4 +857,67 @@ fn novalis_ryno_salvo_sounds_mix_without_overflow() {
     eprintln!("played {played}, peak {peak}");
     assert!(played >= 7, "the salvo's sounds play: {played}");
     assert!(peak > 0, "and are heard");
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// Hand swaps (docs/plan/hero_gameplay.md §11.1): the holding layers, the take-out sounds
+
+/// The holding layers and the hand item through a run with hand requests: per tick (hand id, [layer weight or None]).
+fn swap_run(lv: &Lv, first: i32, more: &[i32], swaps: &[(u32, i32)], ticks: u32) -> Vec<Row> {
+    let s = Setup { item: first, at: spawn(lv), watch: &[], shot_class: -1, part_types: &[] };
+    run_swaps(lv, &s, &|_| PadInput::neutral(), ticks, true, more, swaps)
+}
+
+fn weights(r: &Row) -> [Option<f32>; 2] { r.hold.map(|h| h.map(|h| h.2)) }
+
+/// `UpdateWrenchSelected` 0x2307e0 sets +0x34 on both holding nodes when it commits a swap: they fade out by 0.1 a
+/// tick and are freed; the new item's layers (0x1413fb from its def, `HeroItemsCreate`) are made after that and fade
+/// in by 0.1. Two-hand → wrench: none left; two-hand → one-hand: list 12 only; one-hand → two-hand: both; quick
+/// repeats end on the last item's layers.
+#[test]
+fn novalis_swap_releases_the_holding_layers() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    let full = |r: &Row, n: usize| weights(r).iter().filter(|w| **w == Some(1.0)).count() == n && weights(r).iter().flatten().count() == n;
+    // Two-hand (Devastator 11) → the wrench.
+    let rows = swap_run(&lv, 11, &[], &[(60, 8)], 140);
+    dump(&rows);
+    assert!(full(&rows[59], 2), "two hands before: {:?}", rows[59].hold);
+    // The swap commits in tick 60's item update (after the layers' own upkeep): 0.1 less a tick from tick 61.
+    let fade: Vec<f32> = rows[60..72].iter().map(|r| weights(r)[1].unwrap_or(0.0)).collect();
+    assert!(fade.windows(2).all(|w| w[1] <= w[0]) && fade[0] == 1.0 && (fade[1] - 0.9).abs() < 1e-6 && fade[10] == 0.0, "fading out: {fade:?}");
+    assert!(rows[75..].iter().all(|r| r.hand.0 == 8 && r.hold == [None, None]), "wrench: no holding layer {:?}", rows[80].hold);
+    // Two-hand → one-hand (Blaster 15): list 13 gone for good, list 12 made again and faded in.
+    let rows = swap_run(&lv, 11, &[15], &[(60, 15)], 140);
+    assert!(rows[100..].iter().all(|r| r.hand.0 == 15 && weights(r)[0] == Some(1.0) && weights(r)[1].is_none()), "one hand: {:?}", rows[100].hold);
+    let back = rows[60..100].iter().position(|r| weights(r)[0].is_none()).expect("the old list-12 layer is freed first");
+    assert!(rows[60 + back + 1..100].iter().any(|r| weights(r)[0].is_some_and(|w| w < 1.0)), "then the new one fades in");
+    // One-hand → two-hand.
+    let rows = swap_run(&lv, 15, &[11], &[(60, 11)], 140);
+    assert!(full(&rows[59], 1) && rows[59].hold[1].is_none());
+    assert!(rows[100..].iter().all(|r| r.hand.0 == 11 && full(r, 2)), "two hands: {:?}", rows[100].hold);
+    // Quick-select repeats: 11 → 15 → 11 → 8 → 23 a few ticks apart, then the wrench again.
+    let swaps = [(60, 15), (64, 11), (68, 8), (72, 23), (160, 8)];
+    let rows = swap_run(&lv, 11, &[15, 8, 23], &swaps, 220);
+    dump(&rows);
+    assert!(rows[130..160].iter().all(|r| r.hand.0 == 23 && full(r, 2)), "R.Y.N.O.: two hands {:?}", rows[130].hold);
+    assert!(rows[190..].iter().all(|r| r.hand.0 == 8 && r.hold == [None, None]), "wrench at last: {:?}", rows[190].hold);
+    assert_eq!(rows, swap_run(&lv, 11, &[15, 8, 23], &swaps, 220), "deterministic");
+}
+
+/// The swap's sounds are the new item's own: `HeroItemsCreate`'s `CreateMoby` runs `update_moby_animation_state` on
+/// sequence 0 (the take-out), so its trigger words play as it runs (`MobyAnimAdvance` in `HeroItemsAttach`); the
+/// put-away (sequence 2, one frame) has none and the wrench starts on sequence 1 (no take-out sounds). No other sound
+/// call in the swap path (0x2307e0, 0x231088, 0x2305e8, 0x22f3c0) or the quick select (0x24d238).
+#[test]
+fn novalis_swap_take_out_sounds() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    let swaps = [(60, 15), (120, 23), (180, 8), (240, 11)];
+    let rows = swap_run(&lv, 11, &[15, 23, 8], &swaps, 300);
+    let played: Vec<(usize, i16, i32)> = rows.iter().enumerate().flat_map(|(t, r)| r.sounds.iter().map(move |&(c, i)| (t, c, i))).collect();
+    eprintln!("{played:?}");
+    let of = |c: i16, from: usize, to: usize| played.iter().filter(|p| p.1 == c && (from..to).contains(&p.0)).map(|p| p.2).collect::<Vec<_>>();
+    assert_eq!(of(168, 60, 120), vec![2, 3], "the Blaster's take-out");
+    assert_eq!(of(454, 120, 180), vec![0, 1], "the R.Y.N.O.'s take-out");
+    assert!(played.iter().all(|p| !(180..240).contains(&p.0)), "the wrench: none");
+    assert_eq!(of(157, 240, 300), vec![2, 3], "the Devastator's take-out");
 }

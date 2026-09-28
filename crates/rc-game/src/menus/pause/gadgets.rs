@@ -61,6 +61,8 @@ pub struct Cell {
     /// 0: an item cell (drawn when owned); else a cell shown when the global flag `0x13d388[item]` is set.
     pub kind: i16,
     pub item: i16,
+    /// +8: the picture index the streamed image widget shows for the cell (flag 8: the Help pages' tables).
+    pub image: i16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,7 +93,7 @@ impl Grid {
         let cells = (0..n)
             .map(|k| {
                 let b = cells_addr + 10 * k;
-                Cell { icon: ov.u16(b).unwrap_or(0), variant: ov.i16(b + 2).unwrap_or(0), kind: ov.i16(b + 4).unwrap_or(0), item: ov.i16(b + 6).unwrap_or(0) }
+                Cell { icon: ov.u16(b).unwrap_or(0), variant: ov.i16(b + 2).unwrap_or(0), kind: ov.i16(b + 4).unwrap_or(0), item: ov.i16(b + 6).unwrap_or(0), image: ov.i16(b + 8).unwrap_or(0) }
             })
             .collect();
         Some(Grid {
@@ -157,10 +159,13 @@ pub struct PreviewView {
 pub struct GadgetsView {
     pub model: Option<ModelView>,
     pub preview: Option<PreviewView>,
+    /// The Weapons page's ammo model (`pages::ammo_model_draw`) and the Items page's gold bolt (`pages::gold_draw`).
+    pub ammo: Option<PreviewView>,
+    pub gold_bolt: Option<PreviewView>,
 }
 
 /// The grid of the page's focused widget (the label and the preview read its cursor cell).
-fn focused_grid(m: &PageMenu) -> Option<&Grid> {
+pub fn focused_grid(m: &PageMenu) -> Option<&Grid> {
     let f = m.pages.get(&m.current)?.focus;
     match &m.widgets.get(&f)?.data {
         Data::Grid(g) => Some(g),
@@ -168,8 +173,16 @@ fn focused_grid(m: &PageMenu) -> Option<&Grid> {
     }
 }
 
-/// The item of the focused grid's cursor cell.
-pub fn focused_item(m: &PageMenu) -> Option<i32> { focused_grid(m).map(Grid::item) }
+/// The item of the focused widget's cursor cell (`*(focus + 0x48) + 10·*(focus + 0x3c) + 6`): a grid's, or the Help
+/// pages' icon list's (the same fields).
+pub fn focused_item(m: &PageMenu) -> Option<i32> {
+    let f = m.pages.get(&m.current)?.focus;
+    match &m.widgets.get(&f)?.data {
+        Data::Grid(g) => Some(g.item()),
+        Data::IconList(l) => Some(l.cells.get(l.cursor.max(0) as usize).map_or(0, |c| c.item as i32)),
+        _ => None,
+    }
+}
 
 fn unusable(m: &PageMenu, flags: u32) -> bool { (m.unusable_head && flags & 8 != 0) || (m.unusable_back && flags & 4 != 0) }
 
@@ -451,7 +464,7 @@ mod tests {
             cursor: 0,
             rows,
             cols,
-            cells: items.iter().map(|&i| Cell { icon: 60000 + i as u16, variant: 0, kind: 0, item: i }).collect(),
+            cells: items.iter().map(|&i| Cell { icon: 60000 + i as u16, variant: 0, kind: 0, item: i, image: 0 }).collect(),
             above: 0,
             below: 0,
             left: 0,
