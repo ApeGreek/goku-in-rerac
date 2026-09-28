@@ -52,6 +52,33 @@ cleared), the fidget timer `rand_range(50, 90)`, a raised weapon put away (`0x22
 from the item being put away. Deletion `0x2305e8`: the feet mobys at once, the others when their put-away wraps; the
 next creation makes the target.
 
+**The swap sequence and its timings** (re-read 2026-09-28 against the disassembly of 0x2307e0, the slot loop 0x231088,
+the deletion 0x2305e8 and `HeroItemsCreate` 0x22f3c0) [H]. One path serves every change of a slot — the page close's
+request, the water rules, the `SetState` restores (which reach the back only through the restore request 0x141468 set
+by the back rules themselves: SetState writes the hand's 0x14145c and the feet's 0x141460, never the back's) and
+`GiveItem`'s equip:
+1. **Start** (the tick the request is taken; the slot's +0x18 timer 0x1403f8 + 0x50s must not be running — only the
+   hand's is ever set, by the physics (2) and SetState (10)): +0x24 = 3, `FUN_0022b8e8`, the fidget timer
+   `rand_range(50, 90)`, `0x230720` / `0x2306c0` (hand weapons only: the lock-ons 0x13f52a / 0x13f52c), a raised
+   weapon put away, the slot's item blended to its **sequence 2 over 2 ticks** (not Clank on the back), 0x15ed94 for
+   the back.
+2. **Put away** (state 3, the slot loop): the hand (0) and the feet (1) are deleted on the next loop at once; the head
+   (2) and the back (3) when the item's sequence 2 wraps (its anim flag 2). `0x2305e8` runs the item's own update one
+   last time, empties the slot (+0x24 = 0) and deletes the moby (Clank stays).
+3. **Empty for one tick**, then the next hero update's `HeroItemsCreate` makes the target's moby (state 2) on its
+   **sequence 0** (the take-out: `InitMobyInstance`'s state); the hand waits for its +0x14 frame (`0x1403f4 <
+   0x15f3f8`, two frames after the deletion), the others do not.
+4. **Ready** (state 2): a wrapped sequence 0 blends to **sequence 1 over 2 ticks** (0x231088); the back table rows of
+   Ratchet's anim calls take over from there.
+
+The back packs' data make the Heli-Pack (607) and Thruster-Pack (608) changes quick: their sequences 0 and 2 are
+**single frames** (the put-away is the 2-tick blend, the take-out one advance), while the Hydro-Pack (609) has a
+7-key take-out (sequence 0, 2 ticks a key) and a 3-key put-away (sequence 2): into the lake the Heli-Pack is gone after
+2 ticks, the slot is empty 1 tick, and the Hydro-Pack unfolds; out of it the Hydro-Pack folds for 6 ticks, 1 empty
+tick, the Heli-Pack. The feet slot deletes at once (no put-away animation); the head slot uses the same put-away as the
+back. The port runs exactly this (`idle::back_slot_states` / `back_swap`, `worn`), so no animation was missing: the
+change *is* that short in the game (`tests/hero_pack_swap_novalis.rs` pins the sequence and the tick counts).
+
 **`GiveItem(id, equip)`** 0x275760 (`GameState::give_item`): acquired, owned, the item's ammo, the vendor stock, a
 free quick-select slot for a hand item; with `equip` the request of hand (type 0), head (2) or back (3) — never feet.
 Unchanged by this work (the vendor buys through it).
@@ -193,4 +220,6 @@ grind group, Magneboots and water, the O2 Mask under water, menu requests), `tes
 arrival's state with no grants and no pack moves; the page on the disc's records: open, back grid focus, icons,
 name label, preview view, equip Thruster / denied Hydro, close request, the swap in play, the stomp and the
 Thruster glide, then the Heli-Pack back and its glide; feet toggle and head equip requests), the existing boots
-tests (the magnetic floor now through the automatic Magneboots).
+tests (the magnetic floor now through the automatic Magneboots). `tests/hero_pack_swap_novalis.rs` (2026-09-28): the back swap's
+sequence and tick counts into and out of the Novalis lake (Heli-Pack → Hydro-Pack → Heli-Pack), and the Thruster long
+jump's after-images.

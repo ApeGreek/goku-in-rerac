@@ -51,10 +51,15 @@
 //! Bomb Glove's is ported), 0x141618.
 //!
 //! **Weapons that keep the arm raised** (item def +0x30 → 0x1413fa; the Pyrocitor, the Blaster, …): [`gun_stance`]
-//! (`0x242858`: a walk / stop SetState or the walk's stop becomes the idle state in the weapon's standing sequence),
+//! (`0x242858`: the stop 3 (its SetState and its physics) or the walk's slow stop becomes the idle state in the weapon's
+//! standing sequence; the walk's SetState does not call it, so Ratchet runs off from the stance while firing),
 //! [`arm_on_state_change`] (`0x22eca0`: the arm layers when leaving idle), [`stance_kept`] / [`idle_stance`] (the idle
 //! transitions keep the stance), [`put_away`]'s return to the idle sequence (made by [`apply_pending`] where the item
 //! update asked for it).
+//!
+//! **The glove-holding layers** (0x140050 / 0x140054, [`hold_update`] = `0x22e660`; docs/plan/hero_gameplay.md §11):
+//! with a hand item whose def +0x18 (0x1413fb) is set, Ratchet's arm(s) replay his current key from the holding
+//! classes 1 / 2, so the weapon stays in his hands and level while he runs; the firing arm layer takes over from them.
 
 use super::anim::{AnimCtl, AnimLayer};
 use super::items::{HitSink, ItemEnv};
@@ -106,8 +111,11 @@ pub struct Weapons {
     /// 0x13de08 + 4·id: ammo picked up (stat; the ammo pickups `0x2db028`), added to the game state by the engine.
     pub picked: [i32; N],
     pub glove: Glove,
-    /// 0x140058 / 0x14005c: the weapon arm's pose layers (joint lists 12 / 13).
-    pub layers: [Option<AnimLayer>; 2],
+    /// Ratchet's pose-layer nodes ([`super::anim::PoseNodes`]): 0 / 1 = 0x140058 / 0x14005c, the weapon arm's layers
+    /// (joint lists 12 / 13); 2 / 3 = 0x140050 / 0x140054, the glove-holding layers ([`hold_update`]).
+    pub layers: super::anim::PoseNodes,
+    /// Pose-layer nodes made so far (the creation stamp of [`AnimLayer::born`]: the +0x60 list's order).
+    pub nodes_made: u32,
     /// 0x140064: the arm layers' phase (0 in / playing, 1 fading out, 2 fading fast after a holster).
     pub layer_fade: u8,
     /// 0x1415e4: the weapon sequence last set (the layer's, or the standing full-body one).
@@ -154,7 +162,7 @@ pub struct Weapons {
 impl Default for Weapons {
     fn default() -> Self {
         Weapons {
-            ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 2], layer_fade: 0, layer_seq: 0,
+            ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 4], nodes_made: 0, layer_fade: 0, layer_seq: 0,
             arm_item: 0, deferred: None, throws: 0, defs: Vec::new(), gold: [0; N], pyro: Default::default(), pending_draw: false, pending_idle: false,
             aim: None, aim_pos: [0.0; 3], blaster: Default::default(), ryno: Default::default(), devastator: Default::default(), tesla: Default::default(), pending_anim: None, markers: Default::default(), reactive: Default::default(),
         }
@@ -214,8 +222,132 @@ pub fn fire(h: &mut Hero, c: &mut Ctx) {
     }
 }
 
-/// gp−0x7560: Ratchet's joint lists of the two arm layers.
+/// gp−0x7560: Ratchet's joint lists of the two arm layers (and of the two glove-holding layers).
 pub const ARM_LISTS: [u8; 2] = [12, 13];
+
+/// `FUN_00263e08(ratchet, list)`: a fresh pose-layer node, linked in front of the +0x60 list (its stamp).
+fn new_node(h: &mut Hero, list: u8) -> AnimLayer {
+    h.weapons.nodes_made += 1;
+    AnimLayer { born: h.weapons.nodes_made, ..AnimLayer::new(list) }
+}
+
+/// The glove-holding layers' slots in [`Weapons::layers`] (0x140050 / 0x140054).
+pub const HOLD: usize = 2;
+
+/// `0x22df10(seq)`: Ratchet's key-B sequences in which the glove-holding layers leave his arms to a fixed pose (the
+/// holding class's sequence 0): 0x1c / 0x1d / 0x1f, 0x31 / 0x32, 0x37, 0x4a / 0x4b, 0x50, 0x60, 0x6d / 0x6e. (The
+/// function also returns an arm angle for 0x1c..0x1f past key time 25 (−75°) and 0x37 (−55°), which `0x22e660` writes
+/// to the joint records 8 / 9: not ported, gaps.md G-WPN-011.)
+pub fn hold_special(seq: u8) -> bool { matches!(seq, 0x1c | 0x1d | 0x1f | 0x31 | 0x32 | 0x37 | 0x4a | 0x4b | 0x50 | 0x60 | 0x6d | 0x6e) }
+
+/// **The glove-holding layers** `0x22e660` (first in the items' upkeep `0x22f390`, before `0x22f068`): while the hand
+/// item's def byte +0x18 (0x1413fb) is set, a pose layer on Ratchet's joint list 12 (his right arm, the hand item's)
+/// and, with 0x1413fb = 2, one on list 13 (his left arm) play **his current key from the holding classes 1 / 2**
+/// (node +0x18 = `0x197780[0x198040[i + 1]]`; the keys of his first 0x17 sequences are read from them: the walk, the
+/// run, the idle, the jumps … with the arms holding the weapon), so the gun stays in both hands and level while his
+/// legs and body run. Per layer:
+/// * made (weight 0) when wanted, faded out by 0.1 a tick and freed when not (0x1413fb clear, list 13 with 0x1413fb =
+///   1), or for good once the hand item is hidden (0x1413ff: +0x34);
+/// * weight → 1 by 0.1 a tick, but → 0 while the weapon arm's layer ([`draw_weapon`]) is out and not fading
+///   (0x140058, 0x140064 = 0): the firing arm replaces the holding one;
+/// * its keys follow Ratchet's (`+0x52`/`+0x53` sequences, `+0x50`/`+0x51` frames, t `+0x54`; key A only when he is
+///   not blending): a new sequence while he blends is taken as key B over his blend's t from the layer's last key;
+///   when the layer is itself between two sequences it first finishes that blend at 0.15 a tick (+0x30);
+/// * in the special poses of [`hold_special`] it blends to the holding class's sequence 0 over `ticks(15)` and plays
+///   it (speed 1), and on the way out blends back to his sequence at 0.1 a tick (+0x32 / +0x33);
+/// * its advance (`FUN_00263f70`, speed 0 outside the special poses: no key steps of its own).
+///
+/// `FUN_0022def8`'s 0xff → Ratchet +0xa5 mapping never applies: the layer copies key A only when Ratchet is not
+/// blending, so never his snapshot key (0xff).
+pub fn hold_update(h: &mut Hero, anim: &dyn AnimCtl) {
+    let v = anim.view();
+    for (i, &list) in ARM_LISTS.iter().enumerate() {
+        let slot = HOLD + i;
+        let mut node = h.weapons.layers[slot];
+        if node.is_none_or(|l| !l.kill) {
+            let mut want = h.items.f13fb != 0 && (i == 0 || h.items.f13fb == 2);
+            if h.f13ff != 0 {
+                want = false;
+                if let Some(l) = node.as_mut() { l.kill = true; }
+            }
+            if want {
+                if node.is_none() {
+                    let mut l = new_node(h, list);
+                    l.weight = 0.0;
+                    l.alt = i as u8 + 1;
+                    node = Some(l);
+                }
+            } else if let Some(l) = node.as_mut() {
+                approach_f(&mut l.weight, 0.0, 0.1);
+                if l.weight == 0.0 {
+                    h.weapons.layers[slot] = None;
+                    continue;
+                }
+            }
+        } else if let Some(l) = node.as_mut() {
+            approach_f(&mut l.weight, 0.0, 0.1);
+            if l.weight == 0.0 {
+                h.weapons.layers[slot] = None;
+                continue;
+            }
+        }
+        let Some(mut l) = node else { continue };
+        let steady = v.seq_a == v.seq_b;
+        if h.weapons.layers[0].is_none() || h.weapons.layer_fade != 0 {
+            if !l.kill { approach_f(&mut l.weight, 1.0, 0.1); }
+        } else {
+            approach_f(&mut l.weight, 0.0, 0.1);
+        }
+        // +0x30: Ratchet blending (0x13fdec) into another sequence than the layer's key B while the layer is itself
+        // between two sequences.
+        l.own_blend = !steady && v.blending() && l.seq_b != v.seq_b && l.seq_a != l.seq_b;
+        let special = hold_special(v.seq_b);
+        if !special && !l.special {
+            if !l.own_blend {
+                if steady { l.seq_a = v.seq_a; }
+                l.seq_b = v.seq_b;
+                if steady { l.frame_a = v.frame_a; }
+                l.frame_b = v.frame_b;
+                l.t = v.t;
+            } else {
+                l.t += 0.15;
+                if 1.0 <= l.t {
+                    l.seq_a = l.seq_b;
+                    l.frame_a = l.frame_b;
+                    l.own_blend = false;
+                }
+            }
+        } else if !special {
+            // Out of the special poses: back to his key B from frame 0 over 10 ticks.
+            if !l.back {
+                l.seq_b = v.seq_b;
+                l.frame_b = 0;
+                l.back = true;
+                l.t = 0.0;
+                l.speed = 0.0;
+            } else {
+                l.t = (l.t + 0.1).min(1.0);
+                if l.t == 1.0 { l.special = false; }
+            }
+        } else {
+            if !l.special || l.seq_b != 0 {
+                if l.seq_a == l.seq_b || 0.5 < l.t {
+                    l.seq_a = l.seq_b;
+                    l.frame_a = l.frame_b;
+                }
+                l.t = 0.0;
+                l.seq_b = 0;
+                l.frame_b = 0;
+                l.rate = 1.0 / ticks(15) as f32;
+                l.special = true;
+                l.back = false;
+            }
+            l.speed = 1.0;
+        }
+        l.advance(anim);
+        h.weapons.layers[slot] = Some(l);
+    }
+}
 
 /// `0x22ee08`: the weapon out (0x1413f8 = 1, 0x1413fa = def +0x30, 0x1415e8 = the item): standing (group 0 and
 /// no 0x141618) `SetAnim(10 or 11, def +0x24, 0)`; else the arm layer(s) with `def +0x28` (`+0x2c` crouched) over the
@@ -236,7 +368,7 @@ pub fn draw_weapon(h: &mut Hero, c: &mut Ctx) {
     let seq = if h.group == 0xc { def.anims[2] } else { def.anims[1] };
     if seq == -1 { return; }
     for (i, &list) in ARM_LISTS.iter().enumerate() {
-        let mut l = AnimLayer::new(list);
+        let mut l = new_node(h, list);
         h.weapons.layer_fade = 0;
         h.weapons.layer_seq = seq;
         l.weight = 1.0;
@@ -270,8 +402,8 @@ pub(super) fn apply_pending(h: &mut Hero, c: &mut Ctx) {
 
 /// `0x242858`: a weapon that keeps the arm raised (0x1413fa, item def +0x30) is out on foot (0x141618 clear):
 /// the item in hand is the one drawn → `SetState(0, 0)` and, when it took, the weapon's standing sequence
-/// (`def +0x24`) over 11 ticks (an arm layer out fades), true: the caller (the walk / stop entries, the walk's stop)
-/// gives up its own state; another item in hand → the weapon put away, false.
+/// (`def +0x24`) over 11 ticks (an arm layer out fades), true: the caller (SetState 3, the stop's physics, the walk's
+/// slow stop in its transitions) gives up its own state; another item in hand → the weapon put away, false.
 pub(super) fn gun_stance(h: &mut Hero, c: &mut Ctx) -> bool {
     if h.f13f8 == 0 || h.f13fa == 0 { return false; }
     let id = h.held_item();
@@ -297,7 +429,7 @@ pub(super) fn arm_on_state_change(h: &mut Hero, c: &mut Ctx, prev: i32, new: i32
     for (i, &list) in ARM_LISTS.iter().enumerate() {
         if i == 1 && h.items.f13fb != 2 { break; }
         if h.weapons.layers[i].is_some() { continue; }
-        let mut l = AnimLayer::new(list);
+        let mut l = new_node(h, list);
         h.weapons.layer_fade = 0;
         l.weight = 0.0;
         l.start(&*c.anim, seq.max(0) as u8, 0, ticks(15), true);
@@ -715,6 +847,47 @@ mod tests {
         r.tick(&coll, PadInput::neutral().press(button::CIRCLE));
         assert_eq!(r.hero.state, 0);
         assert_eq!(r.hero.fx.item_sounds, vec![EMPTY_SOUND]);
+    }
+
+    /// `0x22e660`: the holding layers per 0x1413fb (2: lists 12 and 13, 1: list 12, 0: none), made at weight 0 and
+    /// faded in by 0.1 a tick on Ratchet's key; out while the weapon arm's layer plays; into the holding class's
+    /// sequence 0 (speed 1, over `ticks(15)`) in a special pose; faded out and freed for good with the hand hidden.
+    #[test]
+    fn holding_layers() {
+        let mut r = Runner::new([0.0; 3], 0.0);
+        r.anim.set_anim(Pf::ONE, 3, 0);
+        r.anim.advance(Pf::ONE);
+        for (b18, n) in [(2u8, 2), (1, 1), (0, 0)] {
+            r.hero.weapons.layers = [None; 4];
+            r.hero.items.f13fb = b18;
+            hold_update(&mut r.hero, &r.anim);
+            let made: Vec<_> = r.hero.weapons.layers[HOLD..].iter().flatten().collect();
+            assert_eq!(made.len(), n, "0x1413fb = {b18}");
+            assert!(made.iter().all(|l| (l.weight - 0.1).abs() < 1e-6 && l.seq_b == 3 && l.alt as usize >= 1), "{made:?}");
+        }
+        r.hero.weapons.layers = [None; 4];
+        r.hero.items.f13fb = 2;
+        for _ in 0..12 { hold_update(&mut r.hero, &r.anim); }
+        assert!(r.hero.weapons.layers[HOLD..].iter().all(|l| l.is_some_and(|l| l.weight == 1.0 && l.list == ARM_LISTS[l.alt as usize - 1])));
+        // The arm layer out and playing: the holding layers give way.
+        r.hero.weapons.layers[0] = Some(AnimLayer::new(12));
+        r.hero.weapons.layer_fade = 0;
+        for _ in 0..12 { hold_update(&mut r.hero, &r.anim); }
+        assert!(r.hero.weapons.layers[HOLD..].iter().all(|l| l.is_some_and(|l| l.weight == 0.0)), "under the arm: weight 0");
+        r.hero.weapons.layer_fade = 1;
+        for _ in 0..12 { hold_update(&mut r.hero, &r.anim); }
+        assert!(r.hero.weapons.layers[HOLD].is_some_and(|l| l.weight == 1.0), "the arm fading: back to 1");
+        r.hero.weapons.layers[0] = None;
+        // A special pose (the swing 0x31): the holding class's sequence 0, played at speed 1.
+        r.anim.set_anim(Pf::ONE, 0x31, 0);
+        r.anim.advance(Pf::ONE);
+        hold_update(&mut r.hero, &r.anim);
+        let l = r.hero.weapons.layers[HOLD].unwrap();
+        assert!(l.special && l.seq_b == 0 && l.speed == 1.0 && (l.rate - 1.0 / 15.0).abs() < 1e-6, "{l:?}");
+        // The hand hidden (0x1413ff): faded out and freed, not remade while it stays hidden.
+        r.hero.f13ff = 1;
+        for _ in 0..12 { hold_update(&mut r.hero, &r.anim); }
+        assert!(r.hero.weapons.layers[HOLD..].iter().all(Option::is_none));
     }
 
     /// ○ while running: the weapon arm (0x1413f8), not the state; its timer 0x13f50c counts.

@@ -196,8 +196,10 @@ impl Hero {
             }
             0x10 => {
                 // The Thruster-Pack long jump: a 0.4..0.9 hop, gravity 8.5·dt², straight along the facing at
-                // 0x13f744 = 11.5 u/s (5.7 from above 1.4), windup acc 44 / dec 50·dt². (Its after-images, 3 ghost
-                // mobys, are not ported.)
+                // 0x13f744 = 11.5 u/s (5.7 from above 1.4), windup acc 44 / dec 50·dt². Its after-images: three ghosts
+                // 2 / 4 / 6 ticks back (crate::afterimage; faded by super::packs::thruster_trail).
+                super::packs::thruster_trail_start(self, &[(0x28, 2), (0x14, 4), (0x0a, 6)]);
+                let j = &mut self.jump;
                 j.h = Pf::f(0.4);
                 j.hmin = Pf::f(0.4);
                 j.hmax = Pf::f(0.9);
@@ -214,7 +216,10 @@ impl Hero {
             }
             0xd => {
                 // The Thruster-Pack high jump: a 0.1..0.2 hop after a 9-tick windup, then the curve
-                // packs::THRUSTER_HIGH_JUMP_CURVE over ticks 9..44 (the anim aims at frame 26).
+                // packs::THRUSTER_HIGH_JUMP_CURVE over ticks 9..44 (the anim aims at frame 26). Its after-images: two
+                // ghosts 3 / 5 ticks back (crate::afterimage).
+                super::packs::thruster_trail_start(self, &[(0x28, 3), (0x14, 5)]);
+                let j = &mut self.jump;
                 j.h = Pf::f(0.1);
                 j.hmin = j.h;
                 j.hmax = Pf::f(0.2);

@@ -50,3 +50,4 @@ pub mod cinematic;
 pub mod spline;
 pub mod shadows;
 pub mod targeting;
+pub mod afterimage;

@@ -87,6 +87,8 @@ pub enum PartSpawn {
 pub enum MobySpawn {
     /// `FUN_002ff768(size, pos)`: the splash moby 775; `angle` = its `rand_angle` (the one draw).
     Splash { size: f32, pos: [f32; 4], angle: f32 },
+    /// `FUN_002c9da0(side)`: a Thruster-Pack flame, class 0xa7 (`HeroItemsCreate`; no draws).
+    ThrusterFlame { side: i32 },
 }
 
 /// Ratchet's moby as the last write-back left it (`MobyBuildMatrix` of the previous tick): what `FUN_002645a8(Ratchet,
@@ -166,10 +168,10 @@ pub struct HeroFx {
     /// The hand item's looping class sounds' slots, by channel: [`LOOP_FLAME`] the item update's own loop (the
     /// Pyrocitor's flame +0x4a), [`LOOP_HUM`] the Tesla Claw's hum (+0x48), [`LOOP_CLICK`] the Blaster's empty click (its pvar +0x0c,
     /// kept while it plays), [`LOOP_SEQ`] the item's sequence loop sound (moby +0x7d: the Blaster's firing sequence 4).
-    pub item_loops: [Option<i32>; 4],
+    pub item_loops: [Option<i32>; 5],
     /// Whether each [`HeroFx::item_loops`] slot was still playing at the last flush (`SoundIsAlive` as the next
     /// update reads it: the Taunter's whistle).
-    pub item_loop_alive: [bool; 4],
+    pub item_loop_alive: [bool; 5],
     /// The class sound [`LOOP_SEQ`]'s slot plays (the item's +0x7c when it was started).
     pub seq_loop: Option<i32>,
     /// Footsteps the transitions played this tick (`HeroFootstepSound(class, foot, 1)` of the landing), in order:
@@ -187,6 +189,11 @@ pub struct HeroFx {
     pub joints: JointData,
     /// The back pack's placement ([`end`], [`pack_point`]).
     pub back: BackFrame,
+    /// The after-image records 0x1409c0 (Ratchet) and 0x140b00 (the thrown wrench): `crate::afterimage`.
+    pub trails: crate::afterimage::Trails,
+    /// Ratchet's anim keys and key time as the hero update left them ([`end`]): what the moby loop of the next tick
+    /// reads from his moby (+0x50..+0x55) and 0x13fdf8 (the Thruster flames' test, `crate::moby_update::classes::thruster_flame`).
+    pub view: super::AnimView,
 }
 
 /// [`HeroFx::item_loops`] channels.
@@ -194,6 +201,9 @@ pub const LOOP_FLAME: usize = 0;
 pub const LOOP_CLICK: usize = 1;
 pub const LOOP_SEQ: usize = 2;
 pub const LOOP_HUM: usize = 3;
+/// The Suck Cannon's suction (class sound 2, its pvar +0x04) and the Taunter's whistle (its pvar +0x04): their own
+/// channel (channel 0 is released every tick by the Pyrocitor's `item_gone` when another item is in the hand).
+pub const LOOP_ITEM: usize = 4;
 
 /// A camera shake request (the writer's stores into 0x167260 for [`ShakeAxis::Up`], 0x167270 for
 /// [`ShakeAxis::Forward`]): `amp` units for `ticks` ticks.
@@ -374,6 +384,7 @@ pub fn joint_world_point(rows: &[[f32; 4]; 3], position: [f32; 4], scale: f32, t
 /// End of the hero update, after the back items' update: `HeroItemsAttach`'s placement of the back pack from Ratchet's
 /// joint list [`BACK_LIST`] in his pose now and his moby as the write-back left it ([`BackFrame`]).
 pub(super) fn end(h: &mut Hero, moby: &Moby, anim: &dyn super::AnimCtl) {
+    h.fx.view = anim.view();
     let Some(chain) = h.fx.joints.hero.get(BACK_LIST).filter(|c| !c.is_empty()) else { return };
     let Some(p) = anim.eval_chains_with(&[chain.as_slice()], &h.weapons.layers, &moby.joint_mods).into_iter().next() else { return };
     let r = &moby.rows;
@@ -424,6 +435,12 @@ pub fn create_mobys(h: &mut Hero, table: &mut crate::moby_runtime::MobyTable, he
             MobySpawn::Splash { size, pos, angle } => {
                 let Some(id) = hits.create_moby(table, crate::moby_update::classes::splash::CLASS, counter) else { continue };
                 crate::moby_update::classes::splash::fill(&mut table.mobys[id], light, size, pos, angle);
+                out.push(id);
+            }
+            MobySpawn::ThrusterFlame { side } => {
+                use crate::moby_update::classes::thruster_flame as tf;
+                let Some(id) = hits.create_moby(table, tf::CLASS, counter) else { continue };
+                tf::fill(&mut table.mobys[id], side);
                 out.push(id);
             }
         }

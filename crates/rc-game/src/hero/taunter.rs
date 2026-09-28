@@ -22,8 +22,12 @@
 //!
 //! **Native / inferred.** Standard `f32`. [L] The hand item is not a table moby: the lure's position and the lure moby
 //! are Ratchet's (the whistle sits in his hand; the classes only test the field for non-zero); the whistle's
-//! aliveness is the flush's of the previous tick ([`super::fx::HeroFx::item_loop_alive`]). Not ported: the sound-wave
-//! rings (`0x2cd000` state, draw callback `0x2cd1d0`, FX 8 quads), the stats 0x1416f0.., the mines' lure (batch 2).
+//! aliveness is the flush's of the previous tick ([`super::fx::HeroFx::item_loop_alive`]); the whistle has its own
+//! channel ([`super::fx::LOOP_ITEM`]: on channel 0 the Pyrocitor's `item_gone` released it a tick after it started, so
+//! each whistle and its lures lasted one tick). **The rings** ([`Rings`], `0x2cd000` + draw callback `0x2cd1d0`):
+//! while the whistle sequence plays, a ring every 10 ticks leaves the horn (the item's joint list 0) along −row 1 at
+//! 20 u/s for 30 ticks, growing from 0.3 to 10 and fading from alpha 0x14 (FX 8, colour 0x7f5050, additive: faint by
+//! the game's constants). Not ported: the stats 0x1416f0.., the mines' lure (batch 2).
 
 use super::items::{HitSink, ItemEnv};
 use super::packs::SoundCmd;
@@ -45,7 +49,7 @@ pub const CONE: f32 = 0.959_931_1;
 /// The crates the whistle knocks (`uVar1 − 500 < 2`, 0x1f9, 0x1ff).
 pub const CRATES: [i16; 4] = [500, 501, 505, 511];
 /// The item loop channel of the whistle ([`super::fx::HeroFx::item_loops`]).
-pub const CHANNEL: usize = super::fx::LOOP_FLAME;
+pub const CHANNEL: usize = super::fx::LOOP_ITEM;
 
 /// The Taunter's pvars (item moby +0x78).
 #[derive(Clone, Debug, PartialEq)]
@@ -67,10 +71,98 @@ pub struct Taunter {
     /// Lures made (the port's count) and the mobys lured by the last one.
     pub lures: u32,
     pub lured: Vec<MobyId>,
+    /// The sound-wave rings (`0x2cd000`, [`Rings`]).
+    pub rings: Rings,
+}
+
+/// One ring (0x1db8c0 + 0xc·i): +0x00 its distance out, +0x04 (s16) its ticks left, +0x06 (s16) its alpha, +0x08 on.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ring {
+    pub dist: f32,
+    pub left: i16,
+    pub alpha: i16,
+    pub on: bool,
+}
+
+/// The rings' globals (`0x2cd000` / draw callback `0x2cd1d0`; gp−0x5720.. the constants below).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Rings {
+    pub rings: [Ring; 10],
+    /// 0x1614fc: clear them at the next step (the update's state 0); 0x161500 the spawn timer; 0x161504 paused (set
+    /// every update, cleared while the whistle sequence plays); 0x161508 a ring's life (`trunc(10 / (20·dt))`) and
+    /// 0x16150c its inverse.
+    pub reset: bool,
+    pub timer: i32,
+    pub paused: bool,
+    pub life: i32,
+    pub inv_life: f32,
+    /// 0x161510: the horn (the item's joint list 0) and the axis they leave along (−the item's row 1, `+0xd0`).
+    pub mouth: [f32; 3],
+    pub dir: [f32; 3],
+    /// Ratchet's up (−0x13f5e0) for the rings' frame.
+    pub up: [f32; 3],
+    /// The tick the draw callback was registered for.
+    pub drawn: Option<u64>,
+}
+
+/// gp−0x5720 spawn interval, −0x571c reach, −0x5718 speed (u/s), −0x5714 alpha, −0x5710 colour, −0x570c / −0x5708
+/// the size at birth / at the end.
+pub const RING_EVERY: i32 = 10;
+pub const RING_REACH: f32 = 10.0;
+pub const RING_SPEED: f32 = 20.0;
+pub const RING_ALPHA: i16 = 0x14;
+pub const RING_RGB: u32 = 0x7f_5050;
+pub const RING_SIZE: [f32; 2] = [0.3, 10.0];
+/// One ring quad: corners, ST, colours.
+pub type RingQuad = ([[f32; 3]; 4], [[f32; 2]; 4], [u32; 4]);
+
+/// The rings' texture (`GetEffectTex(8)`).
+pub const RING_FX: usize = 8;
+
+impl Rings {
+    /// `0x2cd000`'s state part: the reset, a new ring every `ticks(10)` while not paused, each ring out at 20 u/s until
+    /// its life runs out.
+    fn step(&mut self) {
+        if self.reset {
+            for r in &mut self.rings { r.on = false; }
+            self.reset = false;
+            self.timer = 0;
+            self.life = (RING_REACH / (RING_SPEED * (1.0 / 60.0))) as i32;
+            self.inv_life = 1.0 / self.life as f32;
+        }
+        if !self.paused && super::guns::dec(&mut self.timer) {
+            if let Some(r) = self.rings.iter_mut().find(|r| !r.on) {
+                self.timer = ticks(RING_EVERY);
+                *r = Ring { dist: 0.0, left: self.life as i16, alpha: RING_ALPHA, on: true };
+            }
+        }
+        for r in self.rings.iter_mut().filter(|r| r.on) {
+            if super::guns::dec16(&mut r.left) { r.on = false; } else { r.dist += RING_SPEED * (1.0 / 60.0); }
+        }
+    }
+
+    /// `0x2cd1d0`: one camera-independent quad per ring (FX 8, additive): centred `dist` along the axis, in the frame
+    /// (axis, side = unit(axis × up), side × axis), half-size from 0.3 at birth to 10 at the end, alpha 20 → 0.
+    pub fn quads(&self) -> Vec<RingQuad> {
+        use super::guns::{add3, cross3, scale3, with_len};
+        let mut out = Vec::new();
+        let side = with_len(cross3(self.dir, self.up), 1.0);
+        let up = cross3(side, self.dir);
+        for r in self.rings.iter().filter(|r| r.on) {
+            let c = add3(self.mouth, scale3(self.dir, r.dist));
+            let k = (r.left as f32 * self.inv_life).min(1.0);
+            let size = RING_SIZE[1] + (RING_SIZE[0] - RING_SIZE[1]) * k;
+            let a = (r.alpha as f32 * k) as u32;
+            let rgba = a << 24 | RING_RGB;
+            let corner = |y: f32, z: f32| add3(c, add3(scale3(side, y * size), scale3(up, z * size)));
+            out.push(([corner(-1.0, 1.0), corner(-1.0, -1.0), corner(1.0, 1.0), corner(1.0, -1.0)], [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], [rgba; 4]));
+        }
+        out
+    }
 }
 
 impl Default for Taunter {
-    fn default() -> Self { Taunter { next: 0, range: 0.0, held: 0, t10: 0, crates: 0, on_seq: 0, slot: false, cycle: Vec::new(), lures: 0, lured: Vec::new() } }
+    fn default() -> Self { Taunter { next: 0, range: 0.0, held: 0, t10: 0, crates: 0, on_seq: 0, slot: false, cycle: Vec::new(), lures: 0, lured: Vec::new(), rings: Rings::default() } }
 }
 
 /// [`Taunter::cycle`] from the class's sound defs (`class +0x28`, 0x20 each): def `i` may follow its predecessor when
@@ -79,8 +171,26 @@ pub fn cycle_of(defs: &[rc_formats::sound_bank::SoundDef]) -> Vec<bool> {
     defs.iter().map(|d| (d.near * 10.0) as i32 == 30 && (d.far * 10.0) as i32 == 30).collect()
 }
 
-/// `0x2ccb78`, the Taunter's update (from the slot loop with the slot ready).
-pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut Rng) {
+/// `0x2ccb78`, the Taunter's update (from the slot loop with the slot ready): the whistle, then (not put away) the rings.
+pub fn update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn super::anim::AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut Rng) {
+    hero.weapons.reactive.taunter.rings.paused = true;
+    whistle(hero, table, anim, env, hits, rng);
+    if hero.items.slot.state != 3 {
+        let mouth = super::guns::item_point(hero, env, 0);
+        let t = &mut hero.weapons.reactive.taunter.rings;
+        t.step();
+        t.mouth = mouth;
+        if let Some(it) = hero.items.slot.item.as_ref() {
+            let r1 = [f32::from_bits(it.rows[1][0]), f32::from_bits(it.rows[1][1]), f32::from_bits(it.rows[1][2])];
+            t.dir = super::guns::with_len(r1, -1.0);
+        }
+        let g = super::physics::to_f32x3(hero.gravity_dir);
+        t.up = [-g[0], -g[1], -g[2]];
+        t.drawn = Some(env.frame as u64);
+    }
+}
+
+fn whistle(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut Rng) {
     let Some(class) = hero.items.slot.item.as_ref().and_then(|m| env.data.class(m.o_class)).cloned() else { return };
     let tick = env.frame as u64;
     if hero.weapons.reactive.taunter.range == 0.0 { hero.weapons.reactive.taunter.range = RANGE; }
@@ -95,6 +205,7 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
         hero.fx.item_voices.push(SoundCmd::ItemRelease { n: CHANNEL });
         it.mstate = 1;
         hero.weapons.reactive.taunter.slot = false;
+        hero.weapons.reactive.taunter.rings.reset = true;
     }
     match it.mstate {
         1 => {
@@ -111,6 +222,7 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
     let on_whistle = it.anim.seq_b == 3 && !fc;
     let t = &mut hero.weapons.reactive.taunter;
     if on_whistle { t.on_seq += 1; } else { t.on_seq = 0; }
+    if on_whistle { t.rings.paused = false; }
     let mask = hero.items.slot.fire_mask;
     let pressed = env.pad.pressed & mask != 0;
     let held = env.pad.held & mask != 0;

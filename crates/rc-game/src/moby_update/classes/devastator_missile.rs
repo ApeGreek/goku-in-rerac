@@ -84,9 +84,8 @@ pub fn spawn(table: &mut crate::moby_runtime::MobyTable, env: &crate::hero::item
     let mut range = 70.0f32;
     let tinfo = target.and_then(|t| table.mobys.get(t)).map(|m| ([m.position[0], m.position[1], m.position[2]], crate::targeting::record(m)));
     if let (Some(t), Some((_, Some(r)))) = (target, tinfo) {
-        let pv = &mut table.mobys[t].pvars;
-        let f = u16::from_le_bytes([pv[r + 0x1e], pv[r + 0x1f]]) | 0x80;
-        pv[r + 0x1e..r + 0x20].copy_from_slice(&f.to_le_bytes());
+        crate::targeting::mark_missile(&mut table.mobys[t]);
+        let pv = &table.mobys[t].pvars;
         if pv[r + 0xb] != 0 { lead = 0; }
         if pv[r + 0xc] != 0 { top = pv[r + 0xc] as f32 * dt; }
         if dt * 20.0 < top { range = 140.0; }

@@ -423,9 +423,16 @@ impl Spu {
             l += wl;
             r += wr;
         }
-        let m = |x: i32, reg: u16| ((x * (reg << 1) as i16 as i32) >> 15).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
-        [m(l, self.master[0]), m(r, self.master[1])]
+        [master_out(l, self.master[0]), master_out(r, self.master[1])]
     }
+}
+
+/// The master volume stage of [`Spu::mix`] on the exact sum `x` of the voices and the reverb: `x · (reg << 1)`
+/// (a signed 16-bit level) `>> 15`, clamped to 16 bits. The product is taken in 64 bits: three or more loud voices
+/// (the R.Y.N.O.'s salvo: seven missiles with their class sound and blasts) take the 32-bit product past `i32`,
+/// which panicked in the dev build (overflow check) and wrapped into a full-scale click in the release build.
+pub fn master_out(x: i32, reg: u16) -> i16 {
+    ((x as i64 * (reg << 1) as i16 as i64) >> 15).clamp(i16::MIN as i64, i16::MAX as i64) as i16
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -835,6 +842,27 @@ mod tests {
         b.attack();
         for _ in 0..512 { b.run(); }
         assert_eq!(b.level, 7);
+    }
+
+    /// Regression (the R.Y.N.O. crash, 2026-09-28): many loud voices at once — the mix clamps, it does not overflow
+    /// (the 32-bit master product panicked in the dev build past about two full-scale voices).
+    #[test]
+    fn loud_mix_clamps_without_overflow() {
+        assert_eq!(master_out(48 * 32767, 0x3fff), i16::MAX);
+        assert_eq!(master_out(-48 * 32768, 0x3fff), i16::MIN);
+        assert_eq!(master_out(1000, 0x3fff), ((1000 * 0x7ffe) >> 15) as i16, "the level below the clamp is unchanged");
+        let mut ram = Vec::new();
+        ram.extend(frame(6, 0x77));
+        ram.extend(frame(2, 0x77));
+        ram.extend(frame(3, 0x77));
+        let ram: Arc<[u8]> = Arc::from(ram);
+        let mut spu = Spu::new(ram.clone());
+        for v in spu.voices.iter_mut().take(12) {
+            v.key_on(VoiceData::Ram(ram.clone()), 0, 0x1000, 0x00ff, 0x1fc0);
+            v.vol = [0x3fff, 0x3fff];
+        }
+        let out: Vec<[i16; 2]> = (0..400).map(|_| spu.mix()).collect();
+        assert!(out.iter().any(|s| s[0] == i16::MAX || s[0] == i16::MIN), "twelve loud voices clip");
     }
 
     fn frame(flags: u8, v: u8) -> [u8; 16] {

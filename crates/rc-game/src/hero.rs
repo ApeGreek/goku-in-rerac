@@ -58,6 +58,7 @@ pub mod devastator;
 pub mod tesla;
 pub mod reactive;
 pub mod suck_cannon;
+pub mod suck_vortex;
 pub mod taunter;
 pub mod crank;
 pub mod scripted;
@@ -764,7 +765,10 @@ pub fn hero_update_with_sounds(
     hero.write_back(moby);
     // HeroItemsUpdate's slots 1 (feet) and 2 (head), then 3 (the back).
     hero.worn_items_update(rng);
+    let back_empty = hero.back_slot.slot.state == 0;
     hero.back_items_update(rng);
+    // HeroItemsCreate's Thruster-Pack flames (class 0xa7) with a new Thruster-Pack: packs::flames_on_create.
+    packs::flames_on_create(hero, back_empty);
     // HeroItemsAttach's back placement (the Hydro-Pack's jets read it next tick).
     fx::end(hero, moby, &*anim);
     HeroTick::Ran

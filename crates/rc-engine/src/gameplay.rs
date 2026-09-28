@@ -324,6 +324,8 @@ struct CellHits<'a, 'b> {
     svc: &'a RefCell<&'b mut Services>,
     classes: &'a dyn ClassData,
     coll: &'a Collision,
+    /// The particles, for the hand items' calls into the moby world (the Suck Cannon's vortex strands).
+    parts: Option<&'a RefCell<Option<&'b mut ParticleSim>>>,
 }
 
 impl HitSink for CellHits<'_, '_> {
@@ -377,8 +379,10 @@ impl HitSink for CellHits<'_, '_> {
     // The hand items' calls into class code (rc_game::moby_update::creature::react: the Suck Cannon, the Taunter).
     fn world(&mut self, table: &mut MobyTable, hero: &rc_game::hero::Hero, rng: &mut rc_game::rng::Rng, counter: u64, f: &mut dyn FnMut(&mut rc_game::moby_update::services::World)) -> bool {
         let mut s = self.svc.borrow_mut();
+        let mut p = self.parts.map(|c| c.borrow_mut());
         let mut w = rc_game::moby_update::services::World::new(table, hero, rng, self.classes, &mut s, counter);
         w.coll = Some(self.coll);
+        w.particles = p.as_deref_mut().and_then(|p| p.as_deref_mut()).map(|p| &mut p.sys);
         f(&mut w);
         true
     }
@@ -598,6 +602,20 @@ fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<Hash
 }
 
 /// [`class_joint_lists`] for the level's classes `want` picks.
+/// Ratchet's glove-holding classes 1 / 2 (`rc_game::hero::anim::HoldClass`, `0x22e660`) from the level's core blocks;
+/// None where one is missing (those layers are then not drawn).
+fn hold_classes() -> [Option<std::sync::Arc<rc_game::hero::anim::HoldClass>>; 2] {
+    let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+    let Ok(data) = rc_data::level_core_data(&root, index) else { return [None, None] };
+    let Some(core) = crate::disc_source::level_file(&root, index, "core_index.bin").ok().and_then(|i| rc_formats::level::parse_level_core(&i, data.len()).ok()) else { return [None, None] };
+    rc_game::hero::anim::HOLD_CLASSES.map(|oc| {
+        let blk = core.blocks.iter().find(|b| b.name == format!("moby_class/{oc:04}"))?;
+        let c = rc_game::hero::anim::HoldClass::parse(data.get(blk.offset..blk.offset + blk.size)?);
+        if c.is_none() { eprintln!("gameplay: holding class {oc} does not parse: no glove-holding layer on its arm"); }
+        c.map(std::sync::Arc::new)
+    })
+}
+
 fn class_joint_lists_where(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16) -> bool) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
     use anyhow::{anyhow, Context};
     let wanted: Vec<&rc_formats::moby::LevelMobyClass> = lv.mobys.classes.iter().filter(|c| want(c.o_class as i16)).collect();
@@ -804,6 +822,8 @@ fn setup(
     commands.insert_resource(HeldWeapon::default());
     let mut ratchet = RatchetAnim::new(class);
     ratchet.arm_joints = arm_joints.clone();
+    // The glove-holding layers' classes 1 / 2 (rc_game::hero::weapons::hold_update).
+    ratchet.hold = hold_classes();
     let mirror_anim = opts.is_some_and(|o| o.mirror_anim);
     ratchet.mirror = mirror_anim;
     // The back items (pack 607 of back item 2, Clank 601) and the level for the idle code.
@@ -1115,8 +1135,10 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
         g.camera = rc_game::follow_camera::Camera::new(&cam, options.camera);
     }
     p.game = g;
+    let hold = std::mem::take(&mut p.ratchet.hold);
     p.ratchet = RatchetAnim::new(class);
     p.ratchet.arm_joints = p.arm_joints.clone();
+    p.ratchet.hold = hold;
     p.ratchet.mirror = p.mirror_anim;
     p.frozen_hint = false;
 }
@@ -1276,7 +1298,7 @@ fn tick(
         p.game.hero.back_slot.slot.request = s.0.temp_back;
         p.game.hero.back_slot.clank_hidden = s.0.clank_hidden;
     }
-    let mut hits = CellHits { svc: &svc_cell, classes, coll };
+    let mut hits = CellHits { svc: &svc_cell, classes, coll, parts: Some(&parts_cell) };
     // The sound step (after the camera, before the counter increment).
     let mut sound = |table: &MobyTable, hero: &Hero, cam: &CameraView, rng: &mut Rng, counter: u64| {
         let mut audio_ref = audio_cell.borrow_mut();
@@ -1466,7 +1488,7 @@ fn upload(
     // His pose with the weapon arm's pose layers (rc_game::hero::weapons, the moby +0x60 list) and his joint
     // modifiers (head look, lean, eyelids: the moby +0x64 list, rc_game::hero::idle) over it.
     let hm = &p.game.mobys.mobys[p.hero_id];
-    let layers = rc_game::hero::anim::pose_layers(&p.game.hero.weapons.layers, &p.arm_joints);
+    let layers = rc_game::hero::anim::pose_layers_with(&p.game.hero.weapons.layers, &p.arm_joints, &p.ratchet.hold);
     let f = moby_anim::evaluate_posed(class, &p.ratchet.state, p.ratchet.snapshot.as_ref(), &layers, &hm.joint_mods);
     for (k, b) in f.iter().take(p.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[k] = b; }
     let rows = rows_bits(&hm.rows);

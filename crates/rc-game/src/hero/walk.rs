@@ -18,8 +18,9 @@ impl Hero {
     pub(super) fn walk_entry(&mut self, c: &mut Ctx, id: i32, play: bool) -> Option<bool> {
         self.group = 1;
         self.f15d4 = 0;
-        // 0x242858: a weapon out with the arm raised keeps Ratchet in its stance (super::weapons).
-        if !(self.f063a != 0 && self.f65c == 0) && super::weapons::gun_stance(self, c) { return Some(false); }
+        // No `0x242858` here (SetState case 2 does not call it; the stop 3 and the walk's slow stop do): with a
+        // weapon that keeps the arm raised out, Ratchet walks off from its stance, the arm layers coming up through
+        // `0x22eca0` (super::weapons::arm_on_state_change).
         if self.prev_group != 4 && self.prev_prev_group != 4 { self.speed = len2(self.eff); }
         if DT * Pf::b(0x40e0_0000) < self.speed { self.speed = DT * Pf::b(0x40e0_0000); }
         self.stick_target(c.env, Pf::ONE);

@@ -39,6 +39,7 @@
 //! | 179 (the Pyrocitor's pilot flame; created by the hand item) | 0x2d1068 | [`pyro_glow`] |
 //! | 305 (the Blaster's shot; created by the hand item) | 0x2e2170 | [`blaster_shot`] |
 //! | 153 (the Devastator's missile; created by the hand item) | 0x2c5b70 | [`devastator_missile`] |
+//! | 167 (the Thruster-Pack's flames; created with the pack; every level) | 0x2c9e00 | [`thruster_flame`] |
 //! | 457 (the R.Y.N.O.'s missile; created by the hand item) | 0x2e5a48 | [`ryno_missile`] (the intercept shared with 153: [`missile`]) |
 //! | 605 (buried bolt caches, the Metal Detector's targets; levels 1–18) | 0x2f2eb8 | [`buried_bolts`] |
 //! | 832 (Visibomb range limiters; levels 1–15, 18) | 0x302648 | [`rc_range`] |
@@ -90,6 +91,7 @@ pub mod splash;
 pub mod swing_target;
 pub mod talking_npc;
 pub mod teleporter;
+pub mod thruster_flame;
 pub mod vendor;
 
 use crate::moby_runtime::MobyId;
@@ -162,6 +164,7 @@ pub enum ClassUpdate {
     BlasterShot,
     RynoMissile,
     DevastatorMissile,
+    ThrusterFlame,
     /// A copy of the break template: `breakables::RECIPES[i]`.
     Breakable(u8),
     /// A water class: `crate::water::managers::PORTS[i]` (the ripple managers, the water plane).
@@ -171,7 +174,7 @@ pub enum ClassUpdate {
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 64] = [
+    pub const ALL: [ClassUpdate; 65] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -236,6 +239,7 @@ impl ClassUpdate {
         ClassUpdate::BlasterShot,
         ClassUpdate::RynoMissile,
         ClassUpdate::DevastatorMissile,
+        ClassUpdate::ThrusterFlame,
     ];
 
     /// The level01 class-table address of this update.
@@ -305,6 +309,7 @@ impl ClassUpdate {
             ClassUpdate::BlasterShot => blaster_shot::UPDATE_FN,
             ClassUpdate::RynoMissile => ryno_missile::UPDATE_FN,
             ClassUpdate::DevastatorMissile => devastator_missile::UPDATE_FN,
+            ClassUpdate::ThrusterFlame => thruster_flame::UPDATE_FN,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].func,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].func,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].func,
@@ -383,6 +388,7 @@ impl ClassUpdate {
             ClassUpdate::BlasterShot => &blaster_shot::CLASSES,
             ClassUpdate::RynoMissile => &ryno_missile::CLASSES,
             ClassUpdate::DevastatorMissile => &devastator_missile::CLASSES,
+            ClassUpdate::ThrusterFlame => &thruster_flame::CLASSES,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].classes,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].classes,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].classes,
@@ -554,6 +560,7 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::BlasterShot => blaster_shot::update(w, id),
         ClassUpdate::RynoMissile => ryno_missile::update(w, id),
         ClassUpdate::DevastatorMissile => devastator_missile::update(w, id),
+        ClassUpdate::ThrusterFlame => thruster_flame::update(w, id),
         ClassUpdate::Breakable(i) => breakables::update(w, id, i),
         ClassUpdate::Water(i) => crate::water::managers::update(w, id, i),
         ClassUpdate::Sea(i) => crate::water::sea::update(w, id, i),

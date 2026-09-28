@@ -30,10 +30,16 @@
 //! **Native / inferred.** Standard `f32`. [L] The hand item is not a table moby: its position, mouth and rows are
 //! published each tick for the creatures' carried update (`react::Cannon`), its sequence-4 request and the swallow's
 //! sound 5 come back through the reaction globals and are made by the next update, and the swap lock the carried
-//! update sets reaches the hand slot at the cannon's next update. Not ported: the vortex (`0x3067d0`, `0x306528`, the
-//! draw callback `0x306158`, `0x307850` / `0x3078b8`) and its bolt / ammo vacuum `0x307a50` (their `rand` draws are
-//! missing from the stream), the held-count HUD element (`queue_animation_update(4, 0x753f, …)`), the stats
-//! 0x1416c8.., the gold cannon 0x13e529 (not mirrored: 5 slots), the input latch 0x13cae8.
+//! update sets reaches the hand slot at the cannon's next update.
+//!
+//! **The vortex** (the tube and its smoke strands, [`super::suck_vortex`]): while sucking the pull runs `0x3067d0`
+//! first; in the other states it fades (`0x307850`), state 0 resets it, the stop from state 3 collapses it. **The
+//! vacuum** (`0x307a50`, [`vacuum`]): the pull's walk of the run list gives every live moby it does not pull a
+//! `randi(10)`; on 0 a bolt or an ammo pickup within 30 of Ratchet and near a strong node is taken. **Sounds**: the
+//! suction loop (class sound 2) on its own channel ([`super::fx::LOOP_ITEM`]: channel 0 is released every tick by the
+//! Pyrocitor's `item_gone` when another item is in the hand — the cause of the "sucks for a moment" report).
+//! Not ported: the held-count HUD element (`queue_animation_update(4, 0x753f, …)`), the stats 0x1416c8.., the gold
+//! cannon 0x13e529 (not mirrored: 5 slots), the input latch 0x13cae8.
 
 use super::guns::{self, add3, len3, scale3, sub3};
 use super::items::{HitSink, ItemEnv};
@@ -77,6 +83,10 @@ pub struct SuckCannon {
     pub fired: u32,
     /// The mobys the last pull took (the port's record, for tests).
     pub pulled: Vec<MobyId>,
+    /// The vortex's globals ([`super::suck_vortex`]).
+    pub vortex: super::suck_vortex::Vortex,
+    /// Bolts / ammo pickups the vortex's vacuum took (the port's count).
+    pub vacuumed: u32,
 }
 
 /// `0x3027e8`: the groups the cannon works in (0 blocked).
@@ -110,6 +120,17 @@ fn aim(hero: &Hero, env: &ItemEnv) -> ([f32; 4], f32, f32) {
         }
     }
     (mouth, hero.rot[2].to_f32(), hero.rot[1].to_f32())
+}
+
+/// The vortex's frame (`0x3067d0`): the view's rows in the look stance under the first-person camera (forward,
+/// `up × forward` [L], up), else Ratchet's aim rows 0x13f990 (his moby rows).
+fn aim_rows(hero: &Hero, env: &ItemEnv) -> [[f32; 3]; 3] {
+    if (hero.state == 1 || hero.state == 0x1e) && hero.f13f5 != 0 {
+        if let (Some((_, f)), Some(u)) = (env.camera, env.camera_up) {
+            return [f, guns::cross3(u, f), u];
+        }
+    }
+    hero.moby_rows.map(to_f32x3)[..3].try_into().unwrap()
 }
 
 /// The cannon as the creatures read it (`react::Cannon`).
@@ -148,6 +169,8 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
     let held_btn = env.pad.held & mask != 0;
     let busy = hero.items.f13f7 != 0 || hero.items.f13fc != 0;
     let st = hero.items.slot.item.as_ref().map_or(0, |it| it.mstate);
+    // 0x307850: the vortex fades while not sucking.
+    if st != 0 && st != 3 { hero.weapons.reactive.suck.vortex.fade(tick); }
     let set_st = |hero: &mut Hero, s: u8| { if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = s; } };
     match st {
         0 => {
@@ -164,6 +187,7 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
                 }
             });
             hero.items.slot.swap = 0;
+            hero.weapons.reactive.suck.vortex.reset();
             if held < 1 {
                 hero.weapons.reactive.suck.timer = 0;
                 set_st(hero, 1);
@@ -183,7 +207,7 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
                 set_st(hero, 4);
             } else if held_btn && hero.weapons.reactive.suck.timer == 0 && !busy && ticks(0xf) < hero.items.slot.ticks_ready && group_ok(hero) {
                 hero.weapons.pending_draw = true;
-                hero.fx.item_voices.push(SoundCmd::ItemLoop { n: super::fx::LOOP_FLAME, index: 2, flags: 4 });
+                hero.fx.item_voices.push(SoundCmd::ItemLoop { n: super::fx::LOOP_ITEM, index: 2, flags: 4 });
                 hero.weapons.reactive.suck.timer = ticks(10);
                 set_st(hero, 2);
             }
@@ -204,16 +228,30 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
             let stop_now = coming == 0 && (limit <= held || !group_ok(hero) || (!held_btn && hero.weapons.reactive.suck.timer == 0) || busy);
             if stop_now {
                 stop(hero, env, held, true);
+                // 0x3078b8: the vortex collapses.
+                let mut v = std::mem::take(&mut hero.weapons.reactive.suck.vortex);
+                hits.world(table, &*hero, rng, tick, &mut |w| v.collapse(w, tick));
+                hero.weapons.reactive.suck.vortex = v;
             } else {
                 if wrapped(hero) { blend(hero, env, 3, 2); }
                 let (mouth, yaw, pitch) = aim(hero, env);
                 let group_blocked = !group_ok(hero);
-                let targets = env.targets.to_vec();
                 let pos = cannon.map_or([0.0; 3], |c| c.pos);
-                let coll = env.coll;
+                let rows = aim_rows(hero, env);
+                let cam = env.camera.map_or([0.0; 3], |c| c.0);
+                let mut v = std::mem::take(&mut hero.weapons.reactive.suck.vortex);
                 let mut taken = Vec::new();
-                hits.world(table, &*hero, rng, tick, &mut |w| { taken = pull(w, &targets, pos, mouth, yaw, pitch, group_blocked, coll); });
+                let mut vac = 0;
+                hits.world(table, &*hero, rng, tick, &mut |w| {
+                    // 0x302bd0: the vortex (0x3067d0), then the run list: the pull, and the vacuum for the others.
+                    v.update(w, rows, [mouth[0], mouth[1], mouth[2]], Some(hero_moby), tick);
+                    w.camera = [cam[0], cam[1], cam[2], 1.0].map(crate::ps2v::Pf::f);
+                    let list = crate::moby_update::scheduler::build_active_list(w.table, w.camera, &w.svc.groups).0;
+                    (taken, vac) = pull(w, &list, pos, mouth, yaw, pitch, group_blocked, Some(&v));
+                });
+                hero.weapons.reactive.suck.vortex = v;
                 hero.weapons.reactive.suck.pulled = taken;
+                hero.weapons.reactive.suck.vacuumed += vac;
             }
         }
         4 => {
@@ -304,7 +342,7 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
         }
         _ => {}
     }
-    if away { hero.fx.item_voices.push(SoundCmd::ItemRelease { n: super::fx::LOOP_FLAME }); }
+    if away { hero.fx.item_voices.push(SoundCmd::ItemRelease { n: super::fx::LOOP_ITEM }); }
 }
 
 fn hard_blend(hero: &mut Hero, env: &ItemEnv, seq: u8) {
@@ -317,7 +355,7 @@ fn hard_blend(hero: &mut Hero, env: &ItemEnv, seq: u8) {
 /// 4 (sequence 6, locked).
 fn stop(hero: &mut Hero, env: &ItemEnv, held: i32, from_sucking: bool) {
     if from_sucking { super::weapons::put_away(hero); }
-    hero.fx.item_voices.push(SoundCmd::ItemRelease { n: super::fx::LOOP_FLAME });
+    hero.fx.item_voices.push(SoundCmd::ItemRelease { n: super::fx::LOOP_ITEM });
     if !from_sucking { super::weapons::put_away(hero); }
     hero.items.slot.swap = 0;
     let s = &mut hero.weapons.reactive.suck;
@@ -355,15 +393,20 @@ fn recount(w: &mut crate::moby_update::services::World) {
     }
 }
 
-/// `0x302bd0(cannon, pvars)`: the pull over the run list's targetable mobys with a reaction table (module doc; the
-/// others would feed the vortex's vacuum `0x307a50`, not ported). Returns the mobys taken or refreshed this tick.
+/// `0x302bd0(cannon, pvars)`: over the moby loop's run list: the targetable mobys with a reaction table are pulled
+/// (module doc); Ratchet, the untargetable and the default-table ones go to the vortex's vacuum `0x307a50`
+/// ([`vacuum`], with `vortex`). Returns the mobys taken or refreshed this tick and the vacuum's takes.
 #[allow(clippy::too_many_arguments)]
-pub fn pull(w: &mut crate::moby_update::services::World, list: &[MobyId], cannon: [f32; 3], mouth: [f32; 4], yaw: f32, pitch: f32, group_blocked: bool, coll: Option<&rc_formats::collision::Collision>) -> Vec<MobyId> {
+pub fn pull(w: &mut crate::moby_update::services::World, list: &[MobyId], cannon: [f32; 3], mouth: [f32; 4], yaw: f32, pitch: f32, group_blocked: bool, vortex: Option<&super::suck_vortex::Vortex>) -> (Vec<MobyId>, u32) {
     let mut taken = Vec::new();
+    let mut vac = 0;
     for &m in list {
         if m >= w.table.mobys.len() { continue; }
         let mo = w.m(m);
-        if mo.o_class == 0 || mo.mode & mode::TARGETABLE == 0 || react::table(w, m).is_none() { continue; }
+        if mo.o_class == 0 || mo.mode & mode::TARGETABLE == 0 || react::table(w, m).is_none() {
+            if let Some(v) = vortex { vac += vacuum(w, m, v) as u32; }
+            continue;
+        }
         let Some(r) = react::record(w, m) else { continue };
         let st = crate::moby_update::creature::pi16(w, m, r + react::rec::STATE);
         if 5 < st { continue; }
@@ -389,7 +432,6 @@ pub fn pull(w: &mut crate::moby_update::services::World, list: &[MobyId], cannon
             let dp = diff_rots(pitch, atan(d, pt[2] - cannon[2]));
             if dp * dp < lim {
                 let blocked = w.line(mouth.map(crate::ps2v::Pf::f), [pt[0], pt[1], pt[2], 0.0].map(crate::ps2v::Pf::f), 2, Some(m)).is_some();
-                let _ = coll;
                 if !blocked {
                     react::take(w, m, mouth);
                     taken.push(m);
@@ -401,7 +443,31 @@ pub fn pull(w: &mut crate::moby_update::services::World, list: &[MobyId], cannon
             react::slot_let_go(w, m);
         }
     }
-    taken
+    (taken, vac)
+}
+
+/// `0x2732b8`: the ammo pickup classes the vacuum takes.
+pub const PICKUP_CLASSES: [i16; 8] = [0xe2, 0xcc, 0xde, 0x3ee, 0xd6, 0xe1, 0xd5, 0xdf];
+
+/// `0x307a50(moby)`: a live moby draws `randi(10)`; on 0 a bolt (class type 0x13) or an ammo pickup
+/// ([`PICKUP_CLASSES`]) within 30 of Ratchet and inside the vortex's reach (`Vortex::in_vacuum`) is taken: the bolt flies
+/// to Ratchet (`0x2bcb90`), the pickup is collected (`0x2db850`). True when taken.
+pub fn vacuum(w: &mut crate::moby_update::services::World, m: MobyId, v: &super::suck_vortex::Vortex) -> bool {
+    let st = w.m(m).state;
+    if st == crate::moby_runtime::state::DELETED || st == crate::moby_runtime::state::DELETED_STATIC { return false; }
+    if w.rng.randi(10) != 0 { return false; }
+    let o = w.m(m).o_class;
+    let bolt = w.m(m).has_class && w.classes.info(o).map(|i| i.ty) == Some(0x13);
+    if !bolt && !PICKUP_CLASSES.contains(&o) { return false; }
+    let p = w.m(m).position;
+    let h = w.hero.pos.map(|x| f32::from_bits(x.0));
+    if 30.0 <= len3(sub3([p[0], p[1], p[2]], [h[0], h[1], h[2]])) { return false; }
+    if !v.in_vacuum([p[0], p[1], p[2]]) { return false; }
+    if bolt {
+        crate::moby_update::classes::bolt::start_fly(w, m, crate::ps2v::Pf::ZERO, crate::ps2v::Pf::ZERO)
+    } else {
+        crate::moby_update::classes::pickup::collect(w, m)
+    }
 }
 
 /// State 5's search (0x303000, outside first person): over the run list's targetable creatures (class type 5), a

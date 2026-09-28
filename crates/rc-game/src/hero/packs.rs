@@ -29,9 +29,11 @@
 //! **Camera shake.** The stomp's landing shakes the camera (0x167260 = 0.2 for 40 ticks, level01 0x2390a0) through
 //! the general request ([`super::fx::shake`], `crate::follow_camera::Shake`).
 //!
-//! Not ported: the Thruster jumps' after-images (`0x277428`: ghost
-//! copies of Ratchet 2 / 4 / 6 frames behind), the pad vibration `0x248920`, the Thruster-Pack's flame mobys
-//! (class 0xa7, `0x2c9da0`) and the ledge climb's Thruster voice (0x1c with module 3).
+//! **After-images and flames.** The Thruster jumps' after-images (`0x277400` / `0x277428` at SetState 0x10 / 0xd,
+//! `0x277508` every physics tick: [`thruster_trail`], `crate::afterimage`) and the Thruster-Pack's two flame mobys
+//! (class 0xa7, created with the pack: [`flames_on_create`], `crate::moby_update::classes::thruster_flame`).
+//!
+//! Not ported: the pad vibration `0x248920`.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern)]
 
 use super::anim::AnimCtl;
@@ -253,7 +255,10 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
 /// Per-state physics; false = not ported (the hero freezes).
 pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, _rng: &mut Rng) -> bool {
     match h.state {
-        10 | 0xd | 0xf | 0x10 => h.phys_jump_anim(env, anim.view().frame),
+        10 | 0xd | 0xf | 0x10 => {
+            h.phys_jump_anim(env, anim.view().frame);
+            thruster_trail(h, &anim.view());
+        }
         id::GLIDE => glide_physics(h, env),
         id::STOMP => stomp_physics(h, env),
         id::REBOUND => rebound_physics(h),
@@ -387,6 +392,40 @@ fn hover_physics(h: &mut Hero, env: &Env) {
     }
     h.gravity_from(Pf::ZERO, low * p(0.72));
     h.f654 = h.vel[2];
+}
+
+/// Ratchet's class (`CreateMoby(Ratchet+0xa6)` of the after-images).
+const RATCHET_CLASS: i16 = 0;
+
+/// SetState 0x10 / 0xd (0x23cf98): `0x277400(Ratchet, 0x1409c0)`, then `0x277428(0x1409c0, alpha, back)` per ghost
+/// (crate::afterimage).
+pub(super) fn thruster_trail_start(h: &mut Hero, ghosts: &[(u8, i32)]) {
+    let t = &mut h.fx.trails.hero;
+    t.start(RATCHET_CLASS);
+    for &(a, b) in ghosts { t.add(a, b); }
+}
+
+/// `HeroStatePhysics` 0x2370b8 for 0x10 / 0xd (after `HeroLean`): `0x277508(0x1409c0, (ticks(12) < T) << 1)` with
+/// Ratchet's moby as the last write-back left it and his anim keys now.
+fn thruster_trail(h: &mut Hero, v: &super::AnimView) {
+    if h.state != id::THRUSTER_LONG_JUMP && h.state != id::THRUSTER_HIGH_JUMP { return; }
+    let fade = if ticks(12) < h.timer { 2 } else { 0 };
+    let f = &h.fx.frame;
+    let place = crate::afterimage::Place { rows: f.rows, position: f.position };
+    let pose = crate::afterimage::Pose { seq_a: v.seq_a, seq_b: v.seq_b, frame_a: v.frame_a, frame_b: v.frame_b, t: v.t };
+    h.fx.trails.hero.update(Some((place, pose)), fade);
+}
+
+/// `HeroItemsCreate` 0x22f3c0, slot 3: a pack moby created for back item 3 with Clank shown (0x141628 = 0) creates the
+/// Thruster-Pack's two flames (`FUN_002c9da0(0)`, `(1)`: class 0xa7, crate::moby_update::classes::thruster_flame),
+/// made by the tick right after the hero update (super::fx::create_mobys). `created` = the slot was empty before
+/// this update's creation.
+pub(super) fn flames_on_create(h: &mut Hero, created: bool) {
+    let s = &h.back_slot;
+    if !created || s.slot.state != 2 || s.slot.id != item::THRUSTER_PACK || s.clank_hidden != 0 { return; }
+    // The pack moby exists only with the back classes (`HeroItemsCreate` creates it from the item's class).
+    if h.back.as_ref().is_none_or(|b| b.state == 0) { return; }
+    for side in 0..2 { h.fx.mobys.push(super::fx::MobySpawn::ThrusterFlame { side }); }
 }
 
 /// The jump physics' horizontal control 0x234b40 for 10 and 0x10 (the others: [`Hero::air_control`]).

@@ -274,7 +274,9 @@ impl HeroItems {
 #[allow(clippy::too_many_arguments)]
 pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: &dyn AnimCtl, rng: &mut Rng, env: &ItemEnv, hits: &mut dyn HitSink) {
     super::melee::jump_attack_shockwave(hero, table, env, hits);
-    // 0x22f068 (the weapon arm's upkeep) runs in HeroItemsUpdate before the slots.
+    // 0x22f390 in HeroItemsUpdate, before the slots: the glove-holding layers 0x22e660, then the weapon arm's
+    // upkeep 0x22f068.
+    super::weapons::hold_update(hero, anim);
     super::weapons::arm_upkeep(hero, anim);
     apply_pending_blend(hero, env.data);
     create_hand(hero, g, env);

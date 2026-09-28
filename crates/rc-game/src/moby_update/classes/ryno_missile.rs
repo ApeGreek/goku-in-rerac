@@ -77,11 +77,7 @@ pub const BEAM: Beam = Beam { damage_r: 0.0, damage: 0.0, flash: 4.0, flash2: 2.
 pub fn spawn(hero: &mut crate::hero::Hero, table: &mut crate::moby_runtime::MobyTable, env: &crate::hero::items::ItemEnv, hits: &mut dyn crate::hero::items::HitSink, rng: &mut crate::rng::Rng, aim_h: f32, yaw: f32, pitch: f32, muzzle: [f32; 3], target: Option<MobyId>) -> Option<MobyId> {
     let id = hits.create_moby(table, CLASS, env.frame as u64)?;
     let tinfo = target.and_then(|t| table.mobys.get(t)).map(|m| (m.o_class, [m.position[0], m.position[1], m.position[2]], crate::targeting::record(m)));
-    if let (Some(t), Some((_, _, Some(r)))) = (target, tinfo) {
-        let pv = &mut table.mobys[t].pvars;
-        let f = u16::from_le_bytes([pv[r + 0x1e], pv[r + 0x1f]]) | 0x80;
-        pv[r + 0x1e..r + 0x20].copy_from_slice(&f.to_le_bytes());
-    }
+    if let (Some(t), Some((_, _, Some(_)))) = (target, tinfo) { crate::targeting::mark_missile(&mut table.mobys[t]); }
     let (pa, pb) = (rng.randf(-PI, PI), rng.randf(-PI, PI));
     let ra = rng.randf(-0.00967, 0.00967);
     let rb = rng.randf(-0.02406, 0.02406);

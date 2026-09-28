@@ -371,6 +371,39 @@ fn alpha_toward(w: &mut World, id: MobyId, target: f32) {
     w.mm(id).alpha = a as i32 as u8;
 }
 
+/// `0x2db850(pickup)`: collected: `AddAmmo`, the banner, the picked-up stat, state 2 (flying to Ratchet), scale ×1.2,
+/// the rise `8·dt`, sound 0 of class 213 at most every `ticks(10)`. Also the Suck Cannon's vacuum's take
+/// (`crate::hero::suck_cannon::vacuum`). True when taken (not already flying).
+pub fn collect(w: &mut World, id: MobyId) -> bool {
+    if w.m(id).state == 2 { return false; }
+    let item = p::i32(&w.m(id).pvars, 8);
+    let i = item.clamp(0, N as i32 - 1) as usize;
+    let old = item_ammo(w, i);
+    let amount = p::i32(&w.m(id).pvars, 0);
+    add_ammo(w, i, amount);
+    let new = item_ammo(w, i);
+    if old < new {
+        let n = new - old;
+        let text = w.inventory.pickup_text(i, n == 1);
+        let b = &mut w.svc.pickups_banner;
+        *b = Banner { seq: b.seq.wrapping_add(1), text, arg: n };
+        w.hero_fields_mut().ammo_picked[i] += n;
+    }
+    {
+        let m = w.mm(id);
+        m.state = 2;
+        m.scale *= 0.2 + 1.0;
+    }
+    set_vel(w, id, [0.0; 3]);
+    p::set_ff(&mut w.mm(id).pvars, 0x24, DT * 8.0);
+    let c = w.counter as i32;
+    if (c - w.svc.pickups.last_sound).abs() > w.ticks(10) {
+        w.play_sound_as(0, 0, id, PICKUP_SOUND_CLASS);
+        w.svc.pickups.last_sound = c;
+    }
+    true
+}
+
 /// State 1.
 fn idle(w: &mut World, id: MobyId) {
     alpha_toward(w, id, 128.0);
@@ -385,28 +418,7 @@ fn idle(w: &mut World, id: MobyId) {
     if pos[2] < p::ff(&w.m(id).pvars, 0x28) - 2.0 { take = true; }
     if w.hero_fields().health == 0 { take = false; }
     if take {
-        let amount = p::i32(&w.m(id).pvars, 0);
-        add_ammo(w, i, amount);
-        let new = item_ammo(w, i);
-        if old < new {
-            let n = new - old;
-            let text = w.inventory.pickup_text(i, n == 1);
-            let b = &mut w.svc.pickups_banner;
-            *b = Banner { seq: b.seq.wrapping_add(1), text, arg: n };
-            w.hero_fields_mut().ammo_picked[i] += n;
-        }
-        {
-            let m = w.mm(id);
-            m.state = 2;
-            m.scale *= 0.2 + 1.0;
-        }
-        set_vel(w, id, [0.0; 3]);
-        p::set_ff(&mut w.mm(id).pvars, 0x24, DT * 8.0);
-        let c = w.counter as i32;
-        if (c - w.svc.pickups.last_sound).abs() > w.ticks(10) {
-            w.play_sound_as(0, 0, id, PICKUP_SOUND_CLASS);
-            w.svc.pickups.last_sound = c;
-        }
+        collect(w, id);
         return;
     }
     {

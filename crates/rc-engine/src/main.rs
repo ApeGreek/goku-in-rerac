@@ -52,6 +52,7 @@ mod render_settings;
 mod reticle_render;
 mod marker_render;
 mod tesla_render;
+mod reactive_render;
 mod scene_render;
 mod sea_render;
 mod screen_canvas;
@@ -70,6 +71,8 @@ mod tie_lod;
 mod tie_render;
 mod vendor_render;
 mod water_render;
+mod afterimage_render;
+mod thruster_render;
 mod world_lights;
 
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
@@ -145,8 +148,10 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(water_render::WaterPlugin)
     .add_plugins(sea_render::SeaRenderPlugin)
     .add_plugins(fx_draw::FxDrawPlugin)
+    .add_plugins(afterimage_render::AfterImagePlugin)
     .add_plugins(reticle_render::ReticlePlugin)
     .add_plugins(tesla_render::TeslaPlugin)
+    .add_plugins(reactive_render::ReactivePlugin)
     .add_plugins(sky_stars::SkyStarsPlugin)
     .add_plugins(fog_state::FogStatePlugin)
     .add_plugins(hud_render::HudPlugin)

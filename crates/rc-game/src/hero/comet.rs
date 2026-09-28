@@ -31,8 +31,8 @@
 //!   first hit of 30 ticks plays the wrench's hit sound.
 //!
 //! Native `f32` for the flight (the moby side); the state code keeps the hero block's PS2 float type at its
-//! boundary. **Not ported**: the after-images `0x277400` / `0x277428` (the trail of 0x140b00: a pose history in the
-//! moby renderer, as the Thruster jumps' `0x277428`), the look stance's aiming beam `0x20fb60`, the wall-hit sparks
+//! boundary. The after-images of 0x140b00 (`0x277400` / `0x277428` at the throw,
+//! `0x277508` each flight tick, `0x277740` at the catch) are `crate::afterimage`'s. **Not ported**: the look stance's aiming beam `0x20fb60`, the wall-hit sparks
 //! `0x2bdd20` / hit sparkles `0x2bdb18` (particle types 0x2d / 0x35 records; their draws are not made), the bolts
 //! the returning wrench collects `0x2bdfb8`, the hit-record checks of the hit sound (`FUN_002711f8` records of the
 //! same throw, target type 0x14), and the world line's moby part (the port's line is the world mesh: a non-crate
@@ -250,12 +250,25 @@ pub fn throw_wrench(h: &mut Hero, env: &Env, _from_check: bool) {
     f.speed = DT * 23.0;
     // fun_00212f90(wrench, 6, 0, 5): the spin sequence (applied at the start of the item update).
     h.items.pending_blend = Some((6, 0, ticks(5)));
+    // The wrench's after-images (0x277400(wrench, 0x140b00), 0x277428 × 2: 0x30 / 0x17 at 3 / 5 ticks back;
+    // crate::afterimage).
+    let t = &mut h.fx.trails.wrench;
+    t.start(super::melee::WRENCH_CLASS);
+    t.add(0x30, 3);
+    t.add(0x17, 5);
 }
 
 /// The wrench's update with +0x20 = 10 / 11 (`0x2be1c0`; the slot loop calls it for the wrench's row).
 pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink) {
     let Some(class) = hero.items.slot.item.as_ref().and_then(|m| env.data.class(m.o_class)).cloned() else { return };
     hero.items.slot.swap = 2;
+    // 0x277508(0x140b00, 0): the after-images follow the wrench as its last update left it (crate::afterimage).
+    if let Some(it) = hero.items.slot.item.as_ref() {
+        let place = crate::afterimage::Place { rows: it.rows.map(|r| r.map(f32::from_bits)), position: [it.position[0], it.position[1], it.position[2], 1.0] };
+        let a = &it.anim;
+        let pose = crate::afterimage::Pose { seq_a: a.seq_a, seq_b: a.seq_b, frame_a: a.frame_a, frame_b: a.frame_b, t: a.t };
+        hero.fx.trails.wrench.update(Some((place, pose)), 0);
+    }
     let hand = hero.items.slot.hand_point;
     let mstate = hero.items.slot.item.as_ref().map_or(0, |m| m.mstate);
     // The whoosh (0x14156c): started while going out when the slot is free.
@@ -327,6 +340,7 @@ pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         release_whoosh(hero);
         hero.items.slot.detached = 0;
         if let Some(it) = hero.items.slot.item.as_mut() { it.mstate = IN_HAND; }
+        hero.fx.trails.wrench.kill();
     }
     // The bounce: the world line old → new (flags 2) on a non-water face, or the wall-close flag once.
     let hit_world = env.coll.and_then(|c| line_world(c, from_f32x3(old), from_f32x3(pos), 2)).is_some_and(|o| o.surface_id() != 0);

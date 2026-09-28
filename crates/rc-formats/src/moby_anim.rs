@@ -700,6 +700,46 @@ pub struct PoseLayer<'a> {
     pub frame_b: u8,
     pub t: f32,
     pub weight: f32,
+    /// The node's `+0x18` retarget class and its key flags `+6` / `+7` (None: both keys are the moby's class's).
+    pub alt: Option<AltKeys<'a>>,
+}
+
+/// A pose layer whose keys come from another, animation-only class (`FUN_00264220(node, seq, frame, buffer)`, called by
+/// `FUN_00263f70` for a key whose flag `+6` / `+7` is set): the key's frame of `class` is rebuilt in the moby's
+/// class's layout, joint `k` of `class` becoming the moby's joint `map[k]` (the byte table after the retarget class's
+/// joint-list word, class `+0x1c` + 4, [`retarget_map`]; the other joints zero), its scale and translation records
+/// copied as they are (they carry the moby's joint numbers). Ratchet's glove-holding layers use it (classes 1 / 2).
+#[derive(Clone, Copy, Debug)]
+pub struct AltKeys<'a> {
+    pub class: &'a MobyAnimClass,
+    pub map: &'a [u8],
+    /// `+6` / `+7`: key A / key B is read from `class`.
+    pub a: bool,
+    pub b: bool,
+}
+
+/// The retarget table of an animation-only class (`FUN_00264220` reads `*(class +0x1c) + 4`): one target joint per
+/// joint of the class (`joint_count` bytes after the word at the class's `joints` offset). None when it is out of the
+/// blob or the class has no joints.
+pub fn retarget_map(blob: &[u8], header: &crate::moby::MobyClassHeader) -> Option<Vec<u8>> {
+    let base = usize::try_from(header.joints).ok().filter(|&b| b > 0)? + 4;
+    blob.get(base..base + header.joint_count as usize).map(<[u8]>::to_vec)
+}
+
+/// One key of a pose layer: its frame, and for a retargeted key ([`AltKeys`]) the map from the frame's joints.
+struct LayerKey<'f> {
+    f: &'f MobyFrame,
+    map: Option<&'f [u8]>,
+}
+
+impl LayerKey<'_> {
+    /// The key's quaternion of the moby's joint `j` (a retargeted key: its class's joint `k` with `map[k] = j`, else 0).
+    fn quat(&self, j: usize) -> [i16; 4] {
+        match self.map {
+            None => self.f.quat_at(j),
+            Some(m) => m.iter().position(|&x| x as usize == j).map_or([0; 4], |k| self.f.quat_at(k)),
+        }
+    }
 }
 
 /// The layer's own local values for joint `j` (`FUN_00267770`'s decode, §6.2/§6.3 on the layer's keys): the quaternion,
@@ -707,21 +747,27 @@ pub struct PoseLayer<'a> {
 /// has one: the decode starts from the class's rest pose).
 fn layer_local(class: &MobyAnimClass, l: &PoseLayer, j: usize) -> Option<(V4, Option<[f32; 3]>, [f32; 3])> {
     let rest = *class.rest.get(j)?;
-    let fa = class.frame(l.seq_a, l.frame_a)?;
+    let key = |seq: u8, frame: u8, alt: bool| -> Option<LayerKey> {
+        match l.alt {
+            Some(a) if alt => a.class.frame(seq, frame).map(|f| LayerKey { f, map: Some(a.map) }),
+            _ => class.frame(seq, frame).map(|f| LayerKey { f, map: None }),
+        }
+    };
+    let fa = key(l.seq_a, l.frame_a, l.alt.is_some_and(|a| a.a))?;
     let t = l.t.to_bits();
-    let fb = if t != 0 { class.frame(l.seq_b, l.frame_b) } else { None };
+    let fb = if t != 0 { key(l.seq_b, l.frame_b, l.alt.is_some_and(|a| a.b)) } else { None };
     let u = ps2::sub(ONE, t);
-    let find_s = |f: &MobyFrame| f.scales.iter().find(|r| r.joint as usize == j && r.inherited()).map(scale_bits);
-    let find_t = |f: &MobyFrame| f.trans.iter().find(|r| r.joint as i8 >= 0 && r.joint as usize == j).map(trans_value);
+    let find_s = |k: &LayerKey| k.f.scales.iter().find(|r| r.joint as usize == j && r.inherited()).map(scale_bits);
+    let find_t = |k: &LayerKey| k.f.trans.iter().find(|r| r.joint as i8 >= 0 && r.joint as usize == j).map(trans_value);
     let lerp3 = |a: [f32; 3], b: [f32; 3]| -> [f32; 3] { let v = lerp(bits3w(a, 0), bits3w(b, 0), u, t, 3, [0; 4]); [0, 1, 2].map(|k| f32::from_bits(v[k])) };
     match fb {
-        None => Some((quat_bits(fa.quat_at(j)), find_s(fa), find_t(fa).unwrap_or(rest))),
+        None => Some((quat_bits(fa.quat(j)), find_s(&fa), find_t(&fa).unwrap_or(rest))),
         Some(fb) => {
-            let (qa, qb) = (quat_bits(fa.quat_at(j)), quat_bits(fb.quat_at(j)));
+            let (qa, qb) = (quat_bits(fa.quat(j)), quat_bits(fb.quat(j)));
             let plain = l.seq_a == l.seq_b && l.frame_b as u32 == l.frame_a as u32 + 1;
             let q = if plain { lerp(qa, qb, u, t, 4, qa) } else { nlerp_flip(qa, qb, u, t) };
-            let sc = match (find_s(fa), find_s(fb)) { (Some(a), Some(b)) => Some(lerp3(a, b)), (a, b) => a.or(b) };
-            let tr = lerp3(find_t(fa).unwrap_or(rest), find_t(fb).unwrap_or(rest));
+            let sc = match (find_s(&fa), find_s(&fb)) { (Some(a), Some(b)) => Some(lerp3(a, b)), (a, b) => a.or(b) };
+            let tr = lerp3(find_t(&fa).unwrap_or(rest), find_t(&fb).unwrap_or(rest));
             Some((q, sc, tr))
         }
     }

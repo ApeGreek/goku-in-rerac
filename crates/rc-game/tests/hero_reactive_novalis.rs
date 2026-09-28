@@ -124,6 +124,7 @@ struct CellHits<'a, 'b> {
     svc: &'a std::cell::RefCell<&'b mut Services>,
     classes: &'a ClassTable,
     coll: &'a collision::Collision,
+    parts: &'a std::cell::RefCell<&'b mut Particles>,
 }
 
 impl CellHits<'_, '_> {
@@ -160,8 +161,10 @@ impl rc_game::hero::items::HitSink for CellHits<'_, '_> {
     fn light_free(&mut self, slot: i32) { self.with(|h| h.light_free(slot)) }
     fn world(&mut self, table: &mut MobyTable, hero: &Hero, rng: &mut Rng, counter: u64, f: &mut dyn FnMut(&mut World)) -> bool {
         let mut s = self.svc.borrow_mut();
+        let mut p = self.parts.borrow_mut();
         let mut w = World::new(table, hero, rng, self.classes, &mut s, counter);
         w.coll = Some(self.coll);
+        w.particles = Some(&mut **p);
         f(&mut w);
         true
     }
@@ -189,6 +192,12 @@ struct Row {
     markers: Vec<(usize, u32)>,
     fp: u8,
     mouth: Option<[f32; 3]>,
+    /// The vortex: drawn this tick, node strengths, live strands; the vacuum's takes.
+    vortex: (bool, [i16; 10], usize),
+    vacuumed: u32,
+    /// The Taunter's rings drawn this tick and on; its whistle sounding.
+    rings: (bool, usize),
+    whistle: bool,
     rng: u32,
 }
 
@@ -198,6 +207,26 @@ struct Setup<'a> {
     at: ([f32; 3], f32),
     /// Moby instances to watch (their states).
     watch: &'a [usize],
+    /// How long a hand-item class sound plays (the stand-in sound layer's `SoundIsAlive`; 0: no sound layer).
+    sound_ticks: u64,
+}
+
+/// A stand-in sound layer: every hand-item class sound plays for `ticks` ticks (the Taunter's whistles, the Suck
+/// Cannon's suction), so `SoundIsAlive` answers as an audio layer would; nothing is heard.
+struct FakeSounds {
+    ticks: u64,
+    now: u64,
+    started: Vec<u64>,
+}
+
+impl rc_game::hero::HeroSounds for FakeSounds {
+    fn anim_advanced(&mut self, _: &rc_game::moby_runtime::Moby, _: &rc_game::hero::anim::AnimView, _: &rc_game::hero::anim::AnimView, _: &mut Rng) {}
+    fn item_sound(&mut self, _: i16, _: [f32; 3], _: i32, _: u32, _: &mut Rng) -> i32 {
+        if self.ticks == 0 { return -1; }
+        self.started.push(self.now);
+        self.started.len() as i32 - 1
+    }
+    fn alive(&mut self, slot: i32) -> bool { self.started.get(slot as usize).is_some_and(|&t| self.now < t + self.ticks) }
 }
 
 fn give(lv: &Lv, item: i32) -> (GameState, SessionState) {
@@ -253,6 +282,7 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
     let svc_cell = std::cell::RefCell::new(&mut svc);
     let parts_cell = std::cell::RefCell::new(&mut particles);
     let mut rows = Vec::new();
+    let mut fake = FakeSounds { ticks: s.sound_ticks, now: 0, started: Vec::new() };
     for t in 0..ticks {
         let classes_ref: &ClassTable = &classes;
         let mut mobys = |table: &mut MobyTable, hero: &Hero, rng: &mut Rng, cam: &rc_game::follow_camera::CameraView, coll: &collision::Collision, counter: u64| {
@@ -275,8 +305,9 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
         // The render's +0x31 ("drawn last frame", MobyProc's; the R.Y.N.O.'s search reads it): the watched mobys are
         // in view in these runs.
         for &i in &watch { if game.mobys.mobys[i].state < 0x80 { game.mobys.mobys[i].visible = 1; } }
-        let mut hits = CellHits { svc: &svc_cell, classes: &classes, coll: &lv.mesh };
-        let r = game.tick_with_hits(Some(&input(t).bytes()), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks, &mut hits);
+        let mut hits = CellHits { svc: &svc_cell, classes: &classes, coll: &lv.mesh, parts: &parts_cell };
+        fake.now = game.counter;
+        let r = game.tick_with_hero_sounds(Some(&input(t).bytes()), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks, &mut hits, None, &mut fake);
         assert_eq!(r.hero, rc_game::hero::HeroTick::Ran, "hero stopped in state {:#x} at tick {t}", game.hero.state);
         let h = &game.hero;
         let tick = game.counter - 1;
@@ -301,6 +332,10 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
             markers: h.weapons.markers.of_tick(tick).iter().map(|m| (m.fx, m.rgba)).collect(),
             fp: h.f13f5,
             mouth: g.cannon.map(|c| c.mouth),
+            vortex: (h.weapons.reactive.suck.vortex.drawn == Some(tick), h.weapons.reactive.suck.vortex.alpha, h.weapons.reactive.suck.vortex.strands.iter().filter(|x| x.part.is_some()).count()),
+            vacuumed: h.weapons.reactive.suck.vacuumed,
+            rings: (h.weapons.reactive.taunter.rings.drawn == Some(tick), h.weapons.reactive.taunter.rings.rings.iter().filter(|r| r.on).count()),
+            whistle: h.fx.item_loop_alive[rc_game::hero::fx::LOOP_ITEM],
             rng: game.rng.state,
         });
     }
@@ -351,9 +386,9 @@ fn suck_then_fire(t: u32) -> PadInput {
 }
 
 /// Novalis, the critters 577 in the pit: ○ held pulls the one in the cone through the reaction table (its suck record
-/// 1 approach → 7 let go when ○ is released → 2 rise → 3 pulled → 4 swallowed, the class in its held state 7), hides
-/// it and counts it held; the next ○ fires it (record 5, then 6 rolling after the floor) until it bursts at a wall
-/// (the burst, deleted).
+/// 1 approach → 2 rise → 3 pulled → 4 swallowed, the class in its held state 7) during the first hold, hides it and
+/// counts it held; the next press (after the release) fires it (record 5), and it bursts where it hits (the burst,
+/// deleted).
 #[test]
 fn novalis_suck_cannon_pulls_and_fires_a_critter() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
@@ -361,25 +396,24 @@ fn novalis_suck_cannon_pulls_and_fires_a_critter() {
     assert_eq!(lv.reactions.get(&577), Some(&rc_game::moby_update::creature::react::Table::Critter));
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
     let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
-    let s = Setup { item: 9, at, watch: &[a, b] };
+    let s = Setup { item: 9, at, watch: &[a, b], sound_ticks: 0 };
     let rows = run(&lv, &s, &suck_then_fire, 480);
     dump(&rows);
-    let recs = seen(&rows, |r| r.watched[1].2);
-    // 1 approach (the first hold) → 7 let go when ○ is released → 2 rise → 3 pulled → 4 swallowed → 5 fired → 6 rolling.
-    assert_eq!(recs, [Some(0), Some(1), Some(7), Some(2), Some(3), Some(4), Some(5), Some(6)], "record states");
     let held = rows.iter().position(|r| r.suck.0 == 1).expect("nothing swallowed");
-    let r = &rows[held];
-    assert_eq!((r.watched[1].0, r.watched[1].2), (7, Some(4)), "577 in its held state 7, record 4");
+    let k = rows[held].watched.iter().position(|w| w.2 == Some(4)).expect("which one");
+    let recs = seen(&rows[..held + 1], |r| r.watched[k].2);
+    let order: Vec<i16> = recs.iter().flatten().copied().filter(|&x| x != 0 && x != 7).collect();
+    assert_eq!(order, [1, 2, 3, 4], "record states {recs:?}");
+    assert_eq!(rows[held].watched[k].0, 7, "577 in its held state 7");
     // Swallowed at scale 0; its next carried tick hides it and stops its update (mode 1 | 2).
-    assert!(rows[held + 1].watched[1].3 & (HIDDEN | 2) == HIDDEN | 2, "hidden inside the cannon");
-    assert_eq!(r.suck, (1, 0, 1));
+    assert!(rows[held + 1].watched[k].3 & (HIDDEN | 2) == HIDDEN | 2, "hidden inside the cannon");
+    assert_eq!(rows[held].suck, (1, 0, 1));
     let fired = rows.iter().position(|r| r.fired == 1).expect("never fired");
-    assert!(fired > 330 && fired < 340, "fired at {fired}");
+    assert!(held < fired && (260..265).contains(&fired), "fired at {fired} by the press at 260");
     assert_eq!(rows[fired].suck, (0, 0, 0), "the slot emptied");
+    assert!(rows[fired].watched[k].2.is_some_and(|x| x >= 5), "record {:?}", rows[fired].watched[k].2);
     let burst = rows.iter().position(|r| r.bursts == 1).expect("no burst");
-    assert!(rows[burst].watched[1].0 >= 0xfd, "deleted after the burst");
-    let (p0, p1) = (rows[fired].watched[1].1, rows[burst - 1].watched[1].1);
-    assert!(((p1[0] - p0[0]).powi(2) + (p1[1] - p0[1]).powi(2)).sqrt() > 10.0, "flew {p0:?} → {p1:?}");
+    assert!(rows[burst].watched[k].0 >= 0xfd, "deleted after the burst");
     assert_eq!(rows, run(&lv, &s, &suck_then_fire, 480), "deterministic");
 }
 
@@ -391,7 +425,7 @@ fn rilgar_suck_cannon_takes_a_small_amoeboid() {
     assert_eq!(lv.reactions.get(&866), Some(&rc_game::moby_update::creature::react::Table::Amoeboid));
     assert_eq!(lv.reactions.get(&865), None, "865 keeps the default table");
     let at = facing_moby(&lv, 1262, 5.0, -std::f32::consts::FRAC_PI_2);
-    let s = Setup { item: 9, at, watch: &[1262] };
+    let s = Setup { item: 9, at, watch: &[1262], sound_ticks: 0 };
     let input = |t: u32| if (30..=160).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 200);
     dump(&rows);
@@ -412,7 +446,7 @@ fn novalis_taunter_lures_the_critters() {
     assert_eq!(lv.items.defs[14].o_class, 175, "item 14 is the Taunter (class 175)");
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
     let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
-    let s = Setup { item: 14, at, watch: &[a, b] };
+    let s = Setup { item: 14, at, watch: &[a, b], sound_ticks: 0 };
     let input = |t: u32| if t == 60 { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 120);
     dump(&rows);
@@ -433,7 +467,7 @@ fn novalis_taunter_knocks_a_crate() {
     let c = lv.instances[CRATE].position;
     let at = ([c[0], c[1] + 6.0, c[2]], -std::f32::consts::FRAC_PI_2);
     let crates: Vec<usize> = [375, 377, 376, 533].iter().map(|&m| instance_of(&lv, m)).collect();
-    let s = Setup { item: 14, at, watch: &crates };
+    let s = Setup { item: 14, at, watch: &crates, sound_ticks: 0 };
     let input = |t: u32| if t == 60 { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
     let rows = run(&lv, &s, &input, 120);
     dump(&rows);
@@ -442,4 +476,83 @@ fn novalis_taunter_knocks_a_crate() {
     assert!(rows[t + 10].watched[0].0 != rows[0].watched[0].0, "it broke: {:?}", rows[t + 10].watched[0]);
     assert!(rows[t + 10].watched[1..].iter().zip(&rows[0].watched[1..]).all(|(a, b)| a.0 == b.0), "the others stand");
     assert_eq!(rows, run(&lv, &s, &input, 120), "deterministic");
+}
+
+// ------------------------------------------------------------------------------------------------------------------
+// Holding (the user's report: "it sucks once for a millisecond")
+
+/// Novalis, the pit: ○ held for 360 ticks keeps the cannon sucking (state 3) the whole time, the vortex drawn every
+/// tick with its strands (type-23 puffs) running down it; released, it collapses and fades out.
+#[test]
+fn novalis_suck_cannon_holds_continuously() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
+    let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
+    let s = Setup { item: 9, at, watch: &[a, b], sound_ticks: 0 };
+    let input = |t: u32| if (40..=400).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
+    let rows = run(&lv, &s, &input, 460);
+    dump(&rows);
+    let start = rows.iter().position(|r| r.hand.1 == 3).expect("never sucking");
+    assert!(start < 70, "sucking from {start}");
+    assert!(rows[start..=400].iter().all(|r| r.hand.1 == 3), "the whole hold in state 3");
+    // The first state-3 row is the tick that entered it (state 2's update ran); from the next the vortex every tick.
+    assert!(rows[start + 1..=400].iter().all(|r| r.vortex.0), "the vortex drawn every tick of the hold");
+    assert!(rows[start + 20..=400].iter().all(|r| r.vortex.1[0] >= 0x40), "node 0 at full strength");
+    assert!(rows[start + 40..=400].iter().all(|r| r.vortex.2 > 0), "strands running");
+    let most = rows.iter().map(|r| r.vortex.2).max().unwrap();
+    assert!(most >= 20, "strands at most {most}");
+    assert!(rows[400].vacuumed > 0, "the vacuum took the swallowed critters' bolts");
+    // Released: the fade (−4 a tick from 64) ends the draw within 20 ticks.
+    assert!(rows[401].vortex.0 && !rows[430].vortex.0, "fades out");
+    assert_eq!(rows, run(&lv, &s, &input, 460), "deterministic");
+}
+
+/// Rilgar, two small amoeboids in a line in front of Ratchet: with ○ held the one 14.2 away (the reach is 15) is
+/// pulled and swallowed first, then the nearer one: held 1, then 2, the cannon sucking throughout.
+#[test]
+fn rilgar_suck_cannon_far_reach_and_two_in_sequence() {
+    let Some(lv) = load_level(5) else { eprintln!("skipped: no extracted/"); return };
+    let at = ([167.55005, 305.2638, 26.5], (319.1 - 305.26f32).atan2(164.2 - 167.55));
+    let s = Setup { item: 9, at, watch: &[1261, 1266], sound_ticks: 0 };
+    let input = |t: u32| if (30..=300).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
+    let rows = run(&lv, &s, &input, 320);
+    dump(&rows);
+    let first = rows.iter().position(|r| r.watched[1].2.is_some_and(|x| x != 0)).expect("the far one was not taken");
+    let d = {
+        let (p, h) = (rows[first].watched[1].1, rows[first].pos);
+        ((p[0] - h[0]).powi(2) + (p[1] - h[1]).powi(2)).sqrt()
+    };
+    assert!(d > 13.0, "taken at {d} from Ratchet");
+    let one = rows.iter().position(|r| r.suck.0 == 1).expect("none swallowed");
+    let two = rows.iter().position(|r| r.suck.0 == 2).expect("the second was not swallowed");
+    assert!(one < two);
+    assert_eq!(rows[one].watched[1].2, Some(4), "the far one first");
+    assert_eq!(rows[two].watched[0].2, Some(4));
+    assert!(rows[one..two].iter().all(|r| r.hand.1 == 3), "sucking between the two");
+    assert_eq!(rows, run(&lv, &s, &input, 320), "deterministic");
+}
+
+/// The Taunter held for 240 ticks (the stand-in sound layer plays each whistle for 90): whistle after whistle, the
+/// lure every 4th frame while one sounds, the rings flowing while the whistle sequence plays — for the whole hold.
+#[test]
+fn novalis_taunter_lures_for_the_whole_hold() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
+    let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
+    let s = Setup { item: 14, at, watch: &[a, b], sound_ticks: 90 };
+    let input = |t: u32| if (60..=300).contains(&t) { PadInput::neutral().press(button::CIRCLE) } else { PadInput::neutral() };
+    let rows = run(&lv, &s, &input, 340);
+    dump(&rows);
+    let first = rows.iter().position(|r| r.lure_calls > 0).expect("no whistle");
+    assert!((60..64).contains(&first), "first whistle at {first}");
+    // Lures in every 30-tick window of the hold.
+    for w in (first..300 - 30).step_by(30) {
+        assert!(rows[w + 30].lure_calls > rows[w].lure_calls, "no lure in {w}..{}", w + 30);
+    }
+    let sounding = rows[first..=300].iter().filter(|r| r.whistle).count();
+    assert!(sounding > 200, "the whistles sound {sounding} of the 240 ticks");
+    assert!(rows[first + 5..first + 60].iter().all(|r| r.rings.0 && r.rings.1 > 0), "rings out");
+    let most = rows[first..first + 60].iter().map(|r| r.rings.1).max().unwrap();
+    assert_eq!(most, 3, "a ring every 10 ticks, 30 ticks each");
+    assert_eq!(rows, run(&lv, &s, &input, 340), "deterministic");
 }

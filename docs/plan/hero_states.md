@@ -274,9 +274,10 @@ picker's slippery test), the owned-items mirror and the back slot (§2), the wal
 0x13f5a4 / 0x13f5a5 of `0x23c458` (physics.rs), the hero's looping-sound slots 0x141568 (`packs::flush_sounds`,
 `HeroSounds::release`), pack hits after the hero update (`packs::deliver_hits`, `HitSink::deliver`). Tests
 `packs::tests` (12), `tests/hero_packs_novalis.rs` (glide, both long jumps, stomp, the Hydro-Pack on the back in the
-lake, determinism). Open: the stomp's camera shake (no general shake in follow_camera), the Thruster jumps'
-after-images `0x277428`, the Thruster flame mobys (class 0xa7), the pad vibration `0x248920`, the ledge climb's
-Thruster voice (0x1c), the Hydro-Pack's bubble jets; in the port the back swap's `rand_range(50, 90)` draws after
+lake, determinism). Open: ~~the stomp's camera shake~~ (done, Hero polish), ~~the Thruster jumps'
+after-images `0x277428`~~ and ~~the Thruster flame mobys (class 0xa7)~~ (done 2026-09-28: "Thruster flames",
+"After-images" below), the pad vibration `0x248920`, ~~the ledge climb's Thruster voice (0x1c)~~ (done), the
+Hydro-Pack's bubble jets; in the port the back swap's `rand_range(50, 90)` draws after
 the hero update and before the hand's slot loop (the game: slot 0 first).
 
 ### P5 — Magneboots, Grind Boots, cable
@@ -421,9 +422,8 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
 - **Hits**: the grind wrench's sphere (0x259888(1.0, 0x10000) + `coll_sphere_mobys(1.0, hip, 0x10)`) goes with the
   pack hits through the hit sink after the hero update; `melee::COMBO` has row 6 (the second 0x70 swing, level01
   0x17c0a8 + 6·0x2c = `[0, 1, 25, 7, 17, 18, 23, 8, 13, 6, 12]`), shared with `hero::boots`.
-- **Not done**: the Thruster flames (class 0xa7 mobys `0x2c9da0`: need the moby-creation path from the hero and the
-  class's update), the Thruster jumps' after-images `0x277428` (ghost draws of Ratchet's pose 2 / 4 / 6 frames back:
-  need a pose history in the moby renderer), the pad vibration `0x248920`, the burn fire `0x209ec8` (type 4
+- **Not done**: ~~the Thruster flames (class 0xa7 mobys `0x2c9da0`)~~ and ~~the Thruster jumps' after-images
+  `0x277428`~~ (done 2026-09-28: "Thruster flames", "After-images" below), the pad vibration `0x248920`, the burn fire `0x209ec8` (type 4
   unported), the crouch slide's
   voice 0xc and 0x77's voice 0x17, the wrench hit sound's index 1 (`FUN_002bda88` reads a pointer record from the hit
   moby's pvars).
@@ -480,6 +480,58 @@ over (`Hero::set_joint_chains`, `set_pack_joint_lists`).
 **Guard.** `novalis_hero_digest`: the `moves` run is byte-identical; the two lake runs are identical up to tick 519 and
 differ from tick 520 on, the first tick Ratchet walks into the lake's ankle-deep edge (depth 0.12: the walk case's
 bubbles draw from the stream). The new fields are filtered while 0 / empty.
+
+### Thruster flames (class 0xa7, 2026-09-28)
+The user's report (Gaspar, the Thruster in use): no exhaust. Read from the decompiler C and the disassembly (level01;
+the class is in every level's class list without a model, its table entry a copy of the same code; the callback's
+tables are found on all 19 levels through the relocation):
+* **Creation**: `HeroItemsCreate` 0x22f3c0 creates two flames (`FUN_002c9da0(0)`, `(1)`: pvars cleared with the side,
+  +0x30 0xff, draw distance 0x7e) whenever it creates the back pack for back item 3 with Clank shown. Port:
+  `packs::flames_on_create` → `fx::MobySpawn::ThrusterFlame` → the tick's `fx::create_mobys`.
+* **Update** `0x2c9e00` (moby loop; `rc_game::moby_update::classes::thruster_flame`): "on" in 0xb..0xe or the ledge
+  climb 0x1c at key times 6..16 (both only while not descending, 0x13f76e), 0x10 before tick 44, 0x22 before tick 15 or
+  airborne after tick 33, 8 and 0x81; states 0 (hide, z + 0.5) → 1 (wait; deleted when `GetClankModule(3)` ≠ 3) → 2
+  (sizes grow over `ticks(2)`) → 3 (burning) → 4 (shrink over `ticks(8)`) → 1; states 2..4 register the draw callback
+  0x2c9290 on list 2.
+* **Exhaust** `0x2c98b8` (state 3, "on"): type-21 sparks (orange → white, 10 ticks, splitting) at the nozzle (every
+  third tick in the hover) and halfway back to the last smoke point; type-23 smoke puffs 0.3 behind the nozzle,
+  drifting 0.075 u/tick outward and 0.025 up (0.025 − 5·dt in the glide, − 3·dt in the hover), growth 1.01..1.075
+  (1.0165 glide, 1.037 hover), size 30000, grey 0x808080 (0xa0a0a0 glide / hover), ALPHA 0x44; 4 puffs a tick along
+  the path since the last one (2 in the glide, 1 in the hover): the plume.
+* **Draw callback** `0x2c9290`: the flame's frame from the Thruster-Pack's joint lists (2, 3) / (0, 1) (`0x264630`),
+  two crossed quads (FX 0xc) with `randf(0, 0.1)` flicker on their far corners, a camera-facing glow (FX 0xb, RGBA
+  0x7f2020ff) 0.13 behind the nozzle, and a 196-vertex flame cone (FX 0xa, scrolling ST, `0x21fda8` strips), all
+  additive (ALPHA 0x8000000048). The state part (frame, jitter draws) runs in `draw_callbacks::run_frame`; the drawing
+  is `rc-engine` `thruster_render` through `fx_draw`'s callback machinery.
+* **Sounds / lights**: none in this code (the Thruster's loop, class sound 0x12, is the hero's `packs::loop_sound`,
+  ported before); no point light.
+* Tests: `thruster_flame::tests` (the states, the exhaust per tick in 0x10 / 0x81 / 8, the idle wait, the frame),
+  `thruster_render::tests` (the geometry, the ST scroll, the tables on every level).
+
+### After-images (the "speed blur", 2026-09-28)
+The user's report: the original shows a speed / motion blur while thrusting. **The game has no screen-space blur**:
+`DrawWorld` 0x21a1b8's full-screen passes are the frame clear (`append_gif_transfer_packet` 0x222ee8), the AA blit
+`PutAABlitPacket_A` 0x223200 (a bilinear copy of the draw buffer, packet 0x151900: PRIM 0x16, no alpha blend), the
+fogged sprite, the underwater tint and the fades; Lombyte's "aa blur" stage is that AA blit. What reads as a blur is
+the **after-images**: `0x277400` / `0x277428` / `0x277508` / `0x277740` on a 0x140-byte record (a ring of the owner's
+last 8 positions and rotations, up to 4 ghost mobys of the owner's class drawn blended with their alpha +0x23, in the
+owner's current anim keys at the placement `back − 1` ticks old, faded by the caller), `rc_game::afterimage`. Users
+(every call site in level01):
+
+| record | user | ghosts (alpha @ ticks back) | fade | port |
+|---|---|---|---|---|
+| 0x1409c0 Ratchet | Thruster long jump 0x10 (SetState) | 0x28 @ 2, 0x14 @ 4, 0x0a @ 6 | 2 a tick after tick 12 | `jump.rs` entry, `packs::thruster_trail` |
+| 0x1409c0 | Thruster high jump 0xd (SetState) | 0x28 @ 3, 0x14 @ 5 | 2 a tick after tick 12 | same |
+| 0x1409c0 | gadget lunge 0x20 (physics, tick 8) | 0x30 @ 2, 0x17 @ 4, 0x0c @ 6 | 5 a tick after tick 18 | not ported (the lunge is entry-only) |
+| 0x1409c0 | ended by SetState (on foot), `HeroTeleport` 0x2368e0, the body switch 0x231348 | | | SetState: `states.rs`; the teleport's own kill and the body switch's are not wired (a teleport with a state ends it through SetState) |
+| 0x140b00 wrench | the Comet-Strike's throw `0x236da0` | 0x30 @ 3, 0x17 @ 5 | none; ended at the catch | `comet.rs` |
+
+`rc-engine` `afterimage_render` draws the ghosts as extra instances of the owner's class (Ratchet's, the gadget
+table's wrench) with the ghost's alpha and mode 0x80a (the blended moby group). One mechanism, both records; the game's
+ghosts are table mobys (they can fail to be created with a full table), the port's are not. Not modelled: the ghosts'
+low LOD (+0x72 = 0 for class 0), MobyProc's culls on them. The PCSX2 reference frame also shows the one-frame ghosting
+of an interlaced (frame-mode, 60 fields) picture deinterlaced by blending [L]: that is the emulator's display, not
+the game.
 
 ### Weapons + first person
 **Done (2026-09-26).**

@@ -78,6 +78,12 @@ impl Hero {
         self.stick_target(env, Pf::ONE);
         // The look stances under the first-person camera (0x1413f5): face the camera (super::stance).
         if (self.state == 1 || self.state == 0x1e) && self.f13f5 != 0 { super::stance::first_person_turn(self, env); }
+        // The stop 3 with a weapon that keeps the arm raised out: its stance instead, and nothing more this tick
+        // (`0x2370b8` → `0x242858`, then the physics' end; super::weapons::gun_stance).
+        if self.state == state::STOP && self.f13f8 != 0 && self.f13fa != 0 {
+            let mut c = super::states::Ctx { env, anim: &mut *anim, rng: &mut *rng, voice: None };
+            if super::weapons::gun_stance(self, &mut c) { return; }
+        }
         if self.state == state::CROUCH {
             let seq = anim.view().seq_b;
             if Pf::b(0x3e4c_cccd) < self.stick_mag || seq == 0xe || seq == 0xf {

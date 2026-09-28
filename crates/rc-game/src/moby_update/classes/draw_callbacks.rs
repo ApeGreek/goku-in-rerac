@@ -39,6 +39,9 @@ pub enum Callback {
     VendorBeam,
     /// A sea / liquid surface of `crate::water::sea::PORTS[i]` (draw only; list 1 or the after-ties list by port).
     Sea(u8),
+    /// A Thruster-Pack flame 0xa7 (level01 `0x2c9290`, list 2): its frame from the pack's pose and four `randf` corner
+    /// jitters here ([`super::thruster_flame::draw_callback`]); `rc-engine`'s thruster_render draws it.
+    ThrusterFlame,
 }
 
 /// The lists (registration order).
@@ -92,6 +95,7 @@ pub fn run_frame(w: &mut World) {
         if w.table.mobys.get(id).is_none_or(|m| m.state >= 0x80) { continue; }
         match cb {
             Callback::FireField760 => super::fire_field::draw_callback(w, id),
+            Callback::ThrusterFlame => super::thruster_flame::draw_callback(w, id),
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
             Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) => {}
         }

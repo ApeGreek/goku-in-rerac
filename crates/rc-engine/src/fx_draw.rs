@@ -724,6 +724,8 @@ fn draw_list1(
                         let rows = [0, 1, 2].map(|i| [mo.rows[i][0], mo.rows[i][1], mo.rows[i][2]]);
                         out.push(vendor_glow_points(&rows, [mo.position[0], mo.position[1], mo.position[2]], mo.glow, cam));
                     }
+                    // The Thruster-Pack's flames (crate::thruster_render).
+                    Callback::ThrusterFlame => out.extend(crate::thruster_render::flame_groups(&p.game, id, cam)),
                     // Drawn by crate::water_render / crate::sea_render.
                     Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) => {}
                 }

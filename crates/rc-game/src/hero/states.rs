@@ -76,6 +76,8 @@ impl Hero {
             self.frozen = 0;
             self.items.f13f7 = 0;
             self.f13ff = 0;
+            // 0x277740(0x1409c0): Ratchet's after-images end (crate::afterimage).
+            self.fx.trails.hero.kill();
         }
         let ok = self.set_state_body(c, id, play, old_sub);
         if ok && f7 != 0 && self.items.f13f7 == 0 { self.items.restore_pending = 1; }

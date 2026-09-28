@@ -63,7 +63,8 @@ Status: **P** ported, **P\*** ported in this pass, **part** partly, **–** not 
 | Pose-layer nodes (6 × 0x40 at 0x18efc0), alloc / free, start, advance | `FUN_00263e08`, `FUN_00263ec8`, `FUN_002641c0`, `FUN_00263f70` | **P\*** | `hero::anim::AnimLayer`. |
 | Layer decode and blend in the evaluator (`MobyProc` +0x60 list) and in the chain evaluator | `FUN_00267770`, `MobyAnimEvalChain` 0x268ee8 | **P\*** | `rc_formats::moby_anim::{evaluate_layered, evaluate_chains_layered}`. |
 | The weapon draw (arm layer on joint list 12, + list 13 when 0x1413fb = 2), upkeep, put away, holster | `0x22ee08`, `0x22f068`, `0x22efd8`, `0x2405f8` | **P\*** | `hero::weapons`. §2.4. |
-| Persistent-arm weapons (item +0x30 ≠ 0: the Blaster-type weapons keep the arm up): layer re-creation, standing pose, idle rules | `0x22eca0`, `0x242858`, idle transitions 0x242930 | **P\*** (§7) | `weapons::{arm_on_state_change, gun_stance, stance_kept, idle_stance}`. The glove-holding layers 0x140050 of `0x22e660` (0x1413fb) are not ported. |
+| Persistent-arm weapons (item +0x30 ≠ 0: the Blaster-type weapons keep the arm up): layer re-creation, standing pose, idle rules | `0x22eca0`, `0x242858`, idle transitions 0x242930 | **P\*** (§7) | `weapons::{arm_on_state_change, gun_stance, stance_kept, idle_stance}`. Fixed 2026-09-28 (§11): `0x242858` is called by the stop 3 (SetState and physics) and the walk's slow stop only, not by the walk's SetState, so Ratchet runs off from the stance while firing. |
+| **The glove-holding layers** (0x140050 / 0x140054, while the hand item's def +0x18 = 0x1413fb is set: list 12, and list 13 with 2): Ratchet's key replayed from the holding classes 1 / 2 on his arms | `0x22e660` (in `0x22f390`), `FUN_00264220` (the retargeted key), `0x22df10` (the special poses) | **P** (§11) | `weapons::hold_update`, `anim::{HoldClass, pose_layers_with}`, `rc_formats::moby_anim::{AltKeys, retarget_map}`. Not ported: the joint records 8 / 9 angles, the weapon lowered at walls `0x22b700`, the face layer `0x22e3a8` (G-WPN-011). |
 | Comet-Strike (0x15) | `0x2be1c0`, 0x236da0 | P | A full-body state: the wrench code never calls 0x22ee08 (xrefs: HeroPdaGadget and the weapon updates 0x2c7d68, 0x2cd458, 0x2ce448, 0x2d2450, 0x2e4e60, 0x303000). No layer to wire. |
 
 ### 1.6 Other hero-facing gaps (listed, not done)
@@ -278,7 +279,7 @@ layer: running, Ratchet keeps his run and the flame leaves the hand along his fa
 `particles::type12`: 2 glow puffs + 2 flames a tick, 12 units, cut 0.75 before walls), the kept flames' hit spheres
 and embers (type 2), two nozzle spheres, one ammo per 10 ticks, the flickering point light (7.5), the loop sound, the
 pilot flame (class 179, `classes::pyro_glow`), first person from below the eye along the view. The persistent-arm rules
-(def +0x30): `0x242858` (a walk / stop SetState or the walk's stop turns into the stance), `0x22eca0` (arm layers when
+(def +0x30): `0x242858` (the stop 3's SetState and physics, or the walk's slow stop, turn into the stance; §11), `0x22eca0` (arm layers when
 leaving idle), the idle keep / stance, `0x22efd8`'s return to idle. The hand item is not a table moby in the port:
 hits are Ratchet's, the pilot flame reads its owner's state from pvars; an item update's standing `SetAnim` is made
 right after the slot loop (`Weapons::pending_*`). Gold weapons (0x13e520) are not mirrored (0). Not ported: the hold
@@ -521,10 +522,9 @@ next update [L: one tick]; the lure moby is Ratchet's (the classes only test it 
 flight uses (0, 0, 1) for the stale normal [L]; the whistle's aliveness is the previous flush's
 (`HeroFx::item_loop_alive`). The chicken's suck record lives in its own pvars (+0xe0; the game: a global table).
 
-**Not ported** (gaps): the Morph-o-Ray and the chicken 270 (G-WPN-015); the vortex (`0x3067d0`, `0x306528`, draw
-callback `0x306158`, `0x307850` / `0x3078b8`) and its bolt / ammo vacuum `0x307a50` (their `rand` draws missing);
-particle type 18 (the flight trail: records and draws counted); the held-count HUD element; the Taunter's rings
-(`0x2cd000` / draw callback `0x2cd1d0`) and the mines' lure list 0x1b0c30 (batch 2); the gold cannon; the stats.
+**Not ported** (gaps): the Morph-o-Ray and the chicken 270 (G-WPN-015); particle type 18 (the flight trail: records and
+draws counted); the held-count HUD element; the mines' lure list 0x1b0c30 (batch 2); the gold cannon; the stats. (The vortex,
+the vacuum and the rings: §10.1.)
 
 **Tests** (`crates/rc-game/tests/hero_reactive_novalis.rs`, headless, every run twice identical): Novalis — a critter
 pulled (records 1 → 7 on the release → 2 → 3 → 4), held and hidden (held 1), fired (record 5 → 6) and burst at a wall
@@ -540,3 +540,135 @@ quaternion round trip, the class fallback), `suck_cannon::tests` (the groups). `
 Rilgar `RC_LEVEL=5 RC_HERO_AT=161.52519,326.2638,26.5,1.5708 RC_PLAY_SCRIPT='30-160:press CIRCLE'` — frames 50 / 54 /
 62: the small amoeboid in front, pulled, swallowed. The Taunter has no visible effect of its own yet (its rings are
 G-WPN-017).
+
+### 10.1 The hold fix, the vortex, the vacuum, the rings (2026-09-28, the user's play-test)
+
+**The report**: "it sucks once, for like a millisecond … you have to stand REAL close … you can't suck more than one
+enemy; the Taunter triggers once for a millisecond". **The cause** (found with a per-tick trace of the engine): the
+hold logic was the game's and ran continuously (state 3 for the whole hold, two critters held in sequence), but both
+items kept their looping sound on hand-item sound channel 0, which the Pyrocitor's `item_gone` releases every tick
+whenever another item is in the hand (`hero/items.rs`): the Suck Cannon's suction stopped a tick after it started, and
+the Taunter's whistle ended a tick after it started — so its update saw "not sounding", stopped (sequence 1) and could
+only whistle again after 17 ticks of ○: one-tick lures. **Fix**: a channel of their own (`fx::LOOP_ITEM`). And nothing
+was visible: the vortex and the rings were not ported.
+
+**Reach and strength (the game's, unchanged)**: 15 from the cannon, a 12° cone (squared radians 0.04386491; 110°
+within 3), the same in pitch, a clear line from the mouth; pulled at up to 0.75 a tick (+0.11 a tick); 5 held (10
+gold). Headless: an amoeboid 14.2 away is pulled; two are swallowed in sequence while ○ stays held.
+
+**The vortex** (`hero/suck_vortex.rs`, module doc): a 10-node path of 1.7-unit segments (reach 17) bending after
+the aim with a spring lag (≤ 18°) and a slow wobble, rings of 20 points (radius 0.1 + 0.3·i), node strengths from a
+line along the aim (the tube stops at a wall), up to 200 smoke strands (type-23 puffs) spiralling down the tube into
+the mouth and 2 loose puffs a tick; drawn as the tube's camera-facing quads (FX 0x15, additive) on draw list 2; it
+fades when not sucking and collapses (the strands flung out) at the stop. **The vacuum** (`suck_cannon::vacuum`,
+`0x307a50`): the pull's walk of the run list gives every other live moby a `randi(10)`; on 0 a bolt or ammo pickup
+(classes 0xcc, 0xd5, 0xd6, 0xde, 0xdf, 0xe1, 0xe2, 0x3ee) within 30 of Ratchet near a strong node is taken
+(`bolt::start_fly`, `pickup::collect` = `0x2db850`, factored out of the pickup's idle).
+
+**The rings** (`taunter::Rings`): while the whistle sequence plays, one every 10 ticks from the horn along the item's
+−row 1 at 20 u/s for 30 ticks, 0.3 → 10 wide, alpha 0x14 → 0 (faint by the game's constants), FX 8, colour 0x7f5050,
+additive, draw list 1. Engine: `rc-engine/src/reactive_render.rs` (both, on crate::fx_draw); the engine's hit sink now
+hands the particles to `HitSink::world` (the strands).
+
+**Tests** (`hero_reactive_novalis.rs`, a stand-in sound layer (`FakeSounds`) gives the whistle a length): the cannon
+sucks for the whole 360-tick hold with the vortex drawn every tick, node 0 at full strength, up to 200 strands, the
+vacuum taking the swallowed critters' bolts, then fades out; Rilgar: the far (14.2) and the near amoeboid swallowed in
+sequence; the Taunter whistles and lures in every 30-tick window of a 240-tick hold (the whistle sounding 200+ of the
+240 ticks), 3 rings out at a time. Unit: `suck_vortex::tests` (the circle table, the spring, the rotation sense, the
+vacuum's reach). Engine frames (two runs identical): `novalis_vortex_150.png` (the tube and the vacuumed bolts),
+`novalis_taunter_rings_078.png`.
+
+**Native / [L]**: standard `f32`; the rotation sense of `FUN_00274ac8` (turn toward the aim), the lerp form, the
+first-person second row, the scroll advanced at registration once a tick; the run list the pull walks is rebuilt in
+the hand item's update (the game uses the moby loop's).
+
+## 11. Holding the weapon: the glove-holding layers, standing → running fire, the R.Y.N.O. crash (2026-09-28, the user's play-test)
+
+**What the user saw** (recordings 16.35.21 / 16.47.33 of the original, 16.37.25 of the port): every weapon swung with
+Ratchet's one running arm (the Devastator bobbing up and down, pointing at the ground and the sky), where the original
+holds it level, the two-handed ones in both hands; firing a continuous weapon standing, he could not start running; the
+R.Y.N.O. crashed the game.
+
+**The holding layers `0x22e660`** [H: decompiler output of `0x22e660`, `FUN_00263e08` / `FUN_00263ec8` (alloc / free:
+the node is zeroed), `FUN_00263f70` (the advance: key flags +6 / +7 and the frame pointers +0x38 / +0x3c),
+`FUN_00264220` (the retargeted key), `0x22df10`, `0x22def8`, `HeroItemsCreate` 0x22f3c0 (0x1413fb = def +0x18); data:
+the level's moby classes 1 and 2]. Called first in `0x22f390` (the items' upkeep in `HeroItemsUpdate`, then `0x22f068`,
+then the face layer `0x22e3a8`). Per layer i (0 → node 0x140050 on joint list 12, the right arm with the hand item;
+1 → 0x140054 on list 13, the left arm):
+* **wanted** while 0x1413fb ≠ 0 (and for list 13, 0x1413fb = 2), not while the hand item is hidden (0x1413ff: the
+  node's +0x34 set, faded out for good). Made at weight 0 with node +0x18 = `0x197780[0x198040[i + 1]]`: **moby class
+  1 or 2**. Not wanted: weight → 0 by 0.1·[0x15ed60] a tick, then freed.
+* **weight** → 1 by 0.1 a tick, but → 0 while the weapon arm's layer 0x140058 is out and not fading (0x140064 = 0):
+  the firing arm replaces the holding arm, and comes back as the arm fades.
+* **keys**: it copies Ratchet's key (seq A / B +0x52 / +0x53, frames +0x50 / +0x51, t +0x54; key A only while he is
+  not blending, `FUN_0022def8` would map a 0xff key A to his +0xa5 but that never happens). When he blends into a new
+  sequence while the node is itself between two sequences, it first finishes its own blend at 0.15 a tick (+0x30).
+  In the special poses (`0x22df10`: his key B 0x1c / 0x1d / 0x1f, 0x31 / 0x32, 0x37, 0x4a / 0x4b, 0x50, 0x60, 0x6d /
+  0x6e) it blends to sequence 0 frame 0 over `ticks(15)` and plays it (speed 1); out of them it blends back to his key
+  B from frame 0 at 0.1 a tick (+0x32 / +0x33).
+* **the data**: a key on a sequence below 0x17 is read from the node's class (`FUN_00263f70` sets +6 / +7 and calls
+  `FUN_00264220`), any other from Ratchet's own. Classes 1 and 2 are animation-only (no mesh), 20 joints each, 23
+  sequences with the frame counts and key times of Ratchet's sequences 0..0x16 (seq 17: 27 frames against his 25); the
+  byte table after their joint-list word (class +0x1c + 4) retargets their joint k to Ratchet's joint 52 + k (class 1,
+  list 12) and 72 + k (class 2, list 13); their translation records already carry Ratchet's joint numbers (52 / 54 /
+  56). So on his idle, walk, run, jumps … the arm joints play the **holding** versions of the same frames: the gun stays
+  in his hand(s), level with his chest, while his legs and body run.
+* **which items** (def +0x18 of the level01 item table): 2 (both arms): Suck Cannon 9, Devastator 11 (and 36), Visibomb
+  13, Pyrocitor 16, Hydrodisplacer 22, R.Y.N.O. 23; 1 (the hand-item arm): Swingshot 12, Taunter 14, Blaster 15, Tesla
+  Claw 19, Morph-o-Ray 21, Trespasser 26, Metal Detector 27, Hologuise 31, PDA 32; 0: the wrench, the gloves (10, 17,
+  20, 24, 25), the Walloper 18, the packs, boots and helmets.
+
+**Aim steadiness.** The holding classes are the whole mechanism: there is no aim joint modifier or spine correction in
+the running path (the joint-record writers are the head look, the idle secondaries and `HeroLean`, §7). The guns' line
+of fire does not come from the muzzle's orientation either: the Blaster `0x2ca610`, the Devastator `0x2c7d68`, the
+R.Y.N.O. `0x2e4e60` and the Tesla Claw aim along Ratchet's moby rows (his facing; the camera in first person), only the
+spawn point is the muzzle (`FUN_002645a8` on the item's joint list). With the arm swinging, that spawn point went from
+the hip to above the head; now it stays in the holding pose. The Devastator's running shot still kicks the barrel up
+about 38° for a few ticks: that is its arm sequence 73 (the recoil, on lists 12 / 13 at full weight while the holding
+layers fade out), not the aim.
+
+**Standing → running fire.** `0x242858` (the persistent-arm stance: a weapon with def +0x30 out → `SetState(0, 0)` in
+its standing sequence) has three callers [H: xrefs; SetState 0x23cf98 case 3, `HeroStatePhysics` 0x2370b8 for state
+3, `HeroStateTransitions` 0x242930 state 2's slow stop]: the stop 3's SetState, the stop's physics, and the walk's
+slow stop. The walk's SetState (case 2 / 0x3f / 0x73) does **not** call it. The port called it in the walk entry, so
+the stick's `SetState(2)` out of the stance was turned back into the stance every tick: Ratchet could not run while
+holding ○. Now the walk starts (0x22eca0 brings the moving arm layer up: the Blaster's 57), he runs firing, and the
+stop / the slow stop / the stop's physics return him to the stance (the physics call added: `ground.rs`).
+
+**The R.Y.N.O. crash.** Reproduced in the engine (`RC_GIVE_ITEMS=23`, `RC_HERO_AT` 9 units from the critters, a
+scripted salvo): `attempt to multiply with overflow` at `rc_game::audio::Spu::mix`, the master volume stage
+`x · (reg << 1)` in `i32` on the exact sum of the 48 voices. A salvo's seven missiles each play class sound 1 and
+end in a beam explosion with sound 0: with three or more near full-scale voices the sum passes 65 538 and the product
+passes `i32` (a panic in the dev build, a full-scale wrap-around click in the release build). Fix: the product in 64
+bits (`audio::master_out`), then the clamp as before. The same class checked in the other guns: they share the mixer
+(fixed once); the Devastator's and the R.Y.N.O.'s missiles both wrote the target record's +0x1e..+0x20 while
+`targeting::record` only guarantees +0x14: now `targeting::mark_missile` (bounded) for both. No other panic path found
+in a stress run (the R.Y.N.O. standing, running, first person, at 17 places near and far, 520 ticks each).
+
+**In the port**: `rc_formats::moby_anim::{AltKeys, retarget_map}` (a pose layer's key from another class, remapped;
+`PoseLayer::alt`), `hero::anim::{HoldClass, HOLD_CLASSES, HOLD_SEQS, PoseNodes, pose_layers_with}` and
+`AnimLayer::{alt, own_blend, special, back, kill, born}` (a node's place in the +0x60 list: the newest first),
+`hero::weapons::{hold_update, hold_special, HOLD}` (`Weapons::layers` now holds the four nodes), the call in
+`items::items_update`; the engine loads classes 1 / 2 (`gameplay.rs` `hold_classes`, `RatchetAnim::hold`) for the
+palette and the shadows; the hand item and the joint points follow the holding arm through `eval_chains_with`.
+Native `f32`; no hardware modelling.
+
+**Inferred [L]**: the node order when a holding layer is remade while an arm layer is out (by creation stamp, as
+`FUN_00263e08` links); 0x15ed60 = 1 (NTSC).
+
+**Tests**: `weapons::tests::holding_layers` (per 0x1413fb, the fade under the arm layer, the special pose, the hidden
+hand), `targeting::tests::missile_mark_is_bounded`, `audio::tests::loud_mix_clamps_without_overflow`;
+`hero_guns_novalis`: `novalis_holding_layers_per_item` (Devastator / R.Y.N.O. two layers, Blaster one, Bomb Glove none,
+following the run at weight 1), `novalis_weapon_steady_while_running` (running 60 ticks: barrel pitch spread 13.1°,
+yaw 7.2°, height 0.16 with the holding classes against 97.9° / 124.9° / 0.30 without), `novalis_standing_fire_then_run`
+(Blaster and Tesla Claw: standing fire → running fire → the stance again; fails with the old walk entry),
+`novalis_ryno_salvo_sounds_mix_without_overflow` (the salvo's sounds through the audio system; panics with the old
+arithmetic). `novalis_blaster_standing_breaks_a_crate` now stands 6 units off (was 9): with the Blaster held up in the
+idle too, every shot from 9 units passes over that low crate (it sits in a dip 0.86 below him); it broke only because
+the first shot left from the lower no-weapon idle arm during the stance blend — the port's old pose, not the game's.
+`novalis_hero_digest` (`RC_HERO_DIGEST_NO_IDLE=1`) is byte-identical to HEAD's.
+
+**Frames** (scratchpad `weapon_hold/`): `orig_dev_run.png`, `orig_dev_fire.png` (the original, running with the
+Devastator), `ours_dev_run.png` (the port before, from the user's recording), `ours_after_dev_zoom.png`,
+`ours_after_ryno_run.png`, `ours_after_blaster_run.png` (after), `orig_stand_to_run.png` / `ours_after_stand_to_run.png`
+(standing fire → running fire).

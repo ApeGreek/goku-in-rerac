@@ -10,7 +10,7 @@ use rc_formats::moby_anim::{parse_sequence, parse_sequences, MobyAnimClass, Moby
 use rc_formats::save_game::{ChunkTables, ItemTables, SaveGameLump};
 use rc_formats::{collision, gadget, gameplay, level, moby_spawn};
 use rc_game::game_state::{GameState, SessionState};
-use rc_game::hero::anim::RatchetAnim;
+use rc_game::hero::anim::{HoldClass, RatchetAnim, HOLD_CLASSES};
 use rc_game::hero::items::{ItemClass, ItemData, ItemDef, WeaponDef, HERO_LISTS};
 use rc_game::hero::Hero;
 use rc_game::moby_runtime::{mode, MobyTable, Seq0Info};
@@ -41,6 +41,8 @@ struct Lv {
     tables: ItemTables,
     state: GameState,
     session: SessionState,
+    /// Ratchet's glove-holding classes 1 / 2 (`rc_game::hero::weapons::hold_update`).
+    hold: [Option<Arc<HoldClass>>; 2],
 }
 
 fn load() -> Option<Lv> {
@@ -111,7 +113,8 @@ fn load() -> Option<Lv> {
     state.on_veldin_clank_init(&mut session);
     state.apply_transition(1);
     state.apply_level_start(1, &tables, &mut session);
-    Some(Lv { mesh, instances, pvars, tests, splines, gp: gp.to_vec(), classes, spawnable, death_z, coll_blobs, ratchet, seconds, items, weapon_defs, tables, state, session })
+    let hold = HOLD_CLASSES.map(|oc| rc_formats::test_data::core_block(1, &format!("moby_class/{oc:04}")).and_then(|b| HoldClass::parse(&b)).map(Arc::new));
+    Some(Lv { mesh, instances, pvars, tests, splines, gp: gp.to_vec(), classes, spawnable, death_z, coll_blobs, ratchet, seconds, items, weapon_defs, tables, state, session, hold })
 }
 
 /// The hero's hit sink over the moby loop's services, as the engine's `CellHits` (with the guns' probe and class type).
@@ -184,6 +187,11 @@ struct Row {
     fp: u8,
     cam_pos: [f32; 3],
     rng: u32,
+    /// The glove-holding layers (lists 12 / 13): key A / key B sequence and weight.
+    hold: [Option<(u8, u8, f32)>; 2],
+    /// The hand item as `HeroItemsAttach` placed it this tick: position and rows; Ratchet's facing row.
+    item: Option<([f32; 3], [[f32; 3]; 3])>,
+    facing: [f32; 3],
 }
 
 /// What a run gives and watches.
@@ -202,7 +210,11 @@ fn give(lv: &Lv, item: i32) -> (GameState, SessionState) {
     (gs, session)
 }
 
-fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<Row> {
+fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<Row> { run_with(lv, s, input, ticks, true) }
+
+/// [`run`], with (`hold`) or without Ratchet's glove-holding classes on his animation (without: the holding layers run
+/// but are not evaluated, the arms play his own run).
+fn run_with(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32, hold: bool) -> Vec<Row> {
     let (gs, session) = give(lv, s.item);
     let classes = Arc::new(ClassTable { classes: lv.classes.classes.clone() });
     let mut ct = ClassTable { classes: lv.classes.classes.clone() };
@@ -245,6 +257,7 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
     game.finish_load();
     let mut anim = RatchetAnim::new(&lv.ratchet);
     anim.arm_joints = rc_game::hero::weapons::ARM_LISTS.map(|l| lv.seconds[l as usize].clone());
+    if hold { anim.hold = lv.hold.clone(); }
     let svc_cell = std::cell::RefCell::new(&mut svc);
     let parts_cell = std::cell::RefCell::new(&mut particles);
     let mut rows = Vec::new();
@@ -302,6 +315,9 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
             fp: h.f13f5,
             cam_pos: game.camera.out.pos_f32(),
             rng: game.rng.state,
+            hold: [2, 3].map(|i| h.weapons.layers[i].map(|l| (l.seq_a, l.seq_b, l.weight))),
+            item: h.items.slot.item.as_ref().map(|m| (m.position, m.rows.map(|r| [0, 1, 2].map(|k| f32::from_bits(r[k]))))),
+            facing: rc_game::hero::physics::to_f32x3(h.moby_rows[0]),
         });
     }
     rows
@@ -363,7 +379,11 @@ fn blaster_given_with_its_ammo_and_defs() {
 #[test]
 fn novalis_blaster_standing_breaks_a_crate() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
-    let s = Setup { item: 15, at: facing_crate(&lv, 9.0), watch: &[CRATE], shot_class: 305, part_types: &[27, 72, 26] };
+    // 6 units: the crate stands in a dip 0.86 below Ratchet and is about a unit high. With the Blaster in hand he holds
+    // it up in the idle too (the glove-holding layer, `0x22e660`), so from 9 units every shot passes over it (the
+    // search takes the nanotech crate 533 beyond); before the holding layer, the first shot left from the lower
+    // no-weapon idle arm during the stance blend and broke it.
+    let s = Setup { item: 15, at: facing_crate(&lv, 6.0), watch: &[CRATE], shot_class: 305, part_types: &[27, 72, 26] };
     let input = hold(60, 120);
     let rows = run(&lv, &s, &input, 220);
     dump(&rows);
@@ -659,4 +679,160 @@ fn novalis_tesla_beam_stops_at_a_crate() {
     assert!(rows[fire..fire + 60].iter().any(|r| r.beam.1 < 20), "the chain never stopped short");
     assert!(rows.iter().any(|r| r.watched[0] != rows[0].watched[0]), "the crate was not hit");
     assert_eq!(rows, run(&lv, &s, &input, 200), "deterministic");
+}
+
+
+// ------------------------------------------------------------------------------------------------------------------
+// Holding the weapon (the glove-holding layers `0x22e660`, docs/plan/hero_gameplay.md §11)
+
+/// Running forward from the spawn, no fire.
+fn run_only(t: u32) -> PadInput { if (20..=200).contains(&t) { PadInput::neutral().stick(0.0, -1.0) } else { PadInput::neutral() } }
+
+/// The hand item's barrel while running: its axis most along Ratchet's facing (sign kept), the axis's pitch and its
+/// yaw off the facing (degrees), the item origin's height above Ratchet; per tick of `from..to`.
+fn barrel(rows: &[Row], from: usize, to: usize) -> Vec<(f32, f32, f32)> {
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let score = |k: usize| rows[from..to].iter().map(|r| r.item.map_or(0.0, |(_, m)| dot(m[k], r.facing))).sum::<f32>();
+    let k = (0..3).max_by(|&a, &b| score(a).abs().total_cmp(&score(b).abs())).unwrap();
+    let sign = score(k).signum();
+    rows[from..to].iter().filter_map(|r| {
+        let (p, m) = r.item?;
+        let a = m[k].map(|x| x * sign);
+        let n = dot(a, a).sqrt();
+        let pitch = (a[2] / n).asin().to_degrees();
+        let yaw = (a[1].atan2(a[0]) - r.facing[1].atan2(r.facing[0])).to_degrees();
+        let yaw = (yaw + 540.0) % 360.0 - 180.0;
+        Some((pitch, yaw, p[2] - r.pos[2]))
+    }).collect()
+}
+
+fn spread(v: impl Iterator<Item = f32> + Clone) -> f32 { v.clone().fold(f32::MIN, f32::max) - v.fold(f32::MAX, f32::min) }
+
+/// Which items hold with which arms (def +0x18 → 0x1413fb): the Devastator and the R.Y.N.O. (2) both arms, the
+/// Blaster (1) the right arm only, the Bomb Glove (0) none; running, the layers follow Ratchet's run (his key B, a
+/// sequence below 0x17) at full weight.
+#[test]
+fn novalis_holding_layers_per_item() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    for (item, arms) in [(11, 2), (23, 2), (15, 1), (10, 0)] {
+        let s = Setup { item, at: spawn(&lv), watch: &[], shot_class: -1, part_types: &[] };
+        let rows = run(&lv, &s, &run_only, 150);
+        dump(&rows);
+        assert_eq!(lv.items.defs[item as usize].b18, arms, "item {item}: def +0x18");
+        for r in &rows[100..150] {
+            assert_eq!(r.state, 2, "item {item}: running");
+            let n = r.hold.iter().filter(|h| h.is_some()).count();
+            assert_eq!(n, arms as usize, "item {item}: holding layers {:?}", r.hold);
+            for h in r.hold.iter().flatten() {
+                assert_eq!(h.2, 1.0, "item {item}: full weight");
+                assert_eq!(h.1, r.seq, "item {item}: the layer follows Ratchet's key B");
+                assert!(h.1 < rc_game::hero::anim::HOLD_SEQS, "item {item}: a held sequence");
+            }
+        }
+    }
+}
+
+/// The weapon stays level in his hands while he runs: with the holding classes the barrel (the hand item's axis most
+/// along his facing) keeps its pitch and its yaw off his facing within a few degrees and its height within 0.2 over the
+/// run cycle; his own run animation (no holding classes: the port before) swings it by tens of degrees. The holding
+/// pose is the same for every gun (classes 1 / 2 are item-independent), so the Devastator, the R.Y.N.O. and the
+/// Blaster measure alike. The shots' direction is Ratchet's facing (`0x2c7d68`, `0x2e4e60`, `0x2ca610` read his
+/// moby rows, not the muzzle's), so a steady muzzle is a steady line of fire.
+#[test]
+fn novalis_weapon_steady_while_running() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    for item in [11, 23, 15] {
+        let s = Setup { item, at: spawn(&lv), watch: &[], shot_class: -1, part_types: &[] };
+        let held = barrel(&run_with(&lv, &s, &run_only, 150, true), 90, 150);
+        let free = barrel(&run_with(&lv, &s, &run_only, 150, false), 90, 150);
+        let sp = |v: &[(f32, f32, f32)]| (spread(v.iter().map(|x| x.0)), spread(v.iter().map(|x| x.1)), spread(v.iter().map(|x| x.2)));
+        let (hp, hy, hz) = sp(&held);
+        let (fp, fy, fz) = sp(&free);
+        eprintln!("item {item}: held pitch {hp:.2}° yaw {hy:.2}° height {hz:.3}; free pitch {fp:.2}° yaw {fy:.2}° height {fz:.3}");
+        if std::env::var("RC_GUNS_DUMP").is_ok() { for (a, b) in held.iter().zip(&free) { eprintln!("  {a:?} {b:?}"); } }
+        // The bounds are the holding classes' own sway over the walk / run cycle (measured: 13.1° / 7.2° / 0.16) with
+        // a margin; the port before them (his own arm swinging the gun) was 98° / 125° / 0.30.
+        assert!(hp < 16.0 && hy < 10.0 && hz < 0.2, "item {item}: held {hp} {hy} {hz}");
+        assert!(fp > 4.0 * hp && fy > 4.0 * hy, "item {item}: the holding layers are what keeps it steady");
+    }
+}
+
+/// Firing standing, then pushing the stick while still firing (the user's recording 16.47.33 of the original):
+/// Ratchet leaves the weapon's stance and runs on firing (SetState 2 has no `0x242858`; `0x22eca0` brings the arm up
+/// on his run), and when the stick is let go he stops back into the stance (the walk's slow stop → `0x242858`).
+/// The Blaster (arm layer 57 while moving) and the Tesla Claw (no moving arm layer: the holding layer keeps the claw).
+#[test]
+fn novalis_standing_fire_then_run() {
+    let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
+    let input = |t: u32| {
+        let mut p = PadInput::neutral();
+        if (110..=200).contains(&t) { p = p.stick(0.0, -1.0); }
+        if (60..=300).contains(&t) { p = p.press(button::CIRCLE); }
+        p
+    };
+    for (item, stance, shot_class) in [(15, 56u8, 305i16), (19, 51, -1)] {
+        let s = Setup { item, at: spawn(&lv), watch: &[], shot_class, part_types: &[] };
+        let rows = run(&lv, &s, &input, 320);
+        dump(&rows);
+        let firing = |r: &Row| if item == 15 { !r.shots.is_empty() } else { r.beam.0 };
+        assert!(rows[90..110].iter().all(|r| r.state == 0 && r.seq == stance && r.out == (1, 1) && firing(r)), "item {item}: standing and firing: {:?}", rows[100].state);
+        let run_from = rows[110..].iter().position(|r| r.state == 2).map(|k| k + 110).expect("never ran off while firing");
+        assert!(run_from < 125, "item {item}: ran at {run_from}");
+        let moved = ((rows[195].pos[0] - rows[105].pos[0]).powi(2) + (rows[195].pos[1] - rows[105].pos[1]).powi(2)).sqrt();
+        assert!(moved > 3.0, "item {item}: moved {moved}");
+        assert!(rows[140..195].iter().all(|r| r.state == 2 && r.out == (1, 1) && firing(r)), "item {item}: running and firing");
+        if item == 15 {
+            assert!(rows[140..195].iter().all(|r| r.layer == Some(57)), "the Blaster's arm layer 57 over the run");
+            let ids: std::collections::BTreeSet<usize> = rows[140..195].iter().flat_map(|r| r.shots.iter().map(|x| x.0)).collect();
+            assert!(ids.len() >= 5, "shots while running: {}", ids.len());
+        } else {
+            assert!(rows[140..195].iter().all(|r| r.hold[0].is_some_and(|h| h.2 == 1.0)), "the Tesla Claw in the holding arm");
+        }
+        assert!(rows[260..300].iter().all(|r| r.state == 0 && r.seq == stance), "item {item}: back in the stance: {:?}", (rows[260].state, rows[260].seq));
+        assert_eq!(rows, run(&lv, &s, &input, 320), "deterministic");
+    }
+}
+
+/// Regression (the R.Y.N.O. crash, 2026-09-28): a salvo's sounds — seven missiles' class sound 1 (class 457), 9 ticks
+/// apart, and their seven blasts (its sound 0) together, next to the listener (a salvo into a near target) — mix
+/// without an overflow. The engine panicked in the SPU's master stage (`rc_game::audio::master_out`: the 32-bit product
+/// of the voices' sum and the master volume) once the sum passed about two full-scale voices; this test panics on
+/// that arithmetic.
+#[test]
+fn novalis_ryno_salvo_sounds_mix_without_overflow() {
+    use rc_game::audio::voices::{Listener, SoundSlots};
+    use rc_game::audio::{AudioSystem, FrameInput, LevelAudio};
+    use rc_game::moby_update::services::SoundEvent;
+    let root = rc_formats::test_data::level_dir(1);
+    let (Ok(bank), Some(c), Some(gp), Ok(header)) = (std::fs::read(root.join("sound_bank.bin")), rc_formats::test_data::core(1), rc_formats::test_data::gameplay(1), std::fs::read(root.join("level_header.bin"))) else {
+        eprintln!("skipped: no extracted/");
+        return;
+    };
+    let data = LevelAudio::from_parts(&bank, &c.index, &c.core, &c.data, &gp, &header, &Default::default(), None).unwrap();
+    let mut sys = AudioSystem::new(data);
+    sys.slots = SoundSlots::new();
+    let pos = [150.0f32, 177.0, 41.0];
+    let listener = Listener { pos: [pos[0], pos[1], pos[2] + 1.0], rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], ..Default::default() };
+    let input = FrameInput { listener, hero_pos: pos };
+    let mut rng = Rng::new();
+    let (mut played, mut out, mut peak) = (0, Vec::new(), 0i32);
+    for frame in 0..90u32 {
+        // The salvo's seven launches, then its seven blasts at once.
+        if frame % 9 == 0 && frame < 63 {
+            let ev = SoundEvent { index: 1, flags: 0, moby: 900 + (frame / 9) as usize, o_class: 457, sound_class: 457, pos, tick: frame as u64 };
+            if sys.play_class_sound(&ev, None, &listener, &mut rng) >= 0 { played += 1; }
+        }
+        if frame == 60 {
+            for k in 0..7 {
+                let ev = SoundEvent { index: 0, flags: 0, moby: 900 + k, o_class: 457, sound_class: 457, pos, tick: frame as u64 };
+                if sys.play_class_sound(&ev, None, &listener, &mut rng) >= 0 { played += 1; }
+            }
+        }
+        out.clear();
+        sys.tick_with(&input, frame, &mut rng, &|_| Some(pos), &mut out);
+        peak = peak.max(out.iter().map(|s| (s[0] as i32).abs().max((s[1] as i32).abs())).max().unwrap_or(0));
+    }
+    eprintln!("played {played}, peak {peak}");
+    assert!(played >= 7, "the salvo's sounds play: {played}");
+    assert!(peak > 0, "and are heard");
 }

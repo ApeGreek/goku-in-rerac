@@ -55,6 +55,16 @@ pub fn record(m: &Moby) -> Option<usize> {
     (v != 0 && v + 0x14 <= m.pvars.len()).then_some(v)
 }
 
+/// The missiles' `record +0x1e |= 0x80` (the target learns a missile is on it: the Devastator's `0x2c5440` and the
+/// R.Y.N.O.'s `0x2e5738`). [`record`] only guarantees the record's first 0x14 bytes: a record that ends before
+/// +0x20 is left alone instead of indexing past the pvars.
+pub fn mark_missile(m: &mut Moby) {
+    let Some(r) = record(m) else { return };
+    let Some(b) = m.pvars.get_mut(r + 0x1e..r + 0x20) else { return };
+    let f = u16::from_le_bytes([b[0], b[1]]) | 0x80;
+    b.copy_from_slice(&f.to_le_bytes());
+}
+
 /// The record's `+0x10`: the aim point's height above the moby's position.
 pub fn aim_height(m: &Moby) -> Option<f32> {
     let r = record(m)?;
@@ -438,6 +448,18 @@ mod tests {
     }
 
     fn table(ms: Vec<Moby>) -> MobyTable { MobyTable::new(ms, 0) }
+
+    /// The missiles' mark: +0x1e |= 0x80 on a full record; a record cut short after +0x14 is left alone (no panic).
+    #[test]
+    fn missile_mark_is_bounded() {
+        let mut m = target([0.0; 3], 0.5);
+        mark_missile(&mut m);
+        assert_eq!(m.pvars[0x20 + 0x1e], 0x80);
+        let mut short = target([0.0; 3], 0.5);
+        short.pvars.truncate(0x20 + 0x14);
+        mark_missile(&mut short);
+        assert_eq!(short.pvars.len(), 0x34);
+    }
 
     #[test]
     fn the_list_and_the_record() {
