@@ -43,11 +43,9 @@
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
-use crate::moby_update::classes::debris::flash_spawn;
 use crate::moby_update::creature::projectile;
 use crate::moby_update::creature::{self as c, damage, flash, fx, ground, knock, target, turn, walker};
 use crate::moby_update::services::{pf as to_pf, pv, World};
-use crate::ps2v::Pf;
 use std::f32::consts::PI;
 
 pub const UPDATE_FN: u32 = 0x2e6bf0;
@@ -848,24 +846,8 @@ pub fn shot_update(w: &mut World, id: MobyId) {
     w.delete_moby(id);
 }
 
-/// `0x2fa1b0(size, light, moby, pos, sound)` with light 0: three spark pairs (type 11: `randf(8, 10)` speed, colours
-/// `randi(6)` ×2, lives `rand_range(ticks 15, 20)` / `(25, 30)`), the two flashes (2·size red-violet for `ticks(20)`,
-/// 1.5·size for `ticks(29)`) and the moby's class sound.
+/// `0x2fa1b0(size, 0, moby, pos, sound)`: the death explosion's code with its own flashes (2·size red-violet for
+/// `ticks(20)`, 1.5·size for `ticks(29)`) and no shake (`fx::SHOT_BURST`, docs/plan/explosions.md §C).
 fn shot_burst(w: &mut World, size: f32, id: MobyId, p: c::V, sound: i32) {
-    for _ in 0..3 {
-        let sp = w.rng.randf(8.0, 10.0) * c::DT;
-        let a = w.rng.randi(6) as usize;
-        let b = w.rng.randi(6) as usize;
-        let (t15, t20) = (w.ticks(15), w.ticks(20));
-        let life = w.rng.rand_range(t15, t20);
-        let (t25, t30) = (w.ticks(25), w.ticks(30));
-        let t1 = w.rng.rand_range(t25, t30);
-        w.part11(to_pf(size * 400000.0), to_pf(sp * size), pv(p), [Pf::ZERO; 4], fx::SPARK_A[a], fx::SPARK_B[b], life, t1, 0, 0);
-    }
-    let t = w.ticks(20);
-    flash_spawn(w, size + size, id, p, [0.0; 4], t, 0x7f, 0, 0x40, 0x30);
-    let t = w.ticks(0x1d);
-    flash_spawn(w, size * 1.5, id, p, [0.0; 4], t, 0x20, 0, 0x20, 0);
-    let s = w.m(id).state;
-    if s != 0xfe && s != 0xfd && sound != -1 { w.play_sound(sound, 0, id); }
+    fx::spark_burst(w, &fx::SHOT_BURST, size, 0.0, Some(id), p, sound);
 }

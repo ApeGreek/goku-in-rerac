@@ -875,71 +875,22 @@ pub fn land(w: &mut World, id: MobyId, r: usize, with_burst: bool) {
     slot_delete(w, id);
 }
 
-/// `0x304798(moby)`: the burst of a fired moby: the Bomb Glove's explosion effects at size k = 1 (2 gold) and half
-/// the fireballs (all gold): 10/n low and 4/n high fireballs (`0x2c4c20`), one toward the camera, the type-11 rings,
-/// the flashes (`0x309a68`), the camera shake, the light (template 0x20b7d0 = the bomb's 0x20a930); area hits (radius
-/// 3, `0x26f8f8` damage 2 flags 0x830000) only with the gold cannon. The low / high fireballs, the rings and the
-/// flashes carry the base velocity `(0, 0, 2·dt·k)` (sp+0x60: the bomb's drift in its explosion). No sound.
+/// `0x304798(moby)`: the burst of a fired moby: the Bomb Glove's explosion code (`classes::bomb::blast` with
+/// [`GLOVE_BLAST`](crate::moby_update::classes::bomb::GLOVE_BLAST): its tables 0x20b820 / 0x20b838 hold the bomb's
+/// words) at size k = 1 (2 gold), the fireballs divided by n = 2 (1 gold), the colours shifted by the gold flag
+/// 0x13e529 (`0x270fa8` / `0x270f48`); then the camera shake, the light (template 0x20b7d0 = the bomb's 0x20a930); area
+/// hits (radius 3, `0x26f8f8` damage 2 flags 0x830000) only with the gold cannon. Everything carries the base
+/// velocity `(0, 0, 2·dt·k)` (sp+0x60: the bomb's drift in its explosion). No sound.
 pub fn burst(w: &mut World, id: MobyId) {
     w.svc.creatures.react.bursts += 1;
     let gold = w.svc.creatures.react.gold;
     let k = gold as i32 as f32 + 1.0;
     let n = if gold { 1 } else { 2 };
     let pos = super::pos(w, id);
-    let cam = w.camera.map(|x| x.to_f32());
-    let to_cam = super::sub(cam, pos);
-    let dcam = super::len3(to_cam);
+    let dcam = super::len3(super::sub(w.camera.map(|x| x.to_f32()), pos));
     let up: V = [0.0, 0.0, 1.0, 0.0];
     let base: V = [0.0, 0.0, 2.0 * super::DT * k, 0.0];
-    let spread = |w: &mut World, lo: f32, hi: f32| -> V {
-        let x = w.rng.randf(-1.0, 1.0);
-        let y = w.rng.randf(-1.0, 1.0);
-        let mut v: V = [x, y, 0.0, 0.0];
-        let d = dot(v, up);
-        v = super::sub(v, super::scale(up, d));
-        let u = w.rng.randf(0.0, 1.0);
-        v = super::add(v, super::scale(up, u));
-        let s = w.rng.randf(lo, hi);
-        super::add(super::set_len3(v, k * s * super::DT), base)
-    };
-    for _ in 0..10 / n {
-        let v = spread(w, 3.5, 6.5);
-        let life = w.rng.rand_range(60, 120);
-        crate::moby_update::classes::bomb::fireball(w, pos, v, life, 0);
-    }
-    for _ in 0..4 / n {
-        let v = spread(w, 6.5, 10.0);
-        let life = w.rng.rand_range(60, 90);
-        crate::moby_update::classes::bomb::fireball(w, pos, v, life, 1);
-    }
-    let x = w.rng.randf(-1.0, 1.0);
-    let y = w.rng.randf(-1.0, 1.0);
-    let z = w.rng.randf(-1.0, 1.0);
-    let mut c = to_cam;
-    c[2] += dcam * 0.5;
-    let v = super::add(super::set_len3([x, y, z, 0.0], (dcam / 5.0) * super::DT), super::set_len3(c, (dcam + dcam) * super::DT));
-    let v = super::clamp_len3(v, super::DT * 10.0);
-    let life = w.rng.rand_range(60, 90);
-    crate::moby_update::classes::bomb::fireball(w, pos, v, life, 1);
-    let rings = if dcam < 6.0 { dcam as i32 + 1 } else { 4 };
-    let slow = if dcam < 7.0 { 7.0 - dcam } else { 0.0 };
-    for _ in 0..rings {
-        let s = w.rng.randf(8.0, 10.0);
-        let speed = k * s * super::DT - slow * super::DT;
-        let c1 = crate::moby_update::classes::bomb::RING_C1[w.rng.randi(6) as usize];
-        let c2 = crate::moby_update::classes::bomb::RING_C2[w.rng.randi(6) as usize];
-        let life = w.rng.rand_range(15, 20);
-        let t1 = w.rng.rand_range(25, 30);
-        w.part11(Pf::f(k * 400_000.0), Pf::f(speed), pos.map(Pf::f), base.map(Pf::f), c1, c2, life, t1, 0, 0);
-    }
-    let fl = crate::moby_update::classes::bomb::flash;
-    if 9.0 < dcam {
-        fl(w, k * 4.0, id, pos, base, 15, 0x7f, 0x7f, 0x7f, 0x20);
-        fl(w, k * 4.0, id, pos, base, 24, 0x7f, 0x20, 0, 0x20);
-    }
-    fl(w, k * 4.0, id, pos, base, 20, 0x7f, 0x3f, 0, 0x30);
-    fl(w, k * 3.5, id, pos, base, 27, 0x60, 0x10, 0, 0x40);
-    fl(w, k * 3.0, id, pos, base, 29, 0x20, 0, 0, 0x20);
+    crate::moby_update::classes::bomb::blast(w, &crate::moby_update::classes::bomb::GLOVE_BLAST, id, pos, base, up, k, n, true, gold as u8);
     let amp = if dcam < 20.0 { 0.4 - dcam * 0.0175 } else { f32::from_bits(0x3d4c_ccd0) };
     let t = w.ticks(25);
     w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp, ticks: t });

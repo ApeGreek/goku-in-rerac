@@ -71,8 +71,8 @@ pub mod pv {
 }
 
 /// `0x20aa50` / `0x20aa68`: the rings' and puffs' colours (`randi(6)` each).
-const COL_A: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
-const COL_B: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
+const COL_A: [u32; 6] = fx::SPARK_A;
+const COL_B: [u32; 6] = fx::SPARK_B;
 
 /// `0x2c5440` from the Devastator's update (module doc).
 #[allow(clippy::too_many_arguments)]

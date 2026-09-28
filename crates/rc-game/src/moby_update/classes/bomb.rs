@@ -27,8 +27,14 @@
 //! The water branch (entry splash, ripple and drops, the sinking bubbles, the deep burst and its sound, the
 //! shallow-water scorch and sparks) is [`super::bomb_water`], with the game's draws.
 //!
-//! Native `f32`. **Not ported** (counted in `Services::fx.unported`): the aim-preview `0x2c2be0`, the pass-through classes of the hit test (update `0x160770`), the
-//! gold-glove colour shifts (`0x270fa8`, `0x270f48`: identity without the gold glove).
+//! **One blast, three callers** ([`blast`], [`BlastRow`], [`spawn_fireball`] / [`FireballRow`]; docs/plan/explosions.md
+//! §B): the fireballs / rings / flashes of the explosion are the same compiled code in this update, in the Suck
+//! Cannon's burst `0x304798` (`creature::react::burst`) and in Gemlik's tanks `0x3073c8` (`units::explosive_tank`),
+//! with other constants (size k, fireball divisor, colour tables, fireball class).
+//!
+//! Native `f32`. **Not ported** (counted in `Services::fx.unported`): the aim-preview `0x2c2be0`, the pass-through
+//! classes of the hit test (update `0x160770`), the gold glove (0x13e52a: k = 2, the colour shifts `0x270fa8` /
+//! `0x270f48` [`blast`] takes, the gold smoke of the fireballs, class sound 1; not mirrored, G-WPN gold).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{self as sv, pvar as p, HitTemplate, World};
@@ -377,8 +383,8 @@ const TRAIL_SPREAD: f32 = 1.0;
 const SMOKE: [u32; 4] = [0x2fff_ffff, 0x2f00_ffff, 0x2f00_7fff, 0x2f00_4fff];
 
 /// The smoke rings' colours (`0x20a980`, `0x20a998`: `randi(6)` each).
-pub(crate) const RING_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
-pub(crate) const RING_C2: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
+pub(crate) const RING_C1: [u32; 6] = crate::moby_update::creature::fx::SPARK_A;
+pub(crate) const RING_C2: [u32; 6] = crate::moby_update::creature::fx::SPARK_B;
 
 /// The explosion (+0xbc ≠ 0; `drift` = the reflected direction ·2·dt (or the velocity at the fuse's end),
 /// `normal` = the unit normal of the face it hit).
@@ -397,67 +403,10 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
         w.sphere_mobys(Pf::f(k * 0.5), pv4(pos), 0x10, Some(id), Some(&tmpl));
         w.mm(id).state = EXPLODING;
     }
-    // The fireballs spreading along the face: 10 low ones (type 0), then 4 high ones (type 1).
-    let spread = |w: &mut World, lo: f32, hi: f32| -> [f32; 4] {
-        let x = w.rng.randf(-1.0, 1.0);
-        let y = w.rng.randf(-1.0, 1.0);
-        let mut v = [x, y, 0.0, 0.0];
-        let d = dot3(v, normal);
-        v = sub3(v, [normal[0] * d, normal[1] * d, normal[2] * d, 0.0]);
-        let u = w.rng.randf(0.0, 1.0);
-        v = add3(v, [normal[0] * u, normal[1] * u, normal[2] * u, 0.0]);
-        let s = w.rng.randf(lo, hi);
-        add3(setlen(v, k * s * dt()), drift)
-    };
-    for _ in 0..10 {
-        let v = spread(w, 3.5, 6.5);
-        let life = w.rng.rand_range(60, 120);
-        fireball(w, pos, v, life, 0);
-    }
-    if dry {
-        for _ in 0..4 {
-            let v = spread(w, 6.5, 10.0);
-            let life = w.rng.rand_range(60, 90);
-            fireball(w, pos, v, life, 1);
-        }
-        // One toward the camera.
-        let x = w.rng.randf(-1.0, 1.0);
-        let y = w.rng.randf(-1.0, 1.0);
-        let z = w.rng.randf(-1.0, 1.0);
-        let mut c = to_cam;
-        c[2] += dcam * 0.5;
-        let mut v = add3(setlen([x, y, z, 0.0], (dcam / 5.0) * dt()), setlen(c, (dcam + dcam) * dt()));
-        let l = len3(v);
-        if l > dt() * 10.0 { v = setlen(v, dt() * 10.0); }
-        let life = w.rng.rand_range(60, 90);
-        fireball(w, pos, v, life, 1);
-        // The smoke rings (type 11), 1..4 by the camera distance, slower when the camera is close.
-        let n = if dcam < 6.0 { dcam as i32 + 1 } else { 4 };
-        let slow = if dcam < 7.0 { 7.0 - dcam } else { 0.0 };
-        for _ in 0..n {
-            let s = w.rng.randf(8.0, 10.0);
-            let speed = k * s * dt() - slow * dt();
-            let c1 = RING_C1[w.rng.randi(6) as usize];
-            let c2 = RING_C2[w.rng.randi(6) as usize];
-            let life = w.rng.rand_range(15, 20);
-            let t1 = w.rng.rand_range(25, 30);
-            w.part11(Pf::f(k * 400_000.0), Pf::f(speed), pv4(pos), pv4(drift), c1, c2, life, t1, 0, 0);
-        }
-        // The flashes (class 1192).
-        if dcam > 9.0 {
-            flash(w, k * 4.0, id, pos, drift, 15, 0x7f, 0x7f, 0x7f, 0x20);
-            flash(w, k * 4.0, id, pos, drift, 24, 0x7f, 0x20, 0, 0x20);
-        }
-        flash(w, k * 4.0, id, pos, drift, 20, 0x7f, 0x3f, 0, 0x30);
-        flash(w, k * 3.5, id, pos, drift, 27, 0x60, 0x10, 0, 0x40);
-        flash(w, k * 3.0, id, pos, drift, 29, 0x20, 0, 0, 0x20);
-        let m = w.mm(id);
-        p::set_ff(&mut m.pvars, pv::VEL, 0.0);
-    } else {
-        super::bomb_water::deep_burst(w, id, k);
-        let m = w.mm(id);
-        p::set_ff(&mut m.pvars, pv::VEL, 0.0);
-    }
+    // The fireballs, rings and flashes (the explosion code the Suck Cannon's burst and Gemlik's tanks share).
+    blast(w, &GLOVE_BLAST, id, pos, drift, normal, k, 1, dry, 0);
+    if !dry { super::bomb_water::deep_burst(w, id, k); }
+    p::set_ff(&mut w.mm(id).pvars, pv::VEL, 0.0);
     w.mm(id).cmd = 0;
     if dry {
         w.play_sound(0, 0, id);
@@ -478,20 +427,46 @@ fn explode(w: &mut World, id: MobyId, drift: [f32; 4], normal: [f32; 4]) {
     exploding(w, id);
 }
 
-/// `FUN_002c4c20(pos, vel, life, type, gold)`: a fireball (class 122): 2 spin draws `randf(360°, 720°)·dt`, and for
-/// type 0 a smaller size (`randf(0.5, 0.75)`).
-pub(crate) fn fireball(w: &mut World, pos: [f32; 4], vel: [f32; 4], life: i32, ty: u8) {
-    let Some(m) = w.create_moby(FIREBALL_CLASS) else { return };
+/// A fireball spawner: `0x2c4c20` (class 122, every level) and its level13 copy `0x30c138` (class 1634, Gemlik's
+/// tanks) are one code with these constants (docs/plan/explosions.md §B).
+#[derive(Clone, Copy, Debug)]
+pub struct FireballRow {
+    pub class: i16,
+    /// The alpha: `rand_range(lo, hi)` (drawn first), or 0x80 when `None`.
+    pub alpha: Option<(i32, i32)>,
+    /// The ambient colour (`0x2650d0`).
+    pub ambient: [u8; 3],
+    /// A last scale factor `randf(lo, hi)` (drawn after the shrink) when `Some`.
+    pub grow: Option<(f32, f32)>,
+    /// +0xbc carries the gold flag in bit 1 (`type | gold << 1`); else the type alone.
+    pub gold_bits: bool,
+}
+
+/// `0x2c4c20`: the Bomb Glove's fireball.
+pub const GLOVE_FIREBALL: FireballRow = FireballRow { class: FIREBALL_CLASS, alpha: None, ambient: [0x7f, 0x7f, 0x7f], grow: None, gold_bits: true };
+
+/// `FUN_002c4c20(pos, vel, life, type, gold)` (with [`GLOVE_FIREBALL`]): a fireball (class 122).
+pub(crate) fn fireball(w: &mut World, pos: [f32; 4], vel: [f32; 4], life: i32, ty: u8) { spawn_fireball(w, &GLOVE_FIREBALL, pos, vel, life, ty, 0); }
+
+/// The fireball spawners ([`FireballRow`]): `CreateMoby(class)`, drawn, distances 0xff, the alpha (the tank's
+/// `rand_range(0x40, 0x80)`), the ambient, the position (the whole quadword), the velocity (+0x00), two spins
+/// `randf(2π, 4π)·dt` (+0x10 / +0x14), the life (+0x18 timer, +0x1a start), type 0: scale ·`randf(0.5, 0.75)`;
+/// +0x1c = the scale; the tank's scale ·`randf(2, 5)`; +0xbc = the type (| gold << 1); the matrix.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_fireball(w: &mut World, row: &FireballRow, pos: [f32; 4], vel: [f32; 4], life: i32, ty: u8, gold: u8) {
+    let Some(m) = w.create_moby(row.class) else { return };
+    let alpha = match row.alpha { Some((lo, hi)) => w.rng.rand_range(lo, hi) as u8, None => 0x80 };
     let a = w.rng.randf(dt() * 2.0 * PI, dt() * 4.0 * PI);
     let b = w.rng.randf(dt() * 2.0 * PI, dt() * 4.0 * PI);
     let shrink = if ty == 0 { Some(w.rng.randf(0.5, 0.75)) } else { None };
+    let grow = row.grow.map(|(lo, hi)| w.rng.randf(lo, hi));
     let mo = w.mm(m);
     mo.visible = 1;
-    mo.alpha = 0x80;
+    mo.alpha = alpha;
     mo.draw_dist = 0xff;
     mo.update_dist = 0xff;
-    mo.ambient = [0x7f, 0x7f, 0x7f, mo.ambient[3]];
-    mo.position = [pos[0], pos[1], pos[2], mo.position[3]];
+    mo.ambient = [row.ambient[0], row.ambient[1], row.ambient[2], mo.ambient[3]];
+    mo.position = pos;
     if mo.pvars.len() < 0x20 { mo.pvars.resize(0x20, 0); }
     p::set_v4f(&mut mo.pvars, 0, vel);
     p::set_ff(&mut mo.pvars, 0x10, a);
@@ -501,35 +476,113 @@ pub(crate) fn fireball(w: &mut World, pos: [f32; 4], vel: [f32; 4], life: i32, t
     if let Some(s) = shrink { mo.scale *= s; }
     let sc = mo.scale;
     p::set_ff(&mut mo.pvars, 0x1c, sc);
-    mo.cmd = ty;
+    mo.cmd = if row.gold_bits { ty | gold << 1 } else { ty };
+    if let Some(g) = grow { mo.scale *= g; }
     w.build_matrix(m);
 }
 
-/// `FUN_00309a68(size, parent, pos, vec, T, r, g, b, a)`: a flash of class 1192 (3 draws for its rotation), the
-/// shared `FlashUpdate` (`super::debris::flash_update`) growing it to `size` × its class scale over `T` ticks.
+/// One of a blast's five flashes: size (× k), duration T (ticks), colour and alpha.
+#[derive(Clone, Copy, Debug)]
+pub struct BlastFlash {
+    pub size: f32,
+    pub t: i32,
+    pub rgba: [u8; 4],
+}
+
+/// The explosion code the Bomb Glove's bomb (inline in `0x2c3300`), the Suck Cannon's fired creature (`0x304798`)
+/// and Gemlik's tanks (level13 `0x3073c8`) were compiled from, as data (docs/plan/explosions.md §B): the fireball
+/// spawner, the rings' colour tables, the five flashes (class 1192, `debris::FLASH_BOMB`; the first two only when the
+/// camera is farther than 9).
+#[derive(Clone, Copy, Debug)]
+pub struct BlastRow {
+    pub fireball: FireballRow,
+    pub ring_c1: [u32; 6],
+    pub ring_c2: [u32; 6],
+    pub flashes: [BlastFlash; 5],
+}
+
+const fn bf(size: f32, t: i32, r: u8, g: u8, b: u8, a: u8) -> BlastFlash { BlastFlash { size, t, rgba: [r, g, b, a] } }
+
+/// The Bomb Glove's (and the Suck Cannon burst's: its tables 0x20b820 / 0x20b838 hold the same words as 0x20a980 /
+/// 0x20a998, its flashes the same constants).
+pub const GLOVE_BLAST: BlastRow = BlastRow {
+    fireball: GLOVE_FIREBALL,
+    ring_c1: RING_C1,
+    ring_c2: RING_C2,
+    flashes: [bf(4.0, 15, 0x7f, 0x7f, 0x7f, 0x20), bf(4.0, 24, 0x7f, 0x20, 0, 0x20), bf(4.0, 20, 0x7f, 0x3f, 0, 0x30), bf(3.5, 27, 0x60, 0x10, 0, 0x40), bf(3.0, 29, 0x20, 0, 0, 0x20)],
+};
+
+/// The blast (row, the moby `id`, at `pos`; `base` the velocity every piece carries (the bomb's drift, the others'
+/// `(0, 0, 2·dt)·k`), `normal` the face the spread keeps to, `k` the size (the gold glove / cannon: 2; the tank 1.5),
+/// `n` the fireball divisor (the non-gold Suck Cannon: 2), `dry` false: only the low fireballs (the bomb under water),
+/// `shift` the colour shift `0x270fa8` / `0x270f48` of the rings and the last four flashes (the gold glove / cannon)).
+/// In the game's order: 10/n low fireballs (a random xy direction flattened onto the face, pushed `randf(0, 1)` off
+/// it, `randf(3.5, 6.5)·k·dt` fast, plus `base`, `rand_range(ticks(60), ticks(120))`), 4/n high ones (`randf(6.5,
+/// 10)`, `(ticks(60), ticks(90))`), one toward the camera (a random `(d/5)·dt` plus `2d·dt` toward it, 0.5·d up, at
+/// most `10·dt`), the rings (type 11: `trunc(d) + 1` within 6 else 4; `randf(8, 10)·k·dt`, less `(7 − d)·dt` within
+/// 7; sprite `k·400000`), the flashes.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn flash(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec: [f32; 4], t: i32, r: u8, g: u8, b: u8, a: u8) {
-    let Some(m) = w.create_moby(FLASH_CLASS) else { return };
-    let e = [w.rng.randf(-PI, PI), w.rng.randf(-PI, PI), w.rng.randf(-PI, PI), 0.0];
-    let mo = w.mm(m);
-    mo.state = 0;
-    mo.alpha = a;
-    mo.visible = 1;
-    mo.update_dist = 0xff;
-    mo.draw_dist = 0xff;
-    mo.ambient = [r, g, b, 0];
-    if mo.pvars.len() < 0x20 { mo.pvars.resize(0x20, 0); }
-    let full = mo.scale * size;
-    p::set_ff(&mut mo.pvars, 0x18, full);
-    mo.scale = 0.0;
-    p::set_i32(&mut mo.pvars, 0x10, parent as i32 + 1);
-    mo.position = [pos[0], pos[1], pos[2], mo.position[3]];
-    p::set_v4f(&mut mo.pvars, 0, vec);
-    mo.rotation = e;
-    p::set_i16(&mut mo.pvars, 0x1e, a as i16);
-    p::set_i32(&mut mo.pvars, 0x14, t);
-    p::set_i16(&mut mo.pvars, 0x1c, t as i16);
-    w.build_matrix(m);
+pub fn blast(w: &mut World, row: &BlastRow, id: MobyId, pos: [f32; 4], base: [f32; 4], normal: [f32; 4], k: f32, n: i32, dry: bool, shift: u8) {
+    use crate::moby_update::creature::{add, clamp_len3, len3, set_len3, sub};
+    use crate::moby_update::creature::fx::colour_shift;
+    let cam = w.camera.map(|x| x.to_f32());
+    let to_cam = sub(cam, pos);
+    let dcam = len3(to_cam);
+    let spread = |w: &mut World, lo: f32, hi: f32| -> [f32; 4] {
+        let x = w.rng.randf(-1.0, 1.0);
+        let y = w.rng.randf(-1.0, 1.0);
+        let mut v = [x, y, 0.0, 0.0];
+        let d = dot3(v, normal);
+        v = sub(v, set_len3(normal, d));
+        let u = w.rng.randf(0.0, 1.0);
+        v = add(v, set_len3(normal, u));
+        let s = w.rng.randf(lo, hi);
+        add(set_len3(v, k * s * dt()), base)
+    };
+    for _ in 0..10 / n {
+        let v = spread(w, 3.5, 6.5);
+        let (a, b) = (w.ticks(60), w.ticks(120));
+        let life = w.rng.rand_range(a, b);
+        spawn_fireball(w, &row.fireball, pos, v, life, 0, shift);
+    }
+    if !dry { return; }
+    for _ in 0..4 / n {
+        let v = spread(w, 6.5, 10.0);
+        let (a, b) = (w.ticks(60), w.ticks(90));
+        let life = w.rng.rand_range(a, b);
+        spawn_fireball(w, &row.fireball, pos, v, life, 1, shift);
+    }
+    let x = w.rng.randf(-1.0, 1.0);
+    let y = w.rng.randf(-1.0, 1.0);
+    let z = w.rng.randf(-1.0, 1.0);
+    let mut c = to_cam;
+    c[2] += dcam * 0.5;
+    let v = add(set_len3([x, y, z, 0.0], (dcam / 5.0) * dt()), set_len3(c, (dcam + dcam) * dt()));
+    let v = clamp_len3(v, dt() * 10.0);
+    let (a, b) = (w.ticks(60), w.ticks(90));
+    let life = w.rng.rand_range(a, b);
+    spawn_fireball(w, &row.fireball, pos, v, life, 1, shift);
+    let rings = if dcam < 6.0 { dcam as i32 + 1 } else { 4 };
+    let slow = if dcam < 7.0 { 7.0 - dcam } else { 0.0 };
+    for _ in 0..rings {
+        let s = w.rng.randf(8.0, 10.0);
+        let speed = k * s * dt() - slow * dt();
+        let c1 = colour_shift(row.ring_c1[w.rng.randi(6) as usize], shift);
+        let c2 = colour_shift(row.ring_c2[w.rng.randi(6) as usize], shift);
+        let (a, b) = (w.ticks(15), w.ticks(20));
+        let life = w.rng.rand_range(a, b);
+        let (a, b) = (w.ticks(25), w.ticks(30));
+        let t1 = w.rng.rand_range(a, b);
+        w.part11(Pf::f(k * 400_000.0), Pf::f(speed), pv4(pos), pv4(base), c1, c2, life, t1, 0, 0);
+    }
+    for (i, f) in row.flashes.iter().enumerate() {
+        if i < 2 && dcam <= 9.0 { continue; }
+        let [r, g, b, a] = f.rgba;
+        // `0x270f48(&r, &g, &b, shift)`: every flash but the first.
+        let c = if i == 0 { r as u32 | (g as u32) << 8 | (b as u32) << 16 } else { colour_shift(r as u32 | (g as u32) << 8 | (b as u32) << 16, shift) };
+        let t = w.ticks(f.t);
+        super::debris::flash_spawn_as(w, &super::debris::FLASH_BOMB, k * f.size, id, pos, base, t, c as u8, (c >> 8) as u8, (c >> 16) as u8, a);
+    }
 }
 
 /// `0x2c4d88`: the fireball.
@@ -760,6 +813,98 @@ mod tests {
         assert_eq!(spawned.get(&4).copied().unwrap_or(0), smoke_updates as u64);
         // The light took a point-light slot and gave it back when it ended.
         assert!(svc.point_lights.active().next().is_none());
+    }
+
+    // ---------------------------------------------------------------------------------------------------------
+    // The shared blast (docs/plan/explosions.md §B): one test per caller's row, and the flash kinds.
+
+    const TANK_BALL: i16 = crate::moby_update::classes::units::explosive_tank::FIREBALL;
+
+    /// A world with the blast's classes (the glove's fireball 122, the tank's 1634, the flash 1192) and a source moby 0
+    /// at (100, 100, 50); the camera `cam` units away along x.
+    fn blast_run(row: &BlastRow, k: f32, n: i32, dry: bool, shift: u8, cam: f32) -> (MobyTable, Services, usize) {
+        let mut ct = ClassTable::default();
+        for (slot, oc) in [(1u8, FIREBALL_CLASS), (2, TANK_BALL), (3, FLASH_CLASS)] {
+            ct.classes.insert(oc, (ClassInfo { slot, scale: 1.0, ..Default::default() }, None));
+        }
+        let mut src = Moby::init_instance(0, 0, Some(&ClassInfo { scale: 1.0, ..Default::default() }));
+        src.position = [100.0, 100.0, 50.0, 1.0];
+        let mut table = MobyTable::new(vec![src], 96);
+        let hero = Hero::new();
+        let mut rng = Rng::new();
+        rng.srand(crate::rng::LEVEL_SEED);
+        let mut svc = Services::new();
+        let s0 = rng.state;
+        {
+            let mut w = World::new(&mut table, &hero, &mut rng, &ct, &mut svc, 1);
+            w.camera = [Pf::f(100.0 + cam), Pf::f(100.0), Pf::f(50.0), Pf::ONE];
+            let base = [0.0, 0.0, 2.0 * dt() * k, 0.0];
+            blast(&mut w, row, 0, [100.0, 100.0, 50.0, 1.0], base, [0.0, 0.0, 1.0, 0.0], k, n, dry, shift);
+        }
+        let d = draws(s0, rng.state);
+        (table, svc, d)
+    }
+
+    fn alive(t: &MobyTable, oc: i16) -> Vec<&Moby> { t.mobys.iter().filter(|m| m.o_class == oc && m.state < 0x80).collect() }
+
+    /// The Bomb Glove's row (`0x2c3300`, k = 1): 10 low + 4 high + 1 camera fireballs of class 122 (alpha 0x80, ambient
+    /// 0x7f, +0xbc = the type), 4 rings, 5 flashes of class 1192 beyond 9 (sizes 4 / 4 / 4 / 3.5 / 3, T 15 / 24 / 20 /
+    /// 27 / 29, the timer at T and the size at 0: no head start), 3 within 9; under water (dry = false) only the 10 low
+    /// ones. Draws: 10·(4 + 1 + 3) + 4·(4 + 1 + 2) + (3 + 1 + 2) + 4·5 (+ the type-11 spawner's own with particles) + 5·3.
+    #[test]
+    fn blast_glove_row() {
+        let (t, svc, d) = blast_run(&GLOVE_BLAST, 1.0, 1, true, 0, 30.0);
+        let balls = alive(&t, FIREBALL_CLASS);
+        assert_eq!(balls.len(), 15);
+        assert!(balls.iter().all(|m| m.alpha == 0x80 && m.ambient[..3] == [0x7f, 0x7f, 0x7f] && m.cmd <= 1));
+        assert_eq!(balls.iter().filter(|m| m.cmd == 0).count(), 10);
+        let fl = alive(&t, FLASH_CLASS);
+        let got: Vec<(f32, i32, i16, [u8; 3], u8)> = fl.iter().map(|m| (p::ff(&m.pvars, 0x18), p::i32(&m.pvars, 0x14), p::i16(&m.pvars, 0x1c), [m.ambient[0], m.ambient[1], m.ambient[2]], m.alpha)).collect();
+        assert_eq!(got, vec![(4.0, 15, 15, [0x7f, 0x7f, 0x7f], 0x20), (4.0, 24, 24, [0x7f, 0x20, 0], 0x20), (4.0, 20, 20, [0x7f, 0x3f, 0], 0x30), (3.5, 27, 27, [0x60, 0x10, 0], 0x40), (3.0, 29, 29, [0x20, 0, 0], 0x20)]);
+        assert!(fl.iter().all(|m| m.scale == 0.0));
+        assert_eq!(svc.fx.flashes, 5);
+        // Without a particle system the ring spawns make only their throttle's draws (none at load 0).
+        assert_eq!(d, 10 * 8 + 4 * 7 + 6 + 4 * 5 + 5 * 3);
+        let (t, _, _) = blast_run(&GLOVE_BLAST, 1.0, 1, true, 0, 5.0);
+        assert_eq!(alive(&t, FLASH_CLASS).len(), 3, "within 9: the last three flashes");
+        let (t, _, d) = blast_run(&GLOVE_BLAST, 1.0, 1, false, 0, 30.0);
+        assert_eq!((alive(&t, FIREBALL_CLASS).len(), alive(&t, FLASH_CLASS).len(), d), (10, 0, 80), "under water: the low fireballs only");
+    }
+
+    /// The Suck Cannon burst's row (`0x304798`): the glove's tables at k = 1 with the fireballs halved (5 + 2 + 1);
+    /// the gold cannon (k = 2, n = 1, shift 1): all 15, the flashes twice the size, the last four with red and green
+    /// swapped (`0x270f48`), the first unshifted, and the fireballs' +0xbc carrying the gold bit.
+    #[test]
+    fn blast_suck_cannon_row() {
+        let (t, _, _) = blast_run(&GLOVE_BLAST, 1.0, 2, true, 0, 30.0);
+        assert_eq!(alive(&t, FIREBALL_CLASS).len(), 5 + 2 + 1);
+        assert_eq!(alive(&t, FLASH_CLASS).len(), 5);
+        let (t, _, _) = blast_run(&GLOVE_BLAST, 2.0, 1, true, 1, 30.0);
+        let balls = alive(&t, FIREBALL_CLASS);
+        assert_eq!(balls.len(), 15);
+        assert_eq!(balls.iter().filter(|m| m.cmd == 2).count(), 10, "low: 0 | gold << 1");
+        assert_eq!(balls.iter().filter(|m| m.cmd == 3).count(), 5, "high: 1 | gold << 1");
+        let fl: Vec<(f32, [u8; 3])> = alive(&t, FLASH_CLASS).iter().map(|m| (p::ff(&m.pvars, 0x18), [m.ambient[0], m.ambient[1], m.ambient[2]])).collect();
+        assert_eq!(fl, vec![(8.0, [0x7f, 0x7f, 0x7f]), (8.0, [0x20, 0x7f, 0]), (8.0, [0x3f, 0x7f, 0]), (7.0, [0x10, 0x60, 0]), (6.0, [0, 0x20, 0])]);
+    }
+
+    /// Gemlik's tank row (level13 `0x3073c8` / `0x30c138`): k = 1.5, 15 fireballs of class 1634 (alpha
+    /// `rand_range(0x40, 0x80)`, ambient (0x20, 0x60, 0x10), +0x1c the scale before the `randf(2, 5)` growth, +0xbc
+    /// the type alone), the green flashes 6 / 6 / 6 / 5.25 / 4.5. Draws: two more per fireball than the glove's.
+    #[test]
+    fn blast_tank_row() {
+        use crate::moby_update::classes::units::explosive_tank::TANK_BLAST;
+        let (t, _, d) = blast_run(&TANK_BLAST, 1.5, 1, true, 0, 30.0);
+        let balls = alive(&t, TANK_BALL);
+        assert_eq!((balls.len(), alive(&t, FIREBALL_CLASS).len()), (15, 0));
+        for m in &balls {
+            assert!((0x40..=0x80).contains(&m.alpha) && m.ambient[..3] == [0x20, 0x60, 0x10] && m.cmd <= 1);
+            let g = m.scale / p::ff(&m.pvars, 0x1c);
+            assert!((2.0..=5.0).contains(&g), "growth {g}");
+        }
+        let fl: Vec<(f32, [u8; 3])> = alive(&t, FLASH_CLASS).iter().map(|m| (p::ff(&m.pvars, 0x18), [m.ambient[0], m.ambient[1], m.ambient[2]])).collect();
+        assert_eq!(fl, vec![(6.0, [0x7f, 0x7f, 0x7f]), (6.0, [0x20, 0x7f, 0]), (6.0, [0x3f, 0x7f, 0]), (5.25, [0x10, 0x60, 0]), (4.5, [0, 0x20, 0])]);
+        assert_eq!(d, 10 * 10 + 4 * 9 + 8 + 4 * 5 + 5 * 3);
     }
 }
 

@@ -22,8 +22,9 @@
 //! sound / shake / light): at pos + (0, 0, 1), base velocity (0, 0, 3·dt), up normal: 10 low fireballs (`randf(3.5,
 //! 6.5)`·1.5·dt, `rand_range(ticks(60), ticks(120))`), 4 high (`randf(6.5, 10)`, `(ticks(60), ticks(90))`), one toward
 //! the camera 0x1670c0 (`World::camera`), the smoke rings (type 11, 1..4 by the camera distance, 6e5, the level's
-//! green colour tables 0x1f5560 / 0x1f5578), the flashes 1192 (6 ×2 beyond 9, 6, 5.25, 4.5; green).
-//! **Fireball** (0x30c138): `CreateMoby(1634)`, drawn, draw / update distance 0xff, alpha `rand_range(0x40, 0x80)`,
+//! green colour tables 0x1f5560 / 0x1f5578), the flashes 1192 (6 ×2 beyond 9, 6, 5.25, 4.5; green). Ported as the
+//! shared `bomb::blast` with [`TANK_BLAST`] (docs/plan/explosions.md §B).
+//! **Fireball** (0x30c138, `bomb::spawn_fireball` with [`TANK_FIREBALL`]): `CreateMoby(1634)`, drawn, draw / update distance 0xff, alpha `rand_range(0x40, 0x80)`,
 //! ambient (0x20, 0x60, 0x10) (`0x2650d0`), velocity, spins `randf(2π, 4π)·dt` ×2, life, the low ones' scale
 //! ·`randf(0.5, 0.75)`, +0x1c = scale, +0xbc = type, scale ·`randf(2, 5)`, `MobyBuildMatrix`.
 //! **Scorch** (0x3072c0): `PartType52Spawn(randf(0, 1.5), randf(1.5, 5.7), pos + r·(cos a, sin a) + (0, 0, 0.025),
@@ -169,104 +170,33 @@ fn scorch(w: &mut World, id: MobyId, q: &Scorch) {
     fx::part52(w, s1, s2, p, q.c.0, q.c.1, life);
 }
 
-/// Level13 0x30c138 (module doc).
-fn fireball(w: &mut World, pos: c::V, vel: c::V, life: i32, ty: u8) {
-    let Some(n) = w.create_moby(FIREBALL) else { return };
-    let alpha = w.rng.rand_range(0x40, 0x80) as u8;
-    let m = w.mm(n);
-    m.visible = 1;
-    m.draw_dist = 0xff;
-    m.update_dist = 0xff;
-    m.alpha = alpha;
-    m.ambient = [0x20, 0x60, 0x10, m.ambient[3]];
-    m.position = pos;
-    if m.pvars.len() < 0x20 { m.pvars.resize(0x80, 0); }
-    c::set_pv4(w, n, 0, vel);
-    let a = w.rng.randf(DT * 6.283_185_5, DT * 12.566_371);
-    c::set_pf(w, n, 0x10, a);
-    let b = w.rng.randf(DT * 6.283_185_5, DT * 12.566_371);
-    c::set_pf(w, n, 0x14, b);
-    c::set_pi16(w, n, 0x1a, life as i16);
-    c::set_pi16(w, n, 0x18, life as i16);
-    if ty == 0 {
-        let s = w.rng.randf(0.5, 0.75);
-        w.mm(n).scale *= s;
-    }
-    let sc = w.m(n).scale;
-    c::set_pf(w, n, 0x1c, sc);
-    let g = w.rng.randf(2.0, 5.0);
-    let m = w.mm(n);
-    m.cmd = ty;
-    m.scale *= g;
-    w.build_matrix(n);
-}
+/// Level13 0x30c138: the Bomb Glove's fireball spawner `0x2c4c20` compiled with these constants (module doc;
+/// `bomb::spawn_fireball`).
+pub const TANK_FIREBALL: bomb::FireballRow = bomb::FireballRow { class: FIREBALL, alpha: Some((0x40, 0x80)), ambient: [0x20, 0x60, 0x10], grow: Some((2.0, 5.0)), gold_bits: false };
 
-/// Level13 0x3073c8 (module doc).
+/// Level13 0x3073c8: the Bomb Glove's blast code at k = 1.5 with the level's green tables (0x1f5560 / 0x1f5578, the
+/// bomb's with red and green swapped) and green flashes (`bomb::blast`).
+pub const TANK_BLAST: bomb::BlastRow = bomb::BlastRow {
+    fireball: TANK_FIREBALL,
+    ring_c1: k::RING_C1,
+    ring_c2: k::RING_C2,
+    flashes: [
+        bomb::BlastFlash { size: 4.0, t: 15, rgba: [0x7f, 0x7f, 0x7f, 0x20] },
+        bomb::BlastFlash { size: 4.0, t: 24, rgba: [0x20, 0x7f, 0, 0x20] },
+        bomb::BlastFlash { size: 4.0, t: 20, rgba: [0x3f, 0x7f, 0, 0x30] },
+        bomb::BlastFlash { size: 3.5, t: 27, rgba: [0x10, 0x60, 0, 0x40] },
+        bomb::BlastFlash { size: 3.0, t: 29, rgba: [0, 0x20, 0, 0x20] },
+    ],
+};
+
+/// Level13 0x3073c8 (module doc): at pos + (0, 0, 1), base `(0, 0, 2·dt)·1.5`, the up normal.
 fn burst(w: &mut World, id: MobyId) {
     const K: f32 = 1.5;
     let base: c::V = [0.0, 0.0, (DT + DT) * K, 0.0];
     let up: c::V = [0.0, 0.0, 1.0, 0.0];
     let mut pos = c::pos(w, id);
     pos[2] += 1.0;
-    let cam = w.camera.map(|x| x.to_f32());
-    let to_cam = c::sub(cam, pos);
-    let dcam = c::len3(to_cam);
-    let spread = |w: &mut World, lo: f32, hi: f32| -> c::V {
-        let x = w.rng.randf(-1.0, 1.0);
-        let y = w.rng.randf(-1.0, 1.0);
-        let mut v: c::V = [x, y, 0.0, 0.0];
-        v = c::sub(v, c::scale(up, c::dot3(v, up)));
-        let u = w.rng.randf(0.0, 1.0);
-        v = c::add(v, c::scale(up, u));
-        let s = w.rng.randf(lo, hi);
-        c::add(c::set_len3(v, s * K * DT), base)
-    };
-    for _ in 0..10 {
-        let v = spread(w, 3.5, 6.5);
-        let (a, b) = (w.ticks(60), w.ticks(120));
-        let life = w.rng.rand_range(a, b);
-        fireball(w, pos, v, life, 0);
-    }
-    for _ in 0..4 {
-        let v = spread(w, 6.5, 10.0);
-        let (a, b) = (w.ticks(60), w.ticks(90));
-        let life = w.rng.rand_range(a, b);
-        fireball(w, pos, v, life, 1);
-    }
-    let x = w.rng.randf(-1.0, 1.0);
-    let y = w.rng.randf(-1.0, 1.0);
-    let z = w.rng.randf(-1.0, 1.0);
-    let mut cv = to_cam;
-    cv[2] += dcam * 0.5;
-    let v = c::add(c::set_len3([x, y, z, 0.0], (dcam / 5.0) * DT), c::set_len3(cv, (dcam + dcam) * DT));
-    let v = c::clamp_len3(v, DT * 10.0);
-    let (a, b) = (w.ticks(60), w.ticks(90));
-    let life = w.rng.rand_range(a, b);
-    fireball(w, pos, v, life, 1);
-    let n = if dcam < 6.0 { dcam as i32 + 1 } else { 4 };
-    let slow = if dcam < 7.0 { 7.0 - dcam } else { 0.0 };
-    for _ in 0..n {
-        let s = w.rng.randf(8.0, 10.0) * K * DT;
-        let c1 = k::RING_C1[w.rng.randi(6) as usize];
-        let c2 = k::RING_C2[w.rng.randi(6) as usize];
-        let (a, b) = (w.ticks(15), w.ticks(20));
-        let life = w.rng.rand_range(a, b);
-        let (a, b) = (w.ticks(25), w.ticks(30));
-        let t1 = w.rng.rand_range(a, b);
-        w.part11(pf(400000.0 * K), pf(s - slow * DT), pv(pos), pv(base), c1, c2, life, t1, 0, 0);
-    }
-    if 9.0 < dcam {
-        let t = w.ticks(15);
-        bomb::flash(w, 6.0, id, pos, base, t, 0x7f, 0x7f, 0x7f, 0x20);
-        let t = w.ticks(24);
-        bomb::flash(w, 6.0, id, pos, base, t, 0x20, 0x7f, 0, 0x20);
-    }
-    let t = w.ticks(20);
-    bomb::flash(w, 6.0, id, pos, base, t, 0x3f, 0x7f, 0, 0x30);
-    let t = w.ticks(27);
-    bomb::flash(w, 5.25, id, pos, base, t, 0x10, 0x60, 0, 0x40);
-    let t = w.ticks(29);
-    bomb::flash(w, 4.5, id, pos, base, t, 0, 0x20, 0, 0x20);
+    bomb::blast(w, &TANK_BLAST, id, pos, base, up, K, 1, true, 0);
 }
 
 /// The fireball's trail words (`$gp` level13 0x161f08..0x161f68): per pass (jitter, colours, v1 z and its spread,

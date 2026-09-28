@@ -20,7 +20,8 @@
 //!   `ticks(6)` (`ticks(30)` from `ticks(1100)` on)).
 //! * scene 5 (the arrival), ticks < `ticks(120)`, actor 2 (the ship 530): the point of its joint list 5, the step
 //!   since the last tick (from tick 2) and 0x162070 := the point; at tick `ticks(118)` **the crash explosion**:
-//!   `SpawnBeamExplosion(0, 0, 5, 2.5, 9, 1, 60, ship, 0, p, 3, 200, 200, −1, 0)` and
+//!   `SpawnBeamExplosion(0, 0, 5, 2.5, 9, 1, 60, ship, 0, p, 3, 200, 200, −1, 0, 60, −1, 0)` (60 Bomb Glove fireballs 122
+//!   thrown out) and
 //!   `SpawnBeamExplosion(0, 0, 1, 0.5, 9, 1, 60, ship, 0, p − (0, 0, 1), 300, 2, 2, −1, 0)`; then the ship's draw
 //!   callback (the glass, as in scene 4) and its smoke trail: joint lists 1 and 2, stepped back by the tick's step and forward a
 //!   quarter step four times, `FUN_00278810(150000, 60000, a, a, dt)` at each (two type-23 puffs of `randi(16)`
@@ -50,8 +51,10 @@ pub const ARRIVAL_SCENE: usize = 5;
 pub const CRASH_TICK: i32 = 0x76;
 pub const ARRIVAL_FX_END: i32 = 0x78;
 
-/// The first explosion of the crash (`SpawnBeamExplosion(0, 0, 5, 2.5, 9, 1, 60, …, 3, 200, 200, −1, 0)`).
-pub const CRASH_BEAM: Beam = Beam { damage_r: 0.0, damage: 0.0, flash: 5.0, flash2: 2.5, flash_dist: 9.0, scale: 1.0, light: 60.0, streaks: 3, sparks: 200, puffs: 200, debris: 0, sound: -1, shake: false };
+/// The first explosion of the crash (`SpawnBeamExplosion(0, 0, 5, 2.5, 9, 1, 60, …, 3, 200, 200, −1, 0, 60, −1, 0)`:
+/// param_16 = 60 fireballs, the stack word `sw v0(0x3c), 0(sp)` at 0x30c6c4 that the decompiler drops; fixed
+/// 2026-09-29, docs/plan/explosions.md §A).
+pub const CRASH_BEAM: Beam = Beam { damage_r: 0.0, damage: 0.0, flash: 5.0, flash2: 2.5, flash_dist: 9.0, scale: 1.0, light: 60.0, streaks: 3, sparks: 200, puffs: 200, debris: 60, sound: -1, shake: false };
 /// The second, one unit lower (`SpawnBeamExplosion(0, 0, 1, 0.5, 9, 1, 60, …, 300, 2, 2, −1, 0)`).
 pub const CRASH_BEAM2: Beam = Beam { damage_r: 0.0, damage: 0.0, flash: 1.0, flash2: 0.5, flash_dist: 9.0, scale: 1.0, light: 60.0, streaks: 300, sparks: 2, puffs: 2, debris: 0, sound: -1, shake: false };
 

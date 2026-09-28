@@ -8,7 +8,7 @@
 //! |---|---|---|
 //! | debris spawn | `DebrisSpawn` 0x2c5080 | [`spawn`] |
 //! | debris update, classes 149, 348, 349, 354–359, 363, 364 | `DebrisUpdate` 0x2c5218 | [`update`] |
-//! | flash spawn | `FlashSpawn` 0x2c20e0 | [`flash_spawn`] |
+//! | flash spawn | `FlashSpawn` 0x2c20e0, `0x309a68` (class 1192) | [`flash_spawn_as`] ([`FlashKind`]) |
 //! | flash update, classes 112 (0x70), 1192 | `FlashUpdate` 0x2c22a8 | [`flash_update`] |
 //!
 //! The class lists are the level class-update tables' (0x20bb00 in level01): every level ELF whose table was
@@ -203,15 +203,40 @@ pub fn update(w: &mut World, id: MobyId) {
 // ---------------------------------------------------------------------------------------------------
 // Explosion flashes
 
+/// Which of the game's two flash spawners (docs/plan/explosions.md §F): the same code with two constants.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FlashKind {
+    /// The class created.
+    pub class: i16,
+    /// The head start in ticks (`ticks(head)` taken off the timer at the spawn; 0: none, the size starts at 0).
+    pub head: i32,
+}
+
+/// `FlashSpawn` 0x2c20e0: class 0x70, a `ticks(4)` head start (the shells of `SpawnBeamExplosion`, the death
+/// explosions, the crates, the Visibomb, the Devastator's missile, the gunship).
+pub const FLASH_SHELL: FlashKind = FlashKind { class: FLASH_CLASS, head: 4 };
+/// `0x309a68` (level13 copy 0x305718, same code): class 1192 (0x4a8), no head start: the Bomb Glove's explosion
+/// family (`super::bomb::blast`).
+pub const FLASH_BOMB: FlashKind = FlashKind { class: 1192, head: 0 };
+
 /// `FlashSpawn(size, parent, pos, vec, T, r, g, b, a)` 0x2c20e0: a flash (class 0x70) at `pos`, tinted
 /// `(r, g, b)` with alpha `a`, growing to `size` × the class scale over `T` ticks (it starts `ticks(4)` in).
 /// Three draws when created (`randf(−π, π)` Euler angles), none otherwise.
 #[allow(clippy::too_many_arguments)]
 pub fn flash_spawn(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec: [f32; 4], t: i32, r: u8, g: u8, b: u8, a: u8) -> Option<MobyId> {
-    let m = w.create_moby(FLASH_CLASS)?;
+    flash_spawn_as(w, &FLASH_SHELL, size, parent, pos, vec, t, r, g, b, a)
+}
+
+/// The flash spawners 0x2c20e0 / 0x309a68 (one code, [`FlashKind`]): `CreateMoby(class)`, three `randf(−π, π)`,
+/// state 0, alpha `a`, drawn, distances 0xff, ambient `(r, g, b)` (`0x2650d0`), +0x18 = class scale · `size`, scale 0,
+/// +0x10 the parent (+1), the position (the whole quadword), +0x00 `vec`, the rotation, +0x14 = T; the timer +0x1c =
+/// T − `ticks(head)` and the scale `(T − timer)·full / T` (0x2c20e0), or T and 0 (0x309a68); +0x1e = a; the matrix.
+#[allow(clippy::too_many_arguments)]
+pub fn flash_spawn_as(w: &mut World, kind: &FlashKind, size: f32, parent: MobyId, pos: [f32; 4], vec: [f32; 4], t: i32, r: u8, g: u8, b: u8, a: u8) -> Option<MobyId> {
+    let m = w.create_moby(kind.class)?;
     w.svc.fx.flashes += 1;
     let e = [w.rng.randf(-PI, PI), w.rng.randf(-PI, PI), w.rng.randf(-PI, PI), 0.0];
-    let t4 = w.ticks(4);
+    let head = if kind.head != 0 { Some(w.ticks(kind.head)) } else { None };
     let mo = w.mm(m);
     mo.state = 0;
     mo.alpha = a;
@@ -219,6 +244,7 @@ pub fn flash_spawn(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec:
     mo.update_dist = 0xff;
     mo.draw_dist = 0xff;
     mo.ambient = [r, g, b, 0];
+    if mo.pvars.len() < 0x20 { mo.pvars.resize(0x20, 0); }
     let full = mo.scale * size;
     p::set_ff(&mut mo.pvars, 0x18, full);
     p::set_i32(&mut mo.pvars, 0x10, parent as i32 + 1);
@@ -226,9 +252,17 @@ pub fn flash_spawn(w: &mut World, size: f32, parent: MobyId, pos: [f32; 4], vec:
     p::set_v4f(&mut mo.pvars, 0, vec);
     mo.rotation = e;
     p::set_i32(&mut mo.pvars, 0x14, t);
-    let timer = (t as u16).wrapping_sub(t4 as u16) as i16;
-    p::set_i16(&mut mo.pvars, 0x1c, timer);
-    mo.scale = flash_scale(t, timer, full);
+    match head {
+        Some(t4) => {
+            let timer = (t as u16).wrapping_sub(t4 as u16) as i16;
+            p::set_i16(&mut mo.pvars, 0x1c, timer);
+            mo.scale = flash_scale(t, timer, full);
+        }
+        None => {
+            p::set_i16(&mut mo.pvars, 0x1c, t as i16);
+            mo.scale = 0.0;
+        }
+    }
     p::set_i16(&mut mo.pvars, 0x1e, a as i16);
     w.build_matrix(m);
     Some(m)

@@ -706,8 +706,8 @@ const DEBRIS_ROT: [[u32; 4]; 4] = [
     [0x4049_0625, 0x4049_0625, 0x3fc8_f5c3, 0],
 ];
 /// TNT spark colours (0x20b0b0 / 0x20b0c8).
-const SPARK_C1: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
-const SPARK_C2: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
+const SPARK_C1: [u32; 6] = crate::moby_update::creature::fx::SPARK_A;
+const SPARK_C2: [u32; 6] = crate::moby_update::creature::fx::SPARK_B;
 
 /// `CrateDropBolts` 0x2eb498: bolts (`SetDeathBits(m, 0x100, pvar+0xc0)` → `BoltBurst`) unless pvar+0xc6 ≠ 0
 /// (the ammo crate 511: ammo pickups of pvar+0xcb) or class 501 (the nanotech crate: +0xb4 cleared, death bits

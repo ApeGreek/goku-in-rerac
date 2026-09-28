@@ -102,8 +102,8 @@ pub const FOG_FAR: f32 = 131_072.0;
 pub const FOG_NEAR_F: f32 = 255.0;
 pub const FAR_UNITS: f32 = 144.0;
 /// `0x20aab8` / `0x20aad0`: the explosion rings' colours (`randi(6)` each).
-const COL_A: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
-const COL_B: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
+const COL_A: [u32; 6] = fx::SPARK_A;
+const COL_B: [u32; 6] = fx::SPARK_B;
 
 /// A write of the missile view's look into the level fog globals 0x15f444..0x15f454 (the engine owns them).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

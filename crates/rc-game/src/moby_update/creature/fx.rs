@@ -1,7 +1,8 @@
 //! Death and break effects shared by the creatures (level01 addresses; all engine code linked into every level):
 //!
-//! * [`death_explosion`] `0x273f50(size, light, moby, pos, sound)`: three spark pairs (type 11), two flashes, a camera
-//!   shake when in view, the moby's death sound, an explosion light ([`light_spawn`], class 639).
+//! * [`spark_burst`] ([`SparkBurst`]): `0x273f50(size, light, moby, pos, sound)` ([`death_explosion`]), `0x2742a8`
+//!   ([`piece_explosion`]) and `0x2fa1b0` (the path enemies' glob): three spark pairs (type 11), two flashes, a
+//!   camera shake when in view, the moby's sound, an explosion light ([`light_spawn`], class 639).
 //! * [`beam_explosion`] `SpawnBeamExplosion` 0x273310: the general explosion (damage sphere, type-15 streaks,
 //!   type-11 sparks by camera distance, type-8 puffs, flashes, shake, sound, light).
 //! * [`break_piece`] `BreakFxB` 0x278ad8 and [`piece_update`] `FxGroupUpdate` 0x30cd18: a body piece thrown off with a
@@ -20,7 +21,9 @@ use crate::moby_update::classes::debris::flash_spawn;
 use crate::moby_update::services::{pf as to_pf, pv, pvar, HitTemplate, World};
 use crate::ps2v::Pf;
 
-/// `0x20a090` / `0x20a0a8`: the spark colours the explosions pick from (`randi(6)` each).
+/// `0x20a090` / `0x20a0a8`: the spark colours the explosions pick from (`randi(6)` each). The other explosions' copies
+/// hold the same words (level01 0x20a980 / 0x20a998 the Bomb Glove, 0x20b820 / 0x20b838 the Suck Cannon burst, 0x20aa50
+/// / 0x20aa68 the Devastator, 0x20b4f0 / 0x20b508 the glob, and the crates' and the Visibomb's): one table here.
 pub const SPARK_A: [u32; 6] = [0x4f00_8fff, 0x4f00_8fff, 0x4f00_7fff, 0x4f00_6fff, 0x2fff_ffff, 0x2fff_ffff];
 pub const SPARK_B: [u32; 6] = [0x2f00_5f7f, 0x2f00_4f7f, 0x2f00_3f7f, 0x2f00_004f, 0x2f00_0000, 0x3f00_0000];
 
@@ -105,31 +108,46 @@ pub fn in_view(w: &World, far: f32, p: V, r: f32) -> bool {
     }
 }
 
-/// `0x273f50(size, light, moby, pos, sound)`: the death explosion (module doc). Draws: per spark pair
-/// `randf(8, 10)`, `randi(6)` ×2, two `rand_range`s, then the type-11 spawn's own; 3 per flash; the light's.
+/// One code, three copies (docs/plan/explosions.md §C): `0x273f50` (the death explosion), `0x2742a8` (a broken
+/// prop's piece) and `0x2fa1b0` (the path enemies' glob), as data: three type-11 spark pairs, two flashes (0x2c20e0)
+/// when there is a moby, the camera shake, the moby's class sound, the explosion light.
+#[derive(Clone, Copy, Debug)]
+pub struct SparkBurst {
+    /// The spark sprite per unit of size (`size · sprite`).
+    pub sprite: f32,
+    /// The colour shift (`0x270fa8` on the sparks, `0x270f48` on the flashes; `0x2742a8` passes 1: red ↔ green).
+    pub shift: u8,
+    /// The two flashes: size factor, colour and alpha, duration (ticks).
+    pub flashes: [(f32, [u8; 4], i32); 2],
+    /// `FastBSphereCheck(10, (pos, 2))` → the shake along up `size·0.1` for `ticks(20)`.
+    pub shake: bool,
+    /// The moby's class sound (when it is not deleted and `sound ≠ −1`).
+    pub sound: bool,
+}
+
+/// `0x273f50`: the death explosion.
+pub const DEATH_BURST: SparkBurst = SparkBurst { sprite: 400000.0, shift: 0, flashes: [(4.0, [0x7f, 0x40, 0, 0x30], 20), (3.0, [0x60, 0x20, 0, 0x20], 0x1d)], shake: true, sound: true };
+/// `0x2742a8`: the quiet explosion of a broken prop's flag-2 pieces (`crate::moby_update::classes::breakables`).
+pub const PIECE_BURST: SparkBurst = SparkBurst { sprite: 500000.0, shift: 1, flashes: [(4.0, [0x7f, 0x40, 0, 0x30], 20), (3.0, [0x60, 0x20, 0, 0x20], 0x1d)], shake: false, sound: false };
+/// `0x2fa1b0`: the path enemies' glob hitting (level01 only; its tables 0x20b4f0 / 0x20b508 and light template
+/// 0x1e3440 hold 0x20a090 / 0x20a0a8 / 0x1b0770's words).
+pub const SHOT_BURST: SparkBurst = SparkBurst { sprite: 400000.0, shift: 0, flashes: [(2.0, [0x7f, 0, 0x40, 0x30], 20), (1.5, [0x20, 0, 0x20, 0], 0x1d)], shake: false, sound: true };
+
+/// `0x273f50(size, light, moby, pos, sound)`: the death explosion ([`DEATH_BURST`]).
 pub fn death_explosion(w: &mut World, size: f32, light: f32, moby: Option<MobyId>, p: V, sound: i32) {
-    sparks_and_flashes(w, size, 400000.0, moby, p);
-    if in_view(w, 10.0, p, 2.0) {
-        let t = w.ticks(20);
-        w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp: size * 0.1, ticks: t });
-    }
-    if let Some(m) = moby {
-        if !w.m(m).is_deleted() && sound != -1 { w.play_sound(sound, 0, m); }
-    }
-    explosion_light(w, light, p);
+    spark_burst(w, &DEATH_BURST, size, light, moby, p, sound);
 }
 
-/// `0x2742a8(size, light, moby, pos, −1)`: the quiet explosion of a broken prop's flag-2 pieces
-/// (`crate::moby_update::classes::breakables`): the death explosion's three spark pairs (sprites 500000·size instead
-/// of 400000·size) and two flashes, no camera shake and no sound; the light when `light ≠ 0`. The gold-glove colour
-/// shifts it passes the colours through (`0x270fa8`, `0x270f48`) are the identity here, as in `bomb.rs`.
+/// `0x2742a8(size, light, moby, pos)`: [`PIECE_BURST`] (sprites 500000·size, the colours with red and green
+/// swapped, no shake, no sound).
 pub fn piece_explosion(w: &mut World, size: f32, light: f32, moby: Option<MobyId>, p: V) {
-    sparks_and_flashes(w, size, 500000.0, moby, p);
-    explosion_light(w, light, p);
+    spark_burst(w, &PIECE_BURST, size, light, moby, p, -1);
 }
 
-/// The spark pairs and flashes 0x273f50 and 0x2742a8 share (`sprite` = the type-11 size per unit of `size`).
-fn sparks_and_flashes(w: &mut World, size: f32, sprite: f32, moby: Option<MobyId>, p: V) {
+/// The spark burst ([`SparkBurst`]): per pair `randf(8, 10)`, `randi(6)` ×2, `rand_range(ticks 15, 20)` /
+/// `(ticks 25, 30)` and the type-11 spawn's own draws (sprite `size·sprite`, speed `randf·dt·size`); the flashes (3
+/// draws each); the shake; the sound; the light (none for 0, radius 13 for a negative size; template 0x1b0770).
+pub fn spark_burst(w: &mut World, row: &SparkBurst, size: f32, light: f32, moby: Option<MobyId>, p: V, sound: i32) {
     for _ in 0..3 {
         let sp = w.rng.randf(8.0, 10.0) * super::DT;
         let a = w.rng.randi(6) as usize;
@@ -138,17 +156,27 @@ fn sparks_and_flashes(w: &mut World, size: f32, sprite: f32, moby: Option<MobyId
         let life = w.rng.rand_range(t15, t20);
         let (t25, t30) = (w.ticks(25), w.ticks(30));
         let t1 = w.rng.rand_range(t25, t30);
-        w.part11(to_pf(size * sprite), to_pf(sp * size), pv(p), [Pf::ZERO; 4], SPARK_A[a], SPARK_B[b], life, t1, 0, 0);
+        w.part11(to_pf(size * row.sprite), to_pf(sp * size), pv(p), [Pf::ZERO; 4], colour_shift(SPARK_A[a], row.shift), colour_shift(SPARK_B[b], row.shift), life, t1, 0, 0);
     }
     if let Some(m) = moby {
-        let t = w.ticks(20);
-        flash_spawn(w, size * 4.0, m, p, [0.0; 4], t, 0x7f, 0x40, 0, 0x30);
-        let t = w.ticks(0x1d);
-        flash_spawn(w, size * 3.0, m, p, [0.0; 4], t, 0x60, 0x20, 0, 0x20);
+        for (k, [r, g, b, a], t) in row.flashes {
+            let c = colour_shift(r as u32 | (g as u32) << 8 | (b as u32) << 16, row.shift);
+            let t = w.ticks(t);
+            flash_spawn(w, size * k, m, p, [0.0; 4], t, c as u8, (c >> 8) as u8, (c >> 16) as u8, a);
+        }
     }
+    if row.shake && in_view(w, 10.0, p, 2.0) {
+        let t = w.ticks(20);
+        w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp: size * 0.1, ticks: t });
+    }
+    if let Some(m) = moby {
+        let s = w.m(m).state;
+        if row.sound && s != 0xfe && s != 0xfd && sound != -1 { w.play_sound(sound, 0, m); }
+    }
+    explosion_light(w, light, p);
 }
 
-/// The explosion light of 0x273f50 / 0x2742a8: none for 0, radius 13 for a negative size.
+/// The explosion light of the spark bursts: none for 0, radius 13 for a negative size.
 fn explosion_light(w: &mut World, light: f32, p: V) {
     if light != 0.0 {
         let l = if light <= 0.0 { 13.0 } else { light };
@@ -283,21 +311,23 @@ pub fn beam_explosion_shift(w: &mut World, b: &Beam, moby: Option<MobyId>, p: V,
         let life = w.rng.rand_range(t30, t45) - throttle * 5;
         part08(w, 200_000.0, p, vel, colour_shift(SPARK_A[a], shift), colour_shift(SPARK_B[c], shift), life);
     }
+    // The flashes carry the sparks' base vector (sp+0x1b0: (0, 0, 8·dt·scale)) in their +0x00 (unused by their update).
+    let basev_f = [0.0, 0.0, base_z, 0.0];
     if let Some(m) = moby {
         if 0.0 < b.flash {
             let (r0, b0, r1) = if shift != 0 { (0x46, 0x46, 0x3c) } else { (0x96, 0x96, 0x7f) };
             if l0 < 0.95 && b.flash_dist < dist {
                 let t = w.ticks(16);
-                flash_spawn(w, b.flash, m, p, [0.0; 4], t, r0, 0x96, b0, 0x20);
+                flash_spawn(w, b.flash, m, p, basev_f, t, r0, 0x96, b0, 0x20);
                 let t = w.ticks(22);
-                flash_spawn(w, b.flash, m, p, [0.0; 4], t, r1, 0x7f, 0x50, 0x20);
+                flash_spawn(w, b.flash, m, p, basev_f, t, r1, 0x7f, 0x50, 0x20);
             }
             let t = w.ticks(30);
-            flash_spawn(w, b.flash, m, p, [0.0; 4], t, r1, 0x7f, 0, 0x30);
+            flash_spawn(w, b.flash, m, p, basev_f, t, r1, 0x7f, 0, 0x30);
         }
         if 0.0 < b.flash2 {
             let t = w.ticks(27);
-            flash_spawn(w, b.flash2, m, p, [0.0; 4], t, 0xff, 0xff, 0xff, 0x20);
+            flash_spawn(w, b.flash2, m, p, basev_f, t, 0xff, 0xff, 0xff, 0x20);
         }
     }
     if b.shake && in_view(w, 10.0, p, 2.0) {
@@ -879,5 +909,121 @@ fn free_slot(w: &mut World, id: MobyId) {
     if slot != -1 {
         w.svc.point_lights.free(slot as usize);
         pvar::set_i32(&mut w.mm(id).pvars, lp::SLOT, -1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! The explosion routines' rows (docs/plan/explosions.md §A, §C, §F).
+    use super::*;
+    use crate::hero::Hero;
+    use crate::moby_runtime::{ClassInfo, Moby, MobyTable};
+    use crate::moby_update::classes::debris::{flash_spawn_as, FLASH_BOMB, FLASH_SHELL};
+    use crate::moby_update::services::{ClassTable, Services};
+    use crate::rng::Rng;
+
+    const SRC_CLASS: i16 = 577;
+
+    fn run(f: impl FnOnce(&mut World)) -> (MobyTable, Services) {
+        let mut ct = ClassTable::default();
+        for (slot, oc) in [(1u8, 0x70i16), (2, 1192), (3, LIGHT_CLASS), (4, 122), (5, SRC_CLASS)] {
+            ct.classes.insert(oc, (ClassInfo { slot, scale: 1.0, ..Default::default() }, None));
+        }
+        let mut src = Moby::init_instance(0, 0, Some(&ClassInfo { scale: 1.0, ..Default::default() }));
+        src.o_class = SRC_CLASS;
+        src.position = [100.0, 100.0, 50.0, 1.0];
+        let mut table = MobyTable::new(vec![src], 400);
+        let hero = Hero::new();
+        let mut rng = Rng::new();
+        let mut svc = Services::new();
+        {
+            let mut w = World::new(&mut table, &hero, &mut rng, &ct, &mut svc, 1);
+            w.camera = [Pf::f(130.0), Pf::f(100.0), Pf::f(50.0), Pf::ONE];
+            f(&mut w);
+        }
+        (table, svc)
+    }
+
+    fn flashes(t: &MobyTable) -> Vec<(f32, [u8; 4])> {
+        t.mobys.iter().filter(|m| m.o_class == 0x70 && m.state < 0x80).map(|m| (p::ff(&m.pvars, 0x18), [m.ambient[0], m.ambient[1], m.ambient[2], m.alpha])).collect()
+    }
+
+    use crate::moby_update::services::pvar as p;
+
+    /// §F: the two flash spawners are one code: `0x2c20e0` (class 0x70) starts `ticks(4)` in (timer T − 4, the size
+    /// `4·full/T`), `0x309a68` (class 1192) at T with size 0; both take the whole position and the vector.
+    #[test]
+    fn flash_kinds() {
+        let (t, svc) = run(|w| {
+            flash_spawn_as(w, &FLASH_SHELL, 2.0, 0, [1.0, 2.0, 3.0, 0.5], [0.0, 0.0, 0.25, 0.0], 20, 1, 2, 3, 0x30);
+            flash_spawn_as(w, &FLASH_BOMB, 2.0, 0, [1.0, 2.0, 3.0, 0.5], [0.0, 0.0, 0.25, 0.0], 20, 1, 2, 3, 0x30);
+        });
+        let a = t.mobys.iter().find(|m| m.o_class == 0x70 && m.state < 0x80).unwrap();
+        let b = t.mobys.iter().find(|m| m.o_class == 1192 && m.state < 0x80).unwrap();
+        assert_eq!((p::i16(&a.pvars, 0x1c), a.scale), (16, 4.0 * 2.0 / 20.0));
+        assert_eq!((p::i16(&b.pvars, 0x1c), b.scale), (20, 0.0));
+        for m in [a, b] {
+            assert_eq!((m.position, p::v4f(&m.pvars, 0), p::i32(&m.pvars, 0x14), p::ff(&m.pvars, 0x18), p::i16(&m.pvars, 0x1e)), ([1.0, 2.0, 3.0, 0.5], [0.0, 0.0, 0.25, 0.0], 20, 2.0, 0x30));
+            assert_eq!(([m.ambient[0], m.ambient[1], m.ambient[2]], m.alpha, p::i32(&m.pvars, 0x10)), ([1, 2, 3], 0x30, 1));
+        }
+        assert_eq!(svc.fx.flashes, 2);
+    }
+
+    /// §C `0x273f50`: the flashes 4·s (0x7f, 0x40, 0) / 3·s (0x60, 0x20, 0), the shake `s·0.1` for `ticks(20)`, the sound,
+    /// the light (radius 13 for a negative size).
+    #[test]
+    fn spark_burst_death_row() {
+        let (t, svc) = run(|w| death_explosion(w, 0.5, -1.0, Some(0), [100.0, 100.0, 50.0, 1.0], 4));
+        assert_eq!(flashes(&t), vec![(2.0, [0x7f, 0x40, 0, 0x30]), (1.5, [0x60, 0x20, 0, 0x20])]);
+        assert_eq!(svc.camera_shakes.len(), 1);
+        assert_eq!((svc.camera_shakes[0].amp, svc.camera_shakes[0].ticks), (0.05, 20));
+        assert_eq!(svc.sounds.iter().filter(|s| s.index == 4).count(), 1);
+        let l = t.mobys.iter().find(|m| m.o_class == LIGHT_CLASS && m.state < 0x80).expect("the light");
+        assert_eq!(p::ff(&l.pvars, 0x34), 13.0);
+    }
+
+    /// §C `0x2742a8` (divergence fixed 2026-09-29): its colours go through `0x270fa8` / `0x270f48` with shift **1**
+    /// (a literal `li a1, 1` / `li a3, 1`), so its flashes are (0x40, 0x7f, 0) and (0x20, 0x60, 0), not the death
+    /// explosion's; no shake, no sound, no light for 0.
+    #[test]
+    fn spark_burst_piece_row_swaps_red_and_green() {
+        let (t, svc) = run(|w| piece_explosion(w, 1.0, 0.0, Some(0), [100.0, 100.0, 50.0, 1.0]));
+        assert_eq!(flashes(&t), vec![(4.0, [0x40, 0x7f, 0, 0x30]), (3.0, [0x20, 0x60, 0, 0x20])]);
+        assert!(svc.camera_shakes.is_empty() && svc.sounds.is_empty());
+        assert!(t.mobys.iter().all(|m| m.o_class != LIGHT_CLASS || m.state >= 0x80));
+        assert_eq!(colour_shift(SPARK_A[0], PIECE_BURST.shift), 0x4f00_ff8f, "the sparks: red and green swapped");
+    }
+
+    /// §C `0x2fa1b0` (the path enemies' glob): flashes 2·s (0x7f, 0, 0x40, 0x30) / 1.5·s (0x20, 0, 0x20, 0), the
+    /// sound, no shake.
+    #[test]
+    fn spark_burst_shot_row() {
+        let (t, svc) = run(|w| spark_burst(w, &SHOT_BURST, 0.5, 0.0, Some(0), [100.0, 100.0, 50.0, 1.0], 0));
+        assert_eq!(flashes(&t), vec![(1.0, [0x7f, 0, 0x40, 0x30]), (0.75, [0x20, 0, 0x20, 0])]);
+        assert!(svc.camera_shakes.is_empty());
+        assert_eq!(svc.sounds.len(), 1);
+    }
+
+    /// §A `SpawnBeamExplosion` (divergence fixed 2026-09-29): the flashes take the sparks' base vector
+    /// `(0, 0, 8·dt·scale)` (sp+0x1b0) as their +0x00.
+    #[test]
+    fn beam_flashes_carry_the_base_vector() {
+        let b = Beam { damage_r: 0.0, damage: 0.0, flash: 4.0, flash2: 2.0, flash_dist: 9.0, scale: 1.5, light: 0.0, streaks: 0, sparks: 0, puffs: 0, debris: 0, sound: -1, shake: false };
+        let (t, _) = run(|w| beam_explosion(w, &b, Some(0), [100.0, 100.0, 50.0, 1.0]));
+        let v: Vec<[f32; 4]> = t.mobys.iter().filter(|m| m.o_class == 0x70 && m.state < 0x80).map(|m| p::v4f(&m.pvars, 0)).collect();
+        assert_eq!(v.len(), 4);
+        assert!(v.iter().all(|x| *x == [0.0, 0.0, super::super::DT * 8.0 * 1.5, 0.0]), "{v:?}");
+    }
+
+    /// §A the Novalis crash (`0x30c190`, divergence fixed 2026-09-29): the first `SpawnBeamExplosion` passes
+    /// param_16 = 60, so 60 fireballs 122 fly out of it (the one toward the camera only within 14; here 30 away: 59).
+    #[test]
+    fn crash_beam_throws_sixty_fireballs() {
+        use crate::moby_update::classes::cutscene_fx::{CRASH_BEAM, CRASH_BEAM2};
+        assert_eq!((CRASH_BEAM.debris, CRASH_BEAM2.debris), (60, 0));
+        let (t, _) = run(|w| beam_explosion(w, &CRASH_BEAM, Some(0), [100.0, 100.0, 50.0, 1.0]));
+        assert_eq!(t.mobys.iter().filter(|m| m.o_class == 122 && m.state < 0x80).count(), 59);
+        let (t, _) = run(|w| { w.camera = [Pf::f(105.0), Pf::f(100.0), Pf::f(50.0), Pf::ONE]; beam_explosion(w, &CRASH_BEAM, Some(0), [100.0, 100.0, 50.0, 1.0]) });
+        assert_eq!(t.mobys.iter().filter(|m| m.o_class == 122 && m.state < 0x80).count(), 60);
     }
 }
