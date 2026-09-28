@@ -81,7 +81,8 @@ fn fall_into_deep_water_floats_on_the_surface() {
     assert!((r.hero.position()[2] - (WATER - 0.12)).abs() < 0.03, "floats at {}", r.hero.position()[2]);
     assert_eq!(r.hero.f0634, 1);
     assert_eq!(r.hero.swim.oxygen, OXYGEN_MAX);
-    assert!(r.hero.swim.events.contains(&SwimEvent::Sound(3)));
+    // The splash voice, played at its call point by the hero update (after the entry's splash draws).
+    assert!(r.hero.swim.events.contains(&SwimEvent::Played(3)));
     assert!(r.hero.swim.events.iter().any(|e| matches!(e, SwimEvent::Splash { big: true, .. })));
 }
 
@@ -236,4 +237,171 @@ fn water_level_comes_from_the_water_tables() {
     // The hero rides the table's level (the bob still settling from the fall).
     assert_eq!(r.hero.swim.level.to_f32(), WATER + 0.1);
     assert!((r.hero.position()[2] - (WATER + 0.1 - 0.12 + r.hero.swim.bob.to_f32())).abs() < 1e-5);
+}
+
+// ------------------------------------------------------------------------------------------------
+// The water effects (super::effects): what each tick queued, and the rand ledger.
+
+use crate::hero::fx::{MobySpawn, PartSpawn};
+
+/// Draws between two stream states.
+fn draws(from: crate::rng::Rng, to: crate::rng::Rng) -> usize {
+    let mut r = from;
+    (0..1_000_000).find(|_| { let hit = r == to; r.rand(); hit }).expect("stream never reached")
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+struct Queued { rings45: usize, rings46: usize, drops: usize, bubbles: usize, splashes: usize }
+
+fn queued(r: &Runner) -> Queued {
+    let mut q = Queued { splashes: r.hero.fx.mobys.iter().filter(|m| matches!(m, MobySpawn::Splash { .. })).count(), ..Default::default() };
+    for p in &r.hero.fx.parts {
+        match p {
+            PartSpawn::Ring45 { .. } => q.rings45 += 1,
+            PartSpawn::Ring46 { .. } => q.rings46 += 1,
+            PartSpawn::Drop35 { .. } => q.drops += 1,
+            PartSpawn::Bubble { .. } => q.bubbles += 1,
+            _ => {}
+        }
+    }
+    q
+}
+
+/// The fall into deep water: SetState 0x37's splash `0x22b3a8(3, n, 1)` with n = min(300·|dz|, 40) on the entry tick
+/// (the splash moby 775 of size 2.25 on the level, three type-45 rings, n type-35 drops), and the rand ledger of that
+/// tick and the next ones: entry = 1 (moby) + 3 × (3 + 4) (rings: their draws + the spawner's) + n × (6 + 2) (drops),
+/// and nothing else; each tick after = the splash countdown's min(t / 8, 6) = 6 bubbles × (3 + 3 + 1 + 6) (position,
+/// drift, size, the spawner's six) — no wake yet (its counter needs 31 ticks), no spray (not moving) — plus, on the
+/// first, the two draws of the head's secondary look (`0x22bdd0`, every state).
+#[test]
+fn entry_splash_and_rand_ledger() {
+    let coll = deep();
+    let mut r = runner([24.0, 24.0, 18.0]);
+    let mut entry = None;
+    for t in 0..150 {
+        let s0 = r.rng;
+        let was = r.hero.state;
+        r.tick(&coll, PadInput::neutral());
+        if was != id::SURFACE_IDLE && r.hero.state == id::SURFACE_IDLE {
+            let n = r.hero.swim.events.iter().rev().find_map(|e| match e { SwimEvent::Splash { drops, big: true, .. } => Some(*drops), _ => None }).unwrap();
+            let q = queued(&r);
+            let mut pos = [0.0; 4];
+            if let Some(MobySpawn::Splash { size, pos: p, .. }) = r.hero.fx.mobys.first() {
+                assert_eq!(*size, 2.25);
+                pos = *p;
+            }
+            entry = Some((t, n, q, draws(s0, r.rng), pos));
+            for k in 1..=10 {
+                let s1 = r.rng;
+                r.tick(&coll, PadInput::neutral());
+                assert_eq!(queued(&r), Queued { bubbles: 6, ..Default::default() });
+                assert_eq!(draws(s1, r.rng), 6 * 13 + if k == 1 { 2 } else { 0 }, "tick {k} after the entry");
+            }
+            break;
+        }
+    }
+    let (t, n, q, d, pos) = entry.expect("never entered the water");
+    eprintln!("entry at tick {t}: {n} drops, queued {q:?}, {d} draws, splash at {pos:?}");
+    assert!(n > 0 && n <= 40);
+    assert_eq!(q, Queued { rings45: 3, drops: n as usize, splashes: 1, ..Default::default() });
+    assert_eq!(pos[2], WATER);
+    assert_eq!(d, 1 + 3 * 7 + n as usize * 8, "entry tick ledger");
+}
+
+/// Treading water: the wake `0x22ac40(15, 30)` every 17..31 ticks (one type-45 ring on the level).
+#[test]
+fn treading_water_leaves_a_wake() {
+    let (coll, mut r) = floating();
+    let mut n = 0;
+    for _ in 0..300 {
+        r.tick(&coll, PadInput::neutral());
+        assert_eq!(r.hero.state, id::SURFACE_IDLE);
+        n += queued(&r).rings45;
+    }
+    assert!((300 / 31..=300 / 17 + 1).contains(&n), "{n} wake rings in 300 ticks");
+}
+
+/// Swimming on the surface at full stick: bow rings `0x22ad38(0, 1)` (two type-46 every other tick), spray
+/// `0x22af48(4, 12)` (a type-35 drop every 10..13 ticks) once faster than 1.5 u/s — 3·dt × the stroke is under that on
+/// the curve's tail, so none here — and four bubbles at the hands in the stroke's first 10 frames.
+#[test]
+fn surface_swim_bow_rings() {
+    let (coll, mut r) = floating();
+    let mut total = Queued::default();
+    for _ in 0..120 {
+        r.tick(&coll, PadInput::neutral().stick(0.0, -1.0));
+        let q = queued(&r);
+        total.rings46 += q.rings46;
+        total.drops += q.drops;
+        total.bubbles += q.bubbles;
+    }
+    eprintln!("surface swim: {total:?}, |eff.xy| {}", r.hero.eff_len_xy.to_f32() * 60.0);
+    assert_eq!(r.hero.state, id::SURFACE_SWIM);
+    assert!(total.rings46 >= 60 && total.rings46 % 2 == 0, "{total:?}");
+}
+
+/// The deep-water jump 0x12: at its tick 20 the big splash `0x22b3a8(3, 16, 1)` and the ripple (0.4, 0.35).
+#[test]
+fn water_jump_splashes_at_tick_20() {
+    let (coll, mut r) = floating();
+    run(&mut r, &coll, PadInput::neutral().press(button::CROSS), 1);
+    assert_eq!(r.hero.state, id::WATER_JUMP);
+    let mut at = None;
+    for _ in 0..40 {
+        r.tick(&coll, PadInput::neutral());
+        let q = queued(&r);
+        if q.splashes == 1 { at = Some((r.hero.timer, q)); break; }
+    }
+    let (timer, q) = at.expect("no splash");
+    // The physics sees tick 20; the transitions after it count the timer on.
+    assert_eq!(timer, 0x14 + 1);
+    assert_eq!((q.rings45, q.drops), (3, 16));
+    assert!(r.hero.swim.events.contains(&SwimEvent::Ripple { x: r.hero.position()[0], y: r.hero.position()[1], r: 0.4, amp: 0.35 }));
+}
+
+/// Wading (0.5 deep, state 0x73) and ankle-deep water (0.19 deep, state 2 in water): walking leaves five bubbles at the
+/// feet every tick (`0x22b140(5, 2)`), the bow rings every third tick while faster than 1 u/s, spray every 3..5 ticks
+/// while faster than 0.5 u/s (kind 1 when 0.25 or deeper, else 3); a jump from the water splashes `0x22b3a8(3, 16, 0)`,
+/// and landing back in it plays the voice 0x11 with the big splash `0x22b3a8(3, 24, 1)`.
+#[test]
+fn wading_and_shallow_water_splash() {
+    for (depth, want_state, kind) in [(0.5f32, id::WADE, 1), (0.1875, 2, 3)] {
+        let coll = pool(|_| WATER - depth, Some(WATER), 0, 12, 0, 12);
+        let mut r = runner([8.0, 24.0, WATER + 1.0]);
+        run(&mut r, &coll, PadInput::neutral(), 60);
+        let mut total = Queued::default();
+        let mut kinds = Vec::new();
+        let mut walking = 0;
+        for _ in 0..60 {
+            // The block runs in the walk / wade case (the state at the physics: before the tick's transitions).
+            if matches!(r.hero.state, 2 | 0x73) { walking += 1; }
+            r.tick(&coll, PadInput::neutral().stick(0.0, -1.0));
+            let q = queued(&r);
+            total.bubbles += q.bubbles;
+            total.rings46 += q.rings46;
+            total.drops += q.drops;
+            kinds.extend(r.hero.fx.parts.iter().filter_map(|p| match p { PartSpawn::Drop35 { kind, .. } => Some(*kind), _ => None }));
+        }
+        eprintln!("depth {depth}: state {:#x}, {total:?}, drop kinds {kinds:?}, speed {}", r.hero.state, r.hero.eff_len_xy.to_f32() * 60.0);
+        assert_eq!(r.hero.state, want_state, "depth {depth}");
+        assert!(walking > 50);
+        assert_eq!(total.bubbles, 5 * walking);
+        assert!(total.rings46 >= 2 * 15, "{total:?}");
+        assert!(total.drops >= 10 && kinds.iter().all(|&k| k == kind), "{total:?} {kinds:?}");
+        // A jump out of the water: the small splash in the jump's entry.
+        r.tick(&coll, PadInput::neutral().press(button::CROSS));
+        assert_eq!(r.hero.group, 4, "jumped");
+        let q = queued(&r);
+        assert_eq!((q.rings45, q.drops, q.splashes), (3, 16, 0), "jump splash at depth {depth}");
+        // Landing back in it: the voice 0x11 and the big splash.
+        let mut landed = None;
+        for _ in 0..90 {
+            r.tick(&coll, PadInput::neutral());
+            let q = queued(&r);
+            if q.splashes == 1 { landed = Some(q); break; }
+        }
+        let q = landed.expect("no landing splash");
+        assert_eq!((q.rings45, q.drops), (3, 24));
+        assert!(r.hero.swim.events.contains(&SwimEvent::Played(0x11)));
+    }
 }

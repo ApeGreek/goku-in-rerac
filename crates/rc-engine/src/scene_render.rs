@@ -681,17 +681,25 @@ fn leave_mode2(rt: &mut SceneRuntime, p: &mut Play) {
 }
 
 /// Before a scene frame: what its moby loop reads (module docs).
+/// An actor's [`rc_game::scene_player::SceneActorState`] with its current pose (the one it is drawn with once this
+/// frame's pose is set).
+fn actor_state(a: &Actor) -> rc_game::scene_player::SceneActorState {
+    let rest = AnimState { seq_a: a.slot, frame_a: 0, seq_b: a.slot, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
+    let (state, position) = a.pose.unwrap_or((rest, [0.0; 3]));
+    rc_game::scene_player::SceneActorState { moby: a.moby, o_class: a.o_class as i16, position, scale: a.scale, anim: a.anim.clone(), state, joint_lists: a.joint_lists.clone() }
+}
+
+/// The scene actor that is moby `id`, with the pose it is drawn with this frame (after [`scene_frame`] posed it): what a
+/// draw callback reads of its moby at draw time (the game's callbacks run after `CutsceneModeUpdate` wrote the pose,
+/// e.g. the ship glass's `MobyAttachToJoint`, crate::fx_draw), unlike the moby loop, which sees the last frame's.
+pub(crate) fn drawn_actor(rt: &SceneRuntime, id: MobyId) -> Option<rc_game::scene_player::SceneActorState> {
+    rt.player.as_ref()?;
+    rt.actors.iter().find(|a| a.moby == Some(id)).map(actor_state)
+}
+
 fn publish_scene(rt: &SceneRuntime, player: &ScenePlayer, camera: Option<SceneCamera>, p: &mut Play) {
-    use rc_game::scene_player::{SceneActorState, SceneState};
-    let actors = rt
-        .actors
-        .iter()
-        .map(|a| {
-            let rest = AnimState { seq_a: a.slot, frame_a: 0, seq_b: a.slot, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
-            let (state, position) = a.pose.unwrap_or((rest, [0.0; 3]));
-            SceneActorState { moby: a.moby, o_class: a.o_class as i16, position, scale: a.scale, anim: a.anim.clone(), state, joint_lists: a.joint_lists.clone() }
-        })
-        .collect();
+    use rc_game::scene_player::SceneState;
+    let actors = rt.actors.iter().map(actor_state).collect();
     // The table mobys still carry the last frame's pose here ([`actor_mobys`] wrote it after the last tick).
     p.svc.cinematic.scene = Some(SceneState { id: player.scene_id(), tick: player.scene_tick(), actors });
     // FUN_002ac8d8 writes 0x167240 and the rows 0x167450..; the Euler 0x167250 keeps the last gameplay value.

@@ -1,7 +1,7 @@
 //! The port's Novalis, run headless the way `rc-engine`'s `gameplay.rs` wires it (no Bevy): the moby table
 //! from the loader rules, `Game::new` (hero init, follow camera, `srand(1234)`), the moby services, the
 //! load pass on the game's stream, then gameplay ticks (pad → free-slot pass → moby scheduler with the
-//! class-27 emitters and the ripple manager 751 as external updates → hero → `UpdateParts` + glints →
+//! class-27 emitters as external updates and the ripple manager 751 as a port (`Services::water`) → hero → `UpdateParts` + glints →
 //! camera → sound step → counter). The hero gets the back items' classes (pack 607, Clank 601: the back table
 //! and Clank's fidgets draw), the level (0x15ed84) and, before each tick, the counter (`idle.counter`).
 //! **Sound** (`rc_game::audio`, as the engine's crate::audio_out): the moby loop's class sounds through the
@@ -37,7 +37,6 @@ use rc_game::particles::{type06, BSphereView, Owner, Particles};
 use rc_game::ps2v::Pf;
 use rc_game::rng::Rng;
 use rc_game::tick::{Game, GameOptions, TickHooks};
-use rc_game::water::RippleSim;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
@@ -71,8 +70,8 @@ pub struct LevelData {
     pub ratchet: MobyAnimClass,
     pub owners: Vec<Owner>,
     pub part_defs: Option<rc_formats::particle_tex::PartDefs>,
-    pub ripple: Option<(rc_formats::water::RippleTables, Vec<i32>, [f32; 2])>,
-    pub cuboids: Vec<rc_formats::water::Cuboid>,
+    /// The level's water data (the moby system's `Services::water`: 751 and the ripple module).
+    pub water: rc_game::water::world::LevelWaterData,
     pub ship: Option<([f32; 3], f32)>,
     pub fog_zones: gameplay::FogZones,
     pub level_settings: Vec<u8>,
@@ -102,24 +101,18 @@ impl LevelData {
         let rdi = |o: usize| i32::from_le_bytes(gp[o..o + 4].try_into().unwrap());
         let spawnable = rdi(rdi(gameplay::MOBY_INSTANCES_POINTER) as usize + 4).max(1) as usize;
         let death_z = f32::from_le_bytes(level_settings[0x28..0x2c].try_into().unwrap());
-        let ripple_tables = {
+        let water = {
+            use rc_formats::level_overlay::LevelOverlay;
             let ov_bytes = rd("overlay.bin")?;
-            let ov = rc_formats::water::Overlay::parse(&ov_bytes)?;
-            rc_formats::water::parse_ripple_tables(&ov, lvl)?
-        };
-        let cuboids = rc_formats::water::parse_cuboids(&gp)?;
-        let bank = rc_formats::tfrag_light::parse_light_bank(&gp)?;
-        let ripple = match ripple_tables {
-            Some(t) => {
-                let zc = instances.iter().find(|m| m.o_class == RIPPLE_CLASS as i32).and_then(|m| m.pvar(&pvars))
-                    .map(|p| rc_formats::water::ripple_zone_cuboids(p, t.zones.len())).transpose()?.unwrap_or_default();
-                Some((t, zc, [bank.sets[0].dir_a[0], bank.sets[0].dir_a[1]]))
-            }
-            None => None,
+            let target = LevelOverlay::parse(&ov_bytes)?;
+            let reference = |l: u32| -> Option<Arc<LevelOverlay>> {
+                let b = std::fs::read(extracted.join(format!("levels/{l:02}/overlay.bin"))).ok()?;
+                Some(Arc::new(LevelOverlay::parse(&b).ok()?))
+            };
+            rc_game::water::world::LevelWaterData::load(&ov_bytes, &target, &reference, &gp)?
         };
         // Class table: slot = index in the core's class list; update = the Rust port or an external update.
-        let has_ripple = ripple.is_some();
-        let ext = |oc: i16| match oc { 27 if lvl == 1 => Some(EMITTER_UPDATE), 751 if has_ripple => Some(RIPPLE_UPDATE), _ => None };
+        let ext = |oc: i16| match oc { 27 if lvl == 1 => Some(EMITTER_UPDATE), _ => None };
         let mut classes = ClassTable::default();
         let mut joint_lists = HashMap::new();
         for (slot, e) in core.moby_classes.iter().enumerate() {
@@ -176,41 +169,23 @@ impl LevelData {
             }
             Err(_) => None,
         };
-        Ok(LevelData { mesh, instances, spawn, save, pvars, gp, classes, spawnable, death_z, coll_blobs, splines, ratchet, owners, part_defs, ripple, cuboids, ship, fog_zones, level_settings, joint_lists, back, audio })
+        Ok(LevelData { mesh, instances, spawn, save, pvars, gp, classes, spawnable, death_z, coll_blobs, splines, ratchet, owners, part_defs, water, ship, fog_zones, level_settings, joint_lists, back, audio })
     }
 }
 
 struct Externals<'a> {
     emitters: &'a HashMap<MobyId, usize>,
     view: Option<&'a BSphereView>,
-    ripple: &'a mut Option<RippleSim>,
-    ripple_inputs: Option<&'a (rc_formats::water::RippleTables, Vec<i32>, [f32; 2])>,
-    cuboids: &'a [rc_formats::water::Cuboid],
 }
 
 impl ExternalUpdates for Externals<'_> {
     fn update_fn(&self, o_class: i16) -> Option<u32> {
-        match o_class { 27 => Some(EMITTER_UPDATE), 751 if self.ripple_inputs.is_some() => Some(RIPPLE_UPDATE), _ => None }
+        match o_class { 27 => Some(EMITTER_UPDATE), _ => None }
     }
-    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [Pf; 4], counter: u64, particles: Option<&mut Particles>) {
-        match addr {
-            EMITTER_UPDATE => {
-                // The owner's live moby: the Blarg flyers (660) move their emitters every tick.
-                if let (Some(p), Some(&o)) = (particles, self.emitters.get(&id)) { type06::emitter_update_live(p, rng, o, self.view, 1, &table.mobys[id]); }
-            }
-            RIPPLE_UPDATE => {
-                let m = &mut table.mobys[id];
-                if m.state == 0 {
-                    // 0x2fd0e8 state 0: the init, then state 1, update distance 0xff, z + 0.5.
-                    if let Some((t, z, l)) = self.ripple_inputs { *self.ripple = Some(RippleSim::new(t, z.clone(), *l, rng)); }
-                    m.state = 1;
-                    m.update_dist = 0xff;
-                    m.position[2] += 0.5;
-                } else if let Some(sim) = self.ripple.as_mut() {
-                    sim.tick_with([camera[0].to_f32(), camera[1].to_f32(), camera[2].to_f32()], self.cuboids, rng, counter, particles);
-                }
-            }
-            _ => {}
+    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, _camera: [Pf; 4], _counter: u64, particles: Option<&mut Particles>) {
+        if addr == EMITTER_UPDATE {
+            // The owner's live moby: the Blarg flyers (660) move their emitters every tick.
+            if let (Some(p), Some(&o)) = (particles, self.emitters.get(&id)) { type06::emitter_update_live(p, rng, o, self.view, 1, &table.mobys[id]); }
         }
     }
 }
@@ -238,7 +213,6 @@ pub struct PortSim<'l> {
     pub svc: Services,
     pub sched: Scheduler,
     pub particles: Particles,
-    pub ripple: Option<RippleSim>,
     pub classes: Arc<ClassTable>,
     pub emitters: HashMap<MobyId, usize>,
     pub anim: RatchetAnim,
@@ -336,6 +310,7 @@ impl<'l> PortSim<'l> {
         // The level's volumes (cuboids 0x1600ec …), as the engine sets them: the triggers and the foam fields 760 read them.
         svc.set_volumes(rc_formats::volumes::parse_volumes(&lv.gp)?);
         svc.build_grid(&mut game.mobys);
+        svc.water = rc_game::water::world::WaterWorld::new(lv.water.clone());
         let mut particles = Particles::new(lv.part_defs.clone(), lv.owners.clone());
         particles.pool.level_init();
         // Owner k belongs to gameplay instance `o.instance`, i.e. to moby 0x1acc00[o.instance].
@@ -347,7 +322,6 @@ impl<'l> PortSim<'l> {
             svc,
             sched: Scheduler::new(),
             particles,
-            ripple: None,
             classes: Arc::new(classes),
             emitters,
             anim: RatchetAnim::new(&lv.ratchet),
@@ -374,7 +348,7 @@ impl<'l> PortSim<'l> {
             // The game's view before the first render (None: culls the Novalis emitters), or the diagnostic.
             let cam_view = view_of(&sim.game.camera.out);
             let view = opt.load_emitters_visible.then_some(&cam_view);
-            let mut ext = Externals { emitters: &sim.emitters, view, ripple: &mut sim.ripple, ripple_inputs: lv.ripple.as_ref(), cuboids: &lv.cuboids };
+            let mut ext = Externals { emitters: &sim.emitters, view };
             let mut w = World::new(&mut sim.game.mobys, &hero, &mut sim.game.rng, &*sim.classes, &mut sim.svc, sim.game.counter);
             w.camera = sim.game.camera.out.pos;
             w.coll = Some(&lv.mesh);
@@ -399,7 +373,7 @@ impl<'l> PortSim<'l> {
         standin_visible(&mut self.game.mobys, cam.pos_f32());
         let svc = RefCell::new(&mut self.svc);
         let parts = RefCell::new(&mut self.particles);
-        let (sched, classes, emitters, ripple, missions) = (&mut self.sched, &self.classes, &self.emitters, &mut self.ripple, &self.missions);
+        let (sched, classes, emitters, missions) = (&mut self.sched, &self.classes, &self.emitters, &self.missions);
         let audio = RefCell::new(self.audio.as_mut());
         let hero_id = self.hero_id;
         let mut mobys = |table: &mut MobyTable, hero: &Hero, rng: &mut Rng, cam: &CameraView, coll: &collision::Collision, counter: u64| {
@@ -407,7 +381,7 @@ impl<'l> PortSim<'l> {
             let mut p = parts.borrow_mut();
             let mut a = audio.borrow_mut();
             let mut sink = a.as_deref_mut().map(|a| ClassSoundSink { audio: a, listener: class_sounds::listener_of(cam), hero: Some(hero_id) });
-            let mut ext = Externals { emitters, view: Some(&view), ripple: &mut *ripple, ripple_inputs: lv.ripple.as_ref(), cuboids: &lv.cuboids };
+            let mut ext = Externals { emitters, view: Some(&view) };
             let mut w = World::new(table, hero, rng, &**classes, &mut s, counter);
             w.sound = sink.as_mut().map(|s| s as &mut dyn rc_game::moby_update::services::SoundSink);
             w.camera = cam.pos;
@@ -454,8 +428,8 @@ impl<'l> PortSim<'l> {
         self.game.tick_with_hero_sounds(Some(&pad.bytes()), &lv.mesh, &mut anim, &mut hooks, &mut hits, sound, &mut hero_sounds);
         self.sound_draws.push(sound_n);
         self.draws_per_tick.push(lcg_distance(r0, self.game.rng.state));
-        // 751's per-tick colours (the engine's fog_state does the same after each tick).
-        if let Some(r) = self.ripple.as_ref() { self.look.set_from_ripple_zone(usize::try_from(r.last.zone).ok()); }
+        // 751's per-tick colours (the moby system's water: `Services::water::look`).
+        self.look = self.svc.water.look;
     }
 }
 

@@ -25,7 +25,10 @@
 //! glowing dotted rings around the ball are not this callback: they are the orbs' type-62 trail particles.
 //!
 //! **The ship glass** (`0x2a70a8`, the boot's `0x2327a0`; [`ship_glass_prims`]): the canopy of the ships 530..533,
-//! registered by the cutscene FX driver on list 1 with `MobyAttachToJoint(ship, 0, M)` = the world matrix of the
+//! registered by the cutscene FX driver on list 1; the callback takes `MobyAttachToJoint(ship, 0, M)` **when it draws**,
+//! i.e. on the pose the ship is drawn with this frame (a scene actor's pose is written after the moby loop, so the
+//! registering tick's matrix is one pose behind: the glass then trailed the approaching ship and fell behind its
+//! cockpit and crew; [`crate::scene_render::drawn_actor`]). M is the world matrix of the
 //! last joint of the class's **joint list 0** (the ship's cockpit joint: list `[0, 1, 2, 3, 6]` on 530; the second
 //! argument is a joint-list index, `MobyMarkJointChain` 0x268d80 reads class header +0x1c). Per class `class −
 //! 0x212` the gp arrays (level01 gp −0x6620 colour, −0x6610 point count, −0x6600 quad count, −0x65f0 normals,
@@ -620,6 +623,7 @@ fn draw_list1(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FxPrimMaterial>>,
     mut vis: Query<&mut Visibility>,
+    scene: Option<Res<crate::scene_render::SceneRuntime>>,
 ) {
     let Some(cam_t) = cams.iter().next() else { return };
     let counter = play.as_deref().map(|p| p.game.counter);
@@ -638,12 +642,16 @@ fn draw_list1(
                         out.extend(nanotech_prims(t, &g, cam));
                     }
                     Callback::ShipGlass => {
-                        let (Some(t), Some(m), Some(mo)) = (level.0.water.fx.ship_glass.as_ref(), cbs.matrices.get(&id), p.game.mobys.mobys.get(id)) else { continue };
+                        let (Some(t), Some(mo)) = (level.0.water.fx.ship_glass.as_ref(), p.game.mobys.mobys.get(id)) else { continue };
                         let Some(g) = t.of(mo.o_class) else { continue };
-                        out.push(ship_glass_prims(g, m, cam));
+                        // `MobyAttachToJoint(ship, 0, M)` at draw time: the pose the ship is drawn with this frame (a scene
+                        // actor's, set after the tick's moby loop), else the matrix the registration took.
+                        let drawn = scene.as_deref().and_then(|rt| crate::scene_render::drawn_actor(rt, id)).map(|a| a.joint_matrix(0));
+                        let Some(m) = drawn.or_else(|| cbs.matrices.get(&id).copied()) else { continue };
+                        out.push(ship_glass_prims(g, &m, cam));
                     }
                     // Drawn by crate::water_render.
-                    Callback::FireField760 => {}
+                    Callback::FireField760 | Callback::RipplePatches => {}
                 }
             }
         }

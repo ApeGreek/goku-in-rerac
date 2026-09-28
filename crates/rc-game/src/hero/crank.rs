@@ -311,7 +311,7 @@ mod tests {
         let env = Env { coll: &coll, pad: &pad, cam_yaw: Pf::ZERO, cam_rows: testkit::cam_x().0, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
         let mut anim = RecordingAnim::default();
         let mut rng = Rng::new();
-        let mut c = Ctx { env: &env, anim: &mut anim, rng: &mut rng };
+        let mut c = Ctx { env: &env, anim: &mut anim, rng: &mut rng, voice: None };
         assert!(h.set_state(&mut c, STATE, true));
         assert_eq!((h.state, h.group, h.frozen, h.items.f13f7, h.timer), (STATE, 9, 1, 1, 0));
         assert_eq!(anim.calls.last().copied(), Some((Pf::from_i32(8), SEQ_LATCH, 2)));
@@ -324,7 +324,7 @@ mod tests {
         assert_eq!(r.hero.state, STATE);
         assert_eq!(r.hero.position(), before);
         // SetState(0) lets go: unfrozen, idle.
-        let mut c = Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng };
+        let mut c = Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng, voice: None };
         assert!(r.hero.set_state(&mut c, 0, true));
         assert_eq!((r.hero.state, r.hero.frozen), (0, 0));
     }

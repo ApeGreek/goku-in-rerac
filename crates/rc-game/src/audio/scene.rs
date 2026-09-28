@@ -106,6 +106,18 @@ impl AudioSystem {
         }
     }
 
+    /// `music_Pause(0)` outside a scene (the vendor's `OpenVendorMenu`): the music voices are held, the volumes are the
+    /// normal ones.
+    pub fn music_pause(&mut self) {
+        self.scene.music_paused = true;
+        self.pause_music();
+    }
+
+    /// `music_Unpause` (the vendor's `VendorExit`): the held music voices resume at once.
+    pub fn music_unpause(&mut self) {
+        if self.scene.music_paused { self.resume_music(); }
+    }
+
     /// Applies the queued requests ([`post`]) now.
     pub fn scene_inbox(&mut self) {
         for c in take() { self.scene_command(c); }

@@ -47,6 +47,13 @@
 //! Not modelled: Clank's antenna glow moby
 //! (class 1204 on Clank's joint list 6 with a pulsing +0x90 colour).
 //!
+//! **Which entities may show.** The port keeps an entity set for every class that can be in the hand (every gadget
+//! class of the level) or on the back (the three packs), where the game has only the slots' mobys. So this module is
+//! the one authority on their visibility: every frame an item the game does not have right now is hidden again
+//! ([`absent_entities`]), whatever else wrote its `Visibility` — the vendor's exit and a scene's end re-show every
+//! item entity they hid (`Visibility::Inherited` on all `AttachedTo`), which used to leave every gadget class drawn
+//! at the hand (the Hologuise / Drone Device class 483 the most visible) and the unworn packs on the back.
+//!
 //! `RC_ATTACH=0` disables the items. With `RC_ANIM=0` (Ratchet frozen in the bind pose) they are not
 //! spawned either.
 
@@ -59,6 +66,7 @@ use rc_formats::gadget;
 use rc_formats::moby::LevelMobyClass;
 use rc_formats::moby_anim::{self, AnimState, MobyAnimClass, MobyFrame, Rows};
 use rc_formats::moby_light::{self as light, V4};
+use rc_game::hero::worn;
 
 /// Ratchet's joint lists `FUN_0022a940` evaluates every frame (the 9 words at 0x208c70); the attach
 /// matrix of list `HERO_LISTS[i]` lands at 0x13fe10 + 0x40·i, which the items index by their definition's
@@ -72,6 +80,10 @@ pub fn enabled() -> bool { !std::env::var("RC_ATTACH").is_ok_and(|v| v.trim() ==
 pub enum Slot {
     Hand,
     Back,
+    /// Item slot 1 (the boots; `joint_list` 2 = left, 3 = right) and slot 2 (the head items): posed from Ratchet's
+    /// joints (`rc_game::hero::worn::pose_from_host`), shown while the hero's slot holds their item.
+    Feet,
+    Head,
     /// Placed by the game (the Swingshot's hook), not by a host joint.
     Hook,
 }
@@ -144,7 +156,34 @@ impl Plugin for MobyAttachPlugin {
         app.add_systems(PreUpdate, setup)
             // After moby_anim's FixedUpdate tick (Ratchet's advance) within the same fixed step.
             .add_systems(FixedPostUpdate, update)
-            .add_systems(PostUpdate, (upload, rope_draw));
+            .add_systems(PostUpdate, (upload, rope_draw))
+            // After the vendor / scene show-again passes (they re-show every item entity), before visibility.
+            .add_systems(
+                PostUpdate,
+                keep_absent_hidden
+                    .after(upload)
+                    .after(crate::interact_render::hide_hero)
+                    .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
+            );
+    }
+}
+
+/// Whether an item entity that the game has no moby for may be drawn: the port keeps one entity set per class
+/// that *can* be in the hand or on the back (every gadget class, the three packs), while the game's slot holds one
+/// moby at a time (`HeroItemsCreate` 0x22f3c0 creates only the slot's item, `0x2305e8` deletes it). So an entity
+/// whose item is not the slot's ([`Item::visible`] false) must stay hidden whatever else writes its visibility: the
+/// vendor's `VendorExit` / `FUN_002487a8` and the scene end clear the hide bits of the mobys that exist, which in the
+/// port re-shows every item entity (`Visibility::Inherited` on all `AttachedTo`). Returns the entities to hide.
+pub(crate) fn absent_entities<'a>(items: impl IntoIterator<Item = (bool, &'a [Entity])>) -> Vec<Entity> {
+    items.into_iter().filter(|(visible, _)| !visible).flat_map(|(_, e)| e.iter().copied()).collect()
+}
+
+/// Every frame: the entities of items the game does not have right now are hidden ([`absent_entities`]). Only ever
+/// hides: showing stays with [`upload`] (and the hero hides of the vendor / scenes keep precedence).
+fn keep_absent_hidden(attach: Option<Res<MobyAttach>>, mut q: Query<&mut Visibility, With<AttachedTo>>) {
+    let Some(a) = attach else { return };
+    for e in absent_entities(a.items.iter().map(|i| (i.visible, i.entities.as_slice()))) {
+        if let Ok(mut v) = q.get_mut(e) { v.set_if_neq(Visibility::Hidden); }
     }
 }
 
@@ -237,6 +276,18 @@ fn build(
     ];
     for (n, c, ac) in more_packs { specs.push((n, c, ac, host(Slot::Back, BACK_ATTACH))); }
     specs.push(("Clank", clank, clank_anim, host(Slot::Back, BACK_ATTACH)));
+    // The worn items the level has (item slots 1 and 2, rc_game::hero::worn): each boot class twice (left / right
+    // boot on attach words 2 / 3), each head class once (attach word 4); columns not normalised (0x22fec0).
+    for &(_, o, slot) in WORN_CLASSES {
+        let Ok((c, ac)) = level_class(o) else { continue };
+        let worn = |list| AttachedTo { host: host_ii, slot, joint_list: list, normalise: false };
+        if slot == Slot::Feet {
+            specs.push(("left boot", c.clone(), ac.clone(), worn(worn::LEFT_BOOT_ATTACH)));
+            specs.push(("right boot", c, ac, worn(worn::RIGHT_BOOT_ATTACH)));
+        } else {
+            specs.push(("head item", c, ac, worn(worn::HEAD_ATTACH)));
+        }
+    }
     // The Swingshot (item 12: class 0xd0, attach word 1) and its hook (0xd1), when the level's gadget table has them.
     for (name, o, slot, list) in [("Swingshot", SWINGSHOT_O_CLASS, Slot::Hand, SWINGSHOT_ATTACH), ("Swingshot hook", SWINGSHOT_HOOK_O_CLASS, Slot::Hook, SWINGSHOT_ATTACH)] {
         // The gadget table, else the level's own classes (the hook is a `CreateMoby(0xd1)` of the level).
@@ -268,7 +319,7 @@ fn build(
         let mut snapshot = None;
         if attach.slot == Slot::Hand { moby_anim::set_sequence(&mut state, &ac, 1, 0, 1, &mut snapshot); }
         // Without the game tick only the wrench, the Heli-Pack and Clank show (the old viewer behaviour).
-        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook" | "hand item");
+        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook" | "hand item" | "left boot" | "right boot" | "head item");
         items.push(Item {
             name, o_class: class.o_class as i16, visible, shown: None, attach, anim: ac, state, snapshot, scale: class.class.header.scale,
             base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(),
@@ -308,6 +359,11 @@ const SWINGSHOT_ATTACH: usize = 1;
 const SWINGSHOT_O_CLASS: i32 = rc_game::hero::swingshot::SWINGSHOT_CLASS as i32;
 const SWINGSHOT_HOOK_O_CLASS: i32 = rc_game::hero::swingshot::HOOK_CLASS as i32;
 const BACK_PACK_O_CLASS: i32 = 607;
+/// The worn items' classes (item definition `+0x10`, level01): `(item, o_class, slot)`. The feet slot's second
+/// moby is `+0x14`, the same class.
+const WORN_CLASSES: &[(i32, i32, Slot)] = &[(5, 433, Slot::Head), (6, 1289, Slot::Head), (7, 1290, Slot::Head), (28, 173, Slot::Feet), (29, 195, Slot::Feet)];
+/// The Sonic Summoner's class (0x1b1): its own joint table with 6 identity joints (`HeroItemsAttach` 0x22fec0).
+const SONIC_SUMMONER_O_CLASS: i16 = 0x1b1;
 const CLANK_O_CLASS: i32 = 601;
 
 fn rows_f32(rows: &[V4; 3]) -> [[f32; 3]; 3] { rows.map(|r| [0, 1, 2].map(|k| f32::from_bits(r[k]))) }
@@ -325,7 +381,11 @@ fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap:
         if item.attach.slot == Slot::Hook { continue; }
         let Some(&(_, w)) = ws.iter().find(|(l, _)| *l == item.attach.joint_list) else { continue };
         item.position = [w[3][0], w[3][1], w[3][2]];
-        let adv = if item.attach.slot == Slot::Back { advance_back } else { advance_hand && item.o_class == WRENCH_O_CLASS_I16 };
+        let adv = match item.attach.slot {
+            Slot::Back => advance_back,
+            Slot::Feet | Slot::Head => false,
+            _ => advance_hand && item.o_class == WRENCH_O_CLASS_I16,
+        };
         if adv { moby_anim::advance(&mut item.state, &item.anim); }
         let mut rows: [V4; 3] = [0, 1, 2].map(|i| w[i].map(f32::to_bits));
         if item.attach.normalise { moby_anim::normalise_columns(&mut rows); }
@@ -370,17 +430,46 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
     let (k, class) = (a.host_k, &level.0.mobys.anim[a.host_class]);
     let mods = play.as_ref().map(|p| p.game.mobys.mobys[p.game.hero_moby].joint_mods.clone()).unwrap_or_default();
     place(&mut a, class, &anim.instances[k].state, anim.snapshots[k].as_ref(), back.is_none(), hand.is_none(), &mods);
-    if let Some(h) = hand {
-        for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
-            match h.as_ref().filter(|m| m.o_class == item.o_class) {
-                Some(m) => {
-                    item.visible = (!fp || m.mstate != 0) && !hand_off;
+    // The worn items (item slots 1 and 2, rc_game::hero::worn): the class of the slot's item shows while the slot
+    // has its moby (states 2 and 3), hidden with Ratchet's items (first person; Clank hidden does not hide them).
+    // Ready (2): the keyframe of Ratchet's joints (`HeroItemPoseFromRatchet`); the head item's put-away (3): its own
+    // animation as the hero advanced it.
+    if let Some(p) = play.as_ref() {
+        let h = &p.game.hero;
+        let class_of = |id: i32| p.game.item_data.as_ref().map(|d| d.def(id).o_class).filter(|&o| o > 0).or_else(|| WORN_CLASSES.iter().find(|w| w.0 == id).map(|w| w.1));
+        let worn_class = |s: &rc_game::hero::idle::ItemSlot| if s.state != 0 { class_of(s.id).map(|o| o as i16) } else { None };
+        let (feet, head) = (worn_class(&h.feet_slot), worn_class(&h.head_slot));
+        let host_state = anim.instances[k].state;
+        let host_snap = anim.snapshots[k].clone();
+        for item in a.items.iter_mut().filter(|i| matches!(i.attach.slot, Slot::Feet | Slot::Head)) {
+            let (on, ready) = if item.attach.slot == Slot::Feet { (feet, h.feet_slot.state == 2) } else { (head, h.head_slot.state == 2) };
+            item.visible = on == Some(item.o_class) && !fp;
+            if !item.visible { continue; }
+            if !ready && item.attach.slot == Slot::Head {
+                if let Some(m) = h.worn.head.as_ref().filter(|m| m.o_class == item.o_class) {
                     item.state = m.anim;
                     item.snapshot = m.snapshot.clone();
-                    item.rows = m.rows;
-                    item.position = m.position;
                 }
-                None => item.visible = false,
+                continue;
+            }
+            let (joints, extra): (&[u8], usize) = match (item.attach.slot, item.attach.joint_list) {
+                (Slot::Feet, worn::LEFT_BOOT_ATTACH) => (&worn::LEFT_BOOT_JOINTS, 0),
+                (Slot::Feet, _) => (&worn::RIGHT_BOOT_JOINTS, 0),
+                _ if item.o_class == SONIC_SUMMONER_O_CLASS => (&worn::SONIC_SUMMONER_JOINTS, 6),
+                _ => (&worn::HEAD_JOINTS, 0),
+            };
+            item.snapshot = worn::pose_from_host(class, &host_state, host_snap.as_ref(), &item.anim, joints, extra);
+            item.state = worn::posed_state();
+        }
+    }
+    if let Some(h) = hand {
+        for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
+            item.visible = hand_shows(item.o_class, h.as_ref(), fp, hand_off);
+            if let Some(m) = h.as_ref().filter(|m| m.o_class == item.o_class) {
+                item.state = m.anim;
+                item.snapshot = m.snapshot.clone();
+                item.rows = m.rows;
+                item.position = m.position;
             }
         }
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hook) {
@@ -393,6 +482,13 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
         }
     }
     a.ticks += 1;
+}
+
+/// Whether the hand entity set of class `o_class` shows: only the class of the slot's item moby (the game has no
+/// other hand moby), hidden in first person (`0x2486c0`) unless the item is off the hand (the thrown wrench,
+/// `mstate` ≠ 0) and while 0x1413ff hides the hand item (`FUN_002487a8`).
+pub(crate) fn hand_shows(o_class: i16, held: Option<&rc_game::hero::items::HandItem>, fp: bool, hand_off: bool) -> bool {
+    held.is_some_and(|m| m.o_class == o_class && (!fp || m.mstate != 0) && !hand_off)
 }
 
 /// Palettes and records of the items after a tick, and the entities' transforms (blended-pass sorting).
@@ -546,6 +642,53 @@ fn rope_draw(
         None => {
             if st.shown { commands.entity(e).insert(Visibility::Hidden); }
             st.shown = false;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rc_game::hero::items::HandItem;
+
+    fn held(o_class: i16) -> HandItem {
+        let anim = AnimState { seq_a: 0, frame_a: 0, seq_b: 0, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false };
+        HandItem { o_class, mstate: 0, anim, snapshot: None, scale: 1.0, position: [0.0; 3], rows: [[0; 4]; 3], hit_timer: 0, flight: Default::default() }
+    }
+
+    /// The 21 gadget classes of every level (docs/formats/moby_rac1.md §0.4): for each one in the hand exactly that
+    /// class's entity set shows; none with an empty slot, in first person or while 0x1413ff hides the hand.
+    #[test]
+    fn one_hand_item_per_equipped_item() {
+        let classes: [i16; 21] = [71, 157, 163, 168, 175, 176, 177, 180, 185, 188, 190, 192, 208, 229, 454, 483, 562, 585, 619, 849, 1251];
+        for &c in &classes {
+            let m = held(c);
+            let shown: Vec<i16> = classes.iter().copied().filter(|&k| hand_shows(k, Some(&m), false, false)).collect();
+            assert_eq!(shown, vec![c]);
+            assert!(!classes.iter().any(|&k| hand_shows(k, Some(&m), true, false) || hand_shows(k, Some(&m), false, true)));
+        }
+        assert!(!classes.iter().any(|&k| hand_shows(k, None, false, false)));
+        // The thrown wrench stays drawn in first person.
+        let mut w = held(71);
+        w.mstate = 10;
+        assert!(hand_shows(71, Some(&w), true, false));
+    }
+
+    /// A swap (Bomb Glove 192 → Hologuise / Drone 483 → Pyrocitor 176 → wrench 71), then the vendor's or a scene's
+    /// show-again that sets every item entity visible: after the hide pass only the held class's entities are
+    /// visible, at every step.
+    #[test]
+    fn absent_items_stay_hidden_after_a_show_again() {
+        let classes: [i16; 4] = [192, 483, 176, 71];
+        let ents: Vec<Vec<Entity>> = (0..4u32).map(|k| (0..3).map(|j| Entity::from_raw_u32(1 + 3 * k + j).unwrap()).collect()).collect();
+        for step in [Some(192i16), None, Some(483), None, Some(176), Some(71)] {
+            let m = step.map(held);
+            let visible: Vec<bool> = classes.iter().map(|&c| hand_shows(c, m.as_ref(), false, false)).collect();
+            // Every entity shown (the vendor exit / scene end), then the hide pass.
+            let mut shown: std::collections::HashSet<Entity> = ents.iter().flatten().copied().collect();
+            for e in absent_entities(visible.iter().copied().zip(ents.iter().map(|v| v.as_slice()))) { shown.remove(&e); }
+            let want: std::collections::HashSet<Entity> = classes.iter().zip(&ents).filter(|(c, _)| Some(**c) == step).flat_map(|(_, e)| e.iter().copied()).collect();
+            assert_eq!(shown, want, "held {step:?}");
         }
     }
 }

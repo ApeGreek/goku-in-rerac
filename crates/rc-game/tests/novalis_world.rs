@@ -239,7 +239,10 @@ fn novalis_waterfall_foam_spawns_rings_and_mist() {
     let Ok(ov_bytes) = std::fs::read(root.join("levels/01/overlay.bin")) else { eprintln!("skipped: no extracted/"); return };
     let Some(gp) = rc_formats::test_data::gameplay(1) else { return };
     let ov = rc_formats::water::Overlay::parse(&ov_bytes).unwrap();
-    let tables = rc_formats::water::parse_ripple_tables(&ov, 1).unwrap().unwrap();
+    let lo = rc_formats::level_overlay::LevelOverlay::parse(&ov_bytes).unwrap();
+    let rel = rc_formats::level_overlay::Relocation::new(&lo, &lo);
+    let (a, m) = (rc_formats::water::Ripple751Addrs::locate(&rel).unwrap(), rc_formats::water::RippleModuleAddrs::locate(&rel).unwrap());
+    let tables = rc_formats::water::parse_ripple_tables(&ov, &a, &m).unwrap();
     let cuboids = rc_formats::water::parse_cuboids(&gp).unwrap();
     let instances = gameplay::parse_moby_instances(&gp).unwrap();
     let pvars = gameplay::parse_pvars(&gp).unwrap();

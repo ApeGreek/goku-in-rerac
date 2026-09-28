@@ -814,6 +814,9 @@ pub struct Services {
     pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
     /// The frame's draw-callback lists 0x21afe0 / 0x21b198 ([`crate::moby_update::classes::draw_callbacks`]).
     pub draw_callbacks: crate::moby_update::classes::draw_callbacks::DrawCallbacks,
+    /// The Bomb Glove's reticle draw callbacks (`0x2c23c0`, list 1) registered by its bombs' landing preview
+    /// (`crate::targeting`).
+    pub reticles: crate::targeting::Reticles,
     /// The fire / smoke fields' globals and elements (classes 760 / 809, [`crate::moby_update::classes::fire_field`]).
     pub fire_fields: crate::moby_update::classes::fire_field::FireFieldState,
     /// The creature layer's globals ([`crate::moby_update::creature::Globals`]: rate limiters, class spheres).
@@ -827,11 +830,18 @@ pub struct Services {
     pub interact: crate::moby_update::interact::Interact,
     /// The in-level cinematic calls and engine requests of the moby loop ([`crate::cinematic`]).
     pub cinematic: crate::cinematic::Cinematic,
+    /// The level's water: the ripple module, the flat water plane, the underwater look and the managers' data
+    /// (`crate::water::world`; empty until the level's water data is loaded).
+    pub water: crate::water::world::WaterWorld,
     /// The pickups' globals (ammo pickup sound, the nanotech master and its orbit table;
     /// [`crate::moby_update::classes::pickup`]).
     pub pickups: crate::moby_update::classes::pickup::Globals,
     /// The last pickup banner request (`ShowBannerf`), for the HUD.
     pub pickups_banner: crate::moby_update::classes::pickup::Banner,
+    /// The buried bolt caches' globals (0x141390..98, the counter gp−0x5110): `classes::buried_bolts`.
+    pub buried: crate::moby_update::classes::buried_bolts::Globals,
+    /// The Sonic Summoner's mouse (0x1deb88): `classes::mouse`.
+    pub mouse: crate::moby_update::classes::mouse::Globals,
 }
 
 impl Default for Services {
@@ -868,14 +878,18 @@ impl Services {
             hero_writes: None,
             camera_shakes: Vec::new(),
             draw_callbacks: Default::default(),
+            reticles: Default::default(),
             fire_fields: Default::default(),
             creatures: Default::default(),
             cranks: Default::default(),
             point_lights: Default::default(),
             cinematic: Default::default(),
+            water: Default::default(),
             interact: Default::default(),
             pickups: Default::default(),
             pickups_banner: Default::default(),
+            buried: Default::default(),
+            mouse: Default::default(),
         }
     }
 
@@ -943,6 +957,7 @@ impl Services {
 /// | `clear_motion` | `FastMemZero16(0x13f430, 0x90)`: velocity .. slope ratio (0x13f430..0x13f4bf) | bolt crank 280 |
 /// | `calls` | the classes' calls into the hero code: `SetState` 0x23cf98, `SetAnim` 0x247a90 ([`HeroCall`]) | bolt crank 280 |
 /// | `health` | 0x1415f8 | nanotech cluster 806 `0x300de0` ([`super::classes::pickup`]) |
+/// | `water_level` / `dive_lock` | 0x13f640 / 0x13f52e | the water managers of 05 / 12, the water plane 982 of 05 (`crate::water::managers`) |
 /// | `ammo` / `ammo_picked` | 0x13d428 / 0x13de08 (game state, Ratchet's mirror) | ammo pickups `0x2db028` (`AddAmmo` 0x2494d8) |
 ///
 /// Other class stores into the block, for the classes that are not ported yet (add a field here when one is):
@@ -974,6 +989,10 @@ pub struct HeroFields {
     pub ammo_picked: [i32; rc_formats::save_game::ITEM_COUNT],
     /// `0x1413ff = 1`: the hand item hidden (the gold bolt's pickup; `SetState` clears it on foot).
     pub hide_hand: bool,
+    /// 0x13f640: the water level (the water managers of levels 05 / 12 set it near their water).
+    pub water_level: f32,
+    /// 0x13f52e (s16): the dive lock (level 05's water plane 982 holds it at 5).
+    pub dive_lock: i16,
 }
 
 /// Ratchet's pose as a class stores it (native `f32`): position 0x13f3d0 (x, y, z; w kept), yaw 0x13f3e8, target
@@ -1014,6 +1033,8 @@ impl HeroFields {
             ammo: h.weapons.ammo,
             ammo_picked: [0; rc_formats::save_game::ITEM_COUNT],
             hide_hand: false,
+            water_level: f32::from_bits(h.water_level.0),
+            dive_lock: h.swim.dive_lock,
         }
     }
 
@@ -1046,6 +1067,8 @@ impl HeroFields {
         }
         h.health = self.health;
         h.weapons.ammo = self.ammo;
+        h.water_level = Pf(self.water_level.to_bits());
+        h.swim.dive_lock = self.dive_lock;
         for (t, n) in h.weapons.picked.iter_mut().zip(self.ammo_picked.iter()) { *t += n; }
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
@@ -1107,12 +1130,12 @@ pub struct World<'a> {
     pub sound: Option<&'a mut dyn SoundSink>,
     pub missions: &'a dyn MissionState,
     pub inventory: &'a dyn Inventory,
-    /// Class updates ported outside `moby_update` (water 751, emitters 27, …), run in the moby order.
+    /// Class updates ported outside `moby_update` (the emitters 27, …), run in the moby order.
     pub external: Option<&'a mut dyn ExternalUpdates>,
     pub svc: &'a mut Services,
 }
 
-/// Updates of classes whose ports live outside `moby_update` (the water manager 751 in `water.rs`, the
+/// Updates of classes whose ports live outside `moby_update` (the
 /// class-27 emitters of `particles::type06`, …). The scheduler calls them at the moby's place in the run
 /// order (load pass: array order; ticks: class-slot order) with the one shared RNG, so their draws land where
 /// the game makes them.
@@ -1123,11 +1146,6 @@ pub trait ExternalUpdates {
     /// `(*moby+0x74)(moby)` for an address [`update_fn`](Self::update_fn) returned. `particles` is the
     /// world's particle system (the class-27 emitters spawn into it).
     fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: V4, counter: u64, particles: Option<&mut Particles>);
-    /// `RippleDisturb(x, y, r, amp, patches, n, additive)` 0x2b82a8 on every ripple patch of the level's water
-    /// (the ripple manager 751's buffers); none: nothing (no draws either way).
-    fn ripple_disturb(&mut self, _x: f32, _y: f32, _r: f32, _amp: f32, _additive: bool) {}
-    /// `SetWaterLevel` 0x26ed38's ripple-patch surface height over `p` (`RippleHeightQuery`); None: no patch there.
-    fn water_height(&self, _p: [f32; 3]) -> Option<f32> { None }
 }
 
 /// A `CollLine_Fix` result with its moby (`CollOutput+0x18`).
@@ -1710,6 +1728,12 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
         Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
     }
     fn volumes(&self) -> Option<Arc<rc_formats::volumes::Volumes>> { Some(self.svc.borrow().volumes.clone()) }
+    fn water(&self) -> Option<&dyn crate::hero::swim::WaterQuery> { Some(self) }
+}
+
+/// `SetWaterLevel` 0x26ed38 over the level's water (`Services::water`, borrowed per query).
+impl crate::hero::swim::WaterQuery for SharedServices<'_, '_> {
+    fn water_height(&self, p: [f32; 3]) -> Option<f32> { self.svc.borrow().water.water_height(p) }
 }
 
 /// `Quad(a, b, c, &r0, &r1)` 0x26e520: roots of `a·t² + b·t + c`: `(count, larger root)`.

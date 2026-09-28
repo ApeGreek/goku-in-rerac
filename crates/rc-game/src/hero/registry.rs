@@ -260,11 +260,15 @@ impl Hero {
             Ground => self.phys_ground(env, anim, rng),
             Walk => self.phys_walk(env),
             Air => self.phys_fall(env),
-            Jump if implemented(s) => self.phys_jump(env),
+            Jump if implemented(s) => {
+                // The deep-water jump's splash and bubbles (super::swim::effects::water_jump).
+                if s == super::swim::id::WATER_JUMP { super::swim::effects::water_jump(self, anim, rng); }
+                self.phys_jump(env)
+            }
             Swim => match s {
-                0x33..=0x35 => self.phys_underwater(env, anim),
-                0x36 | 0x37 => self.phys_surface(env, anim),
-                0x6a => self.phys_drown(),
+                0x33..=0x35 => self.phys_underwater(env, anim, rng),
+                0x36 | 0x37 => self.phys_surface(env, anim, rng),
+                0x6a => self.phys_drown(anim, rng),
                 _ => return false,
             },
             Melee => match s {

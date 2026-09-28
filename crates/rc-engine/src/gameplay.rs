@@ -15,7 +15,7 @@
 //!   game's stream (the class-27 emitters see no view: culled, as the game's zero view before the first render),
 //!   and the load's `0x15f5cc++` (`Game::finish_load`: the first tick runs at counter 1): the ported classes'
 //!   state-0 inits (bolts, crates, grass), the external updates (class-27 emitters 0x2bd100 of
-//!   crate::particle_render, water 751 0x2fd0e8 of crate::water_render), one `MobyAnimAdvance` of every
+//!   crate::particle_render; the water managers are class ports, `rc_game::water::managers`), one `MobyAnimAdvance` of every
 //!   non-mode-2 moby. crate::moby_spawn stays the source for the unported classes only (459, 572-family, 577,
 //!   666, 730/790, 750, 1818, the ship): per moby the anim / position / mode come either from the table (a
 //!   class with a ported update) or from its `SpawnState`, never both. Ratchet's animation is `RatchetAnim`
@@ -107,7 +107,6 @@ use crate::moby_render::{self, ExtraMobys, MobyMaterial, MobyOcclusion};
 use crate::moby_spawn::{MobySpawn, SpawnHidden};
 use crate::particle_render::ParticleSim;
 use crate::play_camera::{self, PlayView};
-use crate::water_render::WaterState;
 use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
@@ -135,8 +134,6 @@ use std::collections::HashMap;
 
 /// Level-table address of the class-27 emitter update (Novalis only), crate::particle_render.
 pub(crate) const EMITTER_UPDATE: u32 = 0x2bd100;
-/// Level-table address of the ripple manager 751's update, crate::water_render.
-const RIPPLE_UPDATE: u32 = 0x2fd0e8;
 
 /// `RC_GIVE_ITEMS=<id>,...` (debug): the item ids to own from the start (decimal or `0x` hex; ids outside the
 /// item table are ignored).
@@ -159,33 +156,31 @@ impl Plugin for GameplayPlugin {
     fn build(&self, app: &mut App) {
         let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
         match load_game_state(&root, index) {
-            Ok((mut gs, sess)) => {
+            Ok((mut gs, mut sess)) => {
                 // RC_GIVE_HYDROPACK=1: own the Hydro-Pack (item 4) from the start (debug).
                 if std::env::var("RC_GIVE_HYDROPACK").is_ok_and(|v| v.trim() == "1") {
                     gs.global.owned[rc_game::hero::swim::ITEM_HYDRO_PACK] = 1;
                     println!("game state: RC_GIVE_HYDROPACK=1: Hydro-Pack owned");
                 }
-                // RC_GIVE_ITEMS=<id>,<id>,...: own those items (decimal or 0x hex ids, docs/plan/hero_states.md §0.1)
-                // from the start (debug); the last back item among them (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack)
-                // is the saved back item (equipped[3], 0x14166c), so Clank wears it.
+                // RC_GIVE_ITEMS=<id>,<id>,...: own those items (decimal or 0x hex ids, docs/plan/gadgets.md §6) from the
+                // start (debug, rc_game::inventory::debug_grant); unless RC_GIVE_ITEMS_EQUIP=0, the last back, feet
+                // and head item among them are the saved items of their slots (equipped[3 / 1 / 2]: Clank wears the
+                // pack, Ratchet the boots / head item), and the last hand item is requested into the hand. Without the
+                // variable nothing is granted: the state is the game's.
                 // RC_GIVE_BOLTS=<n>: start with n bolts (debug; e.g. to buy at the vendor).
                 if let Some(n) = std::env::var("RC_GIVE_BOLTS").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
                     gs.global.bolts = n;
                     println!("game state: RC_GIVE_BOLTS: {n} bolts");
                 }
                 if let Some(ids) = give_items() {
-                    for &id in &ids { gs.global.owned[id] = 1; }
+                    use rc_game::inventory::{debug_grant, GrantEquip};
                     // With the ammo `GiveItem` grants (the item record's +0x12), so a given weapon can fire.
                     let tables = crate::disc_source::read_path(&root, &root.join("boot/SCUS_971.99")).ok()
                         .zip(crate::disc_source::level_file(&root, index, "overlay.bin").ok())
                         .and_then(|(elf, ov)| ItemTables::load(&elf, &ov).ok());
-                    if let Some(t) = tables {
-                        for &id in &ids {
-                            if t.records[id].has_ammo() { gs.global.ammo[id] = gs.global.ammo[id].max(t.records[id].grant_ammo() as i32); }
-                        }
-                    }
-                    if let Some(&b) = ids.iter().rev().find(|&&i| matches!(i, 2..=4)) { gs.global.equipped[3] = b as i32; }
-                    println!("game state: RC_GIVE_ITEMS: items {ids:?} owned, back item {}", gs.global.equipped[3]);
+                    let mode = if std::env::var("RC_GIVE_ITEMS_EQUIP").is_ok_and(|v| v.trim() == "0") { GrantEquip::None } else { GrantEquip::LastPerSlot };
+                    let [hand, feet, head, back] = debug_grant(&mut gs, &mut sess, &ids, tables.as_ref(), mode);
+                    println!("game state: RC_GIVE_ITEMS: items {ids:?} owned ({mode:?}): saved back {back:?} / feet {feet:?} / head {head:?}, hand request {hand:?}");
                 }
                 let g = &gs.global;
                 println!(
@@ -255,7 +250,7 @@ pub struct HeldWeapon(pub Option<(u16, i32, i32)>);
 struct AmmoTable(Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
 
 /// The hand-item data, the ammo table (uses ammo, max) and the weapon fields of the item definitions.
-type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, Vec<Vec<u8>>);
+type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, Vec<Vec<u8>>, Vec<Vec<u8>>);
 
 /// The level's hand-item data (item definitions from the overlay, the gadget classes, Ratchet's joint lists)
 /// for `rc_game::hero::items`: the definitions at the overlay's item table (L01 0x179f40, found through
@@ -282,6 +277,9 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
     // The second byte lists of Ratchet's joint lists: the weapon arm layers' joints (`FUN_00263e08`, lists 12 / 13)
     // and the joint-modifier nodes' targets (`AttachManipulator`, their first entries).
     let seconds: Vec<Vec<u8>> = (0..64).map(|l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(_, b)| b).unwrap_or_default()).collect();
+    // The first byte lists (root-to-joint chains) of all his lists: the joint points of the hero's effects (the water
+    // bubbles at his hands, feet and mouth: rc_game::hero::fx::joint_point).
+    let firsts: Vec<Vec<u8>> = (0..64).map(|l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(a, _)| a).unwrap_or_default()).collect();
     let mut classes = Vec::new();
     for g in &gadgets {
         let c = &g.moby.class;
@@ -290,17 +288,15 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
         classes.push(ItemClass { o_class: g.moby.o_class as i16, anim: rc_formats::moby_anim::MobyAnimClass::new(c, seqs), scale: c.header.scale, chains });
     }
     let ammo = tables.records.iter().map(|r| (r.has_ammo(), u16::from_le_bytes([r.0[0xe], r.0[0xf]]))).collect();
-    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, seconds))
+    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, seconds, firsts))
 }
 
-/// The level water tables the hero's ground probe reads (`0x26ed38`): the class-751 ripple patches of
-/// crate::water_render (borrowed per query: the moby hook runs 751 on the same state earlier in the tick).
-struct HeroWater<'w, 'r>(&'w RefCell<Option<&'r mut WaterState>>);
+/// The level's water the hero's ground probe reads (`SetWaterLevel` 0x26ed38: the ripple module's active patches,
+/// then the flat plane; `Services::water`, borrowed per query: the moby hook runs the managers earlier in the tick).
+struct HeroWater<'w, 'r>(&'w RefCell<&'r mut Services>);
 
 impl rc_game::hero::swim::WaterQuery for HeroWater<'_, '_> {
-    fn water_height(&self, p: [f32; 3]) -> Option<f32> {
-        self.0.borrow().as_ref()?.ripple.as_ref()?.water_height(p)
-    }
+    fn water_height(&self, p: [f32; 3]) -> Option<f32> { self.0.borrow().water.water_height(p) }
 }
 
 /// The moby system hook plus the water tables.
@@ -415,15 +411,6 @@ fn load_game_state(root: &std::path::Path, index: u32) -> anyhow::Result<(GameSt
         gs.apply_transition(index as i32);
         gs.apply_level_start(index as i32, &items(index)?, &mut sess);
     }
-    // RC_GIVE_ITEMS (debug): the last hand item among the ids (slot type 0, not the wrench, e.g. the Swingshot 12)
-    // is requested into the hand, as GiveItem's equip does (the session's temp hand item, 0x141408).
-    if let Some(ids) = give_items() {
-        let t = items(index)?;
-        if let Some(&h) = ids.iter().rev().find(|&&i| i != 8 && t.slot_type.get(i) == Some(&0)) {
-            sess.temp_hand = h as i32;
-            println!("game state: RC_GIVE_ITEMS: item {h} requested into the hand");
-        }
-    }
     Ok((gs, sess))
 }
 
@@ -513,68 +500,35 @@ pub fn level_ports() -> &'static rc_game::moby_update::classes::LevelPorts {
             eprintln!("gameplay: level {index:02} overlay not read: class ports by class number");
             return LevelPorts::by_class_number();
         };
-        LevelPorts::from_overlays(&target, &overlay, &[EMITTER_UPDATE, RIPPLE_UPDATE])
+        LevelPorts::from_overlays(&target, &overlay, &[EMITTER_UPDATE])
     })
 }
 
 /// The external updates' level-table address for `o_class` (`ExternalUpdates::update_fn`, also used to build
-/// the class table before the externals exist): the class's table entry is the emitter 0x2bd100 or the ripple
-/// manager 0x2fd0e8 (the latter only with the level's ripple tables).
-fn external_update_fn(ripples: bool, o_class: i16) -> Option<u32> {
+/// the class table before the externals exist): the class's table entry is the emitter 0x2bd100.
+fn external_update_fn(o_class: i16) -> Option<u32> {
     match level_ports().external(o_class) {
         Some(EMITTER_UPDATE) => Some(EMITTER_UPDATE),
-        Some(RIPPLE_UPDATE) if ripples => Some(RIPPLE_UPDATE),
         _ => None,
     }
 }
 
 /// Class updates ported outside `rc_game::moby_update`, run by the scheduler at their place in the moby order
 /// on the game's stream: the class-27 emitters (`type06::emitter_update_live` 0x2bd100 on the emitter's live
-/// moby, which the Blarg flyers 660 move every tick, into the world's
-/// particles, with the view of the last rendered frame) and the ripple manager 751 (state 0: the load-pass
-/// init, else the update with the game camera 0x167240).
+/// moby, which the Blarg flyers 660 move every tick, into the world's particles, with the view of the last rendered
+/// frame). (The water managers are class ports: `rc_game::water::managers`.)
 struct Externals<'a> {
     level: u32,
     emitters: &'a HashMap<MobyId, usize>,
     view: Option<&'a BSphereView>,
-    water: Option<&'a mut WaterState>,
 }
 
 impl ExternalUpdates for Externals<'_> {
-    fn update_fn(&self, o_class: i16) -> Option<u32> { external_update_fn(self.water.as_ref().is_some_and(|w| w.has_ripples()), o_class) }
+    fn update_fn(&self, o_class: i16) -> Option<u32> { external_update_fn(o_class) }
 
-    /// `RippleDisturb` 0x2b82a8 on every ripple patch (the Bomb Glove bomb's water entry, `bomb_water::entry`).
-    fn ripple_disturb(&mut self, x: f32, y: f32, r: f32, amp: f32, additive: bool) {
-        use rc_game::ps2v::Pf;
-        if let Some(sim) = self.water.as_deref_mut().and_then(|w| w.ripple.as_mut()) {
-            let n = sim.patches.len();
-            sim.disturb(Pf::f(x), Pf::f(y), Pf::f(r), Pf::f(amp), 0..n, additive);
-        }
-    }
-
-    /// `SetWaterLevel` 0x26ed38's ripple-patch height (the bomb's bubbles pop there).
-    fn water_height(&self, p: [f32; 3]) -> Option<f32> { self.water.as_deref()?.ripple.as_ref()?.patch_height(p[0], p[1], p[2]) }
-
-    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, camera: [rc_game::ps2v::Pf; 4], counter: u64, particles: Option<&mut Particles>) {
-        match addr {
-            EMITTER_UPDATE => {
-                if let (Some(p), Some(&o)) = (particles, self.emitters.get(&id)) { type06::emitter_update_live(p, rng, o, self.view, self.level, &table.mobys[id]); }
-            }
-            RIPPLE_UPDATE => {
-                let Some(w) = self.water.as_deref_mut() else { return };
-                let m = &mut table.mobys[id];
-                if m.state == 0 {
-                    // 0x2fd0e8 state 0: the init, then state 1, update distance 0xff (always in the run list),
-                    // z + 0.5.
-                    w.ripple_init(rng);
-                    m.state = 1;
-                    m.update_dist = 0xff;
-                    m.position[2] += 0.5;
-                } else {
-                    w.ripple_update_with([camera[0].to_f32(), camera[1].to_f32(), camera[2].to_f32()], rng, counter, particles);
-                }
-            }
-            _ => {}
+    fn update(&mut self, addr: u32, id: MobyId, table: &mut MobyTable, rng: &mut Rng, _camera: [rc_game::ps2v::Pf; 4], _counter: u64, particles: Option<&mut Particles>) {
+        if addr == EMITTER_UPDATE {
+            if let (Some(p), Some(&o)) = (particles, self.emitters.get(&id)) { type06::emitter_update_live(p, rng, o, self.view, self.level, &table.mobys[id]); }
         }
     }
 }
@@ -610,9 +564,13 @@ fn class_table(lv: &crate::level_load::LoadedLevel, ext: &dyn Fn(i16) -> Option<
 /// The joint lists of the classes whose update reads joint points (`rc_game::moby_update::classes::needs_joint_lists`,
 /// `Services::joint_lists`), from their blobs in the level core (as `menu_render::load_frame_class`).
 fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
+    class_joint_lists_where(lv, |o| level_ports().get(o).is_some_and(|u| u.needs_joint_lists()))
+}
+
+/// [`class_joint_lists`] for the level's classes `want` picks.
+fn class_joint_lists_where(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16) -> bool) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
     use anyhow::{anyhow, Context};
-    let wanted: Vec<&rc_formats::moby::LevelMobyClass> =
-        lv.mobys.classes.iter().filter(|c| level_ports().get(c.o_class as i16).is_some_and(|u| u.needs_joint_lists())).collect();
+    let wanted: Vec<&rc_formats::moby::LevelMobyClass> = lv.mobys.classes.iter().filter(|c| want(c.o_class as i16)).collect();
     let mut out = HashMap::new();
     if wanted.is_empty() { return Ok(out); }
     let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
@@ -732,7 +690,6 @@ fn setup(
     occl: Option<ResMut<MobyOcclusion>>,
     mut anim: Option<ResMut<MobyAnim>>,
     mut particles: Option<ResMut<ParticleSim>>,
-    mut water: Option<ResMut<WaterState>>,
     gameplay_entities: GameplayEntities,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
@@ -757,8 +714,7 @@ fn setup(
     let level_index = lv.particles.level;
 
     // The loader: class table, static mobys, dynamic slots, the ship.
-    let ripples = water.as_ref().is_some_and(|w| w.has_ripples());
-    let mut classes = class_table(lv, &|oc| external_update_fn(ripples, oc));
+    let mut classes = class_table(lv, &external_update_fn);
     let ship_ii = spawn.as_ref().and_then(|s| s.ship);
     let (mut table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state.as_ref().map(|s| &s.0), level_index) {
         Ok(t) => t,
@@ -790,9 +746,18 @@ fn setup(
     // The hand items (wrench, bomb glove, …): created by the hero update from the first tick on.
     let mut arm_joints: [Vec<u8>; 2] = Default::default();
     let item_data = match item_data(lv) {
-        Ok((d, ammo, weapon_defs, seconds)) => {
+        Ok((d, ammo, weapon_defs, seconds, firsts)) => {
             arm_joints = rc_game::hero::weapons::ARM_LISTS.map(|l| seconds.get(l as usize).cloned().unwrap_or_default());
             game.hero.set_joint_targets(&seconds);
+            game.hero.set_joint_chains(firsts);
+            // The back packs' joint lists and class scales (the Hydro-Pack's jets: rc_game::hero::fx::pack_point).
+            let packs: Vec<i16> = [2, 3, 4].iter().map(|&id| d.def(id).o_class as i16).filter(|&o| o > 0).collect();
+            match class_joint_lists_where(lv, |o| packs.contains(&o)) {
+                Ok(m) => game.hero.set_pack_joint_lists(
+                    m.into_iter().filter_map(|(o, l)| lv.mobys.classes.iter().find(|c| c.o_class as i16 == o).map(|c| (o, c.class.header.scale, l))).collect(),
+                ),
+                Err(e) => eprintln!("gameplay: no back pack joint lists ({e:#}): the Hydro-Pack's jets start at the pack's origin"),
+            }
             println!(
                 "gameplay: hand items: {} item definitions, {} gadget classes (wrench 71: {}, bomb glove def {:?})",
                 d.defs.len(), d.classes.len(), d.class(71).is_some(), d.defs.get(10)
@@ -815,13 +780,19 @@ fn setup(
     let back_classes = back_classes(lv, item_data.as_ref());
     match &back_classes {
         None => eprintln!("gameplay: no pack / Clank (601) classes on this level: no back items (no Clank fidgets)"),
-        Some((packs, _)) => println!("gameplay: back packs (item, class) {:?} and Clank 601", packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>()),
+        Some((packs, _, heads)) => println!(
+            "gameplay: back packs (item, class) {:?} and Clank 601; head items {:?}",
+            packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>(),
+            heads.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>()
+        ),
     }
     hero_level_setup(&mut game.hero, back_classes.as_ref(), level_index);
 
     // The moby loop's services and the load pass (counter 0) on the game's stream.
     let mut svc = Services::new();
     svc.level = level_index;
+    // The level's water (rc_game::water::world: the ripple managers' tables, the module, the underwater look).
+    if let Some(d) = lv.water.data.clone() { svc.water = rc_game::water::world::WaterWorld::new(d); }
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }
     // The volume sections (cuboids, spheres, cylinders, pills, paths, grind paths) for the trigger tests.
     match rc_formats::volumes::parse_volumes(&lv.gameplay) {
@@ -870,7 +841,7 @@ fn setup(
     let n_load = {
         let hero = game.hero.clone();
         // view None: the view before the level's first render (all zero: FastBSphereCheck culls, type06).
-        let mut ext = Externals { level: level_index, emitters: &emitters, view: None, water: water.as_deref_mut() };
+        let mut ext = Externals { level: level_index, emitters: &emitters, view: None };
         let mut w = World::new(&mut game.mobys, &hero, &mut game.rng, &classes, &mut svc, game.counter);
         w.camera = game.camera.out.pos;
         w.coll = Some(coll);
@@ -931,9 +902,9 @@ fn setup(
     );
     println!(
         "gameplay: moby load pass: {n_load} mobys run, rng {:#010x} -> {:#010x}, tick counter now {}; scheduler-driven statics per class {per_class:?}; \
-         {} groups; {} class-27 emitters, water 751 {}; dynamic slots drawn as extras ({} palette matrices each)",
+         {} groups; {} class-27 emitters, ripple module {}; dynamic slots drawn as extras ({} palette matrices each)",
         rng0.state, game.rng.state, game.counter, svc.groups.lists.iter().flatten().count(), emitters.len(),
-        if water.as_ref().is_some_and(|w| w.external) { "on the game stream" } else { "not run" }, dynamic.pal_slots
+        if svc.water.sim.is_some() { "initialised on the game stream" } else { "none" }, dynamic.pal_slots
     );
     commands.insert_resource(PlayView { view: game.camera.out, tan_half_fov: play_camera::GAME_TAN_HALF_FOV });
     let mut play = Play {
@@ -983,8 +954,9 @@ fn setup(
     commands.insert_resource(play);
 }
 
-/// The back items' classes: `(back item id, o_class, class)` per pack, and Clank.
-type BackPacks = (Vec<(i32, i16, MobyAnimClass)>, MobyAnimClass);
+/// The back items' classes: `(back item id, o_class, class)` per pack, and Clank; the head items' (5..7, their
+/// put-away animation: rc_game::hero::worn).
+type BackPacks = (Vec<(i32, i16, MobyAnimClass)>, MobyAnimClass, rc_game::hero::worn::HeadClasses);
 
 /// The back items' anim classes on this level: the pack moby of each back item 2 / 3 / 4 (the item definitions'
 /// class +0x10: Heli-Pack 607, Thruster-Pack 608, Hydro-Pack 609; those values without the definitions) that the
@@ -996,13 +968,17 @@ fn back_classes(lv: &crate::level_load::LoadedLevel, items: Option<&ItemData>) -
     let packs: Vec<(i32, i16, MobyAnimClass)> =
         [(2, 607), (3, 608), (4, 609)].into_iter().filter_map(|(id, o)| { let o = class_of(id, o); Some((id, o as i16, anim(o)?)) }).collect();
     if !packs.iter().any(|p| p.0 == 2) { return None; }
-    Some((packs, anim(class_of(1, 601))?))
+    let heads = [(5, 433), (6, 1289), (7, 1290)].into_iter().filter_map(|(id, o)| { let o = class_of(id, o); Some((id, o as i16, anim(o)?)) }).collect();
+    Some((packs, anim(class_of(1, 601))?, heads))
 }
 
 /// What the hero code needs from the level after `HeroInit` (load and respawn): the back items' classes and
 /// the level index 0x15ed84.
 fn hero_level_setup(hero: &mut Hero, back: Option<&BackPacks>, level: u32) {
-    if let Some((packs, clank)) = back { hero.set_back_packs(packs.clone(), clank.clone()); }
+    if let Some((packs, clank, heads)) = back {
+        hero.set_back_packs(packs.clone(), clank.clone());
+        hero.set_head_classes(heads.clone());
+    }
     hero.idle.level = level as i32;
 }
 
@@ -1089,6 +1065,8 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
     g.grind_paths = p.game.grind_paths.clone();
     hero_level_setup(&mut g.hero, p.back_classes.as_ref(), p.level);
     g.hero.joint_targets = p.game.hero.joint_targets.clone();
+    // Ratchet's and the packs' joint lists (level data the hero's effects read).
+    g.hero.fx.joints = p.game.hero.fx.joints.clone();
     // Hero init 0x226b70: the hero block is cleared, HP = max HP.
     if let (Some(gs), Some(s)) = (state, session) {
         s.hero_init(gs.global.max_hp);
@@ -1133,13 +1111,21 @@ fn tick(
     mut view: Option<ResMut<PlayView>>,
     mut state: Option<ResMut<Persistent>>,
     mut session: Option<ResMut<Session>>,
-    mode: Option<Res<crate::menu_render::MenuMode>>,
-    (mut occl, mut water): (Option<ResMut<MobyOcclusion>>, Option<ResMut<WaterState>>),
+    mut mode: Option<ResMut<crate::menu_render::MenuMode>>,
+    mut occl: Option<ResMut<MobyOcclusion>>,
     (mut held, ammo, mut audio): HudAudio,
 ) {
     let Some(mut play) = play else { return };
-    if mode.as_ref().is_some_and(|m| !m.state.mode.advances_tick()) { return; }
+    // Mode 5's world frames (crate::interact_render: substates 0 / 2) run one tick in the scene form.
+    let world_frame = mode.as_ref().is_some_and(|m| !m.state.mode.advances_tick() && m.world_tick);
+    if mode.as_ref().is_some_and(|m| !m.state.mode.advances_tick()) && !world_frame { return; }
     if budget.0 == 0 { return; }
+    if world_frame {
+        if let Some(m) = mode.as_mut() {
+            m.world_tick = false;
+            m.world_ticked = true;
+        }
+    }
     budget.0 -= 1;
     let lv = &level.0;
     let Some(coll) = lv.collision.as_ref() else { return };
@@ -1171,7 +1157,6 @@ fn tick(
     let (sched, classes_arc, emitters, missions) = (&mut p.sched, &p.classes, &p.emitters, &p.missions);
     let classes: &ClassTable = classes_arc;
     let debug_hits = &p.debug_hits;
-    let water_cell = RefCell::new(water.as_deref_mut());
     // The sound layer (crate::audio_out): the moby loop's class sounds and the tick's sound step.
     let audio_cell = RefCell::new(audio.as_deref_mut());
     let hero_id = p.hero_id;
@@ -1179,10 +1164,9 @@ fn tick(
     let mut mobys = |table: &mut MobyTable, hero: &Hero, rng: &mut Rng, cam: &CameraView, coll: &Collision, counter: u64| {
         let mut parts = parts_cell.borrow_mut();
         let mut svc = svc_cell.borrow_mut();
-        let mut water_ref = water_cell.borrow_mut();
         let mut audio_ref = audio_cell.borrow_mut();
         let mut sink = audio_ref.as_deref_mut().map(|a| ClassSoundSink { audio: a.system(), listener: class_sounds::listener_of(cam), hero: Some(hero_id) });
-        let mut ext = Externals { level: level_index, emitters, view: view_cull.as_ref(), water: water_ref.as_deref_mut() };
+        let mut ext = Externals { level: level_index, emitters, view: view_cull.as_ref() };
         let inv = item_base.clone().with_hero(hero);
         let mut w = World::new(table, hero, rng, classes, &mut svc, counter);
         w.inventory = &inv;
@@ -1221,7 +1205,7 @@ fn tick(
         if !scene_frame { svc_cell.borrow_mut().glints.update(); }
     };
     // The moby collision the hero and the camera query (and Ratchet's MobyBuildMatrix, the camera's crate hit).
-    let mut world = HeroWorld { world: SharedServices { svc: &svc_cell, classes: classes_arc.clone() }, water: HeroWater(&water_cell) };
+    let mut world = HeroWorld { world: SharedServices { svc: &svc_cell, classes: classes_arc.clone() }, water: HeroWater(&svc_cell) };
     let mut hooks = TickHooks { mobys: &mut mobys, particles: &mut parts, world: Some(&mut world) };
     // The hand-swap globals in from the saved game / session (the quick-select ring writes the request).
     p.game.item_globals = item_globals(state.as_deref().map(|s| &s.0), session.as_deref().map(|s| &s.0));
@@ -1242,8 +1226,13 @@ fn tick(
         svc_cell.borrow_mut().bolt_grabber = gs.0.global.owned[34] != 0;
         p.game.hero.back_slot.slot.saved = gs.0.global.equipped[3];
         p.game.hero.back_slot.thruster_last = gs.0.global.thruster_last;
+        // The feet / head slots' saved items 0x141664 / 0x141668 (rc_game::inventory).
+        p.game.hero.feet_slot.saved = gs.0.global.equipped[1];
+        p.game.hero.head_slot.saved = gs.0.global.equipped[2];
     }
     if let Some(s) = session.as_deref() {
+        p.game.hero.feet_slot.request = s.0.temp_feet;
+        p.game.hero.head_slot.request = s.0.temp_head;
         p.game.hero.back_slot.slot.request = s.0.temp_back;
         p.game.hero.back_slot.clank_hidden = s.0.clank_hidden;
     }
@@ -1283,10 +1272,16 @@ fn tick(
         if s.0.temp_hand != g.request { s.0.temp_hand = g.request; }
         let b = p.game.hero.back_slot.slot.request;
         if s.0.temp_back != b { s.0.temp_back = b; }
+        let (f, h) = (p.game.hero.feet_slot.request, p.game.hero.head_slot.request);
+        if s.0.temp_feet != f { s.0.temp_feet = f; }
+        if s.0.temp_head != h { s.0.temp_head = h; }
     }
     if let Some(gs) = state.as_mut() {
         let (saved, last) = (p.game.hero.back_slot.slot.saved, p.game.hero.back_slot.thruster_last);
         let gl = &mut gs.0.global;
+        let (fs, hs) = (p.game.hero.feet_slot.saved, p.game.hero.head_slot.saved);
+        if gl.equipped[1] != fs { gl.equipped[1] = fs; }
+        if gl.equipped[2] != hs { gl.equipped[2] = hs; }
         if gl.equipped[3] != saved { gl.equipped[3] = saved; }
         if gl.thruster_last != last { gl.thruster_last = last; }
     }
@@ -1343,15 +1338,12 @@ fn tick(
             h.health, h.f510, p.game.camera.shake[0].offset.to_f32(), p.game.camera.shake[1].offset.to_f32()
         );
     }
-    // The swim's ripple disturbances (`RippleDisturb` 0x2b82a8 on every patch); splashes, bubbles and swim sounds
-    // are not drawn / voiced yet.
+    // The swim's ripple disturbances (`RippleDisturb` 0x2b82a8 on every patch; it draws nothing, so after the tick is
+    // the game's order for the 751 update of the next tick). The splashes, rings, drops and bubbles are the hero's
+    // particles and splash mobys (rc_game::hero::swim::effects), the voices play in the hero update.
     for e in std::mem::take(&mut p.game.hero.swim.events) {
         if let rc_game::hero::swim::SwimEvent::Ripple { x, y, r, amp } = e {
-            if let Some(sim) = water_cell.borrow_mut().as_deref_mut().and_then(|w| w.ripple.as_mut()) {
-                let n = sim.patches.len();
-                use rc_game::ps2v::Pf;
-                sim.disturb(Pf::f(x), Pf::f(y), Pf::f(r), Pf::f(amp), 0..n, false);
-            }
+            p.svc.water.disturb(x, y, r, amp, false);
         }
     }
     // Hits taken and deaths (rc_game::hero::damage): the game state's counters (0x15eea8 / 0x13df88[level],

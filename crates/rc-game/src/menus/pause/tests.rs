@@ -53,6 +53,12 @@ fn menu() -> PageMenu {
         level_names: (0..20u32).map(|l| (20153 + l, 20172 + l)).collect(),
         planet_points: vec![[0; 4]; 19],
         name_dy: 17,
+        equip: [0; 4],
+        items: None,
+        unusable_head: false,
+        unusable_back: false,
+        view: super::gadgets::GadgetsView::default(),
+        view_model: None,
     };
     let labels = [20194, 20195, 20196, 20197, 20198, 20199, 20418];
     for (i, &a) in ROOT_W.iter().enumerate() {

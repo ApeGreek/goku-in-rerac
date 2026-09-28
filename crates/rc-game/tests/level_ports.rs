@@ -53,11 +53,12 @@ fn every_level_runs_the_ports_its_class_table_names() {
     // Gemlik: its body pieces run FxGroupUpdate, the vendor, bombs and teleporters their ports.
     let p = ports(13).unwrap();
     for oc in [1733, 1734, 1735, 1801, 1802, 1803, 1804] { assert_eq!(p.get(oc), Some(ClassUpdate::FxPiece), "class {oc}"); }
-    // The class-27 particle emitters and the ripple manager 751 (the engine's external updates) are Novalis's own.
+    // The class-27 particle emitters (the engine's external update) are Novalis's own; the ripple manager 751 is a
+    // water port (`rc_game::water::managers`), also only on Novalis.
     for level in 0..19 {
         let p = ports(level).unwrap();
         assert_eq!(p.external(27), (level == 1).then_some(0x2bd100), "level {level:02}");
-        assert_eq!(p.external(751), (level == 1).then_some(0x2fd0e8), "level {level:02}");
+        assert_eq!(p.in_table(751) && p.get(751) == Some(ClassUpdate::Water(0)), level == 1, "level {level:02}");
     }
     for (oc, u) in [(11, ClassUpdate::Vendor), (121, ClassUpdate::Bomb), (1135, ClassUpdate::TeleporterPad), (500, ClassUpdate::Crate), (758, ClassUpdate::SwingTarget), (803, ClassUpdate::SwingTarget)] {
         assert_eq!(p.get(oc), Some(u), "class {oc}");

@@ -38,8 +38,20 @@ pub const PROMPT: i32 = 21475;
 const CHILD: usize = 0x0c;
 const SCALE: usize = 0x90;
 const PVAR_SIZE: usize = 0x94;
-/// Whether the hologram is un-hidden when Ratchet comes near (the game: yes). Off until its draw is ported.
+/// Whether the hologram moby is un-hidden when Ratchet comes near (the game: yes). The port keeps its mode bit set
+/// and the engine draws it (crate::vendor_render in rc-engine: its chrome packets and the beam callback 0x2ba9c0) from
+/// [`hologram`], since the dynamic-moby path has no metal pass.
 const SHOW_HOLOGRAM: bool = false;
+
+/// The hologram as the game draws it: (child moby, scale V+0x90 · class scale · 2.5 applied, shown), with the
+/// manipulator phases (0x16139c / 0x1613a0). Shown while the vendor is in state 1 or 2 with V+0x90 > 0.
+pub fn hologram(table: &crate::moby_runtime::MobyTable, id: MobyId) -> Option<(MobyId, f32, bool)> {
+    let m = table.mobys.get(id)?;
+    let v = p::i32(&m.pvars, CHILD);
+    let c = (v > 0).then(|| (v - 1) as usize).filter(|&c| c < table.mobys.len())?;
+    let s = if m.pvars.len() >= PVAR_SIZE { p::ff(&m.pvars, SCALE) } else { 0.0 };
+    Some((c, s, (m.state == 1 || m.state == 2) && s > 0.0))
+}
 
 /// The vendor globals (0x1613a4 glow phase, 0x16139c / 0x1613a0 manipulator phases).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -122,6 +134,9 @@ pub fn update(w: &mut World, id: MobyId) {
                 let lease = show && w.svc.interact.try_prompt(owner::VENDOR, PROMPT) != 0;
                 if w.svc.interact.triangle() && can_use && lease {
                     w.svc.interact.handoffs.push(Handoff::OpenVendor { vendor: Some(id) });
+                    // OpenVendorMenu's `SetState(100, 1)` inside the moby loop: Ratchet's update of this tick already
+                    // runs state 100 (nothing moves; he is hidden from the next frame on).
+                    crate::cinematic::hero_state(w, 100, true);
                     w.mm(id).state = 3;
                 }
             }

@@ -255,7 +255,7 @@ fn hand_point(h: &Hero) -> V3 {
 /// After the surface reaction (L00 hero update 0x2070d0): the magnetic floor 0x13f658 (the reaction's surface-2
 /// branch, module doc), the rail contact `0x20cf58` and the cable contact `0x20d330`.
 pub(super) fn contacts(h: &mut Hero, env: &Env) {
-    if h.f0637 != 0 && (h.f65c == 0 || h.height < Pf::b(0x3e99_999a)) && h.mode == 0 && owns(h, MAGNEBOOTS) { h.f658 = 1; }
+    if h.f0637 != 0 && (h.f65c == 0 || h.height < Pf::b(0x3e99_999a)) && h.mode == 0 && h.magneboots_on() { h.f658 = 1; }
     let level = h.idle.level;
     let paths = paths(env);
     if RAIL_LEVELS.contains(&level) { rail_contact_probe(h, paths, level); }
@@ -543,7 +543,7 @@ fn grind_jump_entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
         h.substate = old_sub;
         return Some(false);
     }
-    h.jump_block_defaults();
+    h.jump_block_defaults(c.rng);
     h.f15d4 = 3;
     let j = &mut h.jump;
     if id == 0x29 {

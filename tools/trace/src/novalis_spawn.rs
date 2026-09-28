@@ -376,7 +376,7 @@ pub fn check_fog(ee: &EeImage, lv: &LevelData, sim: &PortSim, out: &mut Out) -> 
     let ram_u = ([u[0], u[1], u[2], u[3]], [u[4], u[5], u[6]], [f(ee, 0x161208), f(ee, 0x16120c), f(ee, 0x161210), f(ee, 0x161214)]);
     let ok_u = ram_u.0 == d.tint && ram_u.1 == d.fog.color && ram_u.2.map(f32::to_bits) == [d.fog.near_dist, d.fog.far_dist, d.fog.near_intensity, d.fog.far_intensity].map(f32::to_bits);
     out.line(format!("  underwater look 0x161200: RAM tint {:02x?} fog {:02x?} {:?} | port (751 zone {:?}) tint {:02x?} fog {:02x?} {:?} -> {}",
-        ram_u.0, ram_u.1, ram_u.2, sim.ripple.as_ref().map(|r| r.last.zone), d.tint, d.fog.color, [d.fog.near_dist, d.fog.far_dist, d.fog.near_intensity, d.fog.far_intensity], if ok_u { "equal" } else { "DIFFERS" }));
+        ram_u.0, ram_u.1, ram_u.2, sim.svc.water.sim.as_ref().map(|r| r.last.zone), d.tint, d.fog.color, [d.fog.near_dist, d.fog.far_dist, d.fog.near_intensity, d.fog.far_intensity], if ok_u { "equal" } else { "DIFFERS" }));
     let underwater = ee.bytes(0x167494, 4)?;
     out.line(format!("  underwater flag 0x167494 = {:02x?}", underwater));
     out.tally("d. fog globals", ok as u64, 1);

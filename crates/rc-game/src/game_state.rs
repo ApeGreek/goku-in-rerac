@@ -284,6 +284,8 @@ pub struct SessionState {
     pub hp: i32,
     /// 0x141408: hand item to show (GiveItem with equip, slot type 0).
     pub temp_hand: i32,
+    /// 0x14140c: the feet slot's request (the Gadgets menu's close; `GiveItem` never writes it).
+    pub temp_feet: i32,
     /// 0x141410: slot-type-2 (head) item to show.
     pub temp_head: i32,
     /// 0x141414: slot-type-3 (back) item to show.
@@ -295,7 +297,7 @@ pub struct SessionState {
 }
 
 impl Default for SessionState {
-    fn default() -> Self { SessionState { hp: 0, temp_hand: 0, temp_head: 0, temp_back: 0, clank_hidden: 0, tick_scale: 1.0 } }
+    fn default() -> Self { SessionState { hp: 0, temp_hand: 0, temp_feet: 0, temp_head: 0, temp_back: 0, clank_hidden: 0, tick_scale: 1.0 } }
 }
 
 impl SessionState {

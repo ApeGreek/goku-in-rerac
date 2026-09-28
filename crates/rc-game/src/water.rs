@@ -37,6 +37,9 @@
 //! [`RippleSim::new`] (751's load-pass init) and [`RippleSim::tick`] (its update) take the caller's stream
 //! (the engine passes the game's one stream from the moby scheduler, at 751's place in the run order).
 
+pub mod managers;
+pub mod world;
+
 use crate::ps2v::{self, Pf, F};
 use crate::rng::Rng;
 use rc_formats::moby_light::vu0_sin_cos;
@@ -212,6 +215,28 @@ pub struct Patch {
     pub extent: [i32; 2],
 }
 
+impl Patch {
+    /// `0x2b7c68(patch, bounds)`: the bounds entry from the centre as it is now: `trunc((x + ox)·1024)`,
+    /// `trunc((y + oy)·1024)`, `trunc((z − 1)·1024)`, extents `trunc(size·1024)` (u16).
+    pub fn set_bounds(&mut self, c: &RippleConsts) {
+        let k1024 = Pf::b(0x4480_0000);
+        let centre = self.centre;
+        self.bounds = [
+            ((centre[0] + c.origin[0]) * k1024).to_i32(),
+            ((centre[1] + c.origin[1]) * k1024).to_i32(),
+            ((centre[2] - ONE) * k1024).to_i32(),
+        ];
+        let ext = (c.size[0] * k1024).to_i32() & 0xffff;
+        self.extent = [ext, ext];
+    }
+
+    /// Record +0x08: the patch's water level (a patch manager writes its moby's z here every tick).
+    pub fn set_z(&mut self, z: f32) {
+        self.centre[2] = Pf::f(z);
+        self.rec.centre[2] = z;
+    }
+}
+
 /// Per-vertex draw data of one patch (`0x261df8` + `0x2b8c08` + the pin overrides).
 #[derive(Clone, Debug)]
 pub struct PatchVerts {
@@ -302,29 +327,40 @@ impl RippleSim {
     /// bounds, patch 13–16 speeds, patch 15 pin, two random drops per patch, drawn from `rng`). `light_dir_xy`
     /// = directional light set 0, light A direction x/y (0x180350/0x180354).
     pub fn new(t: &RippleTables, zone_cuboids: Vec<i32>, light_dir_xy: [f32; 2], rng: &mut Rng) -> Self {
+        let mut sim = RippleSim::module_init(&t.patches, &t.module(), light_dir_xy);
+        sim.zones = t.zones.clone();
+        sim.zone_masks = t.zone_masks.clone();
+        sim.zone_cuboids = zone_cuboids;
+        sim.mist_rows = t.mist_rows.clone();
+        // 751 init overrides (Novalis): patches 13–16 scroll along u only, patch 15 pins its first column.
+        if sim.patches.len() > 16 {
+            for p in 13..=16 { sim.patches[p].speed = [Pf::b(0xbad1_b717), Pf::ZERO]; }
+            sim.patches[15].pins = 8;
+        }
+        sim.init_drops(rng);
+        sim
+    }
+
+    /// The part every ripple manager's init shares (751 `0x2fd0e8`, and the patch managers of levels 05 / 07 / 11 /
+    /// 12 / 13): `RipplePatchesInit(table, n)` 0x2b7a48 (runtime fields; the heights zeroed), the module constants
+    /// 0x1cad00.. = (16, 16, −8, −8, 1, 1, 0.9, ·, 0.1) (the disc's +0x1c damping threshold kept), the light
+    /// `(cos a, sin a, −1)·0.57735` with `a = FastArcTan(light set 0 A.x, A.y)`, and every patch's bounds
+    /// (`0x2b7c68`). No zones and no drops (the managers that make them add them).
+    pub fn module_init(records: &[PatchRecord], m: &rc_formats::water::RippleModule, light_dir_xy: [f32; 2]) -> Self {
         let consts = RippleConsts {
             size: [Pf::b(0x4180_0000); 2],
             origin: [Pf::b(0xc100_0000); 2],
             cell: [ONE; 2],
             refl: Pf::b(0x3f66_6666),
-            damp: Pf::f(t.consts[7]),
+            damp: Pf::f(m.consts[7]),
             step: Pf::b(0x3dcc_cccd),
         };
-        let k1024 = Pf::b(0x4480_0000);
-        let patches = t
-            .patches
+        let patches = records
             .iter()
             .map(|rec| {
-                let centre = rec.centre.map(Pf::f);
-                let bounds = [
-                    ((centre[0] + consts.origin[0]) * k1024).to_i32(),
-                    ((centre[1] + consts.origin[1]) * k1024).to_i32(),
-                    ((centre[2] - ONE) * k1024).to_i32(),
-                ];
-                let ext = (consts.size[0] * k1024).to_i32() & 0xffff;
-                Patch {
+                let mut p = Patch {
                     rec: rec.clone(),
-                    centre,
+                    centre: rec.centre.map(Pf::f),
                     mask: rec.mask,
                     scroll: [Pf::ZERO; 2],
                     speed: [Pf::b(0xbad1_b717); 2],
@@ -333,15 +369,17 @@ impl RippleSim {
                     radius: Pf::b(0x3cf5_c28f),
                     pins: 0,
                     buf: [[Pf::ZERO; G * G]; 3],
-                    bounds,
-                    extent: [ext, ext],
-                }
+                    bounds: [0; 3],
+                    extent: [0; 2],
+                };
+                p.set_bounds(&consts);
+                p
             })
             .collect::<Vec<_>>();
         let a = crate::pad::fast_arctan(Pf::f(light_dir_xy[0]), Pf::f(light_dir_xy[1]));
         let k = Pf::b(0x3f13_cd36);
         let light = [cos(a) * k, sin(a) * k, Pf::b(0xbf13_cd36)];
-        let mut sim = RippleSim {
+        RippleSim {
             patches,
             consts,
             cur: 0,
@@ -349,33 +387,31 @@ impl RippleSim {
             render: 2,
             clock: Pf::b(0x3f8c_cccd),
             light,
-            zones: t.zones.clone(),
-            zone_masks: t.zone_masks.clone(),
-            zone_cuboids,
-            uv_base: t.uv_base.iter().map(|v| v.map(Pf::f)).collect(),
-            uv_select: t.uv_select.clone(),
-            strip_order: t.strip_order.clone(),
+            zones: Vec::new(),
+            zone_masks: Vec::new(),
+            zone_cuboids: Vec::new(),
+            uv_base: m.uv_base.iter().map(|v| v.map(Pf::f)).collect(),
+            uv_select: m.uv_select.clone(),
+            strip_order: m.strip_order.clone(),
             drip_timer: 0,
-            mist_rows: t.mist_rows.clone(),
+            mist_rows: Vec::new(),
             last: RippleTickInfo { zone: -1, ..Default::default() },
-        };
-        // 751 init overrides (Novalis): patches 13–16 scroll along u only, patch 15 pins its first column.
-        if sim.patches.len() > 16 {
-            for p in 13..=16 { sim.patches[p].speed = [Pf::b(0xbad1_b717), Pf::ZERO]; }
-            sim.patches[15].pins = 8;
         }
-        // Two drops per patch: centre ± randf(−6, 6) (x first), radius 2, amplitude 0.2, over all patches.
-        let n = sim.patches.len();
+    }
+
+    /// Two drops per patch: centre ± randf(−6, 6) (x first), radius 2, amplitude 0.2, over all patches (751, and the
+    /// 07 / 13 managers' inits).
+    pub fn init_drops(&mut self, rng: &mut Rng) {
+        let n = self.patches.len();
         for i in 0..n {
             for _ in 0..2 {
                 let rx = Pf(rng.randf_bits(0xc0c0_0000, 0x40c0_0000));
-                let px = sim.patches[i].centre[0];
+                let px = self.patches[i].centre[0];
                 let ry = Pf(rng.randf_bits(0xc0c0_0000, 0x40c0_0000));
-                let py = sim.patches[i].centre[1];
-                sim.disturb(px + rx, py + ry, Pf::b(0x4000_0000), Pf::b(0x3e4c_cccd), 0..n, false);
+                let py = self.patches[i].centre[1];
+                self.disturb(px + rx, py + ry, Pf::b(0x4000_0000), Pf::b(0x3e4c_cccd), 0..n, false);
             }
         }
-        sim
     }
 
     /// Writes `v` to cell (r, c) of buffer `b` of patch `p` and to the neighbours' halo slots it feeds.

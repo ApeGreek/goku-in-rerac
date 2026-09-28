@@ -109,12 +109,20 @@ use rc_game::menus::quick_select::{HeroGate, QuickSelect};
 use rc_game::menus::{MenuAssets, MenuDraw, MenuInput, Overlay};
 use rc_game::pad::button;
 
+/// The system set that builds the menus' 2D primitives into `Hud2dHook` (crate::vendor_render adds to them after).
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MenuPrims;
+
 /// The mode globals and the main-loop frame counter (read by `gameplay::tick`).
 #[derive(Resource, Default, Debug)]
 pub struct MenuMode {
     pub state: ModeState,
     /// Main-loop frames so far (the index of the frame being run while `gameplay::tick` runs).
     pub loop_frame: u64,
+    /// Mode 5 (crate::interact_render): the next frame's update runs the world (`VendorModeUpdate` substates 0 / 2), so
+    /// `gameplay::tick` runs once although the mode does not advance the tick; `world_ticked` = it did this frame.
+    pub world_tick: bool,
+    pub world_ticked: bool,
 }
 
 #[derive(Resource)]
@@ -185,7 +193,7 @@ impl Plugin for MenuPlugin {
             .add_systems(First, |mut r: ResMut<SnapshotRequest>| r.0 = None)
             .add_systems(PreUpdate, setup)
             .add_systems(FixedUpdate, menu_frame.after(crate::gameplay::GameTick))
-            .add_systems(Update, (target_main_camera, build_prims).chain().before(HudBuild))
+            .add_systems(Update, (target_main_camera, build_prims).chain().in_set(MenuPrims).before(HudBuild))
             .add_systems(PostUpdate, menu_layer.before(TransformSystems::Propagate))
             .add_systems(PostUpdate, crate::interact_render::hide_hero.after(crate::moby_render::update_moby_occlusion).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
@@ -243,6 +251,11 @@ fn setup(
         }
     };
     let mut menu = PageMenu::load(&overlay);
+    // The item definitions for the Gadgets / Weapons grids (rc_game::inventory; the overlay's 0x179f40 table).
+    if let (Some(m), Ok(t)) = (menu.as_mut(), &items) {
+        let n = rc_formats::save_game::ITEM_COUNT * rc_formats::save_game::ITEM_DEF_SIZE;
+        if let Some(raw) = overlay.bytes(t.item_defs_addr, n) { m.items = Some(std::sync::Arc::new(rc_game::inventory::ItemInfos::from_raw(raw))); }
+    }
     // The frame mobys: class 0x472 from the level core.
     let frame_class = match load_frame_class(&level.0, &overlay) {
         Ok(f) => Some(f),
@@ -440,6 +453,7 @@ fn menu_frame(
     supported: Option<Res<SupportedMsaa>>,
     (mut vr, mut feed, mut view, mut audio): InteractParams,
     mut shadows: Option<ResMut<crate::shadow_render::ShadowSettings>>,
+    mut widgets3d: ResMut<crate::menu_models::GadgetsPreview>,
 ) {
     let (Some(mut rt), Some(mut play), Some(mut gs), Some(mut sess)) = (rt, play, gs, sess) else { return };
     let rt = &mut *rt;
@@ -527,6 +541,11 @@ fn menu_frame(
                 if let Some(p) = out.entered { println!("menus: frame {frame}: page {p:#x} entered (kind {:#x})", menu.kind); }
                 if out.quit { println!("menus: frame {frame}: Quit Game ○ (0x15f570 = 1: leaving the level is not ported)"); }
                 if let Some(p) = out.freeze { println!("menus: frame {frame}: mode_freezeInit(3, {p:#x}) (save / load dialog not ported)"); }
+                // PageMenuClose: the Gadgets / Weapons pages' changed slots are requested (rc_game::inventory).
+                if let Some(req) = out.equip.filter(|r| r.iter().any(Option::is_some)) {
+                    rc_game::inventory::apply_close_requests(sess, &req);
+                    println!("menus: frame {frame}: equip requests (hand, feet, head, back) {req:?}");
+                }
                 if let Some(x) = out.exit {
                     if x != PostAction::Resume { println!("menus: frame {frame}: post-action {x:?} not ported; resuming"); }
                     mm.state.set(Mode::Gameplay);
@@ -534,6 +553,9 @@ fn menu_frame(
                 } else {
                     menu.draw(&rt.assets, gs, &env, &mut rt.draws);
                 }
+                // The page's 3D widgets (crate::menu_models).
+                widgets3d.view = menu.view;
+                widgets3d.frame += 1;
             }
         }
         Mode::Vendor => {
@@ -546,7 +568,7 @@ fn menu_frame(
             play.game.pad.update(Some(&input.bytes()), mirror);
             let inp = MenuInput::from_pad(&play.game.pad, true);
             crate::interact_render::vendor_frame(
-                &mut vr, &mut play, gs, sess, &mut mm.state, inp, &rt.assets, frame, view.as_deref_mut(), Some(&mut feed), audio.as_deref_mut(), &mut rt.draws,
+                &mut vr, &mut play, gs, sess, &mut mm, inp, &rt.assets, frame, view.as_deref_mut(), Some(&mut feed), audio.as_deref_mut(), &mut rt.draws,
             );
         }
         _ => {}
@@ -554,7 +576,7 @@ fn menu_frame(
     // The "use" system after a gameplay tick: the vendor's hand-off, the prompt for the HUD.
     if mode == Mode::Gameplay && mm.state.mode == Mode::Gameplay {
         crate::interact_render::feed_idle(&mut feed);
-        crate::interact_render::after_tick(&mut vr, &mut play, gs, &mut mm.state, frame, Some(&mut feed), audio.as_deref_mut());
+        crate::interact_render::after_tick(&mut vr, &mut play, gs, &mut mm.state, frame, Some(&mut feed), audio.as_deref_mut(), Some(&rt.assets));
     }
     mm.state.end_frame();
     mm.loop_frame += 1;

@@ -26,6 +26,12 @@ use rc_game::tick::{Game, GameOptions, TickHooks};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
+/// The ports of the common-classes pass (605, 832, 604 / 1818 / 1633, 258, 830).
+pub const COMMON_PASS: [rc_game::moby_update::classes::ClassUpdate; 7] = {
+    use rc_game::moby_update::classes::ClassUpdate as U;
+    [U::BuriedBolts, U::RcRange, U::MouseHouse, U::Mouse, U::MouseShot, U::ActivationZone, U::FloorSwitch]
+};
+
 fn overlay(level: u32) -> Option<Arc<LevelOverlay>> {
     let b = std::fs::read(rc_formats::test_data::level_dir(level).join("overlay.bin")).ok()?;
     Some(Arc::new(LevelOverlay::parse(&b).unwrap()))
@@ -46,6 +52,9 @@ pub struct Outcome {
     pub unported: BTreeMap<i16, (usize, u32)>,
     /// Placed instances per class that run a port (class → instances).
     pub ported: BTreeMap<i16, usize>,
+    /// Of those, the instances of the common classes ported in the common-classes pass ([`COMMON_PASS`]): the
+    /// drop in unported instances that pass made.
+    pub common_pass: usize,
     /// Mobys the scheduler created during the run, and the moby sounds queued.
     pub spawned: usize,
     pub sounds: usize,
@@ -231,10 +240,15 @@ pub fn run_level(level: u32, ticks: u32) -> Option<Outcome> {
     }
     let mut unported = BTreeMap::new();
     let mut ported = BTreeMap::new();
+    let mut common_pass = 0;
     for (inst, t) in instances.iter().zip(&tests) {
         if !t.spawn || inst.o_class == 0 { continue; }
         let oc = inst.o_class as i16;
-        if ports.get(oc).is_some() { *ported.entry(oc).or_insert(0) += 1; continue; }
+        if let Some(u) = ports.get(oc) {
+            *ported.entry(oc).or_insert(0) += 1;
+            if COMMON_PASS.contains(&u) { common_pass += 1; }
+            continue;
+        }
         match ports.level_update(oc) {
             Some(f) if f != 0 => unported.entry(oc).or_insert((0, f)).0 += 1,
             _ => {}
@@ -251,6 +265,7 @@ pub fn run_level(level: u32, ticks: u32) -> Option<Outcome> {
         ported_statics: ported.values().sum(),
         unported,
         ported,
+        common_pass,
         spawned,
         sounds,
     })
@@ -263,10 +278,13 @@ fn all_levels_load_spawn_and_tick() {
     let Some(_) = overlay(1) else { eprintln!("skipped: no extracted/"); return };
     let n = ticks();
     let mut failed = Vec::new();
+    let (mut total_unported, mut total_common) = (0usize, 0usize);
     for level in 0..19 {
         match std::panic::catch_unwind(|| run_level(level, n)) {
             Ok(Some(o)) => {
                 let unported_inst: usize = o.unported.values().map(|v| v.0).sum();
+                total_unported += unported_inst;
+                total_common += o.common_pass;
                 eprintln!(
                     "level {level:02}: ok, {} ticks, hero {:?} → {:?} (state {:#x}), {} statics ({} run a port), {} spawned, {} sounds; unported: {} classes, {} instances {:?}",
                     o.ticks, o.hero_start.map(|x| x.round()), o.hero_end.map(|x| x.round()), o.hero_state, o.statics, o.ported_statics, o.spawned, o.sounds,
@@ -281,6 +299,10 @@ fn all_levels_load_spawn_and_tick() {
             }
         }
     }
+    eprintln!(
+        "all levels: {total_unported} created instances with an unported update; the common-classes pass ported {total_common} (before it: {})",
+        total_unported + total_common
+    );
     assert!(failed.is_empty(), "levels that did not run: {failed:?}");
 }
 

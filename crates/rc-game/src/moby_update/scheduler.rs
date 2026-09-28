@@ -254,6 +254,8 @@ impl Scheduler {
         for &id in &list { run_moby(w, id); }
         // The points the moby-riding particles (types 26 / 55) follow in the UpdateParts that comes next.
         w.refresh_particle_anchors();
+        // `HudBoltAlertShow` 0x227d90 (the hero's frame, after the moby pass): classes::buried_bolts.
+        classes::buried_bolts::alert_frame(w);
         let n = list.len();
         self.last_list = list;
         n
@@ -279,6 +281,7 @@ pub fn class_info(class: &rc_formats::moby::MobyClass, slot: u8, update_fn: Opti
         scale: h.scale,
         glow: (h.glow_rgba != 0).then_some(h.glow_rgba as u32),
         mode_bits: h.mode_bits as u16,
+        ty: h.ty,
         seq0: None,
     }
 }

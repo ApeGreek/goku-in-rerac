@@ -479,10 +479,9 @@ grind 0x28 / 0x2b and cable 0x74 sparks (`hero::boots`), the cable grab's burst,
 (`hero::surface`), the hurt-under-water 0x76 bubbles (`hero::damage`). The swing targets (803) spawn their glints
 through `World::part60` (`moby_update::classes::swing_target`).
 
-**Not ported:** `0x22b140` modes 1 / 2 (bubbles at Ratchet's joint points 0 / 0xe, 0x17 / 0x16: the swim's dives
-0x33 / 0x34 and the sinking floor's four bubbles; the hero update has no joint lists), 0x82's / 0x6a's bubble at joint
-list 4, the swim's splash-countdown bubbles and splashes, the surface wake `0x22ac40` (type 45, a flat quad: kind 1
-is not drawn yet), the burn fire `0x209ec8` (type-25 sparks plus 57 type-4 fire particles every 3..7 ticks; type 4
+**Not ported (then; the water ones are wired since 2026-09-28, "The hero's water effects" below):** `0x22b140` modes
+1 / 2, 0x82's / 0x6a's bubble at joint list 4, the swim's splash-countdown bubbles and splashes, the surface wake
+`0x22ac40`, the burn fire `0x209ec8` (type-25 sparks plus 57 type-4 fire particles every 3..7 ticks; type 4
 unported), the Hydro-Pack's jets. The spawner's own draws are made even when the pool is full (the game skips them
 then; the pool never fills in play).
 
@@ -662,3 +661,38 @@ before and after, PCSX2 frames 20–23); scene 1 at frames 490 / 500 (the Plumbe
 35 and 46 alive, no unported kills), scene 4 at 900. Two runs of the crash frame and of the bomb frame 50 give identical
 PNGs. `cargo test --workspace` green (the bomb rand ledger and `novalis_hero_digest` included).
 
+
+## The hero's water effects (2026-09-28): splash, wake, bow rings, spray, bubbles, breath, Hydro-Pack jets
+
+**Root cause of "no splashes".** The particle types (34, 35, 45, 46) and the splash moby 775 were ported, but the hero
+never called them: `hero::swim` recorded `SwimEvent::Splash` and the engine only applied the `Ripple` events; the
+wake / ring / spray helpers, the joint-point bubbles and the breath bubbles had no port, and the walk / wade case,
+the jumps and the landing had no water calls at all.
+
+**The helpers** (level01, read from the disassembly; `rc_game::hero::swim::effects`, `hero::fx::bubbles_at`):
+
+| helper | what (all positions on the hero 0x13f3d0, the level 0x13f640) | draws, in order |
+|---|---|---|
+| `0x22b3a8(rings, drops, big)` splash | big: splash moby 775 `FUN_002ff768(2.25, {x, y, W})`; rings: type 45 at ±0.3, size `randf(0.3, 0.6)`, growth 5250, level pointer &0x13f640, RGBA −1; drops: type 35, `rand_angle`, out `randf(0, 3·dt)`, up `randf(3·dt, 8·dt)`, at `(x + 8·vx, y + 8·vx, W − randf(0, 0.2))` (**the game adds vx to both x and y**, kept), kind `randi(2)`, life `rand_range(90, 120)` | moby 1; ring 3 + 4; drop 6 + 2 |
+| `0x22ac40(max, after)` wake (counter 0x13fc54) | past `after`: one type-45 ring at ±0.05, size `randf(0.4, 0.6)`; counter = `randi(max)` | 3 + 4 + 1 |
+| `0x22ad38(max, after)` bow rings (0x13fc58) | past `after`: two type-46 at yaw ± 45°, vel `(cos, sin)·0.6·dt` placed 18× ahead, then minus the facing's 1.5·dt; size `randf(0.4, 0.5)`, spin ±2, level pointer &0x13f640; counter = 0 (max 0) or `randi(max)` per ring | (1 + 2) × 2 |
+| `0x22af48(max, after)` spray (0x13fc56) | past `after`: one type-35 drop at hero ± 0.15 + 8 × disp 0x13f450, z = W + 0.1, out `randf(0, 3·dt)` + 0.75·disp, up `randf(3·dt, 6.5·dt)`, life `rand_range(90, 120)`, kind 3 below 0.25 depth else 1; counter = `randi(max)` | 6 + 2 + 1 |
+| `0x22b140(n, mode)` bubbles | type 34 at the feet (mode 0: ±0.1, −0.5..0.1), Ratchet's joint lists 0 / 0xe (1) or 0x17 / 0x16 (2), alternating; drift 0.7 × disp (1.15 in 0x34) ± 0.4·dt, down `randf(−dt, 0)`; size `randf(4200, 7350)`; level −1 | mode 0: 13, modes 1 / 2: 10 |
+| breath (inline, 0x2381bc / 0x238934) | type 34 size 25200 at joint list 4 + 0.4 along Ratchet's x row, vel = disp + 1.5·dt along that row + 2·dt up | 6 (+ the timer's draws) |
+| Hydro-Pack jets (inline, 0x238244) | four type 34 at the pack moby's (class 0x261) lists 0 / 1, − 0.15 along Ratchet's x row, + `randf(0, 0.03)` per axis, vel = disp + `sph(−0.75·dt, yaw, pitch)`, size `randf(6300, 9450)`; timer 0x13fc48 = `trunc((7·dt − speed)/(7·dt)·ticks(5))` | 10 each |
+
+The spawners' own draws are made at the call (`hero::fx::reserve` keeps the stream at the spawner's first draw for the
+queued record, which the particle hook creates right before `UpdateParts`, as before); the splash moby is created by
+the tick right after the hero update through the hit sink's `create_moby` (`hero::fx::create_mobys`, `splash::fill`),
+before anything else can take a slot. Types 45 / 46 gained the water-level pointer the hero passes
+(`type45::HERO_WATER_LEVEL`: the update reads `Particles::water_z` = 0x13f640 through it, so a ring within 0.2 of the
+live level sits 0.02 above it, as the game's pointer does). The joint points are `hero::fx::joint_point` (Ratchet's
+pose now, his moby as the last write-back left it: the formula of `World::joint_point`, shared as
+`fx::joint_world_point`) and `hero::fx::pack_point` (the back pack placed by `HeroItemsAttach`: `fx::end`).
+
+**Callers** (every call site of the helpers in level01; `xrefs` of 0x22ac40 / 0x22ad38 / 0x22af48 / 0x22b140 /
+0x22b3a8 / 0x2840e0): hero_states.md "Swim effects". Tests: `hero::swim::tests` (entry ledger, wake, bow rings, water
+jump, wading and ankle-deep water with the jump and landing), `hero::swim::effects::tests`,
+`particles::type45::tests::rings_ride_the_hero_water_level`. Engine, frame-exact, scratch `hero_water/`: jumping in
+(rings, drops, the splash shell, bubbles), the water jump's splash at its tick 20, wading bubbles; two runs identical
+(PNGs, WAV, traces).

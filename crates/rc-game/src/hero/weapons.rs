@@ -39,8 +39,14 @@
 //! **Ammo** ([`Weapons::ammo`]): the game state's table 0x13d428 + id, mirrored like the owned items (the engine
 //! copies it in before the tick and back after; `uses_ammo` from the item records, +8).
 //!
-//! Not ported: the auto-aim target search over the targetable list 0x1abe80 (mode 0x20 records: no ported class has
-//! one; the melee aim-assist `0x22e238` likewise), the gold glove (0x13e52a: 0), the throw stats record 0x1416d0
+//! **The aim at a target** (`crate::targeting`): without L1 / L2 held (or with 0x1413fc) the glove's update searches
+//! the target list 0x1abe80 ([`crate::targeting::aim_search`] with [`crate::targeting::BOMB_GLOVE`]) and aims the
+//! held bomb's arc at the chosen target's aim point (its record's height above it) instead of the point 8.5 ahead;
+//! the target is 0x13fda0 ([`Weapons::aim`]), and the throw state 0x23 turns Ratchet to it (SetState 0x23: 0x13fda8 =
+//! 1, 0x13fdac = its yaw). The bomb then previews the landing and registers the reticle
+//! (`crate::moby_update::classes::bomb`).
+//!
+//! Not ported: the melee aim-assist `0x22e238` over the same list, the gold glove (0x13e52a: 0), the throw stats record 0x1416d0
 //! (counted in [`Weapons::throws`]), the other gloves' own item updates (their rows are not in `HAND_ITEMS`: only the
 //! Bomb Glove's is ported), 0x141618.
 //!
@@ -61,6 +67,7 @@ use crate::moby_update::classes::bomb;
 use crate::pad::button;
 use crate::ps2v::Pf;
 use crate::rng::Rng;
+use crate::targeting;
 use rc_formats::moby_anim;
 
 /// The Bomb Glove (item 10).
@@ -123,6 +130,10 @@ pub struct Weapons {
     /// the port), made right after the slot loop by [`after_items`].
     pub pending_draw: bool,
     pub pending_idle: bool,
+    /// 0x13fda0: the glove's target (the last search's; kept by the first-person aim), and its position (moby +0x10)
+    /// as the moby loop left it ([`refresh_aim`]).
+    pub aim: Option<MobyId>,
+    pub aim_pos: [f32; 3],
 }
 
 impl Default for Weapons {
@@ -130,6 +141,7 @@ impl Default for Weapons {
         Weapons {
             ammo: [0; N], uses_ammo: [false; N], used: [0; N], picked: [0; N], glove: Glove::default(), layers: [None; 2], layer_fade: 0, layer_seq: 0,
             arm_item: 0, deferred: None, throws: 0, defs: Vec::new(), gold: [0; N], pyro: Default::default(), pending_draw: false, pending_idle: false,
+            aim: None, aim_pos: [0.0; 3],
         }
     }
 }
@@ -364,7 +376,24 @@ impl Hero {
 /// SetState 0x23 (after the group-6 part of `super::melee`'s entry).
 pub(super) fn throw_entry(h: &mut Hero, c: &mut Ctx, play: bool) {
     if play { h.set_anim(c.anim, c.rng, Pf::from_i32(ticks(9)), 0x2c, 7); }
-    // Item 10 with a target (0x13fda0): the aim at it (no targets in the port).
+    // Item 10 with a target (0x13fda0): the aim at it (0x13fda8 = 1, 0x13fdac = the yaw from Ratchet to it).
+    if h.items.slot.id == BOMB_GLOVE && h.weapons.aim.is_some() {
+        let t = h.weapons.aim_pos;
+        h.melee.aimed = 1;
+        h.melee.aim_yaw = crate::pad::fast_arctan(Pf::f(t[0]) - h.pos[0], Pf::f(t[1]) - h.pos[1]);
+    }
+}
+
+/// The glove's target position (0x13fda0 +0x10) as the moby loop left it: SetState reads the moby when it runs.
+pub fn refresh_aim(h: &mut Hero, table: &MobyTable) {
+    if let Some(m) = h.weapons.aim.and_then(|id| table.mobys.get(id)) { h.weapons.aim_pos = [m.position[0], m.position[1], m.position[2]]; }
+}
+
+/// The glove's launch point (`0x2d8330` / `0x2c2be0`): 0.859 from Ratchet at his facing − 20.8°, 0.491 up. `fwd` is
+/// his facing row (0x13f9c0).
+pub fn launch_point(pos: [f32; 3], fwd: [f32; 3]) -> [f32; 3] {
+    let a = fwd[1].atan2(fwd[0]) + f32::from_bits(0xbeb9_53df);
+    [pos[0] + a.cos() * 0.859_039, pos[1] + a.sin() * 0.859_039, pos[2] + 0.490_82]
 }
 
 /// 0x23's physics (`0x2370b8` case 0x23).
@@ -484,32 +513,42 @@ pub fn glove_update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn AnimCtl,
     if let Some(b) = hero.weapons.glove.bomb {
         let fwd = to_f32x3(hero.moby_rows[0]);
         let yawf = fwd[1].atan2(fwd[0]);
-        let p0 = to_f32x3(hero.pos);
-        let a = yawf + f32::from_bits(0xbeb9_53df);
-        launch = [p0[0] + a.cos() * 0.859_039, p0[1] + a.sin() * 0.859_039, p0[2] + 0.490_82];
+        launch = launch_point(to_f32x3(hero.pos), fwd);
         let k = 8.5f32;
         let strafe = env.pad.held & button::STRAFE != 0;
         let mut target = add3(launch, [fwd[0] * k, fwd[1] * k, fwd[2] * k]);
-        if strafe && hero.items.f13fc == 0 {
-            if let Some((cam, cf)) = env.camera {
-                let yaw = cf[1].atan2(cf[0]);
-                let pitch = cf[2].atan2(len2f(cf)).min(f32::from_bits(0x3f17_e9d8)).max(f32::from_bits(0xbfb2_b8c2));
-                let v = [yaw.cos() * k * pitch.cos(), yaw.sin() * k * pitch.cos(), pitch.sin() * k];
-                let mut l = len2f(v);
-                if l == 0.0 { l = 0.01; }
-                let slope = v[2] / l;
-                let gk = DT * DT * 11.0 * k;
-                let r = (gk * 0.5).sqrt();
-                let range = ((r + r) * r * (1.0 - slope)) / (DT * DT * 11.0);
-                if 0.0 < range {
-                    let d = [yaw.cos() * range, yaw.sin() * range, slope * range];
-                    let end = add3(cam, d);
-                    let hit = env.coll.and_then(|c| line_world(c, from_f32x3(cam), from_f32x3(end), 2));
-                    target = match hit {
-                        Some(o) => o.point,
-                        None => add3(cam, [d[0] * 5.0, d[1] * 5.0, d[2] * 5.0]),
-                    };
-                }
+        if !strafe || hero.items.f13fc != 0 {
+            // The target search over 0x1abe80 (crate::targeting); its line of sight from the camera, world only.
+            hero.weapons.aim = None;
+            let cam = env.camera.map(|c| c.0);
+            let clear = |p: [f32; 3]| match (cam, env.coll) {
+                (Some(c), Some(coll)) => line_world(coll, from_f32x3(c), from_f32x3(p), targeting::BOMB_GLOVE.los_flags).is_none(),
+                _ => true,
+            };
+            if let Some(t) = targeting::aim_search(&targeting::BOMB_GLOVE, table, env.targets, launch, yawf, clear) {
+                target = t.point;
+                hero.weapons.aim = Some(t.id);
+                let m = &table.mobys[t.id];
+                hero.weapons.aim_pos = [m.position[0], m.position[1], m.position[2]];
+            }
+        } else if let Some((cam, cf)) = env.camera {
+            let yaw = cf[1].atan2(cf[0]);
+            let pitch = cf[2].atan2(len2f(cf)).min(f32::from_bits(0x3f17_e9d8)).max(f32::from_bits(0xbfb2_b8c2));
+            let v = [yaw.cos() * k * pitch.cos(), yaw.sin() * k * pitch.cos(), pitch.sin() * k];
+            let mut l = len2f(v);
+            if l == 0.0 { l = 0.01; }
+            let slope = v[2] / l;
+            let gk = DT * DT * 11.0 * k;
+            let r = (gk * 0.5).sqrt();
+            let range = ((r + r) * r * (1.0 - slope)) / (DT * DT * 11.0);
+            if 0.0 < range {
+                let d = [yaw.cos() * range, yaw.sin() * range, slope * range];
+                let end = add3(cam, d);
+                let hit = env.coll.and_then(|c| line_world(c, from_f32x3(cam), from_f32x3(end), 2));
+                target = match hit {
+                    Some(o) => o.point,
+                    None => add3(cam, [d[0] * 5.0, d[1] * 5.0, d[2] * 5.0]),
+                };
             }
         }
         let v = launch_velocity(DT * DT * 11.0, k, hero.rot[2].to_f32(), launch, target);

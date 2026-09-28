@@ -14,8 +14,11 @@
 //!
 //! **Where the water comes from.** Only the level data: the collision faces with surface id 0 (the ground probe
 //! `0x232dc0` hits them with flags 2, records the level and re-casts with 0x24 through them to the floor), and
-//! the level's water-height tables (`0x26ed38`: the class-751 ripple patch under the hit, else the flat plane
-//! `0x1612dc..ec`, else the hit's own z) through [`WaterQuery`]. Nothing here knows a level, a pool or an
+//! the level's water-height tables (`0x26ed38`: the active patch of the level's ripple module under the hit (751 on
+//! Novalis, the patch managers of 05 / 07 / 11 / 12 / 13), else the flat plane `0x1612dc..ec` (level 05's class 982),
+//! else the hit's own z) through [`WaterQuery`] (`crate::water::world::WaterWorld::water_height`). The moving water
+//! of the patch managers is their mobys' collision (surface-0 faces at the moby's z), so the probe finds it like
+//! any water face. Nothing here knows a level, a pool or an
 //! object; the surface reaction `0x22cd48` turns the probe's result into the per-tick water flags (0x140634 in
 //! water, 0x1415f4 depth = level − floor, 0x1413f9 wading) that every rule below reads.
 //!
@@ -24,12 +27,12 @@
 //! standard `f32` and stored back into the hero block's fields ([`Pf`]) with [`Pf::f`]. No hardware modelling
 //! is added.
 //!
-//! **Not ported** (cosmetic; recorded as [`SwimEvent`]s where the engine can use them): the bubble / splash /
-//! wake particles (`0x22b140`, `0x22b3a8`, `0x22ac40`, `0x22af48`, `0x22ad38`, `PartType34Spawn`; they draw the
-//! game's `rand`, so the stream diverges from the PS2 while swimming), the Hydro-Pack's bubble jets (need the
-//! pack's back moby, class 0x261), the joint-modifier lean, the ✕-tap stats records, the oxygen HUD meter
-//! (`queue_animation_update(4, …)`; [`Swim::oxygen`] holds the value), the hurt-in-water state 0x76 and the
-//! water currents (classes 613 / 679: they write 0x13f528 and push the hero).
+//! **Effects** ([`effects`]): the splashes, wakes, rings, spray, bubbles and breath bubbles at the game's call points,
+//! with their random draws there (docs/plan/hero_states.md "Swim effects"); the ripple disturbances and the splash
+//! records go to the engine as [`SwimEvent`]s; the voices play at their call points ([`super::states::Ctx::voice`]).
+//!
+//! **Not ported**: the joint-modifier lean, the ✕-tap stats records, the oxygen HUD meter (`queue_animation_update(4, …)`; [`Swim::oxygen`] holds the value) and the water currents
+//! (classes 613 / 679: they write 0x13f528 and push the hero).
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // FPU-style compare order kept from the original.
 
 use super::anim::AnimCtl;
@@ -38,17 +41,25 @@ use super::states::Ctx;
 use super::Hero;
 use crate::pad::button;
 use crate::ps2v::Pf;
+use crate::rng::Rng;
+
+pub mod effects;
 
 /// The level's water-height tables (`0x26ed38` minus its last fallback): the height of the water surface at
-/// `p` (a point on a surface-0 face) from the class-751 ripple patches or a flat water plane, `None` when no
+/// `p` (a point on a surface-0 face) from the ripple module's patches or the flat water plane, `None` when no
 /// table covers `p` (the caller then uses the face's own z, as the game does).
 pub trait WaterQuery {
     fn water_height(&self, p: [f32; 3]) -> Option<f32>;
 }
 
-/// The ripple simulation of class 751 (`RippleHeightQuery` 0x2b8910 through `0x26ed38`).
+/// The ripple module alone (`RippleHeightQuery` 0x2b8910 through `0x26ed38`).
 impl WaterQuery for crate::water::RippleSim {
     fn water_height(&self, p: [f32; 3]) -> Option<f32> { self.patch_height(p[0], p[1], p[2]) }
+}
+
+/// The level's water (`SetWaterLevel` 0x26ed38: the ripple module, then the flat plane).
+impl WaterQuery for crate::water::world::WaterWorld {
+    fn water_height(&self, p: [f32; 3]) -> Option<f32> { crate::water::world::WaterWorld::water_height(self, p) }
 }
 
 /// Hero water state ids (`0x1413d4`).
@@ -85,8 +96,11 @@ pub enum SwimEvent {
     Ripple { x: f32, y: f32, r: f32, amp: f32 },
     /// A splash `0x22b3a8(rings, drops, big)` at the hero on the water level.
     Splash { rings: i32, drops: i32, big: bool },
-    /// Hero sound `0x236738(id)` (3 = splash in, 0x11 = landing in water).
+    /// Hero sound `0x236738(id)` (3 = splash in, 0x11 = landing in water), queued for `super::fx::flush` (a SetState
+    /// from outside the hero update).
     Sound(i32),
+    /// The same, played at its call point ([`super::states::Ctx::voice`]); a record only.
+    Played(i32),
     /// Queued voice `0x236810(id, delay)` (7 / 8 = gasps after a long dive).
     Voice(i32, i32),
     /// `0x2319b0` from the drowned state: deaths++, fade to black, respawn.
@@ -123,6 +137,13 @@ pub struct Swim {
     pub dive_lock: i16,
     /// 0x13f3f0 / 0x13f3f4: Euler x / y spring velocities of the straightening `0x236520`.
     pub euler_vel: [Pf; 2],
+    /// 0x13fc54 / 0x13fc56 / 0x13fc58: the tick counters of the wake `0x22ac40`, the spray `0x22af48` and the bow
+    /// rings `0x22ad38` ([`effects`]).
+    pub fx_counters: [i16; 3],
+    /// 0x13fc40: ticks to the next breath bubble ([`effects::breath_underwater`]).
+    pub breath: i32,
+    /// 0x13fc48: ticks to the Hydro-Pack's next jet bubbles ([`effects::jets`]).
+    pub jets: i16,
     /// Effects and sounds for the engine.
     pub events: Vec<SwimEvent>,
 }
@@ -153,6 +174,12 @@ fn wrap(a: f32) -> f32 {
 
 impl Hero {
     fn water_depth(&self) -> f32 { f(self.f15f4) }
+
+    /// `0x236738(id, 0)` from SetState / the transitions: at the call point when the update gave a player, else queued.
+    fn swim_voice(&mut self, c: &mut Ctx, id: i32) {
+        let e = if c.voice(id, 0) { SwimEvent::Played(id) } else { SwimEvent::Sound(id) };
+        self.swim.events.push(e);
+    }
 
     /// The dive state a □ / R1 press picks: 0x35 with the Hydro-Pack and R1|R2 held, else 0x33.
     fn dive_state(&self, held: u32) -> i32 { if self.owned.has(ITEM_HYDRO_PACK) && held & R12 != 0 { id::HYDRO } else { id::UNDERWATER } }
@@ -214,7 +241,7 @@ impl Hero {
         }
         if enter {
             self.set_state(c, id::SURFACE_IDLE, true);
-            self.swim.events.push(SwimEvent::Sound(3));
+            self.swim_voice(c, 3);
         }
         enter
     }
@@ -265,7 +292,7 @@ impl Hero {
                 self.items.f13f7 = 1;
                 if sid == id::UNDERWATER { self.swim.sink = Pf::ZERO; }
                 if self.prev_group == 0x12 {
-                    self.swim.events.push(SwimEvent::Sound(3));
+                    self.swim_voice(c, 3);
                     self.substate = 1;
                 } else if sid == id::UNDERWATER {
                     self.swim.f44 = ticks(45);
@@ -308,10 +335,14 @@ impl Hero {
                 let (x, y) = (f(self.pos[0]), f(self.pos[1]));
                 let dz = f(self.disp[2]);
                 if self.prev_group == 0x11 {
+                    // Surfacing (0x23d654): 0x22b3a8(3, 10, 0), RippleDisturb(x, y, 0.4, 0.3).
+                    effects::splash(self, c.rng, 3, 10, false);
                     self.swim.events.push(SwimEvent::Splash { rings: 3, drops: 10, big: false });
                     self.swim.events.push(SwimEvent::Ripple { x, y, r: 0.4, amp: 0.3 });
                 } else if dz < DTF * -0.5 {
+                    // Falling in (0x23d6f0): 0x22b3a8(3, min(trunc(300·|dz|), 40), 1), RippleDisturb(x, y, 0.5, −0.4).
                     let n = ((dz.abs() * 300.0) as i32).min(40);
+                    effects::splash(self, c.rng, 3, n, true);
                     self.swim.events.push(SwimEvent::Splash { rings: 3, drops: n, big: true });
                     self.swim.events.push(SwimEvent::Ripple { x, y, r: 0.5, amp: -0.4 });
                     self.swim.splash = ticks(75) as i16;
@@ -355,13 +386,29 @@ impl Hero {
     /// steers the yaw (TurnTo 0.007 / 0.08 / 300°/s) and sets the speed: 3 u/s stroking (0x33, pulsed by the
     /// stroke curve ×5), 6 u/s on the dive-in, the Hydro-Pack 7 u/s with R1|R2 (2.8 u/s × stick without);
     /// 0x34 drifts on its momentum. The body rolls into turns.
-    pub fn phys_underwater(&mut self, env: &Env, anim: &dyn AnimCtl) {
+    pub fn phys_underwater(&mut self, env: &Env, anim: &dyn AnimCtl, rng: &mut Rng) {
         let s = self.state;
         let pad = env.pad;
-        if self.swim.splash != 0 { self.swim.splash -= 1; }
+        // The Hydro-Pack's loop (0x236798(5, Ratchet, 0x13)); out of 0x35 slot 5 is released while still Ratchet's.
+        if s == id::HYDRO { super::packs::loop_sound(self, 5, 0x13); } else { super::packs::release_loop(self, 5); }
+        // The splash countdown 0x13fc5a: FastDecTimer, then min(t / 4, 8) bubbles at the feet.
+        if self.swim.splash != 0 {
+            self.swim.splash = self.swim.splash.max(1) - 1;
+            let n = ((self.swim.splash >> 2) as i32).min(8);
+            super::fx::bubbles(self, rng, n);
+        }
+        let v = anim.view();
+        // Stroking: four bubbles at the hands (lists 0 / 0xe) in the first 10 frames of the stroke (not blending).
+        if s == id::UNDERWATER && !v.blending() && 0.0 < v.frame && v.frame < 10.0 { super::fx::bubbles_at(self, rng, Some(anim), 4, 1); }
+        // Drifting right after the Hydro-Pack: a thinning trail at the hands for 15 ticks.
+        if s == id::UNDERWATER_IDLE && self.prev_state == id::HYDRO && self.timer < ticks(15) {
+            super::fx::bubbles_at(self, rng, Some(anim), (ticks(20) - self.timer) / 3 + 1, 1);
+        }
         if self.substate == 1 {
             if self.timer == 1 {
                 let (x, y) = (f(self.pos[0]), f(self.pos[1]));
+                // The dive-in: 0x22b3a8(3, 16, 0), RippleDisturb(x, y, 0.4, −0.3), splash countdown 70.
+                effects::splash(self, rng, 3, 16, false);
                 self.swim.events.push(SwimEvent::Splash { rings: 3, drops: 16, big: false });
                 self.swim.events.push(SwimEvent::Ripple { x, y, r: 0.4, amp: -0.3 });
                 self.swim.splash = ticks(70) as i16;
@@ -412,6 +459,9 @@ impl Hero {
         }
         if s != id::HYDRO || !r_held { ts *= k; }
         self.target_speed = p(ts);
+        // The breath bubbles 0x13fc40 (at the mouth, joint list 4), then the Hydro-Pack's jets 0x13fc48.
+        effects::breath_underwater(self, rng, anim);
+        if s == id::HYDRO { effects::jets(self, rng); }
         if s == id::HYDRO { self.speed_step(p(DT2F * 13.0), p(DT2F * 8.0)); } else { self.speed_step(p(DT2F * 7.0), p(DT2F * 4.0)); }
         let yaw = f(self.rot[2]);
         let down = wrap(-f(self.rot[1]));
@@ -452,8 +502,19 @@ impl Hero {
     /// is held; 3 u/s during the first 45 ticks of 0x36 without one; 0 when the turn is over 45°), TurnTo
     /// (0.007, 0.08, 300°/s), SpeedStep (4, 5)·dt², velocity = speed × stroke curve × 5.5 along the yaw, flat;
     /// 0x37 stops. The momentum decays by 4.2·dt², then the bob `0x240c78` sets the height.
-    pub fn phys_surface(&mut self, env: &Env, anim: &dyn AnimCtl) {
-        if self.swim.splash != 0 { self.swim.splash -= 1; }
+    pub fn phys_surface(&mut self, env: &Env, anim: &dyn AnimCtl, rng: &mut Rng) {
+        // The effects at the top of the case (0x238a24..): treading water leaves the wake 0x22ac40(15, 30); moving
+        // faster than 1.5 u/s throws spray 0x22af48(4, 12); swimming faster than 1 u/s pushes the bow rings
+        // 0x22ad38(0, 1); the splash countdown 0x13fc5a: t − 1, then min(t / 8, 6) bubbles at the feet.
+        let v = f(self.eff_len_xy);
+        if self.state == id::SURFACE_IDLE { effects::wake(self, rng, 15, 30); }
+        if DTF * 1.5 < v { effects::spray(self, rng, 4, 12); }
+        if self.state == id::SURFACE_SWIM && DTF < v { effects::bow_rings(self, rng, 0, 1); }
+        if self.swim.splash != 0 {
+            self.swim.splash -= 1;
+            let n = ((self.swim.splash >> 3) as i32).min(6);
+            super::fx::bubbles(self, rng, n);
+        }
         self.anim_speed = Pf::f(0.6);
         self.stick_target(env, p(DTF * 3.0));
         if !env.pad.no_direction && f(self.target_speed) < DTF * 3.0 * 0.5 { self.target_speed = p(DTF * 3.0 * 0.5); }
@@ -472,6 +533,9 @@ impl Hero {
             self.speed = Pf::ZERO;
             self.vel = V0;
         }
+        // Swimming: four bubbles at the hands (lists 0 / 0xe) in the first 10 frames of the stroke (not blending).
+        let av = anim.view();
+        if self.state == id::SURFACE_SWIM && !av.blending() && 0.0 < av.frame && av.frame < 10.0 { super::fx::bubbles_at(self, rng, Some(anim), 4, 1); }
         self.momentum_decay(p(DT2F * 4.2));
         self.wall_check(env, 0);
         self.surface_bob();
@@ -514,13 +578,15 @@ impl Hero {
         self.pos[2] = p(f(self.swim.level) + -0.12 + f(self.swim.bob));
     }
 
-    /// 0x6a: drowned. The momentum runs out (4·dt²) and the body sinks toward −1.5 u/s.
-    pub fn phys_drown(&mut self) {
+    /// 0x6a (and 0x82): drowned. The momentum runs out (4·dt²), the last breath bubbles rise
+    /// ([`effects::breath_drowning`]) and the body sinks toward −1.5 u/s.
+    pub fn phys_drown(&mut self, anim: &dyn AnimCtl, rng: &mut Rng) {
         let m = [f(self.momentum[0]), f(self.momentum[1]), f(self.momentum[2])];
         let l = (m[0] * m[0] + m[1] * m[1] + m[2] * m[2]).sqrt();
         let q = if 0.0 < l { (l - DT2F * 4.0).max(0.0) / l } else { 0.0 };
         self.momentum = [p(m[0] * q), p(m[1] * q), p(m[2] * q), self.momentum[3]];
         self.vel = self.momentum;
+        effects::breath_drowning(self, rng, anim);
         let mut s = f(self.swim.sink).min(0.0);
         let t = -(DTF * 1.5);
         s = if s - t > DT2F * 1.5 { s - DT2F * 1.5 } else if t - s > DT2F * 1.5 { s + DT2F * 1.5 } else { t };

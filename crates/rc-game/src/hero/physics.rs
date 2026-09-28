@@ -445,12 +445,13 @@ pub fn line_world(coll: &Collision, a: V4, b: V4, flags: u32) -> Option<crate::c
 impl Hero {
     /// `0x2370b8`: the per-state physics of the current state through the registry
     /// ([`Hero::dispatch_physics`]: ground.rs, walk.rs, air.rs, jump.rs, melee.rs, swim.rs and the package
-    /// modules). Returns false for a state without ported physics (the caller freezes the hero). Cosmetic calls
-    /// (joint-modifier lean 0x235638 / 0x235e60, footstep particles and sounds 0x22ad38 / 0x22af48 / 0x22b140)
-    /// are not ported.
+    /// modules). Returns false for a state without ported physics (the caller freezes the hero). The water effects
+    /// at the top of the ground and walk / wade cases (wake, bow rings, spray, feet bubbles) run first
+    /// ([`super::swim::effects::physics_prologue`]).
     pub fn state_physics(&mut self, env: &Env, anim: &mut dyn super::anim::AnimCtl, rng: &mut crate::rng::Rng) -> bool {
         let substate0 = self.substate;
         let seq0 = anim.view().seq_b;
+        if super::registry::implemented(self.state) { super::swim::effects::physics_prologue(self, &*anim, rng); }
         if !self.dispatch_physics(env, anim, rng) { return false; }
         // 0x23c3f4: the substate / sequence timers restart when those changed during the tick.
         if substate0 != self.substate { self.substate_timer = 0; }

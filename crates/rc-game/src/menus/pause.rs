@@ -12,8 +12,10 @@
 //! The 14 class-0x472 frame mobys ([`frame`]) are spawned, animated and freed here; their corner joints give
 //! the panel rects exactly as `PageMenuDraw` projects them (the engine draws the mobys themselves).
 //!
-//! **Not ported (stubs, counted in [`PageMenu::stub_calls`]):** the Weapons / Gadgets / Quick Select / Items /
-//! Help / Goodies page contents, streamed images and maps, the 3D globe, the gold-bolt panel, the cheat entry
+//! **The Gadgets page** (and the grids, name label and 3D model of the Weapons page it shares): [`gadgets`].
+//!
+//! **Not ported (stubs, counted in [`PageMenu::stub_calls`]):** the Quick Select / Items / Help / Goodies page
+//! contents, the Weapons page's other widgets, streamed images and maps, the 3D globe, the gold-bolt panel, the cheat entry
 //! (0x298f80), the save / load freeze dialogs and the pad-removed dialog.
 //!
 //! **Port-only:** [`port`] adds a "Port Options" page (not in the game) built from the same machinery, reached
@@ -21,6 +23,7 @@
 //! `RC_SETTINGS_PAGE=0`, leaving every record as on the disc).
 
 pub mod frame;
+pub mod gadgets;
 mod options;
 pub mod planet_select;
 pub mod port;
@@ -303,6 +306,10 @@ pub enum Data {
     Missions,
     /// Port-only: the "Port Options" list ([`port`]).
     Port(port::PortList),
+    /// The icon grids, the item preview and the 3D Ratchet of the Gadgets / Weapons pages ([`gadgets`]).
+    Grid(gadgets::Grid),
+    Preview(gadgets::Preview),
+    Model,
     Other,
 }
 
@@ -351,6 +358,9 @@ pub struct MenuOut {
     pub quit: bool,
     /// `mode_freezeInit(3, page)` requested (Save / Load actions 4 / 5); not ported.
     pub freeze: Option<u32>,
+    /// `PageMenuClose`: the item requests `0x141408 + 4·slot` of the slots whose menu copy changed (hand, feet,
+    /// head, back; `crate::inventory::menu_close_requests`), for the session.
+    pub equip: Option<[Option<i32>; 4]>,
     /// ✕ on the Sound page (stereo / mono and the mixer, 0x12e240).
     pub sound_settings: bool,
     /// The transition started / finished this frame.
@@ -413,6 +423,17 @@ pub struct PageMenu {
     /// `*0x15f650`.
     pub planet_points: Vec<[i32; 4]>,
     pub name_dy: i32,
+    /// `0x1ba1a0[4]`: the saved items (hand, feet, head, back) copied at the first tick; the Gadgets / Weapons grids
+    /// equip into it and the close requests the changes.
+    pub equip: [i32; 4],
+    /// The item definitions (the grids' slot types and classes; `crate::inventory`), given by the engine.
+    pub items: Option<std::sync::Arc<crate::inventory::ItemInfos>>,
+    /// `0x1ba2a4` (level 0xd or 0x14161b: the head items unusable) and `0x1ba2a8` (level 0 or 0xe: the packs).
+    pub unusable_head: bool,
+    pub unusable_back: bool,
+    /// The 3D widgets of the last draw (the engine renders them) and the 3D Ratchet widget while it exists.
+    pub view: gadgets::GadgetsView,
+    pub view_model: Option<u32>,
 }
 
 fn stub(m: &mut BTreeMap<&'static str, u64>, name: &'static str) { *m.entry(name).or_default() += 1; }
@@ -447,6 +468,12 @@ impl PageMenu {
             planet_points: (0..19u32).map(|k| std::array::from_fn(|j| ov.i32(ov.at(PLANET_POINTS_BASE) + 0x10 + 16 * k + 4 * j as u32).unwrap_or(0))).collect(),
             name_dy: ov.i32(ov.at(0x15f650))?,
             addrs,
+            equip: [0; 4],
+            items: None,
+            unusable_head: false,
+            unusable_back: false,
+            view: gadgets::GadgetsView::default(),
+            view_model: None,
         };
         let a = &m.addrs;
         let mut todo = vec![a.root, a.map, a.map_missions, a.planet_select, a.planet_confirm];
@@ -486,11 +513,15 @@ impl PageMenu {
         self.ticks = 0;
         self.post = 0;
         self.dest = if g.level < 0x13 { g.level } else { 0 };
+        // 0x1ba2a4 / 0x1ba2a8 (0x14161b is not modelled: 0).
+        self.unusable_head = g.level == 0xd;
+        self.unusable_back = g.level == 0 || g.level == 0xe;
         self.active = true;
     }
 
-    /// `FUN_0028c128`, the first tick (kind → first page, the moby spawn).
-    fn first_tick(&mut self) {
+    /// `FUN_0028c128`, the first tick (kind → first page, the saved items copied, the moby spawn).
+    fn first_tick(&mut self, gs: &GameState) {
+        self.equip.copy_from_slice(&gs.global.equipped[..4]);
         self.no_close = false;
         self.prev = 0;
         self.target = match self.kind {
@@ -550,7 +581,7 @@ impl PageMenu {
             }
             return out;
         }
-        if matches!(self.kind, 0 | 10 | 0xe | 0x11 | 0x21 | 0x2d | 0x23) { self.first_tick(); }
+        if matches!(self.kind, 0 | 10 | 0xe | 0x11 | 0x21 | 0x2d | 0x23) { self.first_tick(gs); }
         stub(&mut self.stub_calls, "cheat entry 0x298f80");
         if self.kind == 1 {
             let done = self.trans < 1;
@@ -622,6 +653,8 @@ impl PageMenu {
             let ws = self.page(self.current).map(|p| p.widgets).unwrap_or([0; 14]);
             for w in ws.iter().filter(|&&w| w != 0) { self.call_leave(*w, &mut out, gs); }
             if let Some(f) = self.frames.as_mut() { f.free(); }
+            // The hand / feet / head / back requests of the slots the pages changed.
+            out.equip = Some(crate::inventory::menu_close_requests(&gs.global.equipped, &self.equip));
             self.current = 0;
             self.kind = 0x14;
             self.trans = 2;
@@ -629,7 +662,7 @@ impl PageMenu {
         out
     }
 
-    fn call_enter(&mut self, w: u32, _refocus: bool, gs: &GameState) {
+    fn call_enter(&mut self, w: u32, refocus: bool, gs: &GameState) {
         let Some(enter) = self.w(w).map(|x| x.enter) else { return };
         match enter {
             0 | 0x28dd10 | 0x28dd18 | 0x295200 => {}
@@ -644,6 +677,9 @@ impl PageMenu {
             func::LABEL_ENTER => {
                 if let Some(Data::Label(l)) = self.wm(w).map(|x| &mut x.data) { l.timer = -1; }
             }
+            gadgets::func::GRID_ENTER => gadgets::grid_enter(self, w, refocus),
+            gadgets::func::MODEL_ENTER => gadgets::model_enter(self, w),
+            gadgets::func::PREVIEW_ENTER => gadgets::preview_enter(self, w),
             func::PLANET_LIST_ENTER => {
                 let dest = self.dest;
                 let names = std::mem::take(&mut self.level_names);
@@ -660,6 +696,8 @@ impl PageMenu {
             0 | 0x28dd10 | 0x28dd18 => {}
             // 0x290508: 0x13e5a0 = sfx·8/10 (mixer, audio port).
             func::SOUND_LEAVE => stub(&mut self.stub_calls, "sound leave mixer 0x290508"),
+            gadgets::func::MODEL_LEAVE => gadgets::model_leave(self, w),
+            gadgets::func::PREVIEW_LEAVE => gadgets::preview_leave(self, w),
             _ => stub(&mut self.stub_calls, "widget leave"),
         }
     }
@@ -705,6 +743,10 @@ impl PageMenu {
             func::CONFIRM_UPDATE => planet_select::confirm_update(self, inp, gs, out),
             func::MISSIONS_UPDATE => planet_select::missions_update(self, w, inp, gs, out),
             port::UPDATE => port::update(self, w, inp, out),
+            gadgets::func::GRID_UPDATE => gadgets::grid_update(self, w, inp, gs, out),
+            // `LoadHandGadget` 0x297d70: the models follow the page's copy of the saved items (engine side).
+            gadgets::func::MODEL_UPDATE => 0,
+            gadgets::func::PREVIEW_UPDATE => gadgets::preview_update(self, w),
             _ => {
                 let _ = env;
                 stub(&mut self.stub_calls, "widget update");
@@ -824,6 +866,7 @@ impl PageMenu {
     pub fn draw(&mut self, a: &MenuAssets, gs: &GameState, env: &MenuEnv, out: &mut Vec<MenuDraw>) {
         out.push(MenuDraw::Snapshot);
         out.push(MenuDraw::Darken { alpha: DARKEN });
+        self.view = gadgets::GadgetsView::default();
         if self.kind == 0x14 { return; }
         let cur = self.page(self.current).cloned();
         let mut rects: [Option<[i32; 4]>; 14] = [None; 14];
@@ -869,6 +912,9 @@ impl PageMenu {
             func::PLANET_LIST_DRAW => planet_select::list_draw(self, w, a, out),
             func::GALAXY_DRAW => planet_select::galaxy_draw(self, w, a, gs, env, out),
             port::DRAW => port::draw(self, w, a, out),
+            gadgets::func::GRID_DRAW => gadgets::grid_draw(self, w, a, gs, env.vsync, out),
+            gadgets::func::MODEL_DRAW => gadgets::model_draw(self, w, gs),
+            gadgets::func::PREVIEW_DRAW => gadgets::preview_draw(self, w, a, gs),
             _ => {
                 stub(&mut self.stub_calls, "widget draw");
                 out.push(MenuDraw::Stub("widget draw"));
@@ -945,6 +991,7 @@ impl PageMenu {
         };
         let dest = self.dest;
         let level = gs.global.level;
+        let focus_item = gadgets::focused_item(self);
         let Some(wd) = self.wm(w) else { return 1 };
         let [_, _, ww, wh] = wd.rect;
         let Data::Label(l) = &mut wd.data else { return 1 };
@@ -963,8 +1010,13 @@ impl PageMenu {
         } else if l.flags & 0x80 != 0 {
             if l.flags & 0x8000 != 0 { variant = 0; }
             focus_cursor
+        } else if l.flags & 0x1100 == 0 {
+            // Default: the focused grid's cursor cell's item (+6), variant 1 for its gold version (0x13e520[item]).
+            let Some(item) = focus_item else { return 1 };
+            variant = gs.global.gold_weapons.get(item.max(0) as usize).is_some_and(|&b| b != 0) as i32;
+            item
         } else {
-            // Grid-cell / list-cursor sources (0x100, 0x1000, default) belong to unported pages.
+            // The list-cursor sources (0x100, 0x1000) belong to unported pages.
             return 1;
         };
         if l.timer == -1 {
@@ -1137,6 +1189,9 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
         (func::MAP_UPDATE, _) => Data::Map { passive: raw[1] & 0x40 != 0 },
         (func::CONFIRM_UPDATE, _) => Data::Confirm,
         (func::MISSIONS_UPDATE, _) => Data::Missions,
+        (gadgets::func::GRID_UPDATE, _) => Data::Grid(gadgets::Grid::read(ov, a)?),
+        (gadgets::func::PREVIEW_UPDATE, _) => Data::Preview(gadgets::Preview { flags: raw[0], angle: f32::from_bits(raw[2]), class: -1, ..Default::default() }),
+        (gadgets::func::MODEL_UPDATE, _) => Data::Model,
         _ => Data::Other,
     };
     Some(Widget { addr: a, update, draw, enter: ov.label(u(8)?), leave: ov.label(u(0xc)?), dflags: u(0x10)?, moby: u(0x14)? as i32, rect: [0; 4], raw, data })

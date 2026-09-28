@@ -372,6 +372,10 @@ fn novalis_hero_digest() {
             text = text.replace(&format!(", script: {:?}", rc_game::follow_camera::script::ScriptCamera::default()), "");
             // The hand slot's hand point 0x1403c0 (the thrown wrench's target; no hand item in these runs).
             text = text.replace(", hand_point: [0.0, 0.0, 0.0]", "");
+            // The water effects (hero water pass): the effect counters 0x13fc54..58 and the breath timer 0x13fc40 while
+            // 0, and the effects channel's moby queue while empty and its copies of Ratchet's moby / joint lists.
+            text = text.replace(", fx_counters: [0, 0, 0], breath: 0, jets: 0", "");
+            text = text.replace(", mobys: [], frame: .., joints: .., back: ..", "");
             // RC_HERO_DIGEST_NO_IDLE=1: without the idle block (the cosmetic joint records, blink and back items),
             // to show that a change to Ratchet's joint modifiers leaves everything else as it was.
             if std::env::var("RC_HERO_DIGEST_NO_IDLE").is_ok_and(|v| v == "1") { text = cut_block(&text, ", idle: Idle {"); }

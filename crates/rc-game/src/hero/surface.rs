@@ -57,10 +57,8 @@
 //! ground probe ([`probe_surface`]).
 //!
 //! **Not ported** (cosmetic, recorded as [`SurfaceEvent`]s for the engine where it can use them): the body leans
-//! of 0x2f / 0x31 (joint records 0x17a680 / 0x17ab00 and their spring settings, as the walk's), the sinking
-//! floor's bubbles `0x22b140(4, 2)` (type 34 at Ratchet's joint points 0x17 / 0x16: the hero update has no joint
-//! lists, so their draws are missing and the stream diverges from the PS2 while sinking; the sand puff `0x286cb0`
-//! itself is ported, through `super::fx::dust`), level 15's lava splash 0x217450 on
+//! of 0x2f / 0x31 (joint records 0x17a680 / 0x17ab00 and their spring settings, as the walk's; the sinking floor's
+//! bubbles `0x22b140(4, 2)` and sand puff `0x286cb0` are ported, through `super::fx`), level 15's lava splash 0x217450 on
 //! 0x7b, the Hologuise end 0x231450 before the surface states (mode 3 is not in the port). Landing on a slippery
 //! floor goes through the landing picker (jump.rs, P3 / P4): its leading L00 test (0x2293a8: slippery and
 //! |eff.xy| > 0.5·dt → 0x2f) is not in the port's picker; the idle / walk / stop entries it picks redirect to 0x2f
@@ -261,7 +259,7 @@ impl Hero {
             self.f0634 = 1;
         }
         if has(3) { self.surf.f0636 = 1; }
-        let mut c = Ctx { env, anim, rng };
+        let mut c = Ctx { env, anim, rng, voice: None };
         // Level 0xd: a body-point sphere touching collision of type 0xb.
         if self.idle.level == 0xd && self.state != 0x7b {
             let r = f(self.cap_radius) + 0.03;
@@ -399,7 +397,7 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
                 return Some(false);
             }
             h.surf.events.push(SurfaceEvent::Sound(10));
-            h.jump_block_defaults();
+            h.jump_block_defaults(c.rng);
             h.group = 0x19;
             let z = f(h.pos[2]);
             let depth = if z < h.surf.liquid { h.surf.liquid - z } else { f(h.jump.g_down) };
@@ -430,7 +428,7 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
 }
 
 /// Per-state physics; false = not ported (the hero freezes).
-pub(super) fn physics(h: &mut Hero, env: &Env, _anim: &mut dyn AnimCtl, rng: &mut Rng) -> bool {
+pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng) -> bool {
     match h.state {
         0x2f => {
             // L00 0x21c438: the slide move, then gravity (in the air from the displacement, 25·dt²; on the
@@ -443,7 +441,7 @@ pub(super) fn physics(h: &mut Hero, env: &Env, _anim: &mut dyn AnimCtl, rng: &mu
                 h.gravity_from(Pf::ZERO, DT2 * Pf::b(0x4316_0000));
             }
         }
-        0x31 => sinking_floor(h, env, rng),
+        0x31 => sinking_floor(h, env, &*anim, rng),
         0x68 => {
             // L00 0x21f710: held by the liquid, sinking at 1 u/s, 0.25 u/s once deeper than (n + 1)/2.
             h.vel = V0;
@@ -531,17 +529,17 @@ pub(super) fn after_transitions(h: &mut Hero, moby: &crate::moby_runtime::Moby, 
 // ------------------------------------------------------------------------------------------------
 // 0x31: the sinking floor (0x23a7cc).
 
-fn sinking_floor(h: &mut Hero, _env: &Env, rng: &mut Rng) {
+fn sinking_floor(h: &mut Hero, _env: &Env, anim: &dyn super::AnimCtl, rng: &mut Rng) {
     // The loop sound in slot 2 (level 15: 0x1d), played while the slot's voice is free.
     if h.surf.voice == -1 {
         h.surf.events.push(SurfaceEvent::LoopSound(if h.idle.level == 0xf { 0x1d } else { 6 }));
         h.surf.voice = 0;
     }
-    // Level ≠ 15: the sand. First `0x22b140(4, 2)`: four type-34 bubbles at Ratchet's joint points 0x17 / 0x16 (not
-    // ported: the hero update has no joint lists; their 40 draws are missing, so the stream still differs from the
-    // PS2 while sinking). Then one puff of sand `PartType47Spawn(randf(37800, 75600), pos, vel)` 0x286cb0 around the
-    // feet (±0.25, −0.1..0.4) moving with 0.9 of the displacement ± 0.7 u/s, rising 1..2 u/s.
+    // Level ≠ 15: the sand. First `0x22b140(4, 2)`: four type-34 bubbles at Ratchet's joint points 0x17 / 0x16 (their
+    // pop level the hero's z + 0.4). Then one puff of sand `PartType47Spawn(randf(37800, 75600), pos, vel)` 0x286cb0
+    // around the feet (±0.25, −0.1..0.4) moving with 0.9 of the displacement ± 0.7 u/s, rising 1..2 u/s.
     if h.idle.level != 0xf {
+        super::fx::bubbles_at(h, rng, Some(anim), 4, 2);
         let dtf = DTF;
         let p0 = to_f32x3(h.pos);
         let x = p0[0] + rng.randf(-0.25, 0.25);

@@ -233,6 +233,8 @@ impl Game {
         carriers.grind = self.grind_paths.clone();
         // The Swingshot targets of the moby loop's run list (hero::swingshot, the weapon check's searches).
         carriers.targets = self.swing_targets(hooks.world.as_deref());
+        // The weapon's target (0x13fda0) where the moby loop left it (SetState 0x23 aims at it).
+        crate::hero::weapons::refresh_aim(&mut self.hero, &self.mobys);
         let hero_tick = {
             let mobys = scene.as_ref().map(OwnedScene::scene);
             let view = self.camera.out;
@@ -249,12 +251,19 @@ impl Game {
                 world: Some(&carriers),
             };
             // The classes' calls into the hero code (SetState / SetAnim: the bolt crank), with the hero's context.
-            if let Some(f) = &hero_writes { f.run_calls(&mut self.hero, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng }); }
-            crate::cinematic::run_hero_calls(&mut self.hero, &cine, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng });
+            if let Some(f) = &hero_writes { f.run_calls(&mut self.hero, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None }); }
+            crate::cinematic::run_hero_calls(&mut self.hero, &cine, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None });
             let moby = &mut self.mobys.mobys[self.hero_moby];
             hero_update_with_sounds(&mut self.hero, moby, &env, anim, &mut self.rng, hero_sounds)
         };
         drop(scene);
+        // The mobys the hero update created (CreateMoby inside it: the water splash 775), before anything else can take a
+        // slot, with their MobyBuildMatrix (hero::fx::create_mobys).
+        if !self.hero.fx.mobys.is_empty() {
+            for id in crate::hero::fx::create_mobys(&mut self.hero, &mut self.mobys, self.hero_moby, hits, self.counter) {
+                if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, id); }
+            }
+        }
         // The hero's camera shakes (the stomp's landing, …: its stores into 0x167260 / 0x167270 during the update).
         for r in std::mem::take(&mut self.hero.fx.shakes) { self.camera.request_shake(r); }
         // HeroSyncMoby 0x229f20: Ratchet's hit slot +0xa4 = 0xff (the message is consumed by this update).
@@ -273,7 +282,9 @@ impl Game {
         // HeroItemsUpdate 0x231268 (hand slot): create, attach, the swap, the item's update (the wrench's hit).
         if hero_tick == HeroTick::Ran {
             if let Some(data) = self.item_data.as_ref() {
-                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])), camera_up: Some(self.camera.out.rows_f32()[2]) };
+                // 0x1abe80, the targetable mobys of the moby loop's run list (crate::targeting), for the items' aim searches.
+                let targets = if self.hero.items.slot.item.is_some() { self.target_list(hooks.world.as_deref()) } else { Vec::new() };
+                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])), camera_up: Some(self.camera.out.rows_f32()[2]), targets: &targets };
                 items_update(&mut self.hero, &mut self.item_globals, &mut self.mobys, &*anim, &mut self.rng, &ienv, hits);
                 // The slot loop's item update that needs the hero's context (the Swingshot's hook: SetState, the
                 // collision lines), at the same point of the frame (hero::gadgets).
@@ -293,7 +304,7 @@ impl Game {
                         water: hooks.world.as_deref().and_then(|w| w.water()),
                         world: Some(&carriers),
                     };
-                    let mut c = crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng };
+                    let mut c = crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None };
                     crate::hero::gadgets::after_items(&mut self.hero, &mut c, data);
                 }
                 // The hand item's class sounds (the wrench's hit, the Swingshot's fire / hit / pull), right after its
@@ -334,6 +345,15 @@ impl Game {
 }
 
 impl Game {
+    /// `0x1abe80` as the moby loop built it: the targetable mobys of its run list for the camera it ran with (the
+    /// previous tick's), in order (`crate::targeting::target_list`); without a moby system, the table's order.
+    fn target_list(&self, world: Option<&dyn MobySystem>) -> Vec<crate::moby_runtime::MobyId> {
+        let order = world.and_then(|w| w.run_list(&self.mobys, self.camera.out.pos)).unwrap_or_else(|| {
+            self.mobys.mobys.iter().enumerate().take_while(|(_, m)| m.state != crate::moby_runtime::state::END).map(|(i, _)| i).collect()
+        });
+        crate::targeting::target_list(&self.mobys, &order)
+    }
+
     /// The Swingshot targets the hero sees this tick: the target mobys of the moby loop's run list (in its order)
     /// with their records and cuboids, and the camera as the previous tick's update left it.
     fn swing_targets(&self, world: Option<&dyn MobySystem>) -> crate::hero::swingshot::Targets {

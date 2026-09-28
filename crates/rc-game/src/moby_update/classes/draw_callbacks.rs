@@ -29,6 +29,10 @@ pub enum Callback {
     /// The ships' canopy glass (level01 `0x2a70a8`, the boot's `0x2327a0`; draw only, apart from its cross-fade timer):
     /// registered by the cutscene FX driver on list 1 with the matrix of the ship's joint list 0 (its canopy joint) ([`DrawCallbacks::matrices`]).
     ShipGlass,
+    /// The ripple patches of the level's ripple module (751's `0x2fd0c0` on level 01, the patch managers' callbacks on
+    /// 05 / 07 / 11 / 12 / 13: `FUN_002b91c8(table, n)`; draw only, apart from the per-patch UV advance the renderer
+    /// makes): `crate::water::managers`.
+    RipplePatches,
 }
 
 /// The two lists (registration order).
@@ -75,7 +79,7 @@ pub fn run_frame(w: &mut World) {
         match cb {
             Callback::FireField760 => super::fire_field::draw_callback(w, id),
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
-            Callback::NanotechGlow | Callback::ShipGlass => {}
+            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches => {}
         }
     }
 }

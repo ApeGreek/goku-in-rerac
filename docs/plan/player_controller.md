@@ -777,11 +777,10 @@ SetState's prologue clears 0x1413f7 / 0x1413fc (mode 0) and its tail sets the re
 - Camera `0x3111d8`, group 0x11: look height (D+0xf0) = 0.25 each tick, pivot height → 0.5 at rate 0.003 (`0x313690`). The
   flags of `0x20eb40` (0x34 in groups 0x11/0x12/0x73) were already ported. The underwater flag / fog / tint are the camera's
   own test (world_animation.md §6, engine `fog_state.rs`).
-- `SwimEvent`s: `Ripple` (applied by the engine to the 751 patches with `RippleSim::disturb`), `Splash`, `Sound` (3 splash
-  in, 0x11 landing in water: not queued yet), `Voice` (7/8 gasps), `Drowned`. Not ported: the particles (bubbles 0x22b140 /
-  PartType34Spawn with its `rand` timer 0x13fc40, splash rings 0x22b3a8, wakes 0x22af48 / 0x22ad38, rings 0x22ac40 — they draw
-  the game's `rand`, so the stream diverges while swimming), the pack's looping sound slot 5 / jets (need the pack moby
-  0x261), the joint-modifier lean, the ✕-tap stats, the oxygen HUD meter (`queue_animation_update(4, …)`), hurt-in-water 0x76,
+- `SwimEvent`s: `Ripple` (applied by the engine to the 751 patches with `RippleSim::disturb`), `Splash` (a record),
+  `Sound` / `Played` (3 splash in, 0x11 landing in water; played at the call point by the hero update), `Voice` (7/8
+  gasps), `Drowned`. The particles, splash mobys, breath bubbles, the pack's loop (slot 5) and jets: hero_states.md "Swim
+  effects" (since 2026-09-28). Not ported: the joint-modifier lean, the ✕-tap stats, the oxygen HUD meter (`queue_animation_update(4, …)`), hurt-in-water 0x76,
   the water currents 613/679 (moby_update), the Hydro-Pack back-item model (Ratchet still wears the heli-pack model).
 
 ### 14.6 Generality

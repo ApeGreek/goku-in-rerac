@@ -17,6 +17,14 @@ pub const TYPE: u8 = 46;
 /// +0x38 without a water level.
 pub const NO_LEVEL: f32 = f32::NEG_INFINITY;
 
+/// `PartType46Spawn(size, spin, pos, vel, &0x13f640)` 0x286a68 with the hero's water level as the pointer
+/// (`level` = [`super::type45::HERO_WATER_LEVEL`]: the update reads [`Particles::water_z`] through it).
+pub fn spawn_on(sys: &mut Particles, rng: &mut Rng, size: f32, spin: f32, pos: [f32; 4], vel: [f32; 4], level: u32) -> Option<usize> {
+    let i = spawn(sys, rng, size, spin, pos, vel, NO_LEVEL)?;
+    rec::set_u32(&mut sys.pool.recs[i], 0x38, level);
+    Some(i)
+}
+
 /// `PartType46Spawn(size, spin, pos, vel, level)` 0x286a68.
 pub fn spawn(sys: &mut Particles, rng: &mut Rng, size: f32, spin: f32, pos: [f32; 4], vel: [f32; 4], level: f32) -> Option<usize> {
     let i = sys.create_part(TYPE)?;
@@ -51,7 +59,8 @@ pub fn update(sys: &mut Particles, i: usize, _rng: &mut Rng) {
     rec::set_ff(r, 0x34, spin);
     rec::set_ff(r, 0x30, angle);
     r[8] = angle as i32 as u8;
-    let level = rec::ff(r, 0x38);
+    let level = if rec::u32(r, 0x38) == super::type45::HERO_WATER_LEVEL { sys.water_z } else { rec::ff(r, 0x38) };
+    let r = &mut sys.pool.recs[i];
     if level != NO_LEVEL && (rec::ff(r, 0x18) - level).abs() < 0.2 { rec::set_ff(r, 0x18, level + 0.02); }
     let t = rec::i16(r, 0xa) - 1;
     rec::set_i16(r, 0xa, t);

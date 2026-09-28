@@ -1,7 +1,8 @@
-//! Level-code water: strip meshes (classes 676, 678, 761, 1225) and ripple patches (class 751), drawn in the
-//! game's frame position. Spec: docs/plan/world_animation.md §1–§3; tables: `rc_formats::water`; state and
-//! the exact float arithmetic: `rc_game::water`. `RC_WATER=0` disables all of it; `RC_WATER_STATS=1` prints
-//! the ripple module's state once per second of ticks.
+//! Level-code water: strip meshes (classes 676, 678, 761, 1225) and the ripple patches of the level's ripple module
+//! (751 on Novalis, the patch managers of levels 05 / 07 / 11 / 12 / 13), drawn in the game's frame position. Spec:
+//! docs/plan/world_animation.md §1–§3; tables: `rc_formats::water`; state and the exact float arithmetic:
+//! `rc_game::water` (the ripple module lives in the moby system, `Services::water`, `rc_game::water::world`).
+//! `RC_WATER=0` disables the drawing; `RC_WATER_STATS=1` prints the ripple module's state once per second of ticks.
 //!
 //! **Frame position.** The game's water is drawn by per-frame draw callbacks that the moby updates register
 //! on list 0x21afe0 (moby instance order: 676, 678, 751, 761, 1225 on Novalis); the list is drained after the
@@ -9,6 +10,8 @@
 //! `depth_bias = 5e5 + slot`, `slot` = the callback order (per class, per strip / patch, layer 1 then layer 2):
 //! after every moby item (Opaque3d / AlphaMask3d run first, moby Transparent3d items have bias 0) and before
 //! the particles (bias 1e6), and among themselves exactly in callback order (all share the origin distance).
+//! The ripple patches are drawn on a tick whose moby loop registered `Callback::RipplePatches` (the manager's
+//! callback: `FUN_002b91c8(table, n)`), at the manager class's place among the strip classes.
 //!
 //! **GS state → Bevy.** Both passes: `ALPHA = FIX << 32 | 0x64` = `Cd + (Cs − Cd)·FIX/128`, TEST 0x5360b with
 //! vertex A = 0 (As = 0 fails, AFAIL RGB_ONLY: colour, never Z), ZTST GEQUAL, CLAMP 0 (repeat), TEX1 bilinear
@@ -25,25 +28,25 @@
 //! `bob(t)` in its update (per tick, before the draw); 1225 writes it in its callback after drawing (one frame
 //! late); 676/678 keep the stored 0 (z = z1). The FastBSphereCheck(400) cull is not reproduced (the GPU clips).
 //!
-//! **Ripples.** Per tick, the 751 update: zone activation against the camera, random drops, the sim clock.
-//! With the game tick (crate::gameplay) the moby scheduler runs it at 751's place in the moby order
-//! ([`WaterState::ripple_update`], its load-pass init [`WaterState::ripple_init`]) on the game's one `rand`
-//! stream with the game camera 0x167240; with `RC_PLAY=0` this plugin's `FixedUpdate` runs it every tick on a
-//! stream of its own (`srand(1234)`) with the fly camera. Per rendered frame, per patch
-//! with a mask: the four-corner frustum test (`FUN_002b91c8`; approximated with the port's projection, the
-//! game tests clip codes against 0x167200), then `advance_uv` (only for drawn patches, as in the game), the
-//! 17×17 vertex grid with grey and sphere-map UV from the drawn height buffer, and one mesh of the active
-//! 4×4 sub-blocks (each the game's 46-vertex strip, degenerate joins dropped). Water pass (FX +0x18, FIX
-//! +0x1d, the shared animated UV) then env pass (FX +0x14, FIX +0x1c, the sphere-map UV), per patch.
-//! The game emits water/env per sub-block; sub-blocks do not overlap, so per patch is the same image.
+//! **Ripples.** The managers run in the moby loop (`rc_game::water::managers`: zone activation or the per-patch
+//! view test, random drops, the sim clock) on the game's one `rand` stream; with `RC_PLAY=0` (no moby loop) this
+//! plugin's `FixedUpdate` runs Novalis's 751 on a stream of its own (`srand(1234)`) with the fly camera. Per
+//! rendered frame, per patch with a mask: the four-corner frustum test (`FUN_002b91c8`; approximated with the
+//! port's projection, the game tests clip codes against 0x167200), then `advance_uv` (only for drawn patches, as
+//! in the game), the 17×17 vertex grid with grey and sphere-map UV from the drawn height buffer, and one mesh of the
+//! active 4×4 sub-blocks (each the game's 46-vertex strip, degenerate joins dropped). Water pass (FX +0x18, FIX
+//! +0x1d, the shared animated UV) then env pass (FX +0x14, FIX +0x1c, the sphere-map UV), per patch. The game
+//! emits water/env per sub-block; sub-blocks do not overlap, so per patch is the same image. A patch's FX / FIX
+//! are read every drawn frame (levels 11 / 12 set them when the patch's moby builds it, 07 / 13 copy the module's
+//! FIX every tick).
 //!
-//! **Buffers.** The materials never change after setup (except the fog uniform, on a fog change), so Bevy
-//! does not re-prepare them: the per-frame values live in two storage buffers every water material binds,
-//! rewritten on each drawn frame. `frame` holds one [`FRAME_RECORD`] per callback slot (z blend w, scroll, the
-//! eight wobble offsets); `ripple` one record per patch (the sub-block mask, the 17×17 positions, sphere-map
-//! UVs and grey, then the 46 water UVs), which the patches' one static mesh (all 16 sub-blocks, each vertex
-//! tagged with its sub-block, strip index and grid vertex) reads; sub-blocks outside the mask are dropped by the
-//! vertex shader. The triangles, their order and their vertex values are those of a mesh of the active
+//! **Buffers.** The materials never change after setup (except the fog uniform, on a fog change, and a patch's
+//! FX / FIX), so Bevy does not re-prepare them: the per-frame values live in two storage buffers every water
+//! material binds, rewritten on each drawn frame. `frame` holds one [`FRAME_RECORD`] per callback slot (z blend w,
+//! scroll, the eight wobble offsets); `ripple` one record per patch (the sub-block mask, the 17×17 positions,
+//! sphere-map UVs and grey, then the 46 water UVs), which the patches' one static mesh (all 16 sub-blocks, each
+//! vertex tagged with its sub-block, strip index and grid vertex) reads; sub-blocks outside the mask are dropped by
+//! the vertex shader. The triangles, their order and their vertex values are those of a mesh of the active
 //! sub-blocks.
 //!
 //! **Fire fields** (class 760, the flames and smoke on the bombed buildings; list 2 = after the particles: `LIST2_BIAS`). The moby system keeps the fields' state
@@ -56,7 +59,7 @@
 //! overlay per level ([`FireFieldTables`]). Both equations blend on the frame's display bytes like every effect
 //! (crate::display_blend; the shared draw-callback material crate::fx_draw::FxPrimMaterial, `fx_prim.wgsl`), As > 0x80 included (the curtain's A = 0xff).
 //!
-//! Not drawn: 1848 (env overlay), drips (787) and the hero's splashes (no hero in the water yet).
+//! Not drawn: 1848 (env overlay), drips (787).
 
 use crate::game_camera::{game_eye, GameFog, GameProjection, TfragFog};
 use crate::fx_draw::{FxPrimMaterial, FxPrimParams, PrimBuf};
@@ -73,36 +76,38 @@ use bevy::render::render_resource::{
 };
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
-use rc_formats::water::{self as wf, Cuboid, RippleTables, StripAnim, StripClass, StripDescriptor, SUB_STRIP_LEN};
+use rc_formats::level_overlay::{LevelOverlay, Relocation};
+use rc_formats::water::{self as wf, StripAnim, StripClass, StripDescriptor, SUB_STRIP_LEN};
+use rc_game::moby_update::classes::draw_callbacks::Callback;
 use rc_game::ps2v::Pf;
 use rc_game::rng::{Rng, LEVEL_SEED};
+use rc_game::water::world::LevelWaterData;
 use rc_game::water::{self as ww, RippleSim, ScrollState, VG};
 use std::path::Path;
+use std::sync::Arc;
 
 const SHADER_PATH: &str = "shaders/water.wgsl";
 /// Transparent3d sort bias of the water draws (see the module doc).
 const WATER_BIAS: f32 = 5.0e5;
-/// The ripple class.
-const RIPPLE_CLASS: u16 = 751;
+/// The ripple patches' place in [`LevelWater::order`] (a manager class stands for it).
+const RIPPLE_SLOT: u16 = u16::MAX;
 
 pub const ATTRIBUTE_WATER_Z1: MeshVertexAttribute = MeshVertexAttribute::new("WaterZ1", 0x5741_5431, VertexFormat::Float32);
 pub const ATTRIBUTE_WATER_UV: MeshVertexAttribute = MeshVertexAttribute::new("WaterUv", 0x5741_5432, VertexFormat::Float32x4);
 pub const ATTRIBUTE_WATER_TAG: MeshVertexAttribute = MeshVertexAttribute::new("WaterTag", 0x5741_5433, VertexFormat::Uint32x2);
 
-/// `RC_WATER=0` turns the water off.
+/// `RC_WATER=0` turns the water drawing off.
 pub fn enabled() -> bool { !std::env::var("RC_WATER").is_ok_and(|v| v.trim() == "0") }
 
 /// Level data for the water.
 #[derive(Default)]
 pub struct LevelWater {
     pub strips: Vec<StripClass>,
-    pub ripples: Option<RippleTables>,
-    pub cuboids: Vec<Cuboid>,
-    /// 751 pvar: cuboid index per zone.
-    pub zone_cuboids: Vec<i32>,
-    /// Directional light set 0, light A direction x / y (0x180350 / 0x180354).
-    pub light_xy: [f32; 2],
-    /// Water classes in moby instance order = draw-callback order.
+    /// The level's water data (`rc_game::water::world`; the moby system's `Services::water` is built from it, also
+    /// with `RC_WATER=0`). None when the overlay could not be read.
+    pub data: Option<LevelWaterData>,
+    /// Water draw callbacks in moby instance order = draw-callback order: strip classes, and [`RIPPLE_SLOT`] for the
+    /// ripple patches (the first instance of a manager class).
     pub order: Vec<u16>,
     /// The fire / smoke fields' quad tables (class 760, levels 00 / 01 / 14; see "Fire fields" below).
     pub fire_fields: Option<FireFieldTables>,
@@ -110,34 +115,44 @@ pub struct LevelWater {
     pub fx: crate::fx_draw::LevelFx,
 }
 
-/// Reads the overlay tables, the cuboids and the 751 pvar.
+/// Reads the level's water data (by code identity against the reference overlays: rc_game::water::world), the strip
+/// tables and the draw order.
 pub fn load(root: &Path, index: u32, gameplay: &[u8]) -> Result<LevelWater> {
-    if !enabled() { return Ok(LevelWater::default()); }
     let ov_bytes = crate::disc_source::level_file(root, index, "overlay.bin")?;
+    let target = LevelOverlay::parse(&ov_bytes).context("parsing the level overlay")?;
+    let cache: std::cell::RefCell<std::collections::HashMap<u32, Option<Arc<LevelOverlay>>>> = Default::default();
+    let reference = |l: u32| -> Option<Arc<LevelOverlay>> {
+        cache
+            .borrow_mut()
+            .entry(l)
+            .or_insert_with(|| crate::disc_source::level_file(root, l, "overlay.bin").ok().and_then(|b| LevelOverlay::parse(&b).ok()).map(Arc::new))
+            .clone()
+    };
+    let data = match LevelWaterData::load(&ov_bytes, &target, &reference, gameplay) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            eprintln!("water: level water data not read ({e}): no water managers");
+            None
+        }
+    };
+    if !enabled() { return Ok(LevelWater { data, ..LevelWater::default() }); }
     let ov = wf::Overlay::parse(&ov_bytes).context("parsing the level overlay")?;
-    let strips = wf::parse_strip_classes(&ov, index)?;
-    let ripples = wf::parse_ripple_tables(&ov, index)?;
+    let strips = match reference(1) {
+        Some(r01) => wf::parse_strip_classes(&ov, &wf::strip_tables(&target, &Relocation::new(&r01, &target)))?,
+        None => Vec::new(),
+    };
     let fire_fields = FireFieldTables::parse(&ov, index)?;
     let fx = crate::fx_draw::LevelFx::parse(&ov, index);
-    if strips.is_empty() && ripples.is_none() { return Ok(LevelWater { fire_fields, fx, ..LevelWater::default() }); }
-    let cuboids = wf::parse_cuboids(gameplay)?;
+    let managers = data.as_ref().map(|d| d.manager_classes.clone()).unwrap_or_default();
+    let has_patches = data.as_ref().is_some_and(|d| d.patch_records().is_some());
     let instances = rc_formats::gameplay::parse_moby_instances(gameplay)?;
-    let pvars = rc_formats::gameplay::parse_pvars(gameplay)?;
-    let mut zone_cuboids = Vec::new();
-    if let Some(rt) = &ripples {
-        if let Some(p) = instances.iter().find(|m| m.o_class == RIPPLE_CLASS as i32).and_then(|m| m.pvar(&pvars)) {
-            zone_cuboids = wf::ripple_zone_cuboids(p, rt.zones.len())?;
-        }
-    }
-    let bank = rc_formats::tfrag_light::parse_light_bank(gameplay)?;
-    let light_xy = [bank.sets[0].dir_a[0], bank.sets[0].dir_a[1]];
     let mut order = Vec::new();
     for m in &instances {
         let c = m.o_class as u16;
-        let ours = strips.iter().any(|s| s.class == c) || (c == RIPPLE_CLASS && ripples.is_some());
-        if ours && !order.contains(&c) { order.push(c); }
+        let slot = if strips.iter().any(|s| s.class == c) { c } else if has_patches && managers.contains(&m.o_class) { RIPPLE_SLOT } else { continue };
+        if !order.contains(&slot) { order.push(slot); }
     }
-    Ok(LevelWater { strips, ripples, cuboids, zone_cuboids, light_xy, order, fire_fields, fx })
+    Ok(LevelWater { strips, data, order, fire_fields, fx })
 }
 
 /// Static uniform of one water draw.
@@ -220,35 +235,37 @@ struct ClassDraw {
     strips: Vec<StripDraw>,
 }
 
+/// One patch's two draws (water, env) and the FX / FIX their materials hold.
 struct PatchDraw {
     entities: [Entity; 2],
+    mats: [Handle<WaterMaterial>; 2],
+    /// FX (water, env) and FIX (water, env) the materials were made with.
+    fx: [i32; 2],
+    fix: [u8; 2],
+    slots: [u32; 2],
     visible: bool,
 }
 
-/// The live water state.
+/// The live water drawing state.
 #[derive(Resource)]
 pub struct WaterState {
     classes: Vec<ClassDraw>,
-    /// Position of the ripple class in the callback order (between the strip classes).
+    /// Position of the ripple patches in the callback order (between the strip classes).
     ripple_at: usize,
-    pub ripple: Option<RippleSim>,
-    patches: Vec<PatchDraw>,
-    cuboids: Vec<Cuboid>,
+    /// None: a patch without its FX textures (not drawn).
+    patches: Vec<Option<PatchDraw>>,
+    /// The `RC_PLAY=0` ripple module (Novalis's 751 on a stream of its own, `srand(1234)`); None with the game tick
+    /// (the module is the moby system's, crate::gameplay::Play).
+    pub fallback: Option<RippleSim>,
+    fallback_inputs: Option<Arc<LevelWaterData>>,
+    fallback_rng: Rng,
     /// The frame counter 0x15f5cc as the updates see it.
     counter: u32,
     ticks: u64,
     drawn_ticks: u64,
     stats: bool,
-    drops: u32,
-    steps: u32,
-    /// 751 updates run (for the stats line).
-    ripple_ticks: u64,
-    /// 751's init inputs (tables, zone cuboids, light x/y), for the load-pass init on the game's stream.
-    ripple_inputs: Option<(RippleTables, Vec<i32>, [f32; 2])>,
-    /// The stream of the `RC_PLAY=0` path (`srand(1234)`); unused once [`external`](Self::external).
-    fallback_rng: Rng,
-    /// The moby scheduler runs 751 (crate::gameplay): this plugin's tick leaves the ripples alone.
-    pub external: bool,
+    /// FX images by FX index, made on first use.
+    fx_images: Vec<Option<Handle<Image>>>,
     /// Every water material (for a fog change) and the fog they hold.
     materials: Vec<Handle<WaterMaterial>>,
     fog: TfragFog,
@@ -257,41 +274,6 @@ pub struct WaterState {
     frame_bytes: Vec<u8>,
     ripple_buf: Handle<ShaderBuffer>,
     ripple_bytes: Vec<u8>,
-}
-
-impl WaterState {
-    /// `(*moby+0x74)` of the ripple manager 751 (0x2fd0e8) as the scheduler calls it: state 0 is the load-pass
-    /// init (`0x2b7a48` + the 751 init, drawing its two drops per patch from `rng`), which rebuilds the
-    /// simulation; later states are the per-tick update ([`ripple_update`](Self::ripple_update)).
-    pub fn ripple_init(&mut self, rng: &mut Rng) {
-        let Some((t, zones, light)) = self.ripple_inputs.as_ref() else { return };
-        self.ripple = Some(RippleSim::new(t, zones.clone(), *light, rng));
-        self.external = true;
-    }
-
-    /// One tick of the 751 update with the game camera `cam` (0x167240), drawing from `rng` (no particle system:
-    /// the zone-5 waterfall foam's spawner draws are made without records).
-    pub fn ripple_update(&mut self, cam: [f32; 3], rng: &mut Rng) { self.ripple_update_with(cam, rng, 0, None) }
-
-    /// [`ripple_update`](Self::ripple_update) with the tick counter 0x15f5cc and the particle system the zone-5
-    /// waterfall foam (types 57 / 56) spawns into.
-    pub fn ripple_update_with(&mut self, cam: [f32; 3], rng: &mut Rng, counter: u64, parts: Option<&mut rc_game::particles::Particles>) {
-        let Some(sim) = self.ripple.as_mut() else { return };
-        let info = sim.tick_with(cam, &self.cuboids, rng, counter, parts);
-        self.drops += info.drops;
-        self.steps += info.stepped as u32;
-        self.ripple_ticks += 1;
-        if self.stats && self.ripple_ticks.is_multiple_of(60) {
-            let active: Vec<usize> = sim.patches.iter().enumerate().filter(|(_, p)| p.mask != 0).map(|(i, _)| i).collect();
-            println!(
-                "water: 751 update {} zone {} active patches {active:?} steps {} drops {} clock {:?} rng {:#010x}",
-                self.ripple_ticks, info.zone, self.steps, self.drops, sim.clock, rng.state
-            );
-        }
-    }
-
-    /// The ripple manager exists on this level.
-    pub fn has_ripples(&self) -> bool { self.ripple_inputs.is_some() }
 }
 
 pub struct WaterPlugin;
@@ -378,6 +360,15 @@ fn write_patch(bytes: &mut [u8], p: usize, mask: u16, v: &ww::PatchVerts, water_
     for uv in water_uv { put(uv[0].to_bits()); put(uv[1].to_bits()); }
 }
 
+/// The FX image of index `i` (made once; None: no such FX texture).
+fn fx_image(cache: &mut Vec<Option<Handle<Image>>>, images: &mut Assets<Image>, tex: &rc_formats::particle_tex::ParticleTextures, i: i32) -> Option<Handle<Image>> {
+    let i = usize::try_from(i).ok()?;
+    let t = tex.fx_textures.get(i)?.as_ref()?;
+    if cache.len() <= i { cache.resize(i + 1, None); }
+    if cache[i].is_none() { cache[i] = Some(crate::fx_draw::fx_image(images, t)); }
+    cache[i].clone()
+}
+
 fn setup(
     mut commands: Commands,
     level: Res<crate::Level>,
@@ -394,27 +385,25 @@ fn setup(
         return;
     };
     let fog = fog.map(|f| f.uniform).unwrap_or_else(|| TfragFog::new(&level.0.fog));
-    let mut fx: Vec<Option<Handle<Image>>> = vec![None; tex.fx_textures.len()];
-    let mut image = |i: i32, images: &mut Assets<Image>| -> Option<Handle<Image>> {
-        let i = usize::try_from(i).ok()?;
-        if fx.get(i)?.is_none() { fx[i] = Some(crate::fx_draw::fx_image(images, tex.fx_textures[i].as_ref()?)); }
-        fx[i].clone()
-    };
+    let mut fx_images: Vec<Option<Handle<Image>>> = Vec::new();
 
     let mut fallback_rng = Rng::new();
     fallback_rng.srand(LEVEL_SEED);
     let mut slot = 0u32;
     let mut classes = Vec::new();
     let mut patches = Vec::new();
-    let mut ripple = None;
     let mut ripple_at = usize::MAX;
+    let mut patch_mesh_handle: Option<Handle<Mesh>> = None;
     let spawn = |commands: &mut Commands, mesh: Handle<Mesh>, mat: Handle<WaterMaterial>, vis: Visibility, name: String| {
         commands.spawn((Mesh3d(mesh), MeshMaterial3d(mat), Transform::IDENTITY, NoFrustumCulling, vis, Name::new(name))).id()
     };
+    // The patch records as the manager's init hands them over (their FX and FIX; levels 11 / 12 set them later).
+    let records = lw.data.as_ref().and_then(|d| d.patch_records()).map(<[_]>::to_vec).unwrap_or_default();
+    let module = lw.data.as_ref().and_then(|d| d.module.clone());
     // The two per-frame buffers, sized for every slot / patch the setup below can create (a slot per strip
     // layer, two per patch). Contents are written once the layout is known.
-    let n_slots: usize = lw.strips.iter().map(|c| c.strips.len() * 2).sum::<usize>() + lw.ripples.as_ref().map_or(0, |r| r.patches.len() * 2);
-    let n_patches = lw.ripples.as_ref().map_or(0, |r| r.patches.len());
+    let n_slots: usize = lw.strips.iter().map(|c| c.strips.len() * 2).sum::<usize>() + records.len() * 2;
+    let n_patches = records.len();
     let mut frame_bytes = vec![0u8; n_slots.max(1) * FRAME_RECORD];
     let ripple_bytes = vec![0u8; n_patches.max(1) * RIPPLE_WORDS * 4];
     let frame = buffers.add(ShaderBuffer::new(&frame_bytes, RenderAssetUsages::default()));
@@ -426,26 +415,24 @@ fn setup(
         h
     };
     for &class in &lw.order {
-        if class == RIPPLE_CLASS {
-            let Some(rt) = lw.ripples.as_ref() else { continue };
+        if class == RIPPLE_SLOT {
+            let Some(m) = module.as_ref() else { continue };
             ripple_at = classes.len();
-            // Level load: the load-time moby pass runs 751's init (`0x2fd0e8` state 0). With the game tick the
-            // scheduler's load pass rebuilds it on the game's stream (WaterState::ripple_init).
-            let sim = RippleSim::new(rt, lw.zone_cuboids.clone(), lw.light_xy, &mut fallback_rng);
-            let mesh = meshes.add(patch_mesh(&sim.strip_order));
-            for (i, p) in sim.patches.iter().enumerate() {
-                let (Some(tw), Some(te)) = (image(p.rec.fx_water, &mut images), image(p.rec.fx_env, &mut images)) else {
+            let mesh = meshes.add(patch_mesh(&m.strip_order));
+            for (i, p) in records.iter().enumerate() {
+                let (Some(tw), Some(te)) = (fx_image(&mut fx_images, &mut images, tex, p.fx_water), fx_image(&mut fx_images, &mut images, tex, p.fx_env)) else {
+                    // The FX a patch has at load: a patch built later by its moby (levels 11 / 12) gets textures then.
                     patches.push(None);
                     continue;
                 };
-                let mw = new_mat(&mut materials, tw, params(p.rec.fix_water, 2, slot, i), slot);
-                let me = new_mat(&mut materials, te, params(p.rec.fix_env, 3, slot + 1, i), slot + 1);
+                let mw = new_mat(&mut materials, tw, params(p.fix_water, 2, slot, i), slot);
+                let me = new_mat(&mut materials, te, params(p.fix_env, 3, slot + 1, i), slot + 1);
+                let ew = spawn(&mut commands, mesh.clone(), mw.clone(), Visibility::Hidden, format!("ripple patch {i} water"));
+                let ee = spawn(&mut commands, mesh.clone(), me.clone(), Visibility::Hidden, format!("ripple patch {i} env"));
+                patches.push(Some(PatchDraw { entities: [ew, ee], mats: [mw, me], fx: [p.fx_water, p.fx_env], fix: [p.fix_water, p.fix_env], slots: [slot, slot + 1], visible: false }));
                 slot += 2;
-                let ew = spawn(&mut commands, mesh.clone(), mw, Visibility::Hidden, format!("ripple patch {i} water"));
-                let ee = spawn(&mut commands, mesh.clone(), me, Visibility::Hidden, format!("ripple patch {i} env"));
-                patches.push(Some(PatchDraw { entities: [ew, ee], visible: false }));
             }
-            ripple = Some(sim);
+            patch_mesh_handle = Some(mesh);
             continue;
         }
         let Some(sc) = lw.strips.iter().find(|s| s.class == class) else { continue };
@@ -462,7 +449,7 @@ fn setup(
             let mesh = meshes.add(strip_mesh(&d));
             let mut slots = Vec::new();
             for layer in 0..2 {
-                let Some(t) = image(d.fx[layer], &mut images) else { continue };
+                let Some(t) = fx_image(&mut fx_images, &mut images, tex, d.fx[layer]) else { continue };
                 let m = new_mat(&mut materials, t, params(d.fix[layer], layer as u32, slot, 0), slot);
                 // Until the first draw: the class's z blend, no scroll, no wobble.
                 write_frame(&mut frame_bytes, slot, w.to_f32(), [0.0; 2], &[[0.0; 2]; 8]);
@@ -475,33 +462,44 @@ fn setup(
         }
         classes.push(ClassDraw { class, anim: sc.anim, w, strips });
     }
+    // Patches without load-time FX (built later by their moby: levels 11 / 12): their slots follow every other
+    // draw's; the textures and FIX are set on their first draw.
+    if let Some(mesh) = patch_mesh_handle {
+        for (i, p) in patches.iter_mut().enumerate() {
+            if p.is_some() { continue; }
+            let mw = new_mat(&mut materials, Handle::default(), params(0, 2, slot, i), slot);
+            let me = new_mat(&mut materials, Handle::default(), params(0, 3, slot + 1, i), slot + 1);
+            let ew = spawn(&mut commands, mesh.clone(), mw.clone(), Visibility::Hidden, format!("ripple patch {i} water"));
+            let ee = spawn(&mut commands, mesh.clone(), me.clone(), Visibility::Hidden, format!("ripple patch {i} env"));
+            *p = Some(PatchDraw { entities: [ew, ee], mats: [mw, me], fx: [-1, -1], fix: [0, 0], slots: [slot, slot + 1], visible: false });
+            slot += 2;
+        }
+    }
+    let data = lw.data.as_ref();
     println!(
-        "water: draw order {:?}; strips {:?}; ripple patches {} (zones {:?}, cuboids {:?}); {} draws",
+        "water: draw order {:?}; strips {:?}; ripple patches {} of {} (module {}, 751 zones {:?}, managers {:?}); {} draws",
         lw.order,
         classes.iter().map(|c| (c.class, c.strips.len())).collect::<Vec<_>>(),
-        ripple.as_ref().map_or(0, |r: &RippleSim| r.patches.iter().filter(|p| p.rec.centre != [0.0; 3]).count()),
-        lw.ripples.as_ref().map(|r| r.zones.iter().map(|z| (z.first_patch, z.patch_count)).collect::<Vec<_>>()),
-        lw.zone_cuboids,
+        records.iter().filter(|p| p.centre != [0.0; 3]).count(),
+        records.len(),
+        module.is_some(),
+        data.and_then(|d| d.z751.as_ref()).map(|(t, z)| (t.zones.iter().map(|z| (z.first_patch, z.patch_count)).collect::<Vec<_>>(), z.clone())),
+        data.map(|d| d.manager_classes.clone()).unwrap_or_default(),
         slot
     );
-    let patches = patches.into_iter().map(|p| p.unwrap_or(PatchDraw { entities: [Entity::PLACEHOLDER; 2], visible: false })).collect();
     if let Some(mut b) = buffers.get_mut(&frame) { b.data = Some(frame_bytes.clone()); }
     commands.insert_resource(WaterState {
         classes,
         ripple_at,
-        ripple,
         patches,
-        cuboids: lw.cuboids.clone(),
+        fallback: None,
+        fallback_inputs: lw.data.clone().filter(|d| d.z751.is_some()).map(Arc::new),
+        fallback_rng,
         counter: 0,
         ticks: 0,
         drawn_ticks: 0,
         stats: std::env::var("RC_WATER_STATS").is_ok_and(|v| v.trim() == "1"),
-        drops: 0,
-        steps: 0,
-        ripple_ticks: 0,
-        ripple_inputs: lw.ripples.clone().map(|t| (t, lw.zone_cuboids.clone(), lw.light_xy)),
-        fallback_rng,
-        external: false,
+        fx_images,
         materials: all_mats,
         fog,
         frame,
@@ -511,18 +509,24 @@ fn setup(
     });
 }
 
-/// One 60 Hz tick: the 761 z pulse and the 751 update (zone activation, drops, clock).
-fn tick(state: Option<ResMut<WaterState>>, cams: MainCamera) {
+/// One 60 Hz tick: the 761 z pulse, and without the game tick (`RC_PLAY=0`) Novalis's 751 on the plugin's stream.
+fn tick(state: Option<ResMut<WaterState>>, play: Option<Res<crate::gameplay::Play>>, cams: MainCamera) {
     let Some(mut st) = state else { return };
     let st = &mut *st;
     st.counter = st.counter.wrapping_add(1);
     let t = st.counter;
     for c in st.classes.iter_mut().filter(|c| c.anim == StripAnim::Bob761) { c.w = ww::bob(t); }
-    let cam = cams.iter().next().map_or([0.0; 3], |t| game_eye(t).to_array());
-    if !st.external {
-        let mut rng = st.fallback_rng;
-        st.ripple_update(cam, &mut rng);
-        st.fallback_rng = rng;
+    if play.is_none() {
+        if let Some(d) = st.fallback_inputs.clone() {
+            let Some((tables, zones)) = d.z751.as_ref() else { return };
+            let cam = cams.iter().next().map_or([0.0; 3], |t| game_eye(t).to_array());
+            let mut rng = st.fallback_rng;
+            match st.fallback.as_mut() {
+                None => st.fallback = Some(RippleSim::new(tables, zones.clone(), d.light_xy, &mut rng)),
+                Some(sim) => { sim.tick(cam, &d.cuboids, &mut rng); }
+            }
+            st.fallback_rng = rng;
+        }
     }
     st.ticks += 1;
 }
@@ -543,10 +547,12 @@ fn outcode(clip_from_world: &Mat4, p: [f32; 3]) -> u32 {
 #[allow(clippy::too_many_arguments)]
 fn draw(
     state: Option<ResMut<WaterState>>,
+    mut play: Option<ResMut<crate::gameplay::Play>>,
     cams: MainCamera,
     fog: Option<Res<GameFog>>,
     level: Res<crate::Level>,
     mut materials: ResMut<Assets<WaterMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut vis: Query<&mut Visibility>,
 ) {
@@ -565,11 +571,21 @@ fn draw(
     let Some(cam_t) = cams.iter().next() else { return };
     let cam = game_eye(cam_t).to_array();
     let clip_from_world = GameProjection::default().get_clip_from_view() * cam_t.to_matrix().inverse();
+    // The ripple module and whether its callback was registered this tick (the moby system's; else the fallback).
+    let mut fallback = st.fallback.take();
+    let (mut sim, registered) = match play.as_deref_mut() {
+        Some(p) => {
+            let reg = p.svc.draw_callbacks.list1.iter().any(|(c, _)| *c == Callback::RipplePatches);
+            (p.svc.water.sim.as_mut(), reg)
+        }
+        None => (fallback.as_mut(), true),
+    };
 
     let n = st.classes.len();
     for ci in 0..=n {
         if ci == st.ripple_at {
-            draw_ripples(st, cam, &clip_from_world, &mut buffers, &mut vis);
+            let tex = level.0.particles.textures.as_ref();
+            draw_ripples(st, sim.as_deref_mut().filter(|_| registered), tex, cam, &clip_from_world, &mut materials, &mut images, &mut buffers, &mut vis);
         }
         let Some(c) = st.classes.get_mut(ci) else { continue };
         let w = c.w;
@@ -584,36 +600,63 @@ fn draw(
         // 1225's callback writes the z blend after drawing (0x309bf8).
         if c.anim == StripAnim::BobAfterDraw1225 { c.w = ww::bob(st.counter); }
     }
+    st.fallback = fallback;
     if let Some(mut b) = buffers.get_mut(&st.frame) { b.data = Some(st.frame_bytes.clone()); }
 }
 
+/// The ripple patches of this frame (`sim` None: not registered this tick, nothing drawn).
 #[allow(clippy::too_many_arguments)]
 fn draw_ripples(
     st: &mut WaterState,
+    sim: Option<&mut RippleSim>,
+    tex: Option<&rc_formats::particle_tex::ParticleTextures>,
     cam: [f32; 3],
     clip_from_world: &Mat4,
+    materials: &mut Assets<WaterMaterial>,
+    images: &mut Assets<Image>,
     buffers: &mut Assets<ShaderBuffer>,
     vis: &mut Query<&mut Visibility>,
 ) {
-    let Some(sim) = st.ripple.as_mut() else { return };
     let mut wrote = false;
-    for p in 0..sim.patches.len() {
-        let Some(pd) = st.patches.get_mut(p) else { continue };
-        if pd.entities[0] == Entity::PLACEHOLDER { continue; }
-        let pa = &sim.patches[p];
-        let mut show = pa.mask != 0;
-        if show {
-            let [x, y, z] = pa.centre.map(Pf::to_f32);
-            let codes = [[x - 8.0, y - 8.0], [x + 8.0, y - 8.0], [x - 8.0, y + 8.0], [x + 8.0, y + 8.0]].map(|[a, b]| outcode(clip_from_world, [a, b, z]));
-            let all = codes.iter().fold(0x2f, |a, &c| a & c);
-            show = all == 0;
-        }
-        if show {
-            let mask = pa.mask;
-            let uv = sim.advance_uv(p);
-            let verts = sim.patch_verts(p, cam);
-            write_patch(&mut st.ripple_bytes, p, mask, &verts, &uv);
-            wrote = true;
+    let mut active = 0;
+    let n = st.patches.len();
+    let mut sim = sim;
+    for p in 0..n {
+        let Some(pd) = st.patches[p].as_mut() else { continue };
+        let mut show = false;
+        if let Some(sim) = sim.as_deref_mut().filter(|s| p < s.patches.len()) {
+            let pa = &sim.patches[p];
+            show = pa.mask != 0;
+            if show {
+                active += 1;
+                let [x, y, z] = pa.centre.map(Pf::to_f32);
+                let codes = [[x - 8.0, y - 8.0], [x + 8.0, y - 8.0], [x - 8.0, y + 8.0], [x + 8.0, y + 8.0]].map(|[a, b]| outcode(clip_from_world, [a, b, z]));
+                let all = codes.iter().fold(0x2f, |a, &c| a & c);
+                show = all == 0;
+            }
+            if show {
+                // The patch's FX / FIX as the record holds them now (a change re-makes the material's texture / FIX).
+                let (fx, fix) = ([pa.rec.fx_water, pa.rec.fx_env], [pa.rec.fix_water, pa.rec.fix_env]);
+                for k in 0..2 {
+                    if fx[k] != pd.fx[k] || fix[k] != pd.fix[k] {
+                        let img = tex.and_then(|t| fx_image(&mut st.fx_images, images, t, fx[k]));
+                        if let (Some(img), Some(mut m)) = (img, materials.get_mut(&pd.mats[k])) {
+                            m.texture = img;
+                            m.params = params(fix[k], 2 + k as u32, pd.slots[k], p);
+                            pd.fx[k] = fx[k];
+                            pd.fix[k] = fix[k];
+                        }
+                    }
+                }
+                show = pd.fx[0] == fx[0] && pd.fx[1] == fx[1];
+            }
+            if show {
+                let mask = sim.patches[p].mask;
+                let uv = sim.advance_uv(p);
+                let verts = sim.patch_verts(p, cam);
+                write_patch(&mut st.ripple_bytes, p, mask, &verts, &uv);
+                wrote = true;
+            }
         }
         if show != pd.visible {
             pd.visible = show;
@@ -624,6 +667,9 @@ fn draw_ripples(
     }
     if wrote {
         if let Some(mut b) = buffers.get_mut(&st.ripple_buf) { b.data = Some(st.ripple_bytes.clone()); }
+    }
+    if st.stats && st.ticks.is_multiple_of(60) {
+        if let Some(s) = sim.as_deref() { println!("water: tick {} active patches {active} clock {:?} render buffer {}", st.ticks, s.clock, s.render); }
     }
 }
 

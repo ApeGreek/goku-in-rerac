@@ -335,13 +335,16 @@ struct HudRuntime {
     banner_seq: u32,
     /// The last `rc_game::cinematic::Cinematic::banner` call shown.
     cine_banner_seq: u32,
+    /// The last [`HudFeed::reset`] applied.
+    reset: u32,
 }
 
 #[derive(Component)]
 struct HudMesh;
 
+/// The HUD composite's UI node (crate::screen_canvas puts the canvases composed over the HUD under it as its children).
 #[derive(Component)]
-struct HudCompositeNode;
+pub(crate) struct HudCompositeNode;
 
 pub struct HudPlugin;
 
@@ -354,6 +357,8 @@ pub struct HudFeed {
     pub prompt_text: Vec<u8>,
     pub bolts_pinned: bool,
     pub weapon: Option<Option<(u16, i32, i32)>>,
+    /// Bumped by `FUN_0024fb00` callers (the vendor's open): every HUD slot is emptied at once.
+    pub reset: u32,
 }
 
 /// Other 2D layers drawn through this pass (crate::menu_render: the quick-select ring, which is HUD slot 3,
@@ -469,6 +474,7 @@ fn setup(
         game: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: lh.lang },
         banner_seq: 0,
         cine_banner_seq: 0,
+        reset: 0,
     });
 }
 
@@ -516,6 +522,10 @@ fn tick_and_build(
         if let Some(s) = &session { rt.game.hp = s.0.hp; }
         rt.game.weapon = held.as_ref().and_then(|h| h.0);
         if let Some(w) = feed.weapon { rt.game.weapon = w; }
+    }
+    if feed.reset != rt.reset {
+        rt.reset = feed.reset;
+        rt.state.reset_slots();
     }
     rt.state.set_prompt(feed.prompt, &feed.prompt_text);
     rt.state.bolts_pinned = feed.bolts_pinned;

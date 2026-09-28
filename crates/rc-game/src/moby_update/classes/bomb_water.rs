@@ -44,15 +44,12 @@ fn setlen(a: [f32; 3], l: f32) -> [f32; 3] {
     if n == 0.0 { [0.0; 3] } else { a.map(|x| x * l / n) }
 }
 
-/// `SetWaterLevel(pos, 0)` 0x26ed38: the ripple patches' surface height over `pos` (`RippleHeightQuery`), else `pos.z`.
-pub fn water_level(w: &World, pos: V) -> f32 {
-    w.external.as_deref().and_then(|e| e.water_height([pos[0], pos[1], pos[2]])).unwrap_or(pos[2])
-}
+/// `SetWaterLevel(pos, 0)` 0x26ed38: the level's water over `pos` (the active ripple patch, the flat plane:
+/// `crate::water::world::WaterWorld::water_height`), else `pos.z`.
+pub fn water_level(w: &World, pos: V) -> f32 { w.svc.water.water_height([pos[0], pos[1], pos[2]]).unwrap_or(pos[2]) }
 
 /// `RippleDisturb(x, y, r, amp, every patch, n, additive)` 0x2b82a8.
-pub fn ripple(w: &mut World, x: f32, y: f32, r: f32, amp: f32, additive: bool) {
-    if let Some(e) = w.external.as_deref_mut() { e.ripple_disturb(x, y, r, amp, additive); }
-}
+pub fn ripple(w: &mut World, x: f32, y: f32, r: f32, amp: f32, additive: bool) { w.svc.water.disturb(x, y, r, amp, additive); }
 
 /// `PartType34Spawn(size, level, pos, vel)` 0x2840e0 (its six draws, with or without a particle system).
 pub fn part34(w: &mut World, size: f32, level: f32, pos: V, vel: [f32; 3]) {

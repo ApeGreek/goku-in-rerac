@@ -19,16 +19,16 @@ column.
 | **666** | 2 | 0x2f4960 | enemy carrier | dropship: flies a path, drops ≤ 8 children (0x1ab / 0x154 / 0x1cb) | **ported** |
 | **688** | 2 | 0x2f7728 | enemy (scripted) | gunship: town bombardment (686 shells, 700 fires) and the bridge fly-by | **ported** |
 | **815** | 6 | 0x3021b8 | enemy spawner | re-creates a member of its group while the group is empty; group −1 on Novalis (inert) | **ported** (gate only) |
-| 1818 | 1 | 0x30df40 | critter (controllable) | the "mouse": needs hand item 5 (`0x1404a8 == 5`) and `0x13d4c5`; not in a first visit | not ported |
+| 1818 | 1 | 0x30df40 | helper (summoned) | the Sonic Summoner's "mouse": head item 5 (`0x1404a8` is slot 2's item, not the hand) worn and owned (`0x13d4c5`); flies beside Ratchet shooting enemies (1633) | **ported** (`classes::mouse`, level_generalisation.md "Common classes") |
 | 11 | 1 | 0x2bb128 | other | Gadgetron vendor | not ported |
-| 604 | 1 | 0x2f2b68 | other | commanded NPC | not ported |
-| 605 | 20 | 0x2f2eb8 | other | nearest-area marker (hidden) | not ported |
+| 604 | 1 | 0x2f2b68 | prop | the mouse's house (opens / closes on the mouse's commands) | **ported** (`classes::mouse`) |
+| 605 | 20 | 0x2f2eb8 | other | buried bolt cache (the Metal Detector's target; hidden) | **ported** (`classes::buried_bolts`) |
 | 613 | 4 | 0x2f3120 | other | water current | not ported |
 | 730 / 790 | 1 / 1 | 0x2fad68 | other | mission NPCs | not ported |
 | 737 | 5 | 0x2fb5b0 | other | camera trigger | not ported |
 | 750 | 1 | 0x2fbf80 | other | infobot | **ported** (hero_gameplay.md §6; inert on Novalis) |
 | 774 | 1 | 0x2ff118 | other | talking NPC | not ported |
-| 832 | 1 | 0x302648 | other | RC-vehicle range limiter | not ported |
+| 832 | 1 | 0x302648 | other | Visibomb range limiter | **ported** (`classes::rc_range`; inert without the Visibomb) |
 | 1134 | 3 | 0x307ca0 | other (pickup) | gold bolt | **ported** (hero_gameplay.md §6) |
 | 1341 | 1 | 0x30acb8 | other | help-hint director | not ported |
 | 280 | 2 | 0x2e0c68 | prop | bolt crank | not ported |

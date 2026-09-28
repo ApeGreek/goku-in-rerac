@@ -51,7 +51,7 @@ impl Overlay {
         let rel = Relocation::new(&refo, &target);
         if rel.is_identity() { return Ok(ov); }
         let reference_ov = Overlay::parse(reference)?;
-        for &a in DATA_LABELS {
+        for &a in DATA_LABELS.iter().chain(vendor::layout::DATA_LABELS) {
             if let Some(b) = rel.data(a) { ov.at.insert(a, b); }
         }
         let roots: Vec<(u32, u32)> = pause::page::ROOTS.iter().filter_map(|&a| Some((a, rel.data(a)?))).collect();
@@ -83,10 +83,12 @@ impl Overlay {
 /// The level-01 data addresses the menus read that code forms directly (the page records are found by the
 /// page walk): the level / planet name table 0x1c22c0 and the galaxy points 0x1c23a8, the planet name offset
 /// 0x15f650, the quick-select gp block 0x15f718 and d-pad defaults 0x17e098, the frame's corner lists 0x161fe0
-/// and light 0x160280 / 0x160290, the menu constants 0x160270..0x160328.
+/// and light 0x160280 / 0x160290, the menu constants 0x160270..0x160328, the Gadgets page's item preview table
+/// 0x1c4988 and grid cell size 0x160350 / 0x160354.
 pub const DATA_LABELS: &[u32] = &[
     0x1c22c0, pause::PLANET_POINTS_BASE, 0x15f650, quick_select::GP_BASE, quick_select::DPAD_DEFAULTS, pause::frame::CORNER_LISTS_ADDR,
     pause::frame::LIGHT_DIR_ADDR, pause::frame::LIGHT_COLOR_ADDR, 0x160270, 0x160274, 0x160278, 0x16027c, 0x160318, 0x160328,
+    pause::gadgets::PREVIEW_TABLE, pause::gadgets::CELL_W, pause::gadgets::CELL_H,
 ];
 
 /// The pad fields the menus read (the `PAD` record at 0x13c940 after this frame's `UpdatePad`).

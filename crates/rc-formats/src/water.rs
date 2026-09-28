@@ -144,18 +144,43 @@ pub struct StripClass {
 /// Descriptor size.
 pub const STRIP_DESC_SIZE: u32 = 0x60;
 
-/// (class, table address, count, animation) per level. Novalis: the `FUN_002b96e0(n, table)` calls in the
-/// draw callbacks 0x2f60f8 (676), 0x2f6150 (678), 0x2feb28 (761), 0x309bf8 (1225).
-pub fn strip_tables(level: u32) -> &'static [(u16, u32, usize, StripAnim)] {
-    match level {
-        1 => &[
-            (676, 0x1e2fc0, 8, StripAnim::Static),
-            (678, 0x1e3380, 2, StripAnim::Static),
-            (761, 0x1fbc80, 4, StripAnim::Bob761),
-            (1225, 0x202d80, 3, StripAnim::BobAfterDraw1225),
-        ],
-        _ => &[],
+/// `FUN_002b96e0(n, table)`, the strip-mesh draw (level-01 label).
+pub const STRIP_DRAW_FN: u32 = 0x2b96e0;
+
+/// The strip-mesh water classes the port knows, by their level-01 code: (update, draw callback, animation).
+/// 676 `0x2f6128` / `0x2f60f8`, 678 `0x2f6180` / `0x2f6150`, 761 `0x2feb58` / `0x2feb28`, 1225 `0x309c98` /
+/// `0x309bf8`. Each callback is `fun_001f76a0` then `FUN_002b96e0(n, table)`: the table and count are read from the
+/// callback's code in the level's overlay ([`strip_tables`]). The strip module exists only in the level-01 overlay
+/// (no other overlay has a copy of `0x2b96e0`: docs/plan/level_generalisation.md W1), so only Novalis finds any.
+pub const STRIP_PORTS: [(u32, u32, StripAnim); 4] = [
+    (0x2f6128, 0x2f60f8, StripAnim::Static),
+    (0x2f6180, 0x2f6150, StripAnim::Static),
+    (0x2feb58, 0x2feb28, StripAnim::Bob761),
+    (0x309c98, 0x309bf8, StripAnim::BobAfterDraw1225),
+];
+
+/// (class, table address, count, animation) of every strip class of the level `target`, found through the reference
+/// (level-01) overlay: a port's update and callback are the level's copies (code identity,
+/// [`crate::level_overlay::Relocation`]), the classes are the `lvl.vtbl` entries that run that update, and `n` /
+/// `table` are the `addiu a0, zero, n` and the `lui`/`%lo` address before the callback's `jal` to the level's copy of
+/// [`STRIP_DRAW_FN`]. Empty when the level has no strip module.
+pub fn strip_tables(target: &crate::level_overlay::LevelOverlay, rel: &crate::level_overlay::Relocation) -> Vec<(u16, u32, usize, StripAnim)> {
+    let Some(draw) = rel.func(STRIP_DRAW_FN) else { return Vec::new() };
+    let jal = 0x0c00_0000 | ((draw >> 2) & 0x03ff_ffff);
+    let vtbl = target.vtbl();
+    let mut out = Vec::new();
+    for &(update, callback, anim) in &STRIP_PORTS {
+        let (Some(u), Some(cb)) = (rel.func(update), rel.func(callback)) else { continue };
+        let Some(code) = target.extent(cb).and_then(|n| target.code(cb, n)) else { continue };
+        let Some(at) = code.iter().position(|&w| w == jal) else { continue };
+        // The arguments are set up to the call and its delay slot.
+        let upto = &code[..(at + 2).min(code.len())];
+        let n = upto.iter().rev().find(|&&w| w >> 16 == 0x2404).map(|&w| (w & 0xffff) as usize);
+        let table = crate::level_overlay::address_refs(upto).into_iter().map(|(_, a)| a).next_back();
+        let (Some(n), Some(table)) = (n, table) else { continue };
+        for e in vtbl.iter().filter(|e| e.update == u) { out.push((e.o_class as u16, table, n, anim)); }
     }
+    out
 }
 
 /// Parses one descriptor at `addr`.
@@ -188,9 +213,9 @@ pub fn parse_strip(ov: &Overlay, addr: u32) -> Result<StripDescriptor> {
     })
 }
 
-/// Every strip class of `level` (empty for levels without a strip table).
-pub fn parse_strip_classes(ov: &Overlay, level: u32) -> Result<Vec<StripClass>> {
-    strip_tables(level)
+/// Every strip class of a level ([`strip_tables`]; empty for levels without a strip module).
+pub fn parse_strip_classes(ov: &Overlay, tables: &[(u16, u32, usize, StripAnim)]) -> Result<Vec<StripClass>> {
+    tables
         .iter()
         .map(|&(class, table, n, anim)| {
             let strips = (0..n as u32).map(|k| parse_strip(ov, table + k * STRIP_DESC_SIZE)).collect::<Result<_>>()?;
@@ -258,11 +283,125 @@ pub struct RippleTables {
 /// Number of vertices in one sub-block strip (`FUN_00262388`: 0x2e).
 pub const SUB_STRIP_LEN: usize = 46;
 
-/// (patch table, patch count, zone count) per level: 751 init `FUN_002b7a48(0x1e34c0, 0x15)`, zone loop `< 7`.
-pub fn ripple_layout(level: u32) -> Option<(u32, usize, usize)> {
-    match level {
-        1 => Some((0x1e34c0, 21, 7)),
-        _ => None,
+/// Where the ripple engine module's constant tables are in one overlay: the level-01 addresses
+/// ([`RippleModuleAddrs::REFERENCE`]) relocated through the module code that forms them ([`RippleModuleAddrs::locate`]).
+/// The module (`0x2b7a48`..`0x2b96c0` and the VU0 kernels) is the same object code in every overlay that has it
+/// (01, 05, 07, 11, 12, 13), linked at other addresses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RippleModuleAddrs {
+    /// 0x1cad00: patch size, origin, cell, sphere-map scale, damping threshold, clock step (9 × f32).
+    pub consts: u32,
+    /// 0x1cafe0: base water UV per sub-block strip vertex.
+    pub uv_base: u32,
+    /// 0x1cb1b0: wobble angle selector per strip vertex.
+    pub uv_select: u32,
+    /// 0x1cae00 / 0x1cad40 / 0x1cada0: the sub-block strip order (position ×12, colour ×4, env UV ×8).
+    pub order_pos: u32,
+    pub order_rgba: u32,
+    pub order_env: u32,
+}
+
+impl RippleModuleAddrs {
+    /// The level-01 addresses.
+    pub const REFERENCE: RippleModuleAddrs = RippleModuleAddrs { consts: 0x1cad00, uv_base: 0x1cafe0, uv_select: 0x1cb1b0, order_pos: 0x1cae00, order_rgba: 0x1cad40, order_env: 0x1cada0 };
+
+    /// The target overlay's addresses (`rel`: level 01 → target); None when the target has no copy of the module.
+    pub fn locate(rel: &crate::level_overlay::Relocation) -> Option<RippleModuleAddrs> {
+        let r = RippleModuleAddrs::REFERENCE;
+        rel.func(RIPPLE_INIT_FN)?;
+        Some(RippleModuleAddrs {
+            consts: rel.data(r.consts)?,
+            uv_base: rel.data(r.uv_base)?,
+            uv_select: rel.data(r.uv_select)?,
+            order_pos: rel.data(r.order_pos)?,
+            order_rgba: rel.data(r.order_rgba)?,
+            order_env: rel.data(r.order_env)?,
+        })
+    }
+}
+
+/// `RipplePatchesInit` 0x2b7a48 (level-01 label): a level that has a copy has the ripple module.
+pub const RIPPLE_INIT_FN: u32 = 0x2b7a48;
+
+/// The ripple module's constant tables of one level.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RippleModule {
+    /// The constants as stored (every manager's init overrides all but +0x1c, the damping threshold).
+    pub consts: [f32; 9],
+    pub uv_base: Vec<[f32; 2]>,
+    pub uv_select: Vec<u32>,
+    /// The 46-vertex strip of a sub-block as indices into the 17×17 grid (the three order tables agree).
+    pub strip_order: Vec<u16>,
+}
+
+/// Reads the module tables at `a`.
+pub fn parse_ripple_module(ov: &Overlay, a: &RippleModuleAddrs) -> Result<RippleModule> {
+    let mut consts = [0f32; 9];
+    for (k, c) in consts.iter_mut().enumerate() { *c = ov.f32(a.consts + 4 * k as u32)?; }
+    let uv_base = (0..SUB_STRIP_LEN as u32).map(|k| Ok([ov.f32(a.uv_base + 8 * k)?, ov.f32(a.uv_base + 8 * k + 4)?])).collect::<Result<_>>()?;
+    let uv_select = (0..SUB_STRIP_LEN as u32).map(|k| ov.u32(a.uv_select + 4 * k)).collect::<Result<_>>()?;
+    let order = |table: u32, stride: i16| -> Result<Vec<u16>> {
+        (0..SUB_STRIP_LEN as u32)
+            .map(|k| {
+                let v = ov.buf(table + 2 * k, 2)?.i16(0)?;
+                if v < 0 || v % stride != 0 || v / stride > 16 * 17 { return invalid(format!("bad sub-block order entry {v} at {table:#x}")); }
+                Ok((v / stride) as u16)
+            })
+            .collect()
+    };
+    let strip_order = order(a.order_pos, 12)?;
+    if order(a.order_rgba, 4)? != strip_order || order(a.order_env, 8)? != strip_order {
+        return invalid("ripple colour / env-UV / position order tables disagree");
+    }
+    Ok(RippleModule { consts, uv_base, uv_select, strip_order })
+}
+
+/// The ripple manager 751's tables (level-01 code `0x2fd0e8`): the patch table and count of its init call
+/// `FUN_002b7a48(0x1e34c0, 0x15)`, the zone loop's `< 7`, and the zone / mask / drip / mist tables it reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Ripple751Addrs {
+    pub patches: u32,
+    pub patch_count: usize,
+    pub zone_count: usize,
+    pub first_patch: u32,
+    pub patch_counts: u32,
+    pub drop_odds: u32,
+    pub masks: u32,
+    pub drips: u32,
+    pub mist_rows: u32,
+}
+
+/// `WaterSurfaceFxUpdate`, the ripple manager 751 (level-01 label).
+pub const RIPPLE_751_FN: u32 = 0x2fd0e8;
+
+impl Ripple751Addrs {
+    pub const REFERENCE: Ripple751Addrs = Ripple751Addrs {
+        patches: 0x1e34c0,
+        patch_count: 21,
+        zone_count: 7,
+        first_patch: 0x1fa5e8,
+        patch_counts: 0x1fa608,
+        drop_odds: 0x1fa628,
+        masks: 0x1fa590,
+        drips: 0x1fa650,
+        mist_rows: 0x1fa6a0,
+    };
+
+    /// The target overlay's addresses when it has a copy of 751's update (its code forms every table; the counts are
+    /// its code constants, equal in a copy); None otherwise (only level 01 has one).
+    pub fn locate(rel: &crate::level_overlay::Relocation) -> Option<Ripple751Addrs> {
+        let r = Ripple751Addrs::REFERENCE;
+        rel.func(RIPPLE_751_FN)?;
+        Some(Ripple751Addrs {
+            patches: rel.data(r.patches)?,
+            first_patch: rel.data(r.first_patch)?,
+            patch_counts: rel.data(r.patch_counts)?,
+            drop_odds: rel.data(r.drop_odds)?,
+            masks: rel.data(r.masks)?,
+            drips: rel.data(r.drips)?,
+            mist_rows: rel.data(r.mist_rows)?,
+            ..r
+        })
     }
 }
 
@@ -282,34 +421,30 @@ pub fn parse_patch(ov: &Overlay, addr: u32) -> Result<PatchRecord> {
     })
 }
 
-/// The ripple tables of `level`, or `None` when the level has no (surveyed) ripple module.
-pub fn parse_ripple_tables(ov: &Overlay, level: u32) -> Result<Option<RippleTables>> {
-    let Some((base, n, zones)) = ripple_layout(level) else { return Ok(None) };
-    let patches = (0..n as u32).map(|i| parse_patch(ov, base + i * PATCH_SIZE)).collect::<Result<Vec<_>>>()?;
-    let zones = (0..zones as u32)
-        .map(|i| Ok(RippleZone { first_patch: ov.i32(0x1fa5e8 + 4 * i)?, patch_count: ov.i32(0x1fa608 + 4 * i)?, drop_odds: ov.i32(0x1fa628 + 4 * i)? }))
+/// The 751 ripple tables at `a` with the module tables at `m` ([`Ripple751Addrs::locate`], [`RippleModuleAddrs::locate`]).
+pub fn parse_ripple_tables(ov: &Overlay, a: &Ripple751Addrs, m: &RippleModuleAddrs) -> Result<RippleTables> {
+    let (base, n) = (a.patches, a.patch_count);
+    let patches = parse_patches(ov, base, n)?;
+    let zones = (0..a.zone_count as u32)
+        .map(|i| Ok(RippleZone { first_patch: ov.i32(a.first_patch + 4 * i)?, patch_count: ov.i32(a.patch_counts + 4 * i)?, drop_odds: ov.i32(a.drop_odds + 4 * i)? }))
         .collect::<Result<Vec<_>>>()?;
-    let zone_masks = (0..n as u32).map(|i| ov.buf(0x1fa590 + 4 * i, 2)?.u16(0)).collect::<Result<_>>()?;
-    let drips = (0..5u32).map(|i| { let b = ov.buf(0x1fa650 + 16 * i, 16)?; Ok([b.f32(0)?, b.f32(4)?, b.f32(8)?, b.f32(12)?]) }).collect::<Result<_>>()?;
-    let mist_rows = ov.read(0x1fa6a0, 20)?.to_vec();
-    let mut consts = [0f32; 9];
-    for (k, c) in consts.iter_mut().enumerate() { *c = ov.f32(0x1cad00 + 4 * k as u32)?; }
-    let uv_base = (0..SUB_STRIP_LEN as u32).map(|k| Ok([ov.f32(0x1cafe0 + 8 * k)?, ov.f32(0x1cafe4 + 8 * k)?])).collect::<Result<_>>()?;
-    let uv_select = (0..SUB_STRIP_LEN as u32).map(|k| ov.u32(0x1cb1b0 + 4 * k)).collect::<Result<_>>()?;
-    let order = |table: u32, stride: i16| -> Result<Vec<u16>> {
-        (0..SUB_STRIP_LEN as u32)
-            .map(|k| {
-                let v = ov.buf(table + 2 * k, 2)?.i16(0)?;
-                if v < 0 || v % stride != 0 || v / stride > 16 * 17 { return invalid(format!("bad sub-block order entry {v} at {table:#x}")); }
-                Ok((v / stride) as u16)
-            })
-            .collect()
-    };
-    let strip_order = order(0x1cae00, 12)?;
-    if order(0x1cad40, 4)? != strip_order || order(0x1cada0, 8)? != strip_order {
-        return invalid("ripple colour / env-UV / position order tables disagree");
+    let zone_masks = (0..n as u32).map(|i| ov.buf(a.masks + 4 * i, 2)?.u16(0)).collect::<Result<_>>()?;
+    let drips = (0..5u32).map(|i| { let b = ov.buf(a.drips + 16 * i, 16)?; Ok([b.f32(0)?, b.f32(4)?, b.f32(8)?, b.f32(12)?]) }).collect::<Result<_>>()?;
+    let mist_rows = ov.read(a.mist_rows, 20)?.to_vec();
+    let RippleModule { consts, uv_base, uv_select, strip_order } = parse_ripple_module(ov, m)?;
+    Ok(RippleTables { base, patches, zones, zone_masks, drips, mist_rows, consts, uv_base, uv_select, strip_order })
+}
+
+/// `n` patch records from `base` (stride [`PATCH_SIZE`]).
+pub fn parse_patches(ov: &Overlay, base: u32, n: usize) -> Result<Vec<PatchRecord>> {
+    (0..n as u32).map(|i| parse_patch(ov, base + i * PATCH_SIZE)).collect()
+}
+
+impl RippleTables {
+    /// The module part of the tables.
+    pub fn module(&self) -> RippleModule {
+        RippleModule { consts: self.consts, uv_base: self.uv_base.clone(), uv_select: self.uv_select.clone(), strip_order: self.strip_order.clone() }
     }
-    Ok(Some(RippleTables { base, patches, zones, zone_masks, drips, mist_rows, consts, uv_base, uv_select, strip_order }))
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -380,7 +515,9 @@ mod tests {
     fn novalis_water_tables() {
         let Some([ov_bytes, index, data_wad, gameplay_wad]) = novalis() else { eprintln!("skipped: no extracted/levels/01"); return };
         let ov = Overlay::parse(&ov_bytes).unwrap();
-        let classes = parse_strip_classes(&ov, 1).unwrap();
+        let lo = crate::level_overlay::LevelOverlay::parse(&ov_bytes).unwrap();
+        let rel = crate::level_overlay::Relocation::new(&lo, &lo);
+        let classes = parse_strip_classes(&ov, &strip_tables(&lo, &rel)).unwrap();
         let counts: Vec<(u16, usize)> = classes.iter().map(|c| (c.class, c.strips.len())).collect();
         assert_eq!(counts, [(676, 8), (678, 2), (761, 4), (1225, 3)]);
         let vcounts = |c: u16| classes.iter().find(|k| k.class == c).unwrap().strips.iter().map(|s| s.vertices.len()).collect::<Vec<_>>();
@@ -403,7 +540,7 @@ mod tests {
             assert!(z[0] > 60.0 && z.iter().cloned().fold(f32::MAX, f32::min) < 39.5, "676 strip {k} z {z:?}");
         }
 
-        let rt = parse_ripple_tables(&ov, 1).unwrap().unwrap();
+        let rt = parse_ripple_tables(&ov, &Ripple751Addrs::locate(&rel).unwrap(), &RippleModuleAddrs::locate(&rel).unwrap()).unwrap();
         assert_eq!(rt.patches.len(), 21);
         assert_eq!(rt.patches.iter().filter(|p| p.centre != [0.0; 3]).count(), 18, "18 patches used");
         assert_eq!(rt.zones.iter().map(|z| z.patch_count).collect::<Vec<_>>(), [4, 2, 6, 1, 0, 4, 1]);

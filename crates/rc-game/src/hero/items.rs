@@ -234,6 +234,9 @@ pub struct ItemEnv<'a> {
     pub camera: Option<([f32; 3], [f32; 3])>,
     /// The camera's up row 0x167470 (the Pyrocitor's first-person flame starts one unit below the eye).
     pub camera_up: Option<[f32; 3]>,
+    /// `0x1abe80`: the targetable mobys of this tick's run list (`crate::targeting::target_list`; the weapons' aim
+    /// searches walk it).
+    pub targets: &'a [MobyId],
 }
 
 /// `FUN_0022de10(slot)` for the hand: gloves (10, 17, 20, 25) take Ratchet's hand pose instead of an

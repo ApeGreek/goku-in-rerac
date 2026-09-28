@@ -405,6 +405,15 @@ impl HudState {
         true
     }
 
+    /// `FUN_0024fb00` → `FUN_0024af10` (`OpenVendorMenu`, the page menus): every slot emptied at once (no ramp), the
+    /// requests the elements keep re-made by their owners.
+    pub fn reset_slots(&mut self) {
+        self.slots = [Slot::default(); SLOTS];
+        self.weapon_handle = None;
+        self.bolts_pin_handle = None;
+        self.prompt_show = false;
+    }
+
     /// The context prompt of this tick and its text (the engine: `moby_update::interact`).
     pub fn set_prompt(&mut self, show: bool, text: &[u8]) {
         self.prompt_show = show;

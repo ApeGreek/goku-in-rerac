@@ -30,7 +30,7 @@ use super::swim::SwimEvent;
 use super::{Hero, HeroSounds};
 use crate::follow_camera::{ShakeAxis, ShakeRequest};
 use crate::moby_runtime::Moby;
-use crate::particles::{type02, type12, type25, type34, type47, type53, Particles};
+use crate::particles::{type02, type12, type25, type34, type35, type45, type46, type47, type53, Particles};
 use crate::rng::Rng;
 
 /// A particle spawn the hero code made this tick, with its spawner's random draws already made.
@@ -53,7 +53,71 @@ pub enum PartSpawn {
     /// `PartType02Spawn` 0x27dc98: a trail blob (the Pyrocitor's embers); `rng` = the stream at its rotation draw
     /// (made by the caller at the game's point).
     Blob { spawn: crate::particles::type02::Spawn, rng: Rng },
+    /// `PartType45Spawn(size, growth, pos, &0x13f640, −1)` 0x286780: a flat ring on the hero's water level (the
+    /// splash's rings, the treading wake); `rng` = the stream at the spawner's first draw (its four draws were made
+    /// at the call: [`reserve`]).
+    Ring45 { size: f32, growth: f32, pos: [f32; 4], rng: Rng },
+    /// `PartType46Spawn(size, spin, pos, vel, &0x13f640)` 0x286a68: a spreading ring riding the hero's water level
+    /// (the wading / swimming bow rings); `rng` as for [`PartSpawn::Ring45`] (two draws).
+    Ring46 { size: f32, spin: f32, pos: [f32; 4], vel: [f32; 4], rng: Rng },
+    /// `PartType35Spawn(pos, vel, kind, life)` 0x2845a8: a water drop; `rng` as for [`PartSpawn::Ring45`] (two draws).
+    Drop35 { pos: [f32; 4], vel: [f32; 4], kind: i32, life: i32, rng: Rng },
 }
+
+/// A moby the hero code created this tick (`CreateMoby` inside the hero update), with the creator's draws already made.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MobySpawn {
+    /// `FUN_002ff768(size, pos)`: the splash moby 775; `angle` = its `rand_angle` (the one draw).
+    Splash { size: f32, pos: [f32; 4], angle: f32 },
+}
+
+/// Ratchet's moby as the last write-back left it (`MobyBuildMatrix` of the previous tick): what `FUN_002645a8(Ratchet,
+/// list, out)` reads besides his pose (the rows +0xc0, the position, the scale +0x2c and the joint-modifier list +0x64).
+/// Captured at the start of every hero update ([`begin`]). Prints as `..` (a copy of the moby, not hero state).
+#[derive(Clone, Default, PartialEq)]
+pub struct JointFrame {
+    pub rows: [[f32; 4]; 3],
+    pub position: [f32; 4],
+    pub scale: f32,
+    pub mods: Vec<rc_formats::moby_anim::JointModifier>,
+}
+
+impl std::fmt::Debug for JointFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str("..") }
+}
+
+/// The joint lists the hero's effects read (class header `joints`, the first byte list of each: root-to-joint
+/// chains, by list index), as the engine loaded them: Ratchet's ([`Hero::set_joint_chains`]) and the back packs'
+/// with their class scale ([`Hero::set_pack_joint_lists`]: the Hydro-Pack's jets). Prints as `..` (level data).
+#[derive(Clone, Default, PartialEq)]
+pub struct JointData {
+    pub hero: std::sync::Arc<Vec<Vec<u8>>>,
+    /// `(o_class, class scale +0x24, lists)` of the pack classes.
+    pub packs: std::sync::Arc<Vec<PackLists>>,
+}
+
+/// One back pack class's joint lists: `(o_class, class scale +0x24, first byte lists)`.
+pub type PackLists = (i16, f32, Vec<Vec<u8>>);
+
+impl std::fmt::Debug for JointData {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str("..") }
+}
+
+/// The back pack moby's placement as `HeroItemsAttach` 0x22fec0 left it at the end of the last hero update ([`end`]):
+/// the attach matrix `W` of Ratchet's joint list 5 (the back items' attach word, item definitions 2..4 +4), position
+/// `W.r3`, rows `W.r0..r2` with their columns normalised (`FUN_00271030`). Prints as `..`.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct BackFrame {
+    pub rows: [[f32; 4]; 3],
+    pub position: [f32; 4],
+}
+
+impl std::fmt::Debug for BackFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { f.write_str("..") }
+}
+
+/// The back items' attach list (`HERO_LISTS[5]`: the attach word 5 of item definitions 2, 3 and 4).
+pub const BACK_LIST: usize = 5;
 
 /// One entry of the delayed-voice queue 0x141528 (8 bytes: s16 active, sound, timer, flags).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -89,6 +153,15 @@ pub struct HeroFx {
     /// The length of `swim.events` when this tick's hero update started (the swim events after it are this tick's;
     /// the engine drains the list after the tick).
     pub swim_mark: usize,
+    /// Mobys the hero code created this tick, in order (cleared at the start of the hero update; created by the tick
+    /// right after it, before anything else can take a moby slot: [`create_mobys`]).
+    pub mobys: Vec<MobySpawn>,
+    /// Ratchet's moby for the joint points ([`joint_point`]), captured by [`begin`].
+    pub frame: JointFrame,
+    /// Ratchet's and the packs' joint lists ([`joint_point`], [`pack_point`]).
+    pub joints: JointData,
+    /// The back pack's placement ([`end`], [`pack_point`]).
+    pub back: BackFrame,
 }
 
 /// A camera shake request (the writer's stores into 0x167260 for [`ShakeAxis::Up`], 0x167270 for
@@ -110,26 +183,44 @@ pub fn dust(h: &mut Hero, rng: &mut Rng, size: f32, pos: [f32; 4], vel: [f32; 4]
     h.fx.parts.push(PartSpawn::Dust { size, pos, vel, alpha, rot });
 }
 
-/// `0x22b140(n, 0)`: `n` bubbles around the hero (±0.1, −0.5..0.1) drifting with 0.7 of his displacement (1.15 in
-/// 0x34) ± 0.4 u/s and sinking at most 1 u/s before they rise, size `randf(4200, 7350)`, popping at the water level
-/// 0x13f640 (the hero's z + 0.4 in the sinking floor 0x31). 6 draws each, then the spawner's 6. Modes 1 / 2 (at
-/// Ratchet's joint points 0 / 0xe, 0x17 / 0x16) are not ported: the hero update has no joint lists.
-pub fn bubbles(h: &mut Hero, rng: &mut Rng, n: i32) {
+/// `0x22b140(n, 0)`: `n` bubbles around the hero ([`bubbles_at`] mode 0).
+pub fn bubbles(h: &mut Hero, rng: &mut Rng, n: i32) { bubbles_at(h, rng, None, n, 0) }
+
+/// `0x22b140(n, mode)` (level01, read from the disassembly): `n` type-34 bubbles. Mode 0 around the hero's feet
+/// (0x13f3d0 + (`randf(±0.1)`, `randf(±0.1)`, `randf(−0.5, 0.1)`): three draws), mode 1 at Ratchet's joint lists 0 / 0xe
+/// alternately (the first bubble at 0), mode 2 at his lists 0x17 / 0x16 ([`joint_point`]; no draws). Each drifts with
+/// 0.7 of the hero's displacement 0x13f450 (1.15 in 0x34) ± `randf(±0.4·dt)` sideways and `randf(−dt, 0)` down, size
+/// `randf(4200, 7350)`, then `PartType34Spawn(size, −1, pos, vel)`: the −1 pops it at the water level 0x13f640 (the
+/// hero's z + 0.4 in the sinking floor 0x31), and the spawner's six draws. `anim` = Ratchet's pose for modes 1 / 2
+/// (None: the moby's origin).
+pub fn bubbles_at(h: &mut Hero, rng: &mut Rng, anim: Option<&dyn super::AnimCtl>, n: i32, mode: i32) {
     let dt = 1.0 / 60.0;
     let p0 = crate::hero::physics::to_f32x3(h.pos);
     let d = crate::hero::physics::to_f32x3(h.disp);
     let k = if h.state == 0x34 { f32::from_bits(0x3f93_3333) } else { f32::from_bits(0x3f33_3333) };
     let level = if h.state == 0x31 { p0[2] + 0.4 } else { h.water_level.to_f32() };
-    for _ in 0..n.max(0) {
-        let x = p0[0] + rng.randf(-0.1, 0.1);
-        let y = p0[1] + rng.randf(-0.1, 0.1);
-        let z = p0[2] + rng.randf(-0.5, 0.1);
+    for i in 0..n.max(0) {
+        let pos = match mode {
+            0 => {
+                let x = p0[0] + rng.randf(-0.1, 0.1);
+                let y = p0[1] + rng.randf(-0.1, 0.1);
+                let z = p0[2] + rng.randf(-0.5, 0.1);
+                [x, y, z, 0.0]
+            }
+            _ => {
+                let list = match (mode, i & 1) { (1, 0) => 0, (1, _) => 0xe, (_, 0) => 0x17, _ => 0x16 };
+                match anim {
+                    Some(a) => joint_point(h, a, list),
+                    None => h.fx.frame.position,
+                }
+            }
+        };
         let vx = d[0] * k + rng.randf(dt * -0.4, dt * 0.4);
         let vy = d[1] * k + rng.randf(dt * -0.4, dt * 0.4);
         let vz = d[2] * k + rng.randf(-dt, dt * 0.0);
         let size = rng.randf(4200.0, 7350.0);
         let draws = type34::Draws::draw(rng);
-        h.fx.parts.push(PartSpawn::Bubble { size, level, pos: [x, y, z, 0.0], vel: [vx, vy, vz], draws });
+        h.fx.parts.push(PartSpawn::Bubble { size, level, pos, vel: [vx, vy, vz], draws });
     }
 }
 
@@ -172,6 +263,9 @@ pub fn create_particles(h: &Hero, sys: &mut Particles) {
             }
             PartSpawn::Flame { len, pos, vel, flags, draws } => { type12::spawn(sys, len, pos, vel, flags, gold, &draws); }
             PartSpawn::Blob { spawn, mut rng } => { type02::spawn(sys, &mut rng, &spawn); }
+            PartSpawn::Ring45 { size, growth, pos, mut rng } => { type45::spawn45_on(sys, &mut rng, size, growth, pos, type45::HERO_WATER_LEVEL, u32::MAX); }
+            PartSpawn::Ring46 { size, spin, pos, vel, mut rng } => { type46::spawn_on(sys, &mut rng, size, spin, pos, vel, type45::HERO_WATER_LEVEL); }
+            PartSpawn::Drop35 { pos, vel, kind, life, mut rng } => { type35::spawn(sys, &mut rng, pos, vel, kind, life); }
         }
     }
 }
@@ -183,10 +277,100 @@ pub fn queue_voice(h: &mut Hero, sound: i16, delay: i16, flags: i16) {
     }
 }
 
-/// Start of the hero update: this tick's particle spawns begin empty; the swim events so far are old ones.
-pub(super) fn begin(h: &mut Hero) {
+/// Start of the hero update: this tick's particle and moby spawns begin empty; the swim events so far are old ones;
+/// Ratchet's moby as the last write-back left it is kept for the joint points.
+pub(super) fn begin(h: &mut Hero, moby: &Moby) {
     h.fx.parts.clear();
+    h.fx.mobys.clear();
     h.fx.swim_mark = h.swim.events.len();
+    let f = &mut h.fx.frame;
+    f.rows = [moby.rows[0], moby.rows[1], moby.rows[2]];
+    f.position = moby.position;
+    f.scale = moby.scale;
+    f.mods.clone_from(&moby.joint_mods);
+}
+
+/// `FUN_002645a8(Ratchet, list, out)` 0x2645a8 from the hero code: the world point of the last joint of Ratchet's joint
+/// list `list` in his current pose (this tick's advance, the weapon-arm layers and the joint modifiers applied:
+/// `AnimCtl::eval_chains_with`), placed by his moby as the last write-back left it ([`JointFrame`]). The same
+/// formula as [`crate::moby_update::services::World::joint_point`] for the table's mobys ([`joint_world_point`]).
+/// Without the list or animation data the point is the moby's origin (as there). Native `f32`.
+pub fn joint_point(h: &Hero, anim: &dyn super::AnimCtl, list: usize) -> [f32; 4] {
+    let f = &h.fx.frame;
+    let chain = h.fx.joints.hero.get(list).filter(|c| !c.is_empty());
+    let t = chain
+        .and_then(|c| anim.eval_chains_with(&[c.as_slice()], &h.weapons.layers, &f.mods).into_iter().next())
+        .map_or([0.0, 0.0, 0.0, 1.0], |p| p[3]);
+    joint_world_point(&f.rows, f.position, f.scale, t)
+}
+
+/// The second half of `FUN_002645a8`, for any moby: a joint's pose translation `t` (`P.r3`, class units) to the world:
+/// `q = t.xyz · scale/1024` (w kept), `r = rows · q` (row 3 = (0, 0, 0, 1)), `out.xyz = r.xyz + position`, `out.w = r.w`.
+pub fn joint_world_point(rows: &[[f32; 4]; 3], position: [f32; 4], scale: f32, t: [f32; 4]) -> [f32; 4] {
+    let k = scale * (1.0 / 1024.0);
+    let q = [t[0] * k, t[1] * k, t[2] * k, t[3]];
+    let v: [f32; 4] = std::array::from_fn(|l| rows[0][l] * q[0] + rows[1][l] * q[1] + rows[2][l] * q[2] + if l == 3 { q[3] } else { 0.0 });
+    [v[0] + position[0], v[1] + position[1], v[2] + position[2], v[3]]
+}
+
+/// End of the hero update, after the back items' update: `HeroItemsAttach`'s placement of the back pack from Ratchet's
+/// joint list [`BACK_LIST`] in his pose now and his moby as the write-back left it ([`BackFrame`]).
+pub(super) fn end(h: &mut Hero, moby: &Moby, anim: &dyn super::AnimCtl) {
+    let Some(chain) = h.fx.joints.hero.get(BACK_LIST).filter(|c| !c.is_empty()) else { return };
+    let Some(p) = anim.eval_chains_with(&[chain.as_slice()], &h.weapons.layers, &moby.joint_mods).into_iter().next() else { return };
+    let r = &moby.rows;
+    let mut rows: [[f32; 4]; 3] = std::array::from_fn(|i| std::array::from_fn(|l| r[0][l] * p[i][0] + r[1][l] * p[i][1] + r[2][l] * p[i][2]));
+    for c in 0..3 {
+        let n = (rows[0][c] * rows[0][c] + rows[1][c] * rows[1][c] + rows[2][c] * rows[2][c]).sqrt();
+        let q = if n == 0.0 { 0.0 } else { 1.0 / n };
+        for row in rows.iter_mut() { row[c] *= q; }
+    }
+    let rr = [moby.rows[0], moby.rows[1], moby.rows[2]];
+    h.fx.back = BackFrame { rows, position: joint_world_point(&rr, moby.position, moby.scale, p[3]) };
+}
+
+/// `FUN_002645a8(pack, list, out)` on the back pack moby (0x1404d0): its joint list `list` in its current pose, placed
+/// by [`BackFrame`] at its class scale. None without a pack, its class data or the list.
+pub fn pack_point(h: &Hero, list: usize) -> Option<[f32; 4]> {
+    let b = h.back.as_ref()?;
+    let class = b.classes.pack(b.pack_item).filter(|c| c.0 == b.pack_o_class)?.1;
+    let (_, scale, lists) = h.fx.joints.packs.iter().find(|p| p.0 == b.pack_o_class)?;
+    let chain = lists.get(list).filter(|c| !c.is_empty())?;
+    let t = rc_formats::moby_anim::evaluate_chains(class, &b.pack.anim, b.pack.snapshot.as_ref(), &[chain.as_slice()]).into_iter().next()?[3];
+    Some(joint_world_point(&h.fx.back.rows, h.fx.back.position, *scale, t))
+}
+
+/// `MatrixMulVec3(v, v, Ratchet+0xc0)`: `v` in Ratchet's moby frame ([`JointFrame::rows`]) to the world (no position).
+pub fn moby_dir(h: &Hero, v: [f32; 3]) -> [f32; 3] {
+    let r = &h.fx.frame.rows;
+    std::array::from_fn(|l| r[0][l] * v[0] + r[1][l] * v[1] + r[2][l] * v[2])
+}
+
+/// The stream as a queued spawner will draw from it: the state now, and `n` draws skipped (each of the spawner's
+/// helpers — `randi`, `randf`, `rand_angle`, `rand` — takes exactly one `rand()`), so the draws after the call see
+/// the stream the game's do.
+pub fn reserve(rng: &mut Rng, n: usize) -> Rng {
+    let at = *rng;
+    for _ in 0..n { rng.rand(); }
+    at
+}
+
+/// The tick's part, right after the hero update: create the mobys the hero code asked for this tick, in order
+/// (`CreateMoby` through the hit sink: `super::items::HitSink::create_moby`), and fill them as their creators do.
+/// Returns the new mobys (the tick builds their matrices). `light` = Ratchet's light word.
+pub fn create_mobys(h: &mut Hero, table: &mut crate::moby_runtime::MobyTable, hero_moby: usize, hits: &mut dyn super::items::HitSink, counter: u64) -> Vec<usize> {
+    let mut out = Vec::new();
+    let light = table.mobys.get(hero_moby).map(|m| m.light);
+    for s in std::mem::take(&mut h.fx.mobys) {
+        match s {
+            MobySpawn::Splash { size, pos, angle } => {
+                let Some(id) = hits.create_moby(table, crate::moby_update::classes::splash::CLASS, counter) else { continue };
+                crate::moby_update::classes::splash::fill(&mut table.mobys[id], light, size, pos, angle);
+                out.push(id);
+            }
+        }
+    }
+    out
 }
 
 /// After the transitions (mode 0): this tick's swim voices (`0x236738(id, 0)` played, `0x236810` queued), then
@@ -217,10 +401,10 @@ pub(super) fn flush(h: &mut Hero, moby: &Moby, sounds: &mut dyn HeroSounds, rng:
 }
 
 /// `HeroFootstepSound(class, foot, 1)` (0x227e48): the variant is 1 when the feet item 0x140430 is the Magneboots
-/// model (class 0xad; the port reads the ownership, as `super::boots` does), then `PlayFootstepSound(class, foot,
-/// variant, 0, Ratchet)` 0x2a1898 on the level `0x15ed84`.
+/// model (class 0xad: [`Hero::magneboots_on`], the feet slot), then `PlayFootstepSound(class, foot, variant, 0,
+/// Ratchet)` 0x2a1898 on the level `0x15ed84`.
 pub fn footstep(h: &Hero, moby: &Moby, class: u8, foot: u8, sounds: &mut dyn HeroSounds, rng: &mut Rng) -> i32 {
-    let variant = h.owned.has(super::boots::MAGNEBOOTS) as u8;
+    let variant = h.magneboots_on() as u8;
     sounds.footstep(moby, h.idle.level, class, foot, variant, rng)
 }
 
@@ -298,7 +482,7 @@ mod tests {
         let moby = Moby::zeroed();
         let mut rng = Rng::new();
         let mut log = Log(Vec::new());
-        begin(&mut h);
+        begin(&mut h, &moby);
         h.swim.events.push(SwimEvent::Sound(3));
         h.swim.events.push(SwimEvent::Voice(7, 27));
         h.swim.events.push(SwimEvent::Voice(7, 40));
@@ -306,7 +490,7 @@ mod tests {
         assert_eq!(log.0, vec![(3, 0)]);
         let mut at = Vec::new();
         for t in 1..60 {
-            begin(&mut h);
+            begin(&mut h, &moby);
             let n = log.0.len();
             flush(&mut h, &moby, &mut log, &mut rng);
             if log.0.len() > n { at.push((t, log.0[n])); }

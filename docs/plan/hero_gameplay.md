@@ -294,3 +294,71 @@ running_lean_targets}`, `type12::tests` (3), `pyrocitor::tests`, `pyro_glow::tes
 at a crate (broken by the flames; not without them) / first person, each twice identical). `novalis_hero_digest`: with
 `RC_HERO_DIGEST_NO_IDLE=1` (the idle block cut) byte-identical to before; the full digest differs only in the idle
 block (the new records 0 / 2, the list, the lean's targets and angles while moving).
+
+## 8. Targeting, the Bomb Glove's reticle, one hand item on screen (2026-09-28)
+
+**Item ids (correction to §1.6).** The name ids of the item definitions (+0x00, strings 20034..) give: 9 Suck Cannon
+(class 849), 10 Bomb Glove (192), 11 Devastator (157), 12 Swingshot (208), 13 Visibomb (163), 14 Taunter (175), 15
+Blaster (168), 16 Pyrocitor (176), 17 Mine Glove (190), 18 Walloper (180), 19 Tesla Claw (177), 20 Glove of Doom (229),
+21 Morph-o-Ray (185), 22 Hydrodisplacer (1251), 23 R.Y.N.O. (454), 24 Drone Device (483), 25 Decoy Glove (562), 26
+Trespasser (188), 27 Metal Detector (585), 31 Hologuise (483, the Drone Device's class), 32 PDA (619). §1.6's "Suck
+Cannon 11 (157)" / "Devastator 19 (177)" are the Devastator and the Tesla Claw. **H** (level01 item table 0x179f40,
+name ids against the string order).
+
+**Two hand items on screen.** Root cause (engine side): `rc-engine` keeps an entity set for every gadget class (and
+the three packs) and shows the one the game's slot holds; the vendor's exit (`interact_render::hide_hero`) and a
+scene's end (`scene_render`) put `Visibility::Inherited` on every `AttachedTo` entity, and `moby_attach` only
+re-inserted visibility when its own flag changed, so after the first vendor visit or cutscene every gadget class stood
+at the hand (the Hologuise / Drone Device model, class 483, the most visible) and the unworn Thruster- / Hydro-Pack on
+the back. The game has no such entities: `HeroItemsCreate` 0x22f3c0 creates only the slot's moby and `0x2305e8`
+deletes it on a swap; `VendorExit` / `FUN_002487a8` clear the hide bits of the mobys that exist. Fix:
+`moby_attach::keep_absent_hidden` hides, every frame, the entities of every item the game does not have
+(`absent_entities`), after those show-again passes; the hand's choice is `hand_shows` (the slot's class only). Not a
+game-data issue: the item → class table is right (items 24 and 31 share class 483 in the game's own table).
+
+**Targeting** (`rc_game::targeting`, module doc for the table of readers). **H** from the level01 decompiler output
+and disassembly of 0x265548, 0x2711f8, 0x2d8330, 0x2c2be0 (disassembled in full), 0x2c23c0, 0x2c3300, 0x22c080,
+0x22e238 / 0x22dff0 / 0x2351d0, 0x2c7d68:
+* `0x1abe80` = the targetable (mode 0x1000) mobys of the run list, in order; each target's record = the pvar
+  block's first word (mode 0x20), `+0x10` the aim point's height. In the port: `targeting::target_list` over the
+  moby system's run list (`tick::Game::target_list`, handed to the items as `ItemEnv::targets`), `aim_height`.
+  Crates are targets too (they have records): the glove aims at crates as the game does.
+* Every reader has its own selection code; the glove's (`targeting::BOMB_GLOVE`): range 15 (2D, from the launch
+  point), 45° of the reference yaw (90° within 4), elevation < 55°, rise < 2, a clear world line from the camera
+  (flags 6); greedy (an accepted target becomes the reference yaw and the new range). Only without L1 / L2 (or with
+  0x1413fc); in first person the camera aim of before. The chosen target (0x13fda0, `Weapons::aim`) replaces the
+  point 8.5 ahead as the arc's target (`launch_velocity` unchanged), and SetState 0x23 turns Ratchet to it.
+* The landing preview 0x2c2be0 runs in the bomb's update (`bomb::aim_preview`, `targeting::arc_landing`) while held
+  and while flying (until the glove holds a new bomb, +0x56): the first line from Ratchet to the start, then 10-tick
+  steps (`p += v; v.z −= 11·dt²`) with a line test each (`0x10`), at most 300 ticks (the fuse when flying); a world
+  face ends it; a moby's collision primitive snaps it to the moby's position (Ratchet only after 10 ticks; only while
+  the arc is less than 2 above its start); water only while falling. A snap's `GroundHeight(0.5, pos + 0.5 up)` is
+  called for its side effect only: its line leaves the ground face's normal in the collision output the preview stores,
+  so a snapped reticle lies flat under the enemy. The lock bookkeeping (+0x30 / +0x40 / +0x60 / +0x64, let go dead,
+  untargetable or after 30 ticks without a snap) is kept in the bomb's pvars. The point is pulled 5 % toward the
+  camera and the reticle registered (`Services::reticles`, list 1).
+* The draw 0x2c23c0 (`targeting::reticle_quads`, `rc-engine` `reticle_render.rs` on crate::fx_draw's material): two
+  2×2 quads, FX 0x11 (three arcs) and 0x12 (three ticks), colour 0x80808080, ALPHA 0x48, turned by `(0, ±spin, 0)` then
+  by the Euler angles `(π/2 − atan2(n.y, √(n.x² + n.z²)), atan2(n.x, n.z), 0)` of the normal, spin = 2π·(counter mod
+  180)/180, opposite ways; not in game mode 2.
+* **Which weapons**: the reticle is the Bomb Glove's only (0x2c2be0's one caller is the bomb 0x2c3300, gated on the
+  owner's class 0xc0; nothing else registers 0x2c23c0). The Mine Glove, Glove of Doom, Decoy Glove and Drone Device
+  have no reticle; the Pyrocitor reads no target list. Plug-in rows for the other readers (`AimRules` or their own
+  search over the same list): the melee aim assist (range 11, cone 50°, score `d + diff·d`, +7 for a record flag), the
+  Devastator 0x2c7d68 (hard lock within 2.5 at 60° / 45°, else a 10° cone (+40° gold) narrowed by the record's
+  radius byte +0x0a, camera line flags 6), the head look 0x22c080 (range record +0x38, 110°, 60°, priority +0x39), and
+  0x2cc830 / 0x2cf138 / 0x2d2018 / 0x2d49f8 / 0x30d308 / 0x2bfe40 (lures, a two-target scorer, the mines of class
+  190) — not ported.
+
+**Native, not emulated.** `f32` with `atan2` for `FastArcTan` and the moby Euler rows for `fun_001fa050`; the
+reticle is two ordinary textured quads through the shared callback material; no PS2 arithmetic. **Inferred**: the
+target list is rebuilt from the run list after the moby loop (the game builds it at the loop's start: a moby that
+toggles 0x1000 in its own update is seen one tick early); the glove is not a table moby in the port, so the preview's
+"owner" exemption covers Ratchet only; the GroundHeight line's endpoints' x/y (the decompiler dropped them: taken as the
+moby's); the moving-platform variants (0x13f64c, never set in the port) are not wired.
+
+**Tests**: `targeting::tests` (6: the list and record, the glove's rules, landing, snapping, the reticle's plane /
+size / spin, the pull and the per-tick list), `moby_attach::tests` (2: one hand entity set per equipped item, absent
+items hidden after a show-again across swaps), `hero_targeting_novalis.rs` (the glove targets a critter, the reticle
+snaps onto it, the bomb lands where it was; twice identical). `novalis_hero_digest` is unaffected by construction (its
+runs have no hand item data, and the new `Weapons` fields sit after the digest's cut).

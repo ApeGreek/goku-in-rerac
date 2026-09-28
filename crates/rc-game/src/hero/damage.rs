@@ -46,10 +46,11 @@
 //!   SetState and the end of the transitions draws (Ratchet's sequences 10 / 0xb / 0x6f / 0x71 have no back-item
 //!   rows).
 //!
-//! **Not ported** (cosmetic, and like the swim's effects they draw from `rand`, so the stream diverges from the
-//! PS2 in these states only): 0x75's surface wake (`0x22ac40`: type-45 ripples, flat quads the particle renderer does
-//! not draw yet; 0x76's bubbles `0x22b140(n, 0)` are ported: `super::fx::bubbles`), 0x82's
-//! bubbles (the drowned physics as in `swim`), 0x3c's and 0x7c's fire (`0x209ec8`, L00 `0x217450`), 0x7f's
+//! **Water effects** (`super::swim::effects`): 0x75's surface wake `0x22ac40(15, 30)`, 0x76's bubbles
+//! `0x22b140(n, 0)` (`super::fx::bubbles`), 0x82's breath bubbles (the drowned physics, as 0x6a's).
+//!
+//! **Not ported** (cosmetic, and they draw from `rand`, so the stream diverges from the PS2 in these states only):
+//! 0x3c's and 0x7c's fire (`0x209ec8`, L00 `0x217450`), 0x7f's
 //! bubble moby (class 0x52a, `CreateMoby` + its class sound); 0x7c's level-6 fog colour (0x141644 / 0x141648);
 //! the help-flag clear `0x225938` and the level-15 flag 0x15f5a4 of the death sequence; the game mode 0x15f5c4
 //! test of the intake (0 in gameplay ticks); the Giant Clank branch of the intake (body 2, not ported).
@@ -402,7 +403,7 @@ fn burn_bounce_entry(h: &mut Hero, c: &mut Ctx, play: bool, old_sub: i32) -> Opt
         h.substate = old_sub;
         return Some(false);
     }
-    h.jump_block_defaults();
+    h.jump_block_defaults(c.rng);
     let j = &mut h.jump;
     j.h = Pf::f(5.5);
     j.takeoff = ticks(5);
@@ -454,6 +455,8 @@ pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut
             h.gravity_from(z, Pf::b(0x3b83_126f));
         }
         0x75 | 0x76 | 0x7f => {
+            // 0x75 (hurt on the surface): the wake `0x22ac40(15, 30)` (0x2387bc, top of the case).
+            if h.state == 0x75 { super::swim::effects::wake(h, rng, 15, 30); }
             // 0x76 (hurt under water): a burst of bubbles `0x22b140(min(10 − timer/3, 8), 0)`, fewer each 3 ticks.
             if h.state == 0x76 { super::fx::bubbles(h, rng, (10 - h.timer / 3).min(8)); }
             h.vel[2] = Pf::ZERO;
@@ -497,7 +500,7 @@ pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut
             h.vel[2] = -DT;
         }
         0x3d | 0x80 => h.phys_ground(env, anim, rng),
-        0x82 => h.phys_drown(),
+        0x82 => h.phys_drown(anim, rng),
         0x3c => h.phys_jump(env),
         _ => return false,
     }

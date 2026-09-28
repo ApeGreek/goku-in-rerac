@@ -518,7 +518,7 @@ mod tests {
         let pad = crate::pad::PadState::default();
         let mut table = crate::moby_runtime::MobyTable::new(vec![crate::moby_runtime::Moby::zeroed()], 4);
         let mut anim = KeyAnim { looped: Some((6, 0x15)), ..Default::default() };
-        let env = ItemEnv { data: &d, pad: &pad, frame: 0, hero_moby: 0, coll: None, camera: None, camera_up: None };
+        let env = ItemEnv { data: &d, pad: &pad, frame: 0, hero_moby: 0, coll: None, camera: None, camera_up: None, targets: &[] };
         let mut far = 0.0f32;
         let mut back_at = None;
         let mut home_at = None;

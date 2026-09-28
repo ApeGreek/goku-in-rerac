@@ -23,6 +23,7 @@
 //! * [`spline`]: the spline follower (paths and grind paths: step, advance, nearest point) the rail riders use.
 //! * [`shadows`]: the moby shadows' directions, slab probes and shadow volumes (`docs/plan/shadows.md`).
 //! * [`game_state`]: the saved game state, new game, level-start rules, transitions, saves and options (`docs/plan/game_state.md`).
+//! * [`inventory`]: owned items, the equipped item per slot and the equip rules (`docs/plan/gadgets.md`).
 
 pub mod collision_query;
 pub mod ps2v;
@@ -41,9 +42,11 @@ pub mod water;
 pub mod hud;
 pub mod audio;
 pub mod game_state;
+pub mod inventory;
 pub mod menus;
 pub mod scene_player;
 pub mod movie_player;
 pub mod cinematic;
 pub mod spline;
 pub mod shadows;
+pub mod targeting;

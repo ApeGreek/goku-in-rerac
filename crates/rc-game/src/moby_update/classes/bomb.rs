@@ -157,6 +157,13 @@ pub fn update(w: &mut World, id: MobyId) {
         let m = w.mm(id);
         if fp && m.state == HELD { m.mode |= 0x41; } else { m.mode &= !0x41; }
     }
+    // The glove's bomb (owner +0x50 = the glove) with a velocity and +0x56 clear: the landing preview and its reticle
+    // (`0x2c2be0(pvars, bomb, 1)`; the moving-platform variants 0 / 2 need 0x13f64c, which the port never sets).
+    {
+        let pv = &w.m(id).pvars;
+        let v = p::v4f(pv, pv::VEL);
+        if p::i32(pv, pv::OWNER) == 1 && p::i16(pv, pv::FLAG56) == 0 && 0.0 < len3(v) { aim_preview(w, id); }
+    }
     match st {
         FLYING => fly(w, id),
         EXPLODING => exploding(w, id),
@@ -170,6 +177,87 @@ pub fn update(w: &mut World, id: MobyId) {
             m.glow = 0xff00_0000 | v << 16 | v << 8 | v;
         }
     }
+}
+
+/// `0x2c2be0(pvars, bomb, 1)`: the landing preview (`crate::targeting::arc_landing`) from the launch point (held:
+/// the velocity the glove's aim left, plus Ratchet's displacement while grinding, 300 ticks) or the bomb (flying: its
+/// fuse; a new bomb in the glove sets +0x56, which ends the flying bomb's previews); a moby it snaps to is tracked in
+/// +0x30 (its position) / +0x40 (its motion since) / +0x60 (the moby) / +0x64 (ticks on it), and let go once dead,
+/// untargetable or past 30 ticks without a snap; the point (+0x10, pulled 5 % toward the camera) and the normal
+/// (+0x20) are what the reticle draw (`0x2c23c0`, list 1: `Services::reticles`) reads. Returns whether it drew.
+fn aim_preview(w: &mut World, id: MobyId) -> bool {
+    use crate::targeting::{self as tg, ArcStart, LineHit};
+    if w.hero.state == 0x72 || w.svc.game_mode != 0 { return false; }
+    let v4 = |a: [f32; 4]| [a[0], a[1], a[2]];
+    let held = w.m(id).state == HELD;
+    let vel = v4(p::v4f(&w.m(id).pvars, pv::VEL));
+    let (from, vel, budget) = if held {
+        let h = w.hero;
+        let from = crate::hero::weapons::launch_point(crate::hero::physics::to_f32x3(h.pos), crate::hero::physics::to_f32x3(h.moby_rows[0]));
+        let d = crate::hero::physics::to_f32x3(h.disp);
+        let vel = if h.group == 0xf { [vel[0] + d[0], vel[1] + d[1], vel[2] + d[2]] } else { vel };
+        (from, vel, 300)
+    } else {
+        if w.hero.weapons.glove.bomb.is_some() { p::set_i16(&mut w.mm(id).pvars, pv::FLAG56, 1); }
+        (v4(w.m(id).position), vel, p::i16(&w.m(id).pvars, pv::LIFE) as i32)
+    };
+    let hero_pos = w.hero_moby.and_then(|h| w.table.mobys.get(h)).map_or(from, |m| [m.position[0], m.position[1], m.position[2]]);
+    let start = ArcStart {
+        from,
+        vel,
+        budget,
+        gravity: dt2() * 11.0,
+        first: [hero_pos[0], hero_pos[1], from[2]],
+        first_ignore: w.hero_moby,
+        ignore: Some(id),
+        // Ratchet (the glove is not a table moby in the port).
+        own: [w.hero_moby, None],
+        gold: w.hero.weapons.gold.get(10).is_some_and(|&g| g != 0) && w.hero.state == 1,
+    };
+    let landing = {
+        let ww: &World = w;
+        tg::arc_landing(
+            &start,
+            |a, b, ignore| {
+                let h = ww.coll_line(pv4([a[0], a[1], a[2], 0.0]), pv4([b[0], b[1], b[2], 0.0]), 0x10, ignore)?;
+                Some(LineHit { point: h.point, normal: h.normal, moby: h.moby, kind: h.kind, surface: h.surface_id() })
+            },
+            |m| { let q = ww.m(m).position; [q[0], q[1], q[2]] },
+            |a, b| ww.coll_line(pv4([a[0], a[1], a[2], 0.0]), pv4([b[0], b[1], b[2], 0.0]), 2, None).map(|h| h.normal),
+        )
+    };
+    let Some(l) = landing else { return false };
+    // The lock on the snapped moby (+0x60 holds the moby + 1; the game's pointer).
+    let locked = p::i32(&w.table.mobys[id].pvars, pv::TARGET);
+    if let Some(m) = l.snapped {
+        let mp = w.table.mobys[m].position;
+        let pvars = &mut w.table.mobys[id].pvars;
+        if locked != m as i32 + 1 {
+            p::set_i32(pvars, 0x64, 0);
+            p::set_i32(pvars, pv::TARGET, m as i32 + 1);
+        } else {
+            let c = p::i32(pvars, 0x64) + 1;
+            p::set_i32(pvars, 0x64, c);
+            let old = p::v4f(pvars, 0x30);
+            p::set_v4f(pvars, 0x40, [mp[0] - old[0], mp[1] - old[1], mp[2] - old[2], mp[3] - old[3]]);
+        }
+        p::set_v4f(pvars, 0x30, mp);
+    } else if locked != 0 {
+        let t = (locked - 1) as usize;
+        let gone = w.table.mobys.get(t).is_none_or(|m| m.state == 0xfe || m.state == 0xfd || m.mode & crate::moby_runtime::mode::TARGETABLE == 0);
+        let pvars = &mut w.table.mobys[id].pvars;
+        if gone || 30 < p::i32(pvars, 0x64) {
+            p::set_i32(pvars, 0x64, 0);
+            p::set_i32(pvars, pv::TARGET, 0);
+        }
+    }
+    let cam = [w.camera[0].to_f32(), w.camera[1].to_f32(), w.camera[2].to_f32()];
+    let point = tg::pull_toward(cam, l.point);
+    let pvars = &mut w.table.mobys[id].pvars;
+    p::set_v4f(pvars, 0x10, [point[0], point[1], point[2], 0.0]);
+    p::set_v4f(pvars, 0x20, [l.normal[0], l.normal[1], l.normal[2], 0.0]);
+    w.svc.reticles.register(w.counter, tg::Reticle { point, normal: l.normal, style: &tg::BOMB_RETICLE });
+    true
 }
 
 /// State 1.

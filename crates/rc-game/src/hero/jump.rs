@@ -36,10 +36,15 @@ impl Hero {
     /// height, the counters and flags cleared, fall-over 2.5 after 70, max air 80, air speed 5.7·dt, turn cap
     /// 860°/s, anim factor 0.5, no descending gravity). The package jump ids (10, 0xd, 0xf, 0x10, 0x11, 0x1c,
     /// 0x29, 0x2a, 0x3c, 0x69) call it and then set their own parameters (0x29 / 0x2a also 0x1415d4 = 3).
-    pub(super) fn jump_block_defaults(&mut self) {
+    /// A jump from the water (in water 0x140634, the feet under the level + 0.5), other than the deep-water jump 0x12,
+    /// splashes: `0x22b3a8(3, 16, 0)` (0x23e890).
+    pub(super) fn jump_block_defaults(&mut self, rng: &mut crate::rng::Rng) {
         self.group = 4;
         self.f15d4 = 0x50;
         self.vel = self.eff;
+        if self.state != super::swim::id::WATER_JUMP && self.f0634 != 0 && self.pos[2].to_f32() < self.water_level.to_f32() + 0.5 {
+            super::swim::effects::splash(self, rng, 3, 0x10, false);
+        }
         let g = DT2;
         let j = &mut self.jump;
         j.g = g * Pf::b(0x41ed_999a);
@@ -71,7 +76,7 @@ impl Hero {
 
     /// The jump-group entry (0x23e7e8) and the per-id jump block values.
     pub(super) fn jump_entry(&mut self, c: &mut Ctx, id: i32, play: bool) {
-        self.jump_block_defaults();
+        self.jump_block_defaults(c.rng);
         let j = &mut self.jump;
         let six = Pf::b(0x3f19_999a);
         match id {
@@ -550,6 +555,14 @@ impl Hero {
             self.anim_speed_for_ticks(self.jump.f_apex, Pf::from_i32(n), self.jump.ak, Pf::b(0xbf80_0000), &v);
             if Pf::b(0x3fc0_0000) < self.anim_speed { self.anim_speed = Pf::b(0x3fc0_0000); }
             return;
+        }
+        // Coming down into water (the probe's first tick under the level, 0x13f648 == 1, 0x24621c): the landing voice
+        // 0x11 and the big splash 0x22b3a8(3, 24, 1).
+        if self.in_water == 1 {
+            let e = if c.voice(0x11, 0) { super::swim::SwimEvent::Played(0x11) } else { super::swim::SwimEvent::Sound(0x11) };
+            self.swim.events.push(e);
+            super::swim::effects::splash(self, c.rng, 3, 0x18, true);
+            self.swim.events.push(super::swim::SwimEvent::Splash { rings: 3, drops: 0x18, big: true });
         }
         // J: landing detection.
         if self.jump.landed != 0 {

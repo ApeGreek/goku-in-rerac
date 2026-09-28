@@ -22,6 +22,28 @@ pub struct Ctx<'a, 'b> {
     pub env: &'a Env<'b>,
     pub anim: &'a mut dyn AnimCtl,
     pub rng: &'a mut Rng,
+    /// `0x236738(index, flags)` played at the call point (the voice's own draws, e.g. its pitch bend, land where the
+    /// game makes them, before the splash draws that follow it): the hero update passes Ratchet's sound layer
+    /// ([`super::HeroSounds::voice`]). None (a SetState from outside the update): [`Ctx::voice`] queues it for
+    /// [`super::fx::flush`] instead.
+    pub voice: Option<&'a mut VoiceSink<'a>>,
+}
+
+/// A voice player for [`Ctx::voice`]: `(index, flags, rng)`.
+pub type VoiceSink<'a> = dyn FnMut(i32, u32, &mut Rng) + 'a;
+
+impl Ctx<'_, '_> {
+    /// `0x236738(index, flags)` from SetState or the transitions: played now when the update gave a player (true),
+    /// else false (the caller queues it as before).
+    pub fn voice(&mut self, index: i32, flags: u32) -> bool {
+        match self.voice.as_deref_mut() {
+            Some(v) => {
+                v(index, flags, &mut *self.rng);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 impl Hero {
@@ -57,6 +79,8 @@ impl Hero {
         }
         let ok = self.set_state_body(c, id, play, old_sub);
         if ok && f7 != 0 && self.items.f13f7 == 0 { self.items.restore_pending = 1; }
+        // The tail's feet restore requests 0x141460 (super::worn).
+        if ok { self.worn_on_set_state(); }
         ok
     }
 
@@ -83,8 +107,13 @@ impl Hero {
     // Transitions 0x242930.
 
     /// `0x242930`: one pass of the state machine (after the move, with the incremented timer).
-    pub fn transitions(&mut self, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng) {
-        let mut c = Ctx { env, anim, rng };
+    pub fn transitions(&mut self, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng) { self.transitions_with_voice(env, anim, rng, None) }
+
+    /// [`Hero::transitions`] with the voices played at their call points (`voice`: see [`Ctx::voice`]).
+    pub fn transitions_with_voice(&mut self, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng, voice: Option<&mut VoiceSink<'_>>) {
+        // (The player's object lifetime shortened to the context's: a coercion `Option` does not do by itself.)
+        let voice = voice.map(|v| v as &mut VoiceSink);
+        let mut c = Ctx { env, anim, rng, voice };
         let sub0 = self.substate;
         let seq0 = c.anim.view().seq_b;
         self.transitions_inner(&mut c);

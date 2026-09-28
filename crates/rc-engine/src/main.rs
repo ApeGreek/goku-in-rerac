@@ -36,6 +36,7 @@ mod hud_render;
 mod input_map;
 mod interact_render;
 mod level_load;
+mod menu_models;
 mod menu_render;
 mod moby_anim;
 mod moby_attach;
@@ -48,7 +49,9 @@ mod occlusion;
 mod particle_render;
 mod play_camera;
 mod render_settings;
+mod reticle_render;
 mod scene_render;
+mod screen_canvas;
 mod shadow_render;
 mod shrub_billboard;
 mod shrub_light;
@@ -62,6 +65,7 @@ mod tfrag_render;
 mod tie_light;
 mod tie_lod;
 mod tie_render;
+mod vendor_render;
 mod water_render;
 mod world_lights;
 
@@ -137,12 +141,16 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(particle_render::ParticlePlugin)
     .add_plugins(water_render::WaterPlugin)
     .add_plugins(fx_draw::FxDrawPlugin)
+    .add_plugins(reticle_render::ReticlePlugin)
     .add_plugins(sky_stars::SkyStarsPlugin)
     .add_plugins(fog_state::FogStatePlugin)
     .add_plugins(hud_render::HudPlugin)
     // The game tick (hero, pad, follow camera) driving Ratchet and the view; RC_PLAY=0 keeps the fly camera only.
     .add_plugins(gameplay::GameplayPlugin)
     .add_plugins(menu_render::MenuPlugin)
+    .add_plugins((screen_canvas::CanvasPlugin, vendor_render::VendorRenderPlugin))
+    // The Gadgets / Weapons pages' 3D Ratchet and item preview (crate::menu_models, on crate::screen_canvas).
+    .add_plugins(menu_models::MenuModelsPlugin)
     // In-engine scenes (mode 2) and the Novalis arrival (crate::scene_render; RC_SCENE=0 / RC_SCENE=<k>).
     .add_plugins(scene_render::SceneRenderPlugin)
     // PSS movies (mode 1) played from the original files (crate::movie_render; RC_PLAY_MOVIE=<n>).

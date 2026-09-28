@@ -53,6 +53,7 @@ pub mod weapons;
 pub mod pyrocitor;
 pub mod crank;
 pub mod scripted;
+pub mod worn;
 
 use crate::ps2v::Pf;
 pub use ledge::{ledge_yaw_input, LedgeBlock};
@@ -400,6 +401,10 @@ pub struct Hero {
     pub owned: Owned,
     /// Item slot 3's bookkeeping (`GetClankModule(3)`, the back item's swap; [`idle::BackSlot`]).
     pub back_slot: idle::BackSlot,
+    /// Item slots 1 (feet) and 2 (head): their bookkeeping and the head moby's put-away ([`worn`]).
+    pub feet_slot: idle::ItemSlot,
+    pub head_slot: idle::ItemSlot,
+    pub worn: worn::Worn,
     /// The Heli-Pack / Thruster-Pack fields (stomp, rebound, hover latch and taps, the hero's looping sound
     /// slots; [`packs`], package P4).
     pub packs: packs::Packs,
@@ -496,7 +501,7 @@ impl Hero {
             melee: melee::Melee::default(), items: items::HeroItems::default(), shockwave: None,
             idle: idle::Idle::new(), back: None, back_classes: None, swim: swim::Swim::new(),
             carry: platform::Carry::default(), surf: surface::Surf::default(),
-            owned: Owned::default(), back_slot: idle::BackSlot::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
+            owned: Owned::default(), back_slot: idle::BackSlot::default(), feet_slot: idle::ItemSlot::default(), head_slot: idle::ItemSlot::default(), worn: worn::Worn::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
             joint_targets: Default::default(),
@@ -639,6 +644,14 @@ impl Hero {
     pub fn set_joint_targets(&mut self, second_lists: &[Vec<u8>]) {
         self.joint_targets = std::sync::Arc::new(second_lists.iter().map(|b| rc_formats::moby_anim::list_target(b).unwrap_or(0xff)).collect());
     }
+
+    /// Ratchet's class joint lists (the first byte list of each: root-to-joint chains, by list index) for the joint
+    /// points of the hero's effects ([`fx::joint_point`]: the water bubbles at his hands, feet and mouth).
+    pub fn set_joint_chains(&mut self, first_lists: Vec<Vec<u8>>) { self.fx.joints.hero = std::sync::Arc::new(first_lists); }
+
+    /// The back pack classes' joint lists and class scales `(o_class, scale, first byte lists)` (the Hydro-Pack's
+    /// jets: [`fx::pack_point`]).
+    pub fn set_pack_joint_lists(&mut self, packs: Vec<(i16, f32, Vec<Vec<u8>>)>) { self.fx.joints.packs = std::sync::Arc::new(packs); }
 }
 
 /// Sounds the hero update plays at the game's point inside `0x228870`, so their RNG draws (the class sound's
@@ -692,7 +705,7 @@ pub fn hero_update_with_sounds(
     rng: &mut crate::rng::Rng,
     sounds: &mut dyn HeroSounds,
 ) -> HeroTick {
-    fx::begin(hero);
+    fx::begin(hero, moby);
     let counter = hero.idle.counter;
     hero.idle.counter = counter.wrapping_add(1);
     let (x, y) = (hero.pos[0], hero.pos[1]);
@@ -724,7 +737,12 @@ pub fn hero_update_with_sounds(
     // The magnetic floor 0x13f658, the rail contact 0x20cf58 and the cable contact 0x20d330 (L00; super::boots).
     boots::contacts(hero, env);
     let group = hero.group;
-    hero.transitions(env, anim, rng);
+    // The transitions with Ratchet's voices played at their call points (the splash voices before the splash draws).
+    {
+        let m: &crate::moby_runtime::Moby = moby;
+        let mut voice = |index: i32, flags: u32, r: &mut crate::rng::Rng| { sounds.voice(m, index, flags, r); };
+        hero.transitions_with_voice(env, anim, rng, Some(&mut voice));
+    }
     // A group change stops the hero's looping sounds (0x2283a8 at the end of 0x242930).
     packs::after_transitions(hero, moby, sounds, rng, group);
     surface::after_transitions(hero, moby, sounds, rng, group);
@@ -733,7 +751,11 @@ pub fn hero_update_with_sounds(
     fx::flush(hero, moby, sounds, rng);
     if hero.mode == 0 { hero.idle_updates(anim.view().seq_b, counter, rng); }
     hero.write_back(moby);
+    // HeroItemsUpdate's slots 1 (feet) and 2 (head), then 3 (the back).
+    hero.worn_items_update(rng);
     hero.back_items_update(rng);
+    // HeroItemsAttach's back placement (the Hydro-Pack's jets read it next tick).
+    fx::end(hero, moby, &*anim);
     HeroTick::Ran
 }
 
@@ -829,7 +851,7 @@ pub mod testkit {
         /// Run `f` with the SetState context of the last tick's pad (e.g. a SetState from outside the tick).
         pub fn with_ctx<R>(&mut self, coll: &Collision, f: impl FnOnce(&mut Hero, &mut states::Ctx) -> R) -> R {
             let env = Env { coll, pad: &self.pad, cam_yaw: self.cam_yaw, cam_rows: self.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: self.water.as_deref(), world: None };
-            let mut c = states::Ctx { env: &env, anim: &mut self.anim, rng: &mut self.rng };
+            let mut c = states::Ctx { env: &env, anim: &mut self.anim, rng: &mut self.rng, voice: None };
             f(&mut self.hero, &mut c)
         }
     }
@@ -880,7 +902,7 @@ mod tests {
             // Straight into 9 through SetState (a running jump from rest).
             let env_pad = r.pad.clone();
             let env = Env { coll: &coll, pad: &env_pad, cam_yaw: r.cam_yaw, cam_rows: r.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
-            let mut c = states::Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng };
+            let mut c = states::Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng, voice: None };
             r.hero.set_state(&mut c, 9, true);
         }
         // T = 0 is the first tick that runs in the jump state (the tick after the press for 7).

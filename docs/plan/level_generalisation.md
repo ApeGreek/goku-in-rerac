@@ -29,7 +29,7 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 | C1 | **fixed** | `rc_game::moby_update::classes::LevelPorts`: a class runs a port when its `lvl.vtbl` entry is the same code as the port's reference function (level 01; level 03 for the swing target). Class-number lists remain the fallback for classes not in the table. Engine: `gameplay::level_ports()` (class table, joint lists, `moby_spawn`). Novalis: identical for every placed class (only the unplaced 731 gains `MissionNpcUpdate`, as the game) |
 | C1 found | fixed by C1 | `FxGroupUpdate` runs other body-piece classes on **every** level (Gemlik 1733–1735, 1801–1804); grass on 00/02/08; `PathPlatformUpdate` 1141 on 10; the ember update on 10 (1806/1807) and 15 (200…210) |
 | C2 | open (N/A) | the flyer update exists only on 01; the shared path driver is called from other levels' own updates |
-| C3 | **fixed** | the emitter / ripple externals come from the table (`LevelPorts::external`); only 01 has them |
+| C3 | **fixed** | the emitter external comes from the table (`LevelPorts::external`; only 01 has it); the ripple manager 751 is now a class port (W3) |
 | C4 | open | `moby_spawn::initial_state` is still keyed by class number (rules transfer where the vtbl says so; not rechecked) |
 | C5 | open | `MISSION_NPC_CLASSES` [730, 790] (01-only code) |
 | C6 | ok | the engine and the smoke test set `Services::level` |
@@ -39,7 +39,7 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 | M3, M7 | **fixed** | `MenuConsts`, the frame light and the corner lists go through `Overlay::at` (0x161fe0 → 0x161e08 on 13; the old read gave joint list 1045220557 and no frame mobys) |
 | M4 | **fixed** | names `at(0x1c22c0)`; points `at(0x1c23a8) + 0x10` (the code forms 0x1c23a8, the map reads from level 1) |
 | M5, M6 | **fixed** | quick-select gp block `at(0x15f718)` (+0x10 on 05 / 16, from the `$gp` operands), page table at +0x20, d-pad `at(0x17e098)` (0x17df18 on 13) |
-| W1–W4 | open (N/A on 13) | Gemlik has no water, ripples or strips: the Novalis paths stay off |
+| W1–W4 | **fixed** | see "Water on every level" below (the earlier "Gemlik has no water" was wrong: 13 has a ripple module and 22 patches) |
 | K1 | open (N/A on 13) | 13 uses the generic star dispatch (120 twinkle + 8 moving) |
 | H1 | partly open | the level-13 branches (below) are in unported code; the footstep branch belongs to the hero agent |
 | H2 | open | not diffed |
@@ -47,6 +47,46 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 | A1 | ok as is | `entry` pauses the music on 13; the landing sequence (not ported) unpauses it: a direct boot plays unpaused, the post-landing state |
 | A2 | open | reverb (another agent) |
 | T1–T4 | open | tooling |
+
+### Water on every level (2026-09-28)
+
+**Survey** (by code identity against level 01, `rc-game/tests/water_levels.rs::water_inventory_all_levels`):
+
+| level | ripple module | manager (update, reference code) | patches | other water |
+|---|---|---|---|---|
+| 01 Novalis | yes | 751, level01 `0x2fd0e8` (7 camera-zone cuboids) | 21 | strips 676 / 678 / 761 / 1225 (the only strip module) |
+| 05 Rilgar | yes | 831, level05 `0x30ca80` (one moby per patch; group commands raise / lower; the sewer flood 0x33e button, 6 timed stages) | 48 | 982 `0x318a68`: the flat water plane `0x1612dc..ec` (59.5 ± 0.25) and the dive lock while Ratchet is in its cuboid; canal / sea surface-0 faces at 59.44 |
+| 07 Umbris | yes | 902, 941 … 971 (20 classes), level07 `0x30c508` (one moby per patch; group commands; a cuboid trigger then two timed rises to 54) | 36 | sinking liquid (surface 0xb) |
+| 11 Pokitaru | yes | 1158, level11 `0x30e088` (patches built from the mobys; the tide 132.36 ↔ 137) | 20 | the sea (surface-0 faces at 223) |
+| 12 Hoven | yes | 19, level12 `0x2bf140` (patches built from the mobys; +5 per command; Ratchet's water level near it; a camera cuboid gate) | 17 | deadly liquid (surface 0xd) |
+| 13 Gemlik | yes | 1263 / 1393, level13 `0x309e88` (the level swings between two heights) | 22 | 1393's collision is surface 0xb |
+| 02, 10, 15, 18 | no | — | — | sinking / deadly liquids (0x3, 0xb, 0xd, 0xe): the hero's surface rules, unchanged |
+| 08, 15, 17 | no | — | — | plain surface-0 water faces (the hit z is the level) |
+
+One engine module on every level that has it (`RipplePatchesInit` 0x2b7a48 … `0x2b96c0` and the VU0 kernels, the same
+object code relinked); the managers are level code, and all but 751 are copies of one template: each placed moby owns
+patch `idx`, writes its z into the patch (+0x08, the water level) and the patch's sub-block mask from a
+`FastBSphereCheck` of its bounding sphere (drawn and simulated only in view), and makes the random drops; the moby of
+patch 0 runs the module's init, the clock and the draw callback. Their collision (surface-0 faces at the moby's z) is
+the water Ratchet swims in, so moving water moves the swimming level. No lava / sludge / quicksand mechanism of its own:
+the other liquids are collision surfaces (hero `surface.rs`, per-level rules), already general.
+
+| # | fix |
+|---|---|
+| W1 | `rc_formats::water::strip_tables(target, rel)`: the strip classes are the `lvl.vtbl` entries that run the level's copy of a strip update (676 `0x2f6128`, 678 `0x2f6180`, 761 `0x2feb58`, 1225 `0x309c98`); the table and count are read from the `lui`/`%lo` and `addiu a0` before the draw callback's `jal` to the copy of `0x2b96e0`. Only 01 has the module (verified: no other overlay has a copy) |
+| W2 | `RippleModuleAddrs::locate` (0x1cad00 consts, 0x1cafe0 UVs, 0x1cb1b0 selectors, the three order tables) and `Ripple751Addrs::locate` (patches, zones, masks, drips, mist) through `Relocation::data`; the patch managers' tables (patches, masks, flood timers / speeds, `$gp` globals) through the same relocation from their own reference levels (`rc_game::water::managers::PORTS`). Found on 05: 0x1d6880 / 0x20b380, 07: 0x1dce40 / 0x204680 (module 0x1ca900), 11: 0x1da880 (module 0x1cb280), 12: 0x1cbf40, 13: 0x1d9bc0 / 0x1f1e20 (module 0x1cab80) |
+| W3 | the managers are class ports, `ClassUpdate::Water(i)` (`rc_game::water::managers`, 751 included): `LevelPorts` finds them by code identity; the ripple module lives in the moby system (`Services::water`, `rc_game::water::world::WaterWorld`), registered for drawing with `Callback::RipplePatches`; `water_render` draws whatever module the level has. The engine's 751 external is gone |
+| W4 | `WaterWorld::water_height` = `SetWaterLevel` 0x26ed38: the active patch (`RippleHeightQuery`), then the flat plane (982 on 05), else the caller's hit z (0x1742e0 is the collision output buffer, not a table: the port already passed the hit). The hero probe, the underwater test, the bomb's water entry and the hero's ripples all use it; the managers' stores into the hero block (0x13f640 on 05 / 12, the dive lock 0x13f52e on 05) go through `HeroFields` |
+
+**Guards** (`rc-game/tests/water_levels.rs`): the inventory on 19 levels (every table resolves, each port only on its
+level); the managers run on 01/05/07/11/12/13 (a step every 9 ticks, the draw registered, every patch's level = its
+moby's z); 751's port = the ripple module alone on the same stream; swim and wade on **05** (canal / sea) and **11**
+(sea, and a tide pool on the 1158 patches: the level read is the patch's rippled surface). Novalis: `novalis_hero_digest`
+and the five water captures byte-identical to before.
+
+**Not ported**: the manager 07 / 13 `.lit` mask overrides are ported but never set by their levels' code; 13's
+pause while Ratchet holds a class-0x45 item in state 0x32 (`0x140940`, the hand item moby, not modelled); the classes
+that send the raise / lower commands (buttons, 0x33e on 05) are other classes. Drips (787) as before.
 
 **Level-13 branches in engine code** (L01 decomp, `0x15ed84 == 0xd`): `InitLevelRenderGlobals` adopts the placed
 ship 533 (`*0x160550`) instead of creating one when ship index 2 and runtime flag `0x160540` (set by the Gemlik
@@ -58,6 +98,36 @@ Weapons / Gadgets pages, which are stubs); `GameStateUpdate` creates class 0x509
 (Novalis registry unchanged; per-level ports and externals), `rc-game/tests/gemlik_generalisation.rs` (menus on 13 and
 all levels, body pieces, `gemlik_content_gap` report), `rc-game/tests/all_levels_smoke.rs` (19 levels: load, spawn,
 load pass, N ticks of the full tick with a scripted pad; Gemlik 3,000 ticks).
+
+## Common classes pass (2026-09-28)
+
+The classes the Gemlik pass listed as unported on many levels, each read from the decomp (addresses per class below)
+and ported once, registered in `classes::LevelPorts` (the level's `lvl.vtbl` entry against the reference function,
+`Relocation`); every level listed runs the **same code** (one group per class, masked-word compare), and every `$gp`
+constant those functions load has the same value on each level copy (checked per copy). Standard `f32`.
+
+| class | what | update (reference) | levels | port |
+|---|---|---|---|---|
+| 605 | buried bolt cache: the Metal Detector's target (hidden; offers itself as the nearest cache 0x141390..98; the dug count per cache is a nibble of save chunk 3008 `0x14bf10 + level·16`); the HUD alert frame `HudBoltAlertShow` 0x227d90 | L01 0x2f2eb8 | 1–18 (358) | `buried_bolts` |
+| 832 | Visibomb range limiter: out of its 20 areas the missile (class 172, hero state 0x1d) gets static (draw 0x302438) and, after 90 ticks, its flight ends (0x2cb788) | L01 0x302648 | 1–15, 18 (16) | `rc_range` |
+| 604 | the Sonic Summoner's "house": an 8-state open / close anim on the mouse's commands (+0xbc), turns to face Ratchet | L01 0x2f2b68 | 1–6, 8, 11, 12, 14 (10) | `mouse` |
+| 1818 | the Sonic Summoner's "mouse" (the object's own strings): with head item 5 worn (`0x1404a8` is item slot 2's id, not the hand) and Ratchet in its cuboid with a clear line from the house, it is summoned (Ratchet held in state 0x1f), runs out, flies 1.1 left / 2 up of him shooting creatures (class type +0x46 = 5; search 0x30d308; shot class 1633 0x30c9a8) for 90 s or 100 shots, vanishes in type-53 sparks and goes home | L01 0x30df40 | same 10 (10) | `mouse` |
+| 258 | activation zone: when the probe (Ratchet, or the camera with +0x7e) enters / leaves its sphere / path / 6 cuboids, sets update / draw / collision of 12 moby groups and 11 mobys (rules +0x7c / +0x7d / +0x7f) | **L05** 0x2f5200 | 5, 7, 9, 10, 12–15, 17 (50) | `activation_zone` |
+| 830 | floor switch: pulsing plate; stood on → green, sound, killed / collected bytes, clears the w of its path's points equal to its key | **L05** 0x30c5b0 | 5, 11, 15, 17, 18 (30) | `floor_switch` |
+
+Other classes unported on 5+ levels: **615** (7 levels, 19 instances, L02 0x2d8ad0, 520 words): the Trespasser lock
+(item 26 in hand while standing on it → camera script, hold 0x72, the puzzle); a minigame, not the same pattern.
+**341** (5 levels, 17, L05 0x2f8080): the Hydrodisplacer pads (anim driven by a linked moby's +0xbc bits; +0xbc = 1
+while Ratchet stands on it holding item 22; glow tween): water machinery, left to the water port.
+
+Seams: `ClassInfo::ty` (class +0x46) filled by `scheduler::class_info`; `Services::{buried, mouse}`;
+`TalkGame::metal_detector_bits` (synced from `GameState` in `Interact::sync_game`); `Scheduler::tick` calls the alert
+frame after the moby pass. Not ported (counted in `Services::unported`): the HUD element 7 itself, the Metal
+Detector's probe point and dig, the static overlay, the mouse's glow sprites (0x30de68), jet particles (type 74),
+blob shadow and the Summoner moby's summon state.
+
+Tests: unit tests in each module; `rc-game/tests/common_classes_levels.rs` (every class resolves on exactly its
+levels; headless behaviour on two levels each); `all_levels_smoke` prints the drop in unported instances.
 
 ## Background: what moves between levels
 

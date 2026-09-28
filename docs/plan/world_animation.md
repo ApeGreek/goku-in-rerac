@@ -255,7 +255,30 @@ Drips (787) and zone-5 mist particles consume their random draws but are not spa
 are not hooked (no hero in water). (Since 2026-09-27: 760 is the fire fields, drawn; the zone-5 spray spawns its
 particles.) Formerly: 760 foam/mist is not drawn (quad geometry and element timers still
 untraced; `rc_game::water::foam_*_tick` hold the two scroll rules), 1848 not ported. Other levels' ripple
-modules (05/07/11/12/13) and strip tables: not surveyed; the per-level address tables are Novalis-only.
+modules: see §3.2.
+
+### 3.2 Other levels' water (2026-09-28)
+
+The ripple module is on 01, 05, 07, 11, 12 and 13; the strip module only on 01. On 05 / 07 / 11 / 12 / 13 the manager
+is a patch template: every placed moby owns one patch (`pvar` index), writes its z as the patch's water level (+0x08)
+every tick, sets the patch's mask (+0x1e) from `FUN_00275690(48 or 64, moby)` (its bounding sphere in view: the
+patch is simulated and drawn only then; 12 also requires the camera in a cuboid), and drops `randi(200) == 0` ripples
+(r 1, additive, amp −0.05; 11: −0.03); the moby of patch 0 runs `RipplePatchesInit` + the constants + light + bounds
+(+ on 07 / 13 two drops per patch), links the patches by position (16-unit neighbours; 05 has an older linker that
+only fills the edge and two corner slots), and every tick the clock and the draw callback `FUN_002b91c8(table, n)`.
+11 / 12 build their patches from the mobys (centre = moby, FX 0x38/0x39 on 11, `pvar+0 / +4 + 0x28` on 12, FIX
+0x1c / 0x44, mask 0xffff) and double the moby scale (the collision covers the 16×16 patch). The water the hero swims
+in is these mobys' collision (surface-0 faces at the moby z). The movements: 05 group commands spring the level
+between pvar +4 and +0 (4.5 up), the flood (button class 0x33e) rises in six timed stages to 44 (slower after each
+drowning); 07 group commands move ±4 u/s, a cuboid trigger then rises 0.32 and 0.42 u/s to 54; 11 the tide springs
+between 132.36 and 137; 12 +5 per command, and Ratchet's water level is the moby's z within 8 in x or y; 13 swings
+between pvar +0 and +4 by cos. 05's class 982 sets the flat plane `0x1612dc..ec` (centre = Ratchet, z 59.5 ±
+0.25·sin, radius 48) and the dive lock `0x13f52e = 5` while Ratchet is in its cuboid.
+
+Port: `rc_game::water::managers` (the ports, native `f32`; the module stays on its PS2-float port),
+`rc_game::water::world` (`LevelWaterData` found by code identity, `WaterWorld` in `Services::water`),
+`rc-engine` `water_render.rs` draws the module of any level. Level generalisation: docs/plan/level_generalisation.md
+"Water on every level".
 
 ## 4. Reflective overlay (1848), confidence high
 

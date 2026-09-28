@@ -37,12 +37,19 @@
 //! | 1134 (gold bolts; every level with one) | 0x307ca0 `GoldBoltUpdate` | [`gold_bolt`] |
 //! | 750 (infobots; levels 0, 1, 3–8, 10, 12–15, 17) | 0x2fbf80 `InfobotUpdate` | [`infobot`] |
 //! | 179 (the Pyrocitor's pilot flame; created by the hand item) | 0x2d1068 | [`pyro_glow`] |
+//! | 605 (buried bolt caches, the Metal Detector's targets; levels 1–18) | 0x2f2eb8 | [`buried_bolts`] |
+//! | 832 (Visibomb range limiters; levels 1–15, 18) | 0x302648 | [`rc_range`] |
+//! | 604 / 1818 / 1633 (the Sonic Summoner's house, "mouse" and its shot; levels 1–6, 8, 11, 12, 14) | 0x2f2b68, 0x30df40, 0x30c9a8 | [`mouse`] |
+//! | 258 (activation zones; levels 5, 7, 9, 10, 12–15, 17) | level05 0x2f5200 | [`activation_zone`] |
+//! | 830 (floor switches; levels 5, 11, 15, 17, 18) | level05 0x30c5b0 | [`floor_switch`] |
 
+pub mod activation_zone;
 pub mod amoeboid;
 pub mod bolt;
 pub mod bolt_crank;
 pub mod bomb;
 pub mod bomb_water;
+pub mod buried_bolts;
 pub mod breakables;
 pub mod camera_trigger;
 pub mod checkpoint;
@@ -56,6 +63,7 @@ pub mod enemy_spawner;
 pub mod flow;
 pub mod flyer;
 pub mod fire_field;
+pub mod floor_switch;
 pub mod gold_bolt;
 pub mod grass;
 pub mod hinged_bridge;
@@ -63,11 +71,13 @@ pub mod infobot;
 pub mod gunship;
 pub mod item_offer;
 pub mod mission_npc;
+pub mod mouse;
 pub mod path_enemy;
 pub mod path_platform;
 pub mod pickup;
 pub mod props;
 pub mod pyro_glow;
+pub mod rc_range;
 pub mod splash;
 pub mod swing_target;
 pub mod talking_npc;
@@ -134,12 +144,21 @@ pub enum ClassUpdate {
     GoldBolt,
     Infobot,
     PyroGlow,
+    BuriedBolts,
+    RcRange,
+    MouseHouse,
+    Mouse,
+    MouseShot,
+    ActivationZone,
+    FloorSwitch,
     /// A copy of the break template: `breakables::RECIPES[i]`.
     Breakable(u8),
+    /// A water class: `crate::water::managers::PORTS[i]` (the ripple managers, the water plane).
+    Water(u8),
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 54] = [
+    pub const ALL: [ClassUpdate; 61] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -194,6 +213,13 @@ impl ClassUpdate {
         ClassUpdate::GoldBolt,
         ClassUpdate::Infobot,
         ClassUpdate::PyroGlow,
+        ClassUpdate::BuriedBolts,
+        ClassUpdate::RcRange,
+        ClassUpdate::MouseHouse,
+        ClassUpdate::Mouse,
+        ClassUpdate::MouseShot,
+        ClassUpdate::ActivationZone,
+        ClassUpdate::FloorSwitch,
     ];
 
     /// The level01 class-table address of this update.
@@ -253,14 +279,22 @@ impl ClassUpdate {
             ClassUpdate::GoldBolt => gold_bolt::UPDATE_FN,
             ClassUpdate::Infobot => infobot::UPDATE_FN,
             ClassUpdate::PyroGlow => pyro_glow::UPDATE_FN,
+            ClassUpdate::BuriedBolts => buried_bolts::UPDATE_FN,
+            ClassUpdate::RcRange => rc_range::UPDATE_FN,
+            ClassUpdate::MouseHouse => mouse::HOUSE_FN,
+            ClassUpdate::Mouse => mouse::MOUSE_FN,
+            ClassUpdate::MouseShot => mouse::SHOT_FN,
+            ClassUpdate::ActivationZone => activation_zone::UPDATE_FN,
+            ClassUpdate::FloorSwitch => floor_switch::UPDATE_FN,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].func,
+            ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].func,
         }
     }
 
     pub fn from_address(a: u32) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.address() == a) }
 
     /// [`ClassUpdate::ALL`] and every break-template copy (`Breakable(i)`).
-    pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)) }
+    pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)).chain(crate::water::managers::ids().map(ClassUpdate::Water)) }
 
     /// The classes the level01 table maps to this function.
     pub fn classes(self) -> &'static [i16] {
@@ -319,7 +353,15 @@ impl ClassUpdate {
             ClassUpdate::GoldBolt => &gold_bolt::CLASSES,
             ClassUpdate::Infobot => &infobot::CLASSES,
             ClassUpdate::PyroGlow => &pyro_glow::CLASSES,
+            ClassUpdate::BuriedBolts => &buried_bolts::CLASSES,
+            ClassUpdate::RcRange => &rc_range::CLASSES,
+            ClassUpdate::MouseHouse => &mouse::HOUSE_CLASSES,
+            ClassUpdate::Mouse => &mouse::MOUSE_CLASSES,
+            ClassUpdate::MouseShot => &mouse::SHOT_CLASSES,
+            ClassUpdate::ActivationZone => &activation_zone::CLASSES,
+            ClassUpdate::FloorSwitch => &floor_switch::CLASSES,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].classes,
+            ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].classes,
         }
     }
 }
@@ -334,7 +376,10 @@ impl ClassUpdate {
     pub const fn reference_level(self) -> u32 {
         match self {
             ClassUpdate::SwingTarget => 3,
+            ClassUpdate::ActivationZone => activation_zone::REFERENCE_LEVEL,
+            ClassUpdate::FloorSwitch => floor_switch::REFERENCE_LEVEL,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].level,
+            ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].level,
             _ => 1,
         }
     }
@@ -474,7 +519,15 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::GoldBolt => gold_bolt::update(w, id),
         ClassUpdate::Infobot => infobot::update(w, id),
         ClassUpdate::PyroGlow => pyro_glow::update(w, id),
+        ClassUpdate::BuriedBolts => buried_bolts::update(w, id),
+        ClassUpdate::RcRange => rc_range::update(w, id),
+        ClassUpdate::MouseHouse => mouse::house_update(w, id),
+        ClassUpdate::Mouse => mouse::mouse_update(w, id),
+        ClassUpdate::MouseShot => mouse::shot_update(w, id),
+        ClassUpdate::ActivationZone => activation_zone::update(w, id),
+        ClassUpdate::FloorSwitch => floor_switch::update(w, id),
         ClassUpdate::Breakable(i) => breakables::update(w, id, i),
+        ClassUpdate::Water(i) => crate::water::managers::update(w, id, i),
     }
 }
 
@@ -484,5 +537,5 @@ pub fn needs_joint_lists(o_class: i16) -> bool { for_class(o_class).is_some_and(
 
 impl ClassUpdate {
     /// The ports whose update reads joint points ([`needs_joint_lists`] by port, for [`LevelPorts`]).
-    pub fn needs_joint_lists(self) -> bool { matches!(self, ClassUpdate::Flyer | ClassUpdate::PathEnemy | ClassUpdate::Gunship | ClassUpdate::GoldBolt) }
+    pub fn needs_joint_lists(self) -> bool { matches!(self, ClassUpdate::Flyer | ClassUpdate::PathEnemy | ClassUpdate::Gunship | ClassUpdate::GoldBolt | ClassUpdate::Mouse) }
 }

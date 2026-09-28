@@ -48,7 +48,7 @@ impl Sim {
         let it = r.hero.items.slot.item.as_mut().unwrap();
         let p = r.hero.pos;
         it.position = [p[0].to_f32() + 0.3, p[1].to_f32(), p[2].to_f32() + 1.0];
-        let mut c = Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng };
+        let mut c = Ctx { env: &env, anim: &mut r.anim, rng: &mut r.rng, voice: None };
         item_update(&mut r.hero, &mut c, &self.data);
         r.log.push((r.hero.state, r.hero.timer, r.hero.position()));
         t

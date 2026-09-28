@@ -240,6 +240,8 @@ pub struct ClassInfo {
     pub glow: Option<u32>,
     /// +0x44 mode bits.
     pub mode_bits: u16,
+    /// +0x46 the class type byte (5: a creature the mouse 1818's search shoots at, `classes::mouse::search`).
+    pub ty: u8,
     /// +0x48 sequence 0 header: frame count (+0x10) and bit 7 of the loop-sound byte (+0x11). (+0x0c = sequence count.)
     pub seq0: Option<Seq0Info>,
 }

@@ -288,7 +288,8 @@ the capsule (L00 0x2133a8). Findings: the Grind Boots **are** tested (0x13d4dd) 
 contact only exists on levels 0, 4, 6, 7, 8, 9, 10, 13, 14, 16, 17, 18 and on 6 / 0xe / 0x10 only near fixed mount
 points (the rail starts); the cable contact on 0, 3, 4, 7, 9, 10, 13, 17 (Kerwan's three 2-point grind paths are
 cables); the rails' own collision is a pit surface (0xc) just under the spline; 0x13f658 needs the feet item
-moby (0x140430, item slot 2) to be the Magneboots (class 0xad; the port reads the ownership, **L**); SetState(2) with
+moby (0x140430, item slot **1**) to be the Magneboots (class 0xad; since 2026-09-28 the port tests the feet slot,
+`Hero::magneboots_on`, which the automatic swap fills: docs/plan/gadgets.md); SetState(2) with
 0x13f658 = 1 becomes 0x3f (walk.rs); idle and stop take 0x28 on the rail contact (ground.rs). The grind hit
 0x13f90e is `damage::Damage::grind_hit`. Tests: `boots::tests` (11), `spline::tests` (5),
 `tests/hero_boots_grind.rs` (every level's 37 grind paths; Oltanis 14: grind, grind jump, rail switch 2 → 3;
@@ -376,13 +377,62 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
 - **Not done**: the Thruster flames (class 0xa7 mobys `0x2c9da0`: need the moby-creation path from the hero and the
   class's update), the Thruster jumps' after-images `0x277428` (ghost draws of Ratchet's pose 2 / 4 / 6 frames back:
   need a pose history in the moby renderer), the pad vibration `0x248920`, the burn fire `0x209ec8` (type 4
-  unported), bubbles at Ratchet's joint points (`0x22b140` modes 1 / 2, 0x82 / 0x6a: need his joint lists in the hero
-  update), the surface wake `0x22ac40` (type 45 flat quads: renderer kind 1), the Hydro-Pack jets, the crouch slide's
+  unported), the crouch slide's
   voice 0xc and 0x77's voice 0x17, the wrench hit sound's index 1 (`FUN_002bda88` reads a pointer record from the hit
   moby's pvars).
 - Tests: `follow_camera::tests::shake_envelope`, `hero::fx::tests` (3), `particles::type25::tests` (2), `type34`,
   `type47`, `type60`, `audio::tests::gadget_class_sounds_on_every_level`; `packs::tests` (stomp request), `boots::tests`
   (sparks queued, the grind wrench's hit). The `novalis_hero_digest` guard is byte-identical.
+
+### Swim effects (the hero's water effects)
+**Done (2026-09-28).** The user's report: no splash jumping in, getting out or walking in ankle-deep water. Root cause:
+the particle types and the splash moby existed, but no hero code called them (the swim code recorded
+`SwimEvent::Splash`, which nothing consumed; the wake, rings, spray, joint bubbles and breath had no port). Now every
+call site of the water helpers in the hero code (level01, disassembly; helpers and their draws: particles.md "The hero's
+water effects") runs at its point, in its order, with its draws:
+
+| where (level01) | condition | call | port |
+|---|---|---|---|
+| SetState 0x37, 0x23d654 | from under water (group 0x11) | `0x22b3a8(3, 10, 0)`, ripple (0.4, 0.3) | `swim_entry` |
+| SetState 0x37, 0x23d6f0 | from above, disp.z < −0.5·dt | `0x22b3a8(3, min(trunc(300·|dz|), 40), 1)`, ripple (0.5, −0.4), countdown 0x13fc5a = 75 | `swim_entry` |
+| water entry 0x2408e8 | after SetState(0x37) | voice 3 | `water_entry_check` (at the call point) |
+| SetState 0x33 / 0x35 | from the surface | voice 3 (before the SetAnim) | `swim_entry` |
+| jump entry 0x23e890 | state ≠ 0x12, in water 0x140634, z < W + 0.5 | `0x22b3a8(3, 16, 0)` | `jump_block_defaults` |
+| jump transitions 0x24621c | past the take-off / curve window, 0x13f648 == 1 (first tick under the level) | voice 0x11, `0x22b3a8(3, 24, 1)` | `tr_jump` |
+| physics 0x12, 0x23b5bc / 0x23b644 | tick 20 / frame in [4, 7] | `0x22b3a8(3, 16, 1)` + ripple (0.4, 0.35) / `0x22b140(7, 0)` | `effects::water_jump` |
+| physics 0x33..0x35, 0x23790c.. | 0x35 / else | loop 0x236798(5, 0x13) / release slot 5 | `phys_underwater` |
+| | countdown 0x13fc5a | FastDecTimer, `0x22b140(min(t/4, 8), 0)` | |
+| | 0x33, not blending, frame in (0, 10) | `0x22b140(4, 1)` | |
+| | 0x34 after 0x35, timer < 15 | `0x22b140((20 − t)/3 + 1, 1)` | |
+| | dive-in tick 1 | `0x22b3a8(3, 16, 0)`, ripple (0.4, −0.3), countdown 70 | |
+| | after the target speed | breath 0x13fc40 (`randi(100) < 40` → 4..11 else 40..90 ticks) | `effects::breath_underwater` |
+| | 0x35 | jets 0x13fc48 | `effects::jets` |
+| physics 0x36 / 0x37, 0x238a24.. | 0x37 / |eff.xy| > 1.5·dt / 0x36 and > dt | `0x22ac40(15, 30)` / `0x22af48(4, 12)` / `0x22ad38(0, 1)` | `phys_surface` |
+| | countdown | t − 1, `0x22b140(min(t/8, 6), 0)` | |
+| | 0x36, not blending, frame in (0, 10), after the velocity | `0x22b140(4, 1)` | |
+| physics 0x6a / 0x82, 0x238934 | 0x13fc40 runs out | breath; next in 2..5 + t/5 (t < 40) or 10..20 (t > 70) | `effects::breath_drowning` |
+| physics 0x75, 0x2387bc | always | `0x22ac40(15, 30)` | `damage::physics` |
+| physics 0x76 | always | `0x22b140(min(10 − t/3, 8), 0)` | (ported before) |
+| physics ground cases, 0x23714c | wading flag 0x1413f9 | `0x22ac40(15, 30)` | `effects::physics_prologue` |
+| physics 2 / 0x73, 0x23a2e4 | wading, or in water under 0.25 deep | |eff.xy| > dt: `0x22ad38(0, 2)`; > 0.5·dt: `0x22af48(2, 4)`; `0x22b140(5, 2)` | `effects::physics_prologue` |
+| physics 0x31 (sinking floor) | level ≠ 15 | `0x22b140(4, 2)` before the sand | `surface::sinking_floor` |
+
+**Sounds.** Voices from SetState and the transitions play at their call points (`states::Ctx::voice`, which the hero
+update fills with `HeroSounds::voice`), so a voice's own draws come before the splash draws after it
+(`SwimEvent::Played` records them). Water footsteps: the ground probe's footstep class 3 on levels 1 / 0x12 (ported
+before) plays through the walk keys (level def 16 when wading on Novalis: engine trace); the wade sequence 0x60 has no
+keyed footsteps in `FUN_00227e90` (as in the game).
+
+**General pieces.** `hero::fx::joint_point` (any of Ratchet's joint lists, his pose now and his moby as the last
+write-back left it; `joint_world_point` is `World::joint_point`'s formula), `hero::fx::pack_point` (the back pack's
+lists, placed by `fx::end` = `HeroItemsAttach`'s list-5 attach), `hero::fx::reserve` (a queued spawner's draws made at
+the call), `MobySpawn` + `fx::create_mobys` (a moby the hero code creates, made by the tick after the hero update),
+`type45::HERO_WATER_LEVEL` (the level pointer of rings 45 / 46). The engine hands Ratchet's and the packs' joint lists
+over (`Hero::set_joint_chains`, `set_pack_joint_lists`).
+
+**Guard.** `novalis_hero_digest`: the `moves` run is byte-identical; the two lake runs are identical up to tick 519 and
+differ from tick 520 on, the first tick Ratchet walks into the lake's ankle-deep edge (depth 0.12: the walk case's
+bubbles draw from the stream). The new fields are filtered while 0 / empty.
 
 ### Weapons + first person
 **Done (2026-09-26).**

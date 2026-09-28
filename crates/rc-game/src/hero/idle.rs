@@ -169,12 +169,16 @@ pub mod joint {
     pub const REC2: usize = 2;
     /// Record 3 (list 4): the head look (0x17ad54 / 0x17ad58 = its y / z angles); the lean's x, y, z.
     pub const HEAD: usize = 3;
+    /// Records 4 / 5 (lists 22 / 23): Ratchet's feet; scale 0.01 every tick a feet item is worn (`0x22c5c0`: the
+    /// boots replace his feet). Their angles (the slope foot IK of `0x22c5c0`) are not ported.
+    pub const FOOT_L: usize = 4;
+    pub const FOOT_R: usize = 5;
     /// Record 12 (list 21): follows the head look (/2.8, ×0.25).
-    pub const REC12: usize = 4;
+    pub const REC12: usize = 6;
     /// Records 13..16 (lists 25..28): the idle secondaries; the lean's y / z.
-    pub const SECONDARY: usize = 5;
+    pub const SECONDARY: usize = 7;
     /// Record 17 (list 24): scale from 0x15ee14.
-    pub const REC17: usize = 9;
+    pub const REC17: usize = 11;
 }
 
 /// A node of Ratchet's joint-modifier list (moby `+0x64`) in the order the game links them (`AttachManipulator`
@@ -254,8 +258,8 @@ pub struct Idle {
     pub clank_fidget_timer: i32,
     /// 0x15ee14: record 17's scale source (approaches 0.92 by ≤ 0.05 per tick).
     pub rec17_scale: f32,
-    /// Records 0..3, 12..17 of the joint block 0x17ab00.
-    pub joints: [JointRec; 10],
+    /// Records 0..5, 12..17 of the joint block 0x17ab00.
+    pub joints: [JointRec; 12],
     /// Ratchet's joint-modifier list (moby `+0x64`), head first: the attached joint records and eyelid nodes.
     pub manips: Vec<Manip>,
 }
@@ -292,6 +296,8 @@ impl Idle {
                 JointRec::new(1, 10, 0x3c03_126f, 0x3e99_999a),
                 JointRec::new(2, 11, 0, 0),
                 JointRec::new(3, 4, 0x3be5_6042, 0x3e99_999a),
+                JointRec::new(4, 22, 0x3dcc_cccd, 0x3e99_999a),
+                JointRec::new(5, 23, 0x3dcc_cccd, 0x3e99_999a),
                 JointRec::new(12, 21, 0x3df5_c28f, 0x3e99_999a),
                 JointRec::new(13, 25, 0x3c75_c28f, 0x3e99_999a),
                 JointRec::new(14, 26, 0x3c75_c28f, 0x3e99_999a),
@@ -675,7 +681,7 @@ impl Hero {
     /// item; the glide 8 with the Hydro-Pack saved requests the Heli-Pack. Then the slots' common swap
     /// ([`Hero::slot_swap`]).
     fn back_swap(&mut self, rng: &mut Rng) {
-        let water = matches!(self.group, 0x11 | 0x12) || matches!(self.state, 0x6a | 0x82 | 0x75 | 0x76);
+        let water = self.in_water_groups();
         let hydro = self.owned.has(super::swim::ITEM_HYDRO_PACK);
         let s = &mut self.back_slot.slot;
         let mut keep_unsaved = None;
@@ -690,8 +696,8 @@ impl Hero {
         if !s.swap_requests(keep_unsaved) { return; }
         // Slot 3's part of the swap: 0x15ed94 from the item being put away; the pack plays its put-away
         // (sequence 2, 2 ticks); Clank is not blended.
+        self.slot_swap_effects(rng);
         self.back_slot.thruster_last = (self.back_slot.slot.id == 3) as i32;
-        self.clear_look_and_rearm(rng);
         if let Some(b) = self.back.as_mut() {
             b.blend_pack(2, 0, 2);
             b.state = 3;
@@ -699,12 +705,17 @@ impl Hero {
         self.back_slot.slot.state = 3;
     }
 
-    /// The swap's `FUN_0022b8e8` (head look and idle secondaries cleared) and the fidget timer 0x140360 =
-    /// `rand_range(50, 90)`.
-    fn clear_look_and_rearm(&mut self, rng: &mut Rng) {
+    /// What every slot's swap does besides its own slot (`UpdateWrenchSelected` 0x2307e0 when a swap starts):
+    /// `FUN_0022b8e8` (head look and idle secondaries cleared), the fidget timer 0x140360 = `rand_range(50, 90)`,
+    /// and a raised weapon put away (`0x1413f8` set → `0x22efd8`, `super::weapons::put_away`).
+    pub(super) fn slot_swap_effects(&mut self, rng: &mut Rng) {
         self.idle.clear_look();
         self.fidget_timer = rng.rand_range(ticks(50), ticks(90));
+        super::weapons::put_away(self);
     }
+
+    /// `FUN_0022dea8`: in the water groups 0x11 / 0x12 or the states 0x6a / 0x82 / 0x76 / 0x75.
+    pub(super) fn in_water_groups(&self) -> bool { matches!(self.group, 0x11 | 0x12) || matches!(self.state, 0x6a | 0x82 | 0x75 | 0x76) }
 
     // --------------------------------------------------------------------------------------------
     // The idle transitions (0x242930 state 0, the part before StickTarget).
@@ -830,6 +841,11 @@ impl Hero {
     /// `0x22b928`, `0x22bdd0`, `0x227590`, `0x2278c0` and the joint springs `0x2273d0`, in the hero update's
     /// order (`seq_b` = Ratchet's sequence B after the transitions; `counter` = 0x15f5cc).
     pub(super) fn idle_updates(&mut self, seq_b: u8, counter: i32, rng: &mut Rng) {
+        // 0x22c5c0 (out of the water): with a feet item moby (0x140430) Ratchet's feet records 4 / 5 get scale 0.01
+        // this tick, so the boots replace his feet (its slope foot IK is not ported).
+        if !self.in_water_groups() && self.feet_slot.state != 0 {
+            for k in [joint::FOOT_L, joint::FOOT_R] { self.idle.joints[k].scale = f(0x3c23_d70a); }
+        }
         self.head_look(seq_b, rng);
         self.idle_secondaries(seq_b, rng);
         self.blink_update(seq_b, counter, rng);
@@ -857,10 +873,10 @@ impl Hero {
         let (state, substate, group) = (self.state, self.substate, self.group);
         let (speed, disp, yaw) = (self.eff_len_xy.to_f32(), self.disp, self.rot[2].to_f32());
         let j = &mut self.idle.joints;
-        let springs = |j: &mut [JointRec; 10], kd: [(u32, u32); 4]| {
+        let springs = |j: &mut [JointRec; 12], kd: [(u32, u32); 4]| {
             for (i, (k, d)) in [REC0, NECK, REC2, HEAD].into_iter().zip(kd) { (j[i].k, j[i].d) = (f(k), f(d)); }
         };
-        let body = |j: &mut [JointRec; 10], z13: f32, z14: f32| {
+        let body = |j: &mut [JointRec; 12], z13: f32, z14: f32| {
             j[SECONDARY].target[2] = z13;
             for k in 1..4 { j[SECONDARY + k].target[2] = z14; }
         };
@@ -1336,7 +1352,7 @@ mod tests {
         let mut t = Idler::new(1, 150);
         let (cam_rows, cam_yaw) = cam_x();
         let env = Env { coll: &t.coll, pad: &t.pad, cam_yaw, cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
-        let mut c = super::super::states::Ctx { env: &env, anim: &mut t.anim, rng: &mut t.rng };
+        let mut c = super::super::states::Ctx { env: &env, anim: &mut t.anim, rng: &mut t.rng, voice: None };
         t.hero.idle.look_yaw = 0.5;
         t.hero.set_state(&mut c, 0, true);
         assert_eq!(t.hero.idle.blink_period, 0x68);

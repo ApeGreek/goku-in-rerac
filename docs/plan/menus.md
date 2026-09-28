@@ -483,7 +483,8 @@ Help/tutorial boxes: hud_text.md §3.4 (`Help_Update` 0x225bd0). They run inside
 
 * Navy rect vs 3D frame order (whether `fun_00200e08` shares the moby chain); widget-texture clear (0x251838) arguments; the other
   mobys `MobyUpdateLoop` ticks in mode 3 (the list is not filtered to the frame mobys).
-* Weapons/Gadgets/Items/Help/Goodies internals only catalogued; meaning of `0x1413f4 == 1`; Goodies flags 0x15eea0 / 0x15ee20; the lost x anchor of
+* The Gadgets page (and the Weapons page's grids / name label / 3D Ratchet) is ported: docs/plan/gadgets.md §3. The
+  rest of Weapons, Items/Help/Goodies internals only catalogued; meaning of `0x1413f4 == 1`; Goodies flags 0x15eea0 / 0x15ee20; the lost x anchor of
   the planet list sub-label; scroll u unit in 0x2252d0; whether 59802 frame 14 is HUD texture 235; `0x15f650` = 17 (overlay) vs 11 (report).
 * Quick select: HUD/hero update order per tick; PS2 truncation of `(int)(74·fast_cos·1.05)`; meanings of 0x1413f4/f7/fc, 0x13f502, 0x15f594;
   readers of 0x15fa94/98/9c; the NTSC pause-menu writer of 0x141ea0; entry field +4; equip sound; the wrench (item 8, icon 0) is an empty slot.

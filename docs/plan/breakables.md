@@ -97,8 +97,14 @@ tables sit on it: posed with the class's own sequences, the 531 / 533 glass lies
 units (530's cockpit is open: its rim matches the hatch outline). `SceneActorState::joint_matrix` now takes the
 list (the infobot thrusters' `0x264508(m, 0, M)` too). The normal goes through the full matrix with w = 1 (the
 translation is added), then is scaled to 0.1: kept. Not modelled: the ST cross-fade outside scenes, FX 1 in mode 6.
-Open: in the port the scene actors Ratchet and Clank draw in front of the glass at frames 104–116 of scene 5,
-while PCSX2 (images 27 / 28) shows them behind it; the hatch and the glass outline match.
+**Draw time, not tick time.** The callback computes `MobyAttachToJoint` when it draws, after `CutsceneModeUpdate`
+wrote the frame's actor poses; the moby loop that registers it sees the previous pose. The port first took the
+matrix at registration, so the glass trailed the ship by a tick (≈ 1.4 units in scene 5 as the ship flies at the
+camera): far away it still looked seated, close up it fell behind the cockpit and the crew ("snaps behind them",
+user images 48–50). `fx_draw` now evaluates the matrix at draw time from the pose the actor is drawn with
+(`scene_render::drawn_actor`), falling back to the registration's matrix for a moby that is not a scene actor.
+Scene 5 frames 74 / 100 / 108 / 116 now show the tinted dome over Ratchet and Clank as in PCSX2 27 / 28; scene 4's
+courier ship 531 (frame 1200) is unchanged. Scratch `breakables/cmp_canopy_snap.png`.
 
 **Infobot screen** (`images/46.webp`): the port's screen during scene 1 (frame 3291) is black with the same faint
 edge highlight (bottom right); no change.

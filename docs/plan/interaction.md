@@ -188,20 +188,19 @@ overlay bytes (it is not a function in the Ghidra project).
   (Novalis headless: prompt → △ → mode 5 → ✕ ✕ buys the Pyrocitor → △ → back, bolts 5000 → 2500, owned, quick
   select [10, 16], stock byte 0x50; determinism).
 
-**Port choices / not ported** (each is a visible difference):
-* The vendor's screens are 2D panels at fixed places (`vendor::layout`), black at alpha 0x60, instead of textures on
-  the monitor joints; the item model is replaced by its HUD icon; no salesman video, hologram (created but kept hidden:
-  its glass draw and cone 0x2ba9c0 are not ported), frame mobys, weapon demo scenes or PDA remote vendor.
-* The world does not update during the 40-frame fly-in and leave (the game runs the moby loop and particles there);
-  the vendor's own animation (seq 3 open, seq 4 close) is not advanced in mode 5, so the box stays closed.
-* The camera cuts to the vendor's front after the open's fade (the game's `CameraScript` / `CameraScript2(2)` blend
-  back is a cut here).
+**Port choices / not ported**: superseded by the vendor rebuild (§10); the 2D-panel vendor described here before
+2026-09-28 is gone.
 * The scene-end `HeroTeleport` of a talker (`FUN_002783a8`) is applied through the hero-write channel by
   crate::scene_render; with `RC_SCENE` set its scene requests are dropped (a talker then waits in state 2).
 * The prompt's race best-time lines (levels 5 / 16), the ship's and teleporter's prompts (their classes are not
   ported), `PromptRelease` users.
 
 ## 7. Engine check (Novalis)
+
+(2026-09-28, the rebuild of §10: frame 100 △, frame 104 substate 0, frame 144 the screens (sound 4), frame 180 ✕
+(sound 0), frame 200 ✕, frame 215 the purchase (sound 7), frame 246 the salesman's greeting line (vendor_audio 000),
+△ at 330 → substate 2 at 337 → `VendorExit` at 377 (sound 6), the camera blending back behind Ratchet 3.5 in front
+of the vendor. The older numbers below are the 2D-panel port's.)
 
 `RC_SCENE=0 RC_HERO_AT=168.16,138.03,60,0.9327` (3 units in front of the vendor, facing it), `RC_GIVE_BOLTS=5000`,
 `RC_PLAY_SCRIPT="100-100:press TRIANGLE,180-180:press X,200-200:press X"`: the prompt from frame 8; frame 100 △ →
@@ -230,3 +229,243 @@ dropped. Headless: `crates/rc-game/tests/interaction_vendor.rs`. `novalis_hero_d
 * **The Novalis Infobot** (2026-09-28, hero_gameplay.md §6): after the sale's scene 1 → movie 2 → scene 2 the worker's
   `UnlockPlanet(2)` / `ShowPlanetBanner(2)` reach the game state and the HUD banner through `rc_game::cinematic`
   (engine: the whole chain from △ to the banner, frames 2470 → 4420).
+
+## 9. Vendor, as built (the complete experience, level01) [H unless marked]
+
+Everything the player sees and hears from walking up to a Gadgetron vendor to walking away, read from the code
+(level01.elf addresses; the vendor code is the same in every overlay). Constants at gp = 0x166c00.
+
+### 9.1 Approach (class 11 update 0x2bb128, §4)
+
+* **Idle** (state 1, far): the machine sits closed on **seq 0** (1 frame) and pulses its glow word +0x90 (phase
+  0x1613a4 += 0.05). The hologram child **class 1143** (the Gadgetron logo: 3 joints, 9 normal + 7 chrome packets,
+  class scale 0.0136) was created at init 2.95 above the vendor, draw distance 64, +0x73 = 32; its scale V+0x90
+  is 0 and it is hidden (mode |= 1).
+* **Near** (every 8th tick: XY ≤ 16 and |Δz| ≤ 8 → state 2): **seq 1** (1 frame) blended over 10 ticks, the
+  hologram shown and grown by 0.1 per tick to scale 1 (10 ticks), drawn at `V+0x90 · class scale · 2.5`. Its two
+  manipulators (`AttachManipulator(child, 0/1, V+0x10/+0x50)`) spin its joints about z at +0.01 / −0.01 rad per tick
+  (0x16139c / 0x1613a0, `FUN_00221e38(rec, 2, a)`). The draw callback **0x2ba9c0** (`RegisterDrawCallback2` every tick
+  of states 1 and 2) draws the projector beam under the logo. Leaving (XY > 18 or |Δz| > 10) → state 1, seq 0 (blend
+  10), the logo shrinks 0.1 per tick and hides at 0.
+* **Prompt** (state 2 only): §4's rule → "△ Activate Gadgetron Vendor" (21475, owner 1).
+* **Sounds**: none in states 1 / 2 (the class sound table has 8 entries; all are played by mode 5).
+
+### 9.2 Opening (`OpenVendorMenu` 0x2ae1a0, then `VendorModeUpdate` 0x2b03b8 substate 0)
+
+On the tick △ is pressed with the lease, the class calls `OpenVendorMenu(vendor)` inside the moby loop:
+1. Clears the vendor globals 0x1ca940 (0x220 bytes) and 0x1cab60; the salesman voice index 0x1ca978 = language
+   0x15ed88 − 1 (≥ 0); `sound group pause 0x1d` (`func_0x0012e3e8`), **`music_Pause(0)`**.
+2. The list (`VendorBuildItemList` 0x2adef0), the selection in the middle, the carousel offset; the HUD's **bolt
+   counter** (`queue_animation_update(0x12, …, 9999999)`: slot 2 pinned) and, for an ammo entry, the **ammo slot**
+   (0x30: icon 60000 + item, ammo 0x13d428[item], max records +0xe).
+3. `DAT_0015f5d8 = 1` (the next render is skipped), substate 0, the snapshot / salesman buffers at 0x174284 /
+   0x174288 + 0x60000, **class sound 3** (open), then **`FadeToBlack(4)`**: 4 blocking frames that darken the last
+   image with black at alpha 0x20, 0x40, 0x60, 0x80 (0x21b438); then the full-screen fade 0x15f3fc = 1.0.
+4. Mode 5, hero `SetState(100, 1)` with 0x1413f5 = 1 and `FUN_002486c0` (**Ratchet and his items hidden**),
+   `hard_cut(vendor, 2, 0)`: the vendor jumps to **seq 2** (12 frames: the unfold), speed = 0.5 · 0x15ed60 (1.0 on
+   NTSC) → 24 ticks.
+5. The camera: **`CameraScript(eye, euler, 1, 0, 0)`**: mode 1 = snap, i.e. a **cut** (under the black) to eye =
+   vendor rows · (3.8, 0, 1.5) + vendor position, Euler (0, 0, vendor yaw + π) (level, facing the machine); every
+   mode-5 frame re-sends the same targets (0x316dd0 / 0x316e28).
+6. The vendor light set 14 (0x1806c0 / 0x1806d0) = colour (0.9, 0.9, 0.6), direction vendor rows · (−0.42, −0.7,
+   −0.577), second light off; 4 manipulators on the vendor's joints 0x14..0x17 (0x166300: the arm rotations that
+   lay out the monitors for ≤ 7 entries: ±(7 − n) · 0x681 on two of them).
+
+**Substate 0** (40 frames, `ticks(0x28)`), per frame: **the world runs** — `FUN_002ab920`, `MobyUpdateLoop`,
+`RunLevelCallbacks`, `PatchShrubGifs`, `UpdateParts`, `UpdateAllPointLights`, `IncrementTickCounter` (gated by the
+debug flags 0x16c4e0, all set in play) — but **not the hero and not the camera update**; the fade 0x15f3fc −= 0.34
+(1.0 → 0.66 → 0.32 → 0: black for 3 frames after the 4 fade frames); the vendor's own update is state 3 (hologram
+scale 0) while the moby loop advances its seq 2 unfold; the screens' glass quads (0x2b3700) are registered while the
+timer ≤ 36. At 40: **seq 3** (1 frame: open) blended over 8 at speed 1.0, `0x1ca94c = 1` (snapshot request),
+0x1622a0 = 1 / 0x16229c = 8 (the screens' **power-on**, 8 frames), **class sound 4** (screens on), substate 1.
+`sound_update` runs at the end of every mode-5 frame.
+
+### 9.3 The menu screen (substate 1; render `DrawWorld_Mode5` 0x2b4020)
+
+**Update** (substate 1: no world update, no tick): the vendor's `MobyAnimAdvance`; the first frame after the salesman
+data arrived creates the salesman (below); the spinning mobys (below); the pad (§9.4); `DrawSpriteHelper_C`
+0x2af7e8 (the buy flow); `HudUpdate(1)`; `sound_update`.
+
+**Background.** The first substate-1 render draws the world once with the vendor hidden (+0x34 |= 1) and **grabs the
+frame** (`GrabFrameSnapshot`); every later frame uploads that still image and draws on it, in order: the item
+hologram, the vendor (`DrawMobyList(vendor, 1)`), the hologram cone, the six screens, the popup (while buying), the
+glass quads, the HUD. So the world behind is frozen; the vendor, the hologram, the screens and the HUD animate.
+The same render creates the screen mobys (0x1ca954 + 0x100 = 0x1ca960: +0 and +0x500 class 13, +0x100 / +0x200 /
++0x300 by `FUN_002af3f0` 0x2af3f0) and starts reading the **salesman data** `vendor.bin` (toc 0x198) from disc.
+
+**The screens** (`VendorDrawScreens` 0x2b3130, read from the disassembly: it does not decompile). For screen s =
+0..5 (0 ticker 0x2b1a48, 1 item panel 0x2b1f08, 2 salesman 0x2b1b58, 3 button window 0x2b2430, 4 prompt 0x2b2688,
+5 icon strip 0x2b1c10; jump table 0x20a570):
+1. `MobyGetBoneMatrix(vendor, 3, {4s, 4s+1, 4s+2})` 0x264630: the world positions p0, p1, p2 of three vendor joints
+   (the monitor's corner and its two edges). With the margins m = 0x1ca798[s] (4 floats: s0 (0.01, 0.01, 0.009,
+   0.01), s1 (0.01, 0.03, 0.03, 0.03), s2 (0.03, 0, 0, 0), s3 (0.02, 0.06, 0.04, 0.035), s4 (0.07, 0.05, 0.03,
+   0.03), s5 (0.03, 0.06, 0.02, 0.03)): a = p1 − p0, b = p2 − p0; corner c = p0 + â·m0 + b̂·m1; a = â·(|a| − 2·m2),
+   b = b̂·(|b| − 2·m3).
+2. `FUN_002adc38(c, c + a + b)` projects the corner and the opposite corner with the current camera: the screen
+   rectangle (x, y, W, H) in game pixels (an axis-aligned rectangle: **the screens are drawn flat, facing the
+   camera**, over the monitor's projected extent).
+3. Power-on (0x1622a0, frames 8 − 0x16229c) and power-off (0x162298, frames 0x162294): f = frames / 8; the
+   rectangle shrinks to f of its width and height about its centre (the CRT turning on / off); drawn again with
+   `FUN_002adc38` → (x', y', w', h').
+4. The render target: `fun_00239690(9, 7)` = a 512×128 target in VRAM with **`SetRenderToTextureView(1.0, …, 512,
+   128)`**: the same camera, projection zoom 1.0 (instead of 0.63), centre (256, 64); cleared black
+   (`FUN_00223470` 0..512 × 0..128, colour 0); the screen's draw function; `FUN_002b2cd8(w', h', s)` the static; then
+   the view restored (0x2b3100).
+5. The target's texels (0, 0)..(W − 1, H − 1) are drawn as a sprite on (x', y', w', h') (`DrawBoneQuads` 0x21c018 =
+   the textured-rectangle packet), RGBA 0x80808080, ALPHA 0x64. At rest the copy is 1:1 (the screen content is laid
+   out in screen pixels).
+
+**The static** (`FUN_002b2cd8(w, h, s)`, into the target after the content): per screen a counter 0x1caba0[s]:
+when running (+2 per frame, the ticker's never below 0x18) FX texture **0x1a** (noise) is drawn over (0, 0, w, h)
+at a random texel offset (`randi(200)`, `randi(200)`) with alpha `min(2·(0x80 − clamp(c − 0x80)), 0x80)` (ALPHA
+0x68), until c passes 0xff; an idle screen restarts it with probability 1/700 per frame. Screens 1..5 also roll a
+**scan bar**: FX texture **0x1c** over (0, −(0x200 − c)/32, w, 1.5·(h + 16)), colour 0x505050, alpha ≤ 0x50,
+started with probability 1/360. The popup (screen 6) adds FX **0x19** (64×64 glass) over it.
+
+**Glass quads** (0x2b3700, after the screens): screens 1..5 get a quad in 3D on the same inset corners, FX
+texture **0x19**, RGBA 0x80808080, TEST 0x32003, ALPHA 0x44, UV (0, 0)..(1, 0.984).
+
+**Screen contents** (target pixels, small font unless noted):
+* **Ticker** (0): the LED text 0x2b1838 (`fun_00238310(2.0, text, −scroll, 8)`): HUD icon 0xe935 glyph cells
+  0x1ca598 / advances 0x1ca698, scale 2, 'b' blinks the next glyph; +2 px per frame; when scrolled out, a random line
+  of 0x1ca538[24] (`randi(24)`), 18 leading spaces; black bars at x 0..4 and 226..230.
+* **Item panel** (1): `DrawMobyList(+0x100)` **the item's 3D model** (class = item definition +0x10: the weapon's
+  own model, e.g. Pyrocitor 176, Bomb Glove 192, `0x1df` for item 24) and `DrawMobyList(+0)` (class 13), both lit
+  by light set 14 with ambient 0x202020, drawn with the RTT view; then the name at (6, 8), for ammo "Ammo" (20317)
+  at (24, 24) and the unit price right-aligned at (118, 101); a weapon's price at (118, 101) (grey 0x80808080 and the
+  discounted price at (118, 85) under the discount 0x13d4e3; the PDA strikes the old price with 7 lines).
+  **Placement** (`FUN_002af3f0`, on every selection change): position = vendor rows · ((0, −1.6, 1.5) +
+  0x1c8da0[item]) + vendor position, with +0x1c8dac[item] added to z again for a weapon (twice with the discount);
+  rotation 0x1c8d90[item] (x, y) and z = table + vendor yaw; `fun_00212ed8(m, 0 or 1, 0)` its first frames; +0x194
+  = 0 (no spin). E.g. Pyrocitor (16): offset (−3.4, −2.15, −0.15) + 0.12, rotation (0, −1.57, −3.0).
+* **Salesman** (2): `DrawMobyList(salesman)`: the **class 12 moby** (92 joints, class scale 1/6), a 3D character,
+  **not a video**. Its sequences are not in the level: `vendor.bin` (toc 0x198, WAD-compressed; 16 offsets then the
+  sequences) is read at the menu's first render and relocated into class 12's sequence slots (`FUN_002ade20`); the
+  moby is created when the read is done (`InitMobyInstance(0x1ca954, 12)`), placed at vendor rows · (−0.5, −1.8,
+  0.2) + position, yaw = the vendor's, lit like the item. Its behaviour (`FUN_002aee20`, `FUN_002af248`): a greeting
+  on creation (a random set k = `randi(2)`, voice stream 10000 + 18k + v, v = language − 1, seq 1 then seq 3k+4 when
+  the stream is ready, the voice started at a set frame of the talk sequence), idle seq 2 / 3 / 0 cycling every 600
+  frames with an idle line (10000 + 6(3k+1) + v, seq 3k+5), a line on a cursor move (1 in 4, at most every 360
+  frames: 10000 + 6(3k+2) + v, seq 3k+6); the voices are the 36 VAGs of `vendor_audio` (toc 0x1a0). [M: the stream
+  id → file mapping is id − 10000.]
+* **Button window** (3): "✕ Buy" 21044 / "△ Back" 21043 / "✕ Yes" per the buy flow, centred in the rectangle
+  (`font_print_window_small`, [M] exact layout).
+* **Prompt** (4): "△ Exit" 20192 / "△ No" 21067 centred at (40, 20).
+* **Icon strip** (5): the 48×48 icons at x = 12 + 56·i, y 6 (ammo icon frame 2, weapon frame 0), the selection box
+  pulsing `((t & 15)·4 − 32 clamped) + 0x40`; ≥ 8 entries: the carousel.
+* **Price and bolt icon**: the price is the item panel's text; the bolt icon beside it is the HUD's bolt counter
+  (slot 2, pinned) [M: the screenshot's small bolt next to "1" on the panel is part of the panel art or the HUD].
+
+**The item hologram** (above the pad, drawn before the vendor): an ammo entry with a class in 0x1c94a0[item]
+(e.g. Pyrocitor ammo → class **214**, the canister; Bomb Glove ammo → 226) draws **+0x200** at vendor rows ·
+((−1.0, 0.05, 1.3) + (0, 0, sin(φ)/20) + 0x1c9490[item]) + position, rotation (0x1c9480[item].xy, φ); a weapon
+draws **+0x300** (the item's class) at the same base + 0x1c9dd0[item] with rotation (0x1c9dc0[item].xy, φ), then
+shifted by 0x1c9db0[item] rotated by its own matrix. φ = 0x1622a4 += 0.05 per frame (the spin), sin(φ)/20 the bob.
++0x300 gets +0x334 |= 0x100 [M: the hologram draw style]. Light set 14, ambient 0x202020.
+**The cone** (`VendorDrawHologramCone` 0x2b3cc8): 4 quads over 9 vertices 0x1ca800 (vendor space: x 0; y ±0.6 / ±0.2
+/ ±0.05 at z 1.6 / 0.9..1.0 / 0.67), UVs 0x1ca890 (a 3×3 grid) with V + 0x161184 (+0.01 per frame, wrapped at 1), vertex
+alpha 0x10 at the top row and 0x60 below (RGB 0x80), FX texture 0x18, ALPHA 0x4000000044 (additive) [M: texture and
+blend from menus.md §4].
+**The spinning class-13 mobys** +0 / +0x500 at (−10.2, −4.25, 0) / (−9.5, −5.85, 0.85) in vendor space, x rotation
+−0.05 per frame, y −0.36, z +0.05: +0 is drawn in the item panel's target (the backdrop behind the item).
+
+### 9.4 Input and sounds (class 11 sound table, `PlayClassSound(n, 0, vendor)`)
+
+| sound | when |
+|---|---|
+| 3 open | `OpenVendorMenu` (the △ tick) |
+| 4 screens on | substate 0 → 1 (frame 40) |
+| 1 cursor | Left / Right edge that moves the selection (`0x13cb04` against the last frame's `gp−0x4950`); in the quantity popup each step (auto-repeat: held > 15 frames every 8th, > 47 every frame; the sound on every 4th repeat) |
+| 0 select | ✕ on an entry (buy flow 1), a cancel (△ in the popup), a failed purchase |
+| 2 denied | the popup opens on an entry that cannot be bought (maxed out / can't afford) |
+| 7 purchase | a purchase (ammo or weapon), with ticker 20319 "THANK YOU" |
+| 5 exit | △ in the menu (not while a voice line is being requested, `gp−0x5a74`) |
+| 6 closed | `VendorExit` after the leave |
+
+Denied texts in the popup: "You're maxed out!" 21046, "You can't afford it!" 21048; the ticker 20320 on a purchase
+short of bolts. The popup is **class 0x471** (1137: 5 joints, seq 0 = 4 frames open, seq 1 idle) at the vendor's
+position and rotation, lit with ambient 0x101010 and light set 14, its text drawn into a target (screen 6:
+`FUN_002b2848`, the static with FX 0x19) mapped on its joints; the buy flow waits for its animation: open seq 0
+(4 frames), ✕ / △ → seq 0 from the last frame backwards (blend 8 / 1), then the purchase when it has closed.
+
+### 9.5 Closing (substate 2, `VendorExit` 0x2ae660)
+
+△ → 0x162298 = 1, 0x162294 = 8, sound 5; the screens power off over those 8 frames. At 0: the vendor **seq 4**
+(10 frames: the fold) from frame 9 blended over 8 at speed −0.5 · 0x15ed60 (backwards at half speed), the camera
+view restored from its copy (0x166400), substate 2. **Substate 2** (40 frames): the world runs again (as substate 0),
+the glass quads while ≤ 36; then seq 1 (blend 8), the manipulators detached, and (no weapon demo) `VendorExit(0)`:
+the HUD slots released, `SetState(0, 1)`, Ratchet shown, **`HeroTeleport`** to vendor rows · (3.5, 0, 0) +
+position facing the vendor (yaw + π), **`CameraScript2(2)`**: the follow camera **blends** back from the vendor view
+(rates 0.018), the vendor's state 1, **class sound 6**, sound group 0x1d resumed, **`music_Unpause`**. A weapon
+bought with a demo scene (0x1ca4a0[item] ≥ 0: Pyrocitor 5, …) plays that scene first (substate 3,
+`VendorStartWeaponDemo` 0x2ae7f8) and returns through `FUN_002aecf0`.
+
+Timing (NTSC frames): open = 1 (△ tick) + 4 (FadeToBlack) + 40 = 45 frames to a usable menu, of which the last
+37 show the unfolding vendor; close = 8 (power-off) + 40 (fold, world running) = 48 frames, then the camera blend.
+
+### 9.6 Why the port was slow and silent (2026-09-28, before this rebuild)
+
+* **Silent**: mode 5 did not run the EE audio frame. Class sounds are queued in the sound slots by
+  `PlayClassSound` and only become 989snd plays in `sound_update` (`AudioSystem::game_frame_with`), which ran in the
+  gameplay tick's sound step; mode 5 skips the tick, so `run_audio` filled those frames with IOP-only frames
+  (`render`) and no vendor sound ever started (the queued slots were issued, late, after the exit).
+* **Sluggish**: the frame counts matched (4 + 40 open, 8 + 40 close), but the port froze the world and did not
+  play the vendor's seq 2 / 4, so the 40-frame fly-in and the 40-frame leave were a still picture (and the leave
+  a still picture with the screens already gone) followed by a hard camera cut: 80 frames with nothing moving read
+  as lag. No frame hitch or load was involved (the tables load at the level's first tick, not at the open).
+* **Measured after the rebuild** (realtime run, `RC_INTERACT_TRACE=1`, wall clock from the △ tick): substate 0 from
+  63 ms (the 4 fade frames), the menu at 747 ms (frame 144 = △ + 44; the game: 45 frames incl. the △ frame = 733 ms);
+  △ in the menu → mode 0 in 48 frames (≈ 800 ms; substate 2 at +7, the exit at +47). Headless
+  (`tests/interaction_vendor.rs`): open → menu 44 frames, △ → mode 0 48 frames, with the world ticking on exactly
+  the 40 + 40 frames of substates 0 / 2.
+
+## 10. The vendor in the port (rebuild, 2026-09-28)
+
+**Game logic** (`crates/rc-game/src/menus/vendor.rs` + `vendor/{layout,salesman,screens}.rs`):
+* `Vendor::open` / `frame` follow §9.2–§9.5 frame for frame: `FadeToBlack(4)` (`pre_fade`), substate 0's 40 world
+  frames with the fade and the unfold, the screens' power-on (`power()`), the menu, the buy flow timed by the
+  popup moby's own animation (class 0x471), the 8-frame power-off, the fold and substate 2's 40 world frames, the
+  exit. The vendor's animation is asked for as `VendorAnim` requests (hard cut seq 2 at speed 0.5, blend seq 3,
+  blend seq 4 from frame 9 at −0.5, blend seq 1); `world_runs()` / `screens_shown()` / `glass_only()` say what the
+  frame does.
+* `layout::VendorLayout` reads every placement constant by its level-01 label (mapped on other levels by
+  `Overlay::relocated`: `DATA_LABELS`).
+* `screens`: the screen quads from three joint points and the margins (`Quad`), the shrink, the projection
+  (`View`, `FUN_002adc38`), `place`, the glass quads, the static (`Statics::step`, `FUN_002b2cd8`). The content per
+  screen is `Vendor::screen_content` (target pixels); `Vendor::render_screens` is the render's per-frame part on the
+  game's stream (the ticker's line choice, the static's draws; it also starts the salesman's data read).
+* `salesman::Salesman`: `FUN_002aee20` / `FUN_002af248` (the greeting, idle cycle, remarks on a cursor move, the
+  purchase reset, the voice started at the talk sequence's key time `MobyAnimKeyTime`).
+* `Vendor::scene`: the placements of the item model (+0x100), the class-13 backdrop (+0), the salesman, the item
+  hologram (+0x200 / +0x300) and the popup.
+* The class (`classes/vendor.rs`): △ also calls `SetState(100)` through the hero-call channel (as `OpenVendorMenu`
+  does inside the moby loop); `hologram()` exposes the logo's size and visibility for the renderer.
+
+**Engine** (`crates/rc-engine/src/interact_render.rs`, `vendor_render.rs`, `screen_canvas.rs`):
+* Mode 5 runs `Vendor::frame` once per frame (crate::menu_render), applies the animation requests to the vendor moby
+  and, in the menu, advances it; the world frames run the gameplay tick in its scene form (`Game::camera_paused`,
+  Ratchet in state 100) through `MenuMode::world_tick`; the frames without a tick run the audio's EE frame
+  (`sound_update`), so every class sound plays when the game plays it; the music is paused from the open to the exit;
+  the salesman's lines play on the dialogue voice (`vendor_audio/NNN.bin`, NNN = id − 10000); the HUD slots are
+  emptied at the open (`FUN_0024fb00`, `HudFeed::reset`); at the exit Ratchet is teleported 3.5 in front of the
+  vendor (state 0) and the follow camera blends back from the vendor view (`CameraScript` mode 1 then
+  `CameraScript2(2)` on the next tick).
+* crate::vendor_render draws the approach logo (class 1143 with its chrome pass and its two spinning joints) and
+  beam, the menu's cone, the item hologram, the popup, the screens as HUD-pass primitives (black target, content,
+  static; squeezed while powering on / off) and the glass quads; the item panel's and the salesman's 3D parts are
+  crate::screen_canvas canvases.
+* **crate::screen_canvas** (general render-to-texture): `Canvases::create(commands, images, name) → CanvasId`,
+  `layer(id)` (the `RenderLayers` for the entities it shows), `show(id, Some(CanvasView { rect, focal, centre, clear
+  }))` per frame (None hides it), `CanvasView::from_target(size, tan, texels, rect, clear)` for a game render target.
+  A window-sized image rendered by a `Camera3d` carrying the main transform, a `GameProjection` with the canvas'
+  focal lengths and a `SubCameraView` for its principal point; a UI node shows the rectangle, **under** the HUD
+  composite (`create`: the vendor's screens, drawn in the 3D pass before the HUD) or **over** it
+  (`create_over_hud`: a page menu's 3D widget, whose render target `PageMenuDraw` 0x28d080 copies after the panel's
+  navy rect; docs/plan/gadgets.md §3). `show_exact(id, view, (tan_x, tan_y))` gives the projection tangents exactly
+  (the game camera's own, bit-identical; `half / (half / tan)` does not always round-trip in `f32`). [M: the vendor's two 3D screens use the frame's own projection: the item and the salesman are placed in
+  the world where that view shows them over their monitors; the render target's zoom argument 1.0 would put them at
+  the targets' edges at a quarter of the size the game shows.]
+
+**Still not ported**: the weapon demo scenes (substate 3), the PDA's remote vendor presentation, the popup's
+ammo-quantity backdrop (+0x500 drawn in the popup), the approach beam's scan plane and its four glow points
+(`FUN_002781d0`), the sound group 0x1d pause, the world snapshot (the port draws the frozen world live).

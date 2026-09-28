@@ -11,7 +11,8 @@
 //!    order here keeps that lag (inferred from the call order, see the doc).
 //! 2. **Camera update** (0x20eca8) for the camera (the fly camera for now): the underwater test 0x20e9f0
 //!    (`rc_game::fog_zones::UnderwaterState`, collision line queries against the level mesh; the water height
-//!    is the active ripple patch's (`rc_game::water::RippleSim::patch_height`), else the hit point), then the fog
+//!    is the level's water, `rc_game::water::world::WaterWorld::water_height`: the active ripple patch, the flat
+//!    plane, else the hit point), then the fog
 //!    zones `fun_001ee4b0` (`rc_game::fog_zones::update`), which overwrite the level fog globals. Nothing is
 //!    restored on leaving a zone.
 //! 3. **Tint**: while the flag is set `DrawDebugProfiler` draws full-screen sprites with RGBAQ 0x161200..03
@@ -181,6 +182,7 @@ fn update_fog_state(
     mut game_fog: ResMut<GameFog>,
     tie: Option<ResMut<crate::tie_lod::TieLodState>>,
     water: Option<Res<crate::water_render::WaterState>>,
+    play: Option<Res<crate::gameplay::Play>>,
     cams: MainCamera,
 ) {
     let Some(mut state) = state else { return };
@@ -200,15 +202,25 @@ fn update_fog_state(
     if let Some(forced) = state.force_underwater {
         state.underwater.flag = forced;
     } else if let Some(mesh) = &state.mesh {
-        // Water height: 0x26ed38 samples the active ripple patch (0x2b8910, crate::water_render) and
-        // falls back to the hit point when none holds the point.
-        let ripple = water.as_ref().and_then(|w| w.ripple.as_ref());
-        state.underwater.update_with_mesh(mesh, eye, |p| ripple.and_then(|r| r.patch_height(p[0], p[1], p[2])));
+        // Water height: 0x26ed38 = the level's water (`Services::water`: the active ripple patch, then the flat
+        // plane), falling back to the hit point; without the game tick the plugin's Novalis ripples.
+        match play.as_deref() {
+            Some(p) => state.underwater.update_with_mesh(mesh, eye, |q| p.svc.water.water_height(q)),
+            None => {
+                let ripple = water.as_ref().and_then(|w| w.fallback.as_ref());
+                state.underwater.update_with_mesh(mesh, eye, |q| ripple.and_then(|r| r.patch_height(q[0], q[1], q[2])));
+            }
+        }
     }
-    // The alternate colours follow the highest active ripple (751) zone this tick (crate::water_render;
-    // no active zone keeps the last values).
-    let zone = water.as_ref().and_then(|w| w.ripple.as_ref()).map_or(-1, |r| r.last.zone);
-    state.look.set_from_ripple_zone(usize::try_from(zone).ok());
+    // The alternate colours: as the level's water managers leave 0x161200.. (751 per zone on Novalis, the patch
+    // managers' init values elsewhere); without the game tick, the plugin's 751 zone.
+    match play.as_deref() {
+        Some(p) => state.look = p.svc.water.look,
+        None => {
+            let zone = water.as_ref().and_then(|w| w.fallback.as_ref()).map_or(-1, |r| r.last.zone);
+            state.look.set_from_ripple_zone(usize::try_from(zone).ok());
+        }
+    }
     if state.underwater.flag != was { println!("underwater: {} at {eye:.2?}", if state.underwater.flag { "on" } else { "off" }); }
     if state.zones_enabled {
         let hit = fog_zones::update(&mut state.level, &state.zones, eye);
