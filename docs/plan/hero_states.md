@@ -29,6 +29,12 @@ callers, **L** inferred (identity guessed from behaviour, flagged). Addresses ar
   its data leads to it). Surface rules are the one place where the superset could change a level's behaviour
   (a face with surface 7 on a level whose reaction ignores 7): package P1 checks the surface ids each level's faces
   use against that level's own reaction.
+- **Checked per level (2026-09-29, level_generalisation.md H2, `rc-trace overlay-diff`).** Every level's copy of the
+  hero functions the port has is level 01's or level 00's code (the three switches differ in their case sets only),
+  except: the surface Ratchet's capsule and `LandEta` pass through (0 / 3 on level 2 / 0xd on 6 and 0xe:
+  `surface::PASS_SURFACE`, ported), Kerwan's own path search for the cables (`boots::FIXED_REACH_LEVELS`, ported),
+  the Hoverboard and 0x3e on 5 / 16 (G-HERO-008) and the body branches on 15 / 18 (G-HERO-005). Where a level takes
+  level 00's code the port matches only for the parts of level 00 it has (G-HERO-031).
 - Scripts used for this inventory: `work/decomp/*/` (all levels' unique functions), the per-level case union and
   level01-name mapping through `tools/ghidra/names/clusters.tsv` (the scripts were throwaway; rerun by grepping each
   level's export for `param_1 != 100` + `iRam001413dc == 0x14`).

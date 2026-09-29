@@ -14,7 +14,7 @@ should be a `--dry-run` where a script has one.
 | `scripts/ghidra_http.py` | GET/POST client for the GhidraMCP plugin's HTTP API (`127.0.0.1:8089`, Ghidra GUI open) |
 | `scripts/import_levels.py [NN ...]` | Imports `extracted/boot/SCUS_971.99` as `/SCUS_971.99` (if the project lacks it) and `work/ghidra-import/levelNN.elf` into `/levels`, waits for analysis, applies Lombyte's boot-match names, saves. Skips programs that exist. |
 | `scripts/apply_boot_names.py [--dry-run]` | Boot ELF names from `names/boot_functions.csv` (Lombyte), source path as a plate comment |
-| `scripts/overlay_diff.py` | Clusters functions of the boot ELF and the 19 overlays by a relocation-tolerant code hash; writes `names/clusters.tsv` and `names/overlay_names.csv` |
+| `scripts/overlay_diff.py` | Clusters functions of the boot ELF and the 19 overlays by a relocation-tolerant code hash; writes `names/clusters.tsv` and `names/overlay_names.csv` (for naming; to ask whether a function differs between levels, and how, use `rc-trace overlay-diff`: docs/workflows/ghidra.md "Masked overlay diff") |
 | `scripts/apply_overlay_names.py [levelNN.elf ...]` | Applies `names/overlay_names.csv` to the level programs |
 | `scripts/apply_doc_names.py --dry-run / --apply [--export]` | Applies the names our docs give (`names/doc_names.csv`) and propagates them through `names/clusters.tsv`; log in `work/decomp/doc_names_apply.tsv` |
 | `scripts/export_decomp.py <program>` | Decompiled C of every function to `work/decomp/<program>/` (+ `index.tsv`) |

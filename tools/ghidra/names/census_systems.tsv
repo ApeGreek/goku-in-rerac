@@ -161,7 +161,7 @@ L01:002a1968	SoundSetVolume	sound	has	L	SoundSetVolume (audio.md)
 L01:002a1988	SoundSetPitchBend	sound	has	L	SoundSetPitchBend (audio.md)
 L01:002a1770	PlayLevelSoundAtMoby	lsound	has	V	PlayLevelSoundAtMoby (services.rs)
 C:7789cc0440c2		lsound	partly	L	level sound on a slot (0x15f574 base), not on L01
-C:bcf4ccdaa994	FUN_0027eca0	lsound	partly	L	level sound on a slot, not on L01
+C:bcf4ccdaa994	FUN_0027eca0	lsound	has	V	level04's copy of PlayLevelSoundAtMoby 0x2a1770 (same masked code; W2 2026-09-29, G-AUD-007): World::play_level_sound
 L01:0029ac10	FUN_0029ac10	lsound	has	V	
 L01:0027a248	MusicRequestTrack	music	has	V	MusicRequestTrack
 L01:002ac330	DialogStreamStart	dialog	has	V	DialogStreamStart
@@ -276,7 +276,7 @@ L01:002b4918	VU1_addGSregister__FUiUlb	fxdraw	has	V	VU1_addGSregister (GS state 
 L01:0021bc50	emit_rgba_draw_packet	fxdraw	has	L	RGBA draw packet
 L01:002781d0	FUN_002781d0	fxdraw	has	V	glow quad
 L01:0021fda8	DrawEnvOverlayMesh	fxdraw	has	V	DrawEnvOverlayMesh
-L01:0021e340	DrawSpriteHelper_A	fxdraw	partly	L	DrawSpriteHelper_A: not cited by the port
+L01:0021e340	DrawSpriteHelper_A	fxdraw	has	L	the VU1 sprite program's set-up (view·proj 0x167140, guard band 0x1671c0, fog, GIF tags); no state: rc-engine fx_draw's material does it per prim (G-REN-020, W2 2026-09-29)
 C:9e7a11937cc7	FUN_00263618	fxdraw	has	L	glow-quad variant (FX 0xb, ALPHA 0x48), not on L01
 L01:0021be90	DrawTexturedQuad	fxdraw	has	V	
 L01:002a70a8	ShipDrawCallback	fxdraw	has	V	ShipDrawCallback
@@ -437,7 +437,7 @@ C:804ab5384c93	FUN_002db990	family	family	V	pvar init
 C:8faeb3633958	FUN_00295de8	family	family	V	L04 family (manipulators)
 C:a8c09d3f73ff	FUN_00295778	family	family	V	L04 family (capsule collision)
 C:99346c2b3975	FUN_002e9d10	family	family	V	L06 knock variant
-L01:00278020	FUN_00278020	heightmap	missing	L	level height from the byte grid 0x15fc98..0x15fca8
+L01:00278020	FUN_00278020	heightmap	has	V	level height from the byte grid 0x15fc98..0x15fca8: rc_formats::level::HeightGrid::height (G-LVL-008, W2 2026-09-29)
 L01:002a29a0	FUN_002a29a0	levelexit	missing	L	game mode request 0x15f5c0 (level exit / transition)
 L01:00279070	OpenShipMenu	help	has	V	PromptRelease: interact.rs Prompt::release (Lombyte's name OpenShipMenu is wrong: it drops the prompt lease)
 L01:0028bf50	PauseAllSounds	sound	has	V	PauseAllSounds
@@ -457,7 +457,7 @@ G:0015edb7=00000000	cheat_bighead_flag	cheat	missing	V	the big-head cheat flag 0
 X:1843	fighter_1843	shipmode	missing	V	override: the fighters' attack states 5 / 6 and the target-list bit run only in the ship-combat mode (hero state 0x32 with the ship moby 0x140940 of class 0x45, read directly): G-LVL-009 (class_units_levels_09_18.md U543)
 X:1319	fighter_1319	shipmode	missing	V	override: the same fighter source compiled for Pokitaru: G-LVL-009 (U370)
 X:838	voice_handoff_838	voicehand	missing	V	override: one looping class voice handed between the group's emitters by rewriting the slot record's owner and position (0x13e5d8 + slot·0x70: a computed store the census cannot see): G-AUD-010
-X:855	voice_handoff_855	voicehand	missing	V	override: as 838: G-AUD-010
+X:855	voice_handoff_855	voicehand	has	V	the slot owner / position rewrite is ported (World::hand_over_sound, SoundSink::hand_over; W2 2026-09-29, G-AUD-010; first consumer 838 laser_fence)
 H:cd35c1d4fa65eb86	FUN_00217300	math	trivial	V	zero a quadword (sqc2 vf0)
 C:16bfd13f798c	FUN_0025c758	shadow	has	V	ShadowSetGround 0x26eff8's level copy (moby +0x84 / +0x88 = z ∓ 0.2): shadows.rs set_ground
 C:a3aa13a8e1c8	FUN_00263ad0	math	trivial	V	angle += (target − angle)·k (fast_subtract_rotations / fast_add_rotations)

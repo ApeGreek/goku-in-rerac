@@ -15,7 +15,7 @@
 //! | the point nearest a distance | level03 `0x264558` (03, 04, 14), level05 `0x2a0260` (05, 08, 12, 16), level01 `0x28b510` (the flyer driver's) | the same source three times (identical decompiles; `fabs`'s `%lo` differs); the level-01 copy was already ported as the flyer's `nearest` | [`nearest_at_distance`] (the flyer calls it) |
 //! | a segment crosses a path wall | level00 `0x261b48` (00, 08, 13, 16, 18), level02 `0x263710` (02, 03 `0x24ffb0`, 04, 09, 12, 14, 15, 17), level01 `0x276820` `ClampToPath` | the same source: identical decompiles apart from the table address; `ClampToPath` is ported (`World::clamp_to_path`), only its found flag was dropped | `World::clamp_to_path_hit` |
 //! | the point at a distance along equal segments | level01 `0x277260` (level10 `0x2554e0`) | one source; its only consumer is class 947 (level 10, 2 instances, unported) | not ported (no consumer yet) |
-//! | nearest points to a pair | level15 `0x265b38` (09, 13, 15) | no unported unit of the census calls it (review.tsv only) | not ported |
+//! | the next path point toward a target | level15 `0x265b38` (cluster dc2339668382: 09 `0x294cb0`, 13 `0x282010`, 15) | one source (the census's "nearest points to a pair"); consumer 193 (09, 15: `classes::units::pack_biter`) | [`toward`] |
 //!
 //! Standard `f32` (the game's VU0 macro code; no result depends on its last bit). The rotation wraps use the
 //! game's `fast_add_rotations` / `fast_subtract_rotations` (`creature::add_rot` / `sub_rot`).
@@ -143,6 +143,32 @@ pub fn nearest_at_distance(pts: &[Point], d: f32, pos: [f32; 4]) -> i32 {
     k
 }
 
+/// Level09 `0x294cb0(moby, path, &target, &out)` (level15 `0x265b38`, level13 `0x282010`): the path point to head for
+/// on the way from `me` to `target` along a path of waypoints. Of the points nearer `target` than `me` is (3-D), the one
+/// nearest `target` (`b`); the point nearest `me` (`a`, strictly nearer wins, the first on a tie). No such `b` →
+/// `target` itself; `a == b` → point `a`; `a < b` → point `a + 1`; else point `a − 1`.
+pub fn toward(pts: &[Point], me: [f32; 4], target: [f32; 4]) -> [f32; 4] {
+    let d0 = len3(sub(me, target));
+    let (mut a, mut b) = (-1i32, -1i32);
+    let (mut best_a, mut best_b) = (10000.0f32, 10000.0f32);
+    for (k, _) in pts.iter().enumerate() {
+        let p = pt(pts, k);
+        let dt = len3(sub(p, target));
+        let ds = len3(sub(p, me));
+        if !(best_a <= ds) {
+            best_a = ds;
+            a = k as i32;
+        }
+        if dt < d0 && !(best_b <= dt) {
+            best_b = dt;
+            b = k as i32;
+        }
+    }
+    if b == -1 { return target; }
+    let i = if a == b { a } else if a < b { a + 1 } else { a - 1 };
+    pt(pts, i.max(0) as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +177,19 @@ mod tests {
         xyz.iter().enumerate().map(|(i, p)| [p[0], p[1], p[2], w.get(i).copied().unwrap_or(0.0)].map(f32::to_bits)).collect()
     }
     fn close(a: [f32; 4], b: [f32; 4]) -> bool { (0..3).all(|k| (a[k] - b[k]).abs() < 1e-4) }
+
+    /// `0x294cb0`: along a row of waypoints the next one toward the target from the nearest one; the target itself when
+    /// no waypoint is nearer it than the walker; the nearest one when it is also the one nearest the target.
+    #[test]
+    fn toward_steps_along_the_waypoints() {
+        let pts = path(&[[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [20.0, 0.0, 0.0], [30.0, 0.0, 0.0]], &[]);
+        let v = |x: f32| [x, 1.0, 0.0, 1.0];
+        assert_eq!(toward(&pts, v(1.0), v(29.0))[0], 10.0, "a = 0 < b = 3: point 1");
+        assert_eq!(toward(&pts, v(29.0), v(1.0))[0], 20.0, "a = 3 > b = 0: point 2");
+        assert_eq!(toward(&pts, v(20.5), v(21.0)), v(21.0), "no point nearer the target than the walker");
+        assert_eq!(toward(&pts, v(12.0), v(9.0))[0], 10.0, "a = b = 1");
+        assert_eq!(toward(&[], v(0.0), v(5.0)), v(5.0));
+    }
 
     /// A straight-then-up open path: the position lerps within the segment, the rotation eases toward the next
     /// segment's yaw / pitch, and the last segment is held (t clamped, its own rotation, roll 0).

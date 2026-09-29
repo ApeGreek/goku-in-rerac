@@ -75,8 +75,8 @@ fn reaction_tables_resolve() {
 // Headless levels (the path_classes harness, with Ratchet's moby placed and the reaction tables)
 
 #[derive(Default)]
-struct RecSink {
-    slots: Vec<MobyId>,
+pub(crate) struct RecSink {
+    pub(crate) slots: Vec<MobyId>,
 }
 
 impl rc_game::moby_update::services::SoundSink for RecSink {
@@ -87,21 +87,21 @@ impl rc_game::moby_update::services::SoundSink for RecSink {
     fn alive(&self, slot: i32, moby: MobyId) -> bool { usize::try_from(slot).ok().and_then(|s| self.slots.get(s)) == Some(&moby) }
 }
 
-struct Lv {
-    sink: RecSink,
-    table: MobyTable,
-    classes: ClassTable,
-    svc: Services,
-    sched: Scheduler,
-    rng: Rng,
-    mesh: collision::Collision,
-    counter: u64,
-    missions: rc_game::moby_update::services::LevelMissions,
-    hero_idx: MobyId,
-    particles: rc_game::particles::Particles,
+pub(crate) struct Lv {
+    pub(crate) sink: RecSink,
+    pub(crate) table: MobyTable,
+    pub(crate) classes: ClassTable,
+    pub(crate) svc: Services,
+    pub(crate) sched: Scheduler,
+    pub(crate) rng: Rng,
+    pub(crate) mesh: collision::Collision,
+    pub(crate) counter: u64,
+    pub(crate) missions: rc_game::moby_update::services::LevelMissions,
+    pub(crate) hero_idx: MobyId,
+    pub(crate) particles: rc_game::particles::Particles,
 }
 
-fn load(level: u32) -> Option<Lv> {
+pub(crate) fn load(level: u32) -> Option<Lv> {
     let core = rc_formats::test_data::core(level)?;
     let gp = rc_formats::test_data::gameplay(level)?;
     let ports = ports(level)?;
@@ -156,7 +156,7 @@ fn load(level: u32) -> Option<Lv> {
 }
 
 impl Lv {
-    fn world<'a>(&'a mut self, hero: &'a Hero) -> World<'a> {
+    pub(crate) fn world<'a>(&'a mut self, hero: &'a Hero) -> World<'a> {
         let mut w = World::new(&mut self.table, hero, &mut self.rng, &self.classes, &mut self.svc, self.counter);
         w.coll = Some(&self.mesh);
         w.sound = Some(&mut self.sink);
@@ -165,7 +165,7 @@ impl Lv {
         w.particles = Some(&mut self.particles);
         w
     }
-    fn load_pass(&mut self, hero: &Hero) {
+    pub(crate) fn load_pass(&mut self, hero: &Hero) {
         self.place_hero(hero);
         let mut sched = std::mem::take(&mut self.sched);
         { let mut w = self.world(hero); sched.load_pass(&mut w); }
@@ -178,7 +178,7 @@ impl Lv {
         h.position[3] = 1.0;
         self.svc.build_matrix_in(&mut self.table, &self.classes, self.hero_idx);
     }
-    fn tick(&mut self, hero: &Hero) {
+    pub(crate) fn tick(&mut self, hero: &Hero) {
         self.counter += 1;
         let c = self.counter;
         self.place_hero(hero);
@@ -187,16 +187,16 @@ impl Lv {
         { let mut w = self.world(hero); sched.tick(&mut w); }
         self.sched = sched;
     }
-    fn of_class(&self, oc: i16) -> Vec<MobyId> { self.table.mobys.iter().enumerate().filter(|(_, m)| m.o_class == oc && m.state < 0x80).map(|(i, _)| i).collect() }
+    pub(crate) fn of_class(&self, oc: i16) -> Vec<MobyId> { self.table.mobys.iter().enumerate().filter(|(_, m)| m.o_class == oc && m.state < 0x80).map(|(i, _)| i).collect() }
     /// The hit records the log holds for `target`.
-    fn hits_on(&self, target: MobyId) -> Vec<rc_game::moby_update::services::HitRecord> { self.svc.hits.records.iter().filter(|r| r.target == target && r.attacker.is_some()).copied().collect() }
-    fn hit(&mut self, hero: &Hero, id: MobyId, t: &HitTemplate) {
+    pub(crate) fn hits_on(&self, target: MobyId) -> Vec<rc_game::moby_update::services::HitRecord> { self.svc.hits.records.iter().filter(|r| r.target == target && r.attacker.is_some()).copied().collect() }
+    pub(crate) fn hit(&mut self, hero: &Hero, id: MobyId, t: &HitTemplate) {
         let mut w = self.world(hero);
         w.deliver_hit(id, t);
     }
 }
 
-fn hero_at(p: [f32; 3]) -> Hero {
+pub(crate) fn hero_at(p: [f32; 3]) -> Hero {
     let mut h = Hero::new();
     h.pos = rc_game::hero::physics::v4(p[0], p[1], p[2]);
     h.body_point = rc_game::hero::physics::v4(p[0], p[1], p[2] + 0.7);
@@ -205,7 +205,7 @@ fn hero_at(p: [f32; 3]) -> Hero {
 }
 
 /// The wrench's hit (`0x2be1c0`: flags 0x10000, type 0 / 1, class 0x47, damage 1, the exact push along `dir`).
-fn wrench(hero: MobyId, dir: [f32; 2]) -> HitTemplate {
+pub(crate) fn wrench(hero: MobyId, dir: [f32; 2]) -> HitTemplate {
     HitTemplate { dir: [Pf::f(dir[0]), Pf::f(dir[1]), Pf::ONE, Pf::b(0x45af_df66)], attacker: Some(hero), flags: 0x1_0000, b18: 0, b19: 1, h1a: 0x47, damage: Pf::ONE, w20: 1 }
 }
 

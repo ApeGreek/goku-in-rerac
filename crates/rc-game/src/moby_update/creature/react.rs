@@ -14,8 +14,8 @@
 //!   state 0xe, 270 state 5), [`land`] 0x3051a8 and the burst [`burst`] 0x304798.
 //!   Classes with a table (all 19 overlays' `lvl.vtbl`): 270 everywhere; 577 (01); 572 / 866 (01, 05, 11); 749
 //!   (00, 18: [`VELDIN_749`], reversed on level 00, found by [`tables_from_overlays`]); 580 (02), 340 (04), 827 (06,
-//!   10), 252 (08, 14), 193 (09, 15), 1246 (11), 238 (12), 63 (13), 1445 (16), 1382 (17), 568 / 1906 (18) — those
-//!   classes are not ported. 865 and 459 keep the default: never sucked.
+//!   10), 252 (08, 14), 193 (09, 15), 1246 (11), 238 (12), 63 (13), 1445 (16), 1382 (17), 568 (18: [`ROLLING_MINE_568`]),
+//!   1906 (18) — the classes without a table row here are not ported. 865 and 459 keep the default: never sucked.
 //! * **The damage record** (the creature header's +0x00, `FUN_002711f8`) carries two more weapon inputs: **+0x18 the
 //!   lure** (the Taunter's `0x2cc830` writes its moby; 577 turns it into its 240-tick alert, 572 into its alert,
 //!   459 into its 600-tick alert — the classes already read it, as `ALERT`), +0x04 (s16) the Morph-o-Ray's full meter
@@ -111,21 +111,41 @@ pub struct Wrappers {
     /// The suck record's pvar offset (slot +0x10: 577 `pvars + 0x60` 0x2f1df8, amoeboids `+0xc0` 0x2efbc8; the
     /// chicken's is its pvar +0x14 pointer, [`crate::moby_update::classes::chicken`]).
     pub record: usize,
+    /// The wrappers that keep the state they took (568's level18 0x2d6108..): slot +0x00 takes only a moby in state
+    /// `held − 1` or `held` (the state saved in moby +0xbc, returns 2; any other state: record state 0, refused), a
+    /// refusal returns the moby to its saved state (instead of [`Wrappers::release`]), slot +0x0c leaves the state.
+    pub saved: bool,
+    /// Slot +0x14 returns the moby to its class's pool instead of `DeleteMoby` (568's 0x2d6280:
+    /// [`crate::moby_update::classes::units::rolling_mine::park`]).
+    pub pool: bool,
+    /// Slot +0x0c after the let-go handler.
+    pub let_go: LetGo,
+}
+
+/// What a table's slot +0x0c does after the let-go handler [`let_go`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LetGo {
+    /// `state = held` (the level-01 wrappers).
+    Held,
+    /// Nothing more (568's 0x2d6230).
+    Keep,
+    /// 252's 0x2d4050: back to its hover home ([`crate::moby_update::classes::units::hover_zapper::let_go`]).
+    Hover252,
 }
 
 /// 577's table 0x20c3f4 (0x2f1c78, 0x2f1cc8, 0x2f1d18, 0x2f1dc8, 0x2f1df8).
-pub const CRITTER: Wrappers = Wrappers { held: 7, release: 1, start_only: None, bounce_sound: Some(2), seqs: [2, 2, 2, 9, 4, 10, 10, 6, 4], record: 0x60 };
+pub const CRITTER: Wrappers = Wrappers { held: 7, release: 1, start_only: None, bounce_sound: Some(2), seqs: [2, 2, 2, 9, 4, 10, 10, 6, 4], record: 0x60, saved: false, pool: false, let_go: LetGo::Held };
 /// 866's table 0x20c40c and 572's 0x20c3dc (0x2efa88, 0x2efaf8, 0x2efb48, 0x2efb98, 0x2efbc8); the sequence table
 /// by class (866 gp−0x51b0, else gp−0x51c0).
-pub const AMOEBOID_866: Wrappers = Wrappers { held: 0xe, release: 1, start_only: Some((866, 8)), bounce_sound: None, seqs: [1, 1, 1, 6, 6, 6, 6, 6, 6], record: 0xc0 };
+pub const AMOEBOID_866: Wrappers = Wrappers { held: 0xe, release: 1, start_only: Some((866, 8)), bounce_sound: None, seqs: [1, 1, 1, 6, 6, 6, 6, 6, 6], record: 0xc0, saved: false, pool: false, let_go: LetGo::Held };
 pub const AMOEBOID_572: Wrappers = Wrappers { seqs: [1; 9], ..AMOEBOID_866 };
 /// 270's table (0x2e0a28, 0x2e0a78, 0x2e0ac8, 0x2e0b78, 0x2e0ba8); record: see the chicken module.
-pub const CHICKEN: Wrappers = Wrappers { held: 5, release: 1, start_only: None, bounce_sound: Some(1), seqs: [2, 2, 2, 0, 0, 0, 0, 0, 0], record: 0xe0 };
+pub const CHICKEN: Wrappers = Wrappers { held: 5, release: 1, start_only: None, bounce_sound: Some(1), seqs: [2, 2, 2, 0, 0, 0, 0, 0, 0], record: 0xe0, saved: false, pool: false, let_go: LetGo::Held };
 
 /// 749's table (level00 0x1ea7ec: 0x2d56e0, 0x2d5730, 0x2d5780, 0x2d57d0, 0x2d5800; level18 0x1f34b0 the same code):
 /// held 9, a refused slot → 5, no bounce sound, the sequence table gp−0x52a0 (level00 0x161960: 4, 4, 4, then 0),
 /// the record at pvar +0xd0 (0x2d5800).
-pub const VELDIN_749: Wrappers = Wrappers { held: 9, release: 5, start_only: None, bounce_sound: None, seqs: [4, 4, 4, 0, 0, 0, 0, 0, 0], record: 0xd0 };
+pub const VELDIN_749: Wrappers = Wrappers { held: 9, release: 5, start_only: None, bounce_sound: None, seqs: [4, 4, 4, 0, 0, 0, 0, 0, 0], record: 0xd0, saved: false, pool: false, let_go: LetGo::Held };
 
 /// `0x2defb0(target)`: the Morph-o-Ray's morph (a spawn and a delete: `crate::moby_update::classes::chicken::morph`).
 pub fn morph_target(w: &mut World, target: MobyId) -> Option<MobyId> {
@@ -133,12 +153,47 @@ pub fn morph_target(w: &mut World, target: MobyId) -> Option<MobyId> {
     crate::moby_update::classes::chicken::morph(w, target, gold)
 }
 
-/// The level-01 reference functions of the tables' slot +0x00 ([`table_kind`] matches a level's table by them).
-pub const REF_CRITTER: u32 = 0x2f1c78;
-pub const REF_AMOEBOID: u32 = 0x2efa88;
-pub const REF_CHICKEN: u32 = 0x2e0a28;
-/// The reaction tables reversed on other levels: (level, slot +0x00's address there, the table).
-pub const OTHER_REFS: [(u32, u32, Table); 1] = [(0, 0x2d56e0, Table::Veldin749)];
+/// The level-01 reference tables: their slots +0x00, +0x08 and +0x0c (the wrappers that differ between the classes'
+/// tables: the held state, the bounce sound, the let-go); [`tables_from_overlay`] matches a level's table by all three.
+pub const REF_CRITTER: [u32; 3] = [0x2f1c78, 0x2f1d18, 0x2f1dc8];
+pub const REF_AMOEBOID: [u32; 3] = [0x2efa88, 0x2efb48, 0x2efb98];
+pub const REF_CHICKEN: [u32; 3] = [0x2e0a28, 0x2e0ac8, 0x2e0b78];
+/// 568's table (level18 0x1f3498: 0x2d6108, 0x2d6190, 0x2d61e0, 0x2d6230, 0x2d6250, 0x2d6280): held 4, the saved
+/// state (moby +0xbc) on a refusal, no bounce sound, the sequence table gp−0x5278 (level18 0x161988: nine 2s), the
+/// record at pvar +0x60 (0x2d6250), slot +0x14 parks it ([`Wrappers::pool`]).
+pub const ROLLING_MINE_568: Wrappers = Wrappers { held: 4, release: 4, start_only: None, bounce_sound: None, seqs: [2; 9], record: 0x60, saved: true, pool: true, let_go: LetGo::Keep };
+/// The level-01 wrapper shape (held 7, a refusal → 1) without the bounce sound: 193's table (level09 0x209b00:
+/// 0x2e2680, 0x2e26d0, 0x2e2720, 0x2e2770, 0x2e27a0 → pvar +0x60, `DeleteMoby`; level15 0x1e3e9c the same code) and
+/// 1445's (level16 0x1e9050). The sequence table is the class's own (its init stores it in the record's +0x70:
+/// [`SEQ_TABLES`]); these are the defaults.
+pub const HELD7: Wrappers = Wrappers { held: 7, release: 1, start_only: None, bounce_sound: None, seqs: [0; 9], record: 0x60, saved: false, pool: false, let_go: LetGo::Held };
+
+/// 252's table (level08 0x1fd200: 0x2d3f60, 0x2d3fb0, 0x2d4000 (held 5, refused → 1), 0x2d4050 (the let-go:
+/// [`LetGo::Hover252`]), 0x2d40d8 (+0x60), `DeleteMoby`; level14 0x1fd9d0 the same code); its sequence table gp−0x5378
+/// (level08 0x161888: nine 2s).
+pub const HOVER_252: Wrappers = Wrappers { held: 5, release: 1, start_only: None, bounce_sound: None, seqs: [2; 9], record: 0x60, saved: false, pool: false, let_go: LetGo::Hover252 };
+
+/// The reaction tables reversed on other levels: (level, its slots +0x00 / +0x08 / +0x0c there, the table).
+pub const OTHER_REFS: [(u32, [u32; 3], Table); 4] = [
+    (0, [0x2d56e0, 0x2d5780, 0x2d57d0], Table::Veldin749),
+    (18, [0x2d6108, 0x2d61e0, 0x2d6230], Table::RollingMine568),
+    (9, [0x2e2680, 0x2e2720, 0x2e2770], Table::Held7),
+    (8, [0x2d3f60, 0x2d4000, 0x2d4050], Table::Hover252),
+];
+
+/// The classes' sequence tables as their inits store them in the suck record's +0x70 (the game: a pointer to the
+/// class's gp table; the port: [`seq_table_id`] of the entry here). Entries 1 approach, 2 rise, 3 pulled, 4 held,
+/// 5 fired, 6 bounce, 7 let go. 193: level09 gp−0x5328 (0x1618d8).
+/// 63: level13 gp−0x5860 (0x1613a0).
+pub const SEQ_TABLES: [[u8; 9]; 2] = [[0, 0, 0, 7, 2, 8, 8, 6, 2], [5, 5, 5, 7, 3, 8, 8, 2, 3]];
+pub const SEQS_193: usize = 0;
+pub const SEQS_63: usize = 1;
+/// 1445's table (level16 gp−0x4db8, 0x161e48) holds the same bytes as 193's.
+pub const SEQS_1445: usize = SEQS_193;
+
+/// The record +0x70 word for [`SEQ_TABLES`] entry `i` (a tag the instance data never holds, so a record whose class
+/// init did not store one keeps its table's default [`Wrappers::seqs`]).
+pub fn seq_table_id(i: usize) -> i32 { 0x5e05_0000 | i as i32 }
 
 /// A ported reaction table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -148,6 +203,12 @@ pub enum Table {
     Chicken,
     /// 749 (levels 00, 18: [`VELDIN_749`]).
     Veldin749,
+    /// 568 (level 18: [`ROLLING_MINE_568`]).
+    RollingMine568,
+    /// The shape [`HELD7`] (193 on 09 / 15, 1445 on 16).
+    Held7,
+    /// 252 (levels 08, 14: [`HOVER_252`]).
+    Hover252,
 }
 
 /// The Suck Cannon as its last update left it (module doc).
@@ -207,15 +268,14 @@ pub fn table_by_class(o_class: i16) -> Option<Table> {
     }
 }
 
-/// The level's class table's reaction tables: for each class whose table's slot +0x00 is the same code as a ported
-/// reference (level 01's [`REF_CRITTER`] / [`REF_AMOEBOID`] / [`REF_CHICKEN`]), that table.
+/// The level's class table's reaction tables: for each class whose table's slots +0x00, +0x08 and +0x0c are the same
+/// code as a ported reference's (level 01's [`REF_CRITTER`] / [`REF_AMOEBOID`] / [`REF_CHICKEN`]), that table.
 pub fn tables_from_overlay(target: &rc_formats::level_overlay::LevelOverlay, level01: &rc_formats::level_overlay::LevelOverlay) -> std::collections::HashMap<i16, Table> {
     let rel = rc_formats::level_overlay::Relocation::new(level01, target);
     let mut out = std::collections::HashMap::new();
     for e in target.vtbl() {
-        let Some(slot0) = target.u32(e.w8) else { continue };
         for (r, t) in [(REF_CRITTER, Table::Critter), (REF_AMOEBOID, Table::Amoeboid), (REF_CHICKEN, Table::Chicken)] {
-            if same_small(&rel, level01, target, r, slot0) { out.insert(e.o_class as i16, t); }
+            if same_table(&rel, level01, target, r, e.w8) { out.insert(e.o_class as i16, t); }
         }
     }
     out
@@ -229,11 +289,15 @@ pub fn tables_from_overlays(target: &rc_formats::level_overlay::LevelOverlay, le
         let Some(ov) = reference(level) else { continue };
         let rel = rc_formats::level_overlay::Relocation::new(&ov, target);
         for e in target.vtbl() {
-            let Some(slot0) = target.u32(e.w8) else { continue };
-            if same_small(&rel, &ov, target, r, slot0) { out.insert(e.o_class as i16, t); }
+            if same_table(&rel, &ov, target, r, e.w8) { out.insert(e.o_class as i16, t); }
         }
     }
     out
+}
+
+/// Whether the target table at `w8` has slots +0x00, +0x08, +0x0c of the same code as the reference's `r`.
+fn same_table(rel: &rc_formats::level_overlay::Relocation, a: &rc_formats::level_overlay::LevelOverlay, b: &rc_formats::level_overlay::LevelOverlay, r: [u32; 3], w8: u32) -> bool {
+    [0u32, 2, 3].iter().zip(r).all(|(&k, ra)| b.u32(w8 + 4 * k).is_some_and(|tb| same_small(rel, a, b, ra, tb)))
 }
 
 /// The slot functions are reached only through the tables, so a function extent may be unknown: compare 16 masked
@@ -260,6 +324,9 @@ pub fn wrappers(w: &World, id: MobyId) -> Option<Wrappers> {
         Table::Amoeboid => if w.m(id).o_class == 866 { AMOEBOID_866 } else { AMOEBOID_572 },
         Table::Chicken => CHICKEN,
         Table::Veldin749 => VELDIN_749,
+        Table::RollingMine568 => ROLLING_MINE_568,
+        Table::Held7 => HELD7,
+        Table::Hover252 => HOVER_252,
     })
 }
 
@@ -320,7 +387,12 @@ pub fn cannon_frame(w: &mut World, id: MobyId, euler: [f32; 3]) {
     sphere_lerp(w, id);
 }
 
-fn seq(w: &World, id: MobyId, k: usize) -> u8 { wrappers(w, id).map_or(0, |x| x.seqs[k]) }
+/// Entry `k` of the class's sequence table: the one its init stored in the record's +0x70 ([`SEQ_TABLES`]), else its
+/// table's default.
+fn seq(w: &World, id: MobyId, k: usize) -> u8 {
+    let own = record(w, id).map(|r| ri(w, r, id, rec::SEQS)).and_then(|v| SEQ_TABLES.iter().enumerate().find(|(i, _)| seq_table_id(*i) == v).map(|(_, t)| t[k]));
+    own.unwrap_or_else(|| wrappers(w, id).map_or(0, |x| x.seqs[k]))
+}
 
 /// `fun_00212f90(moby, seq, 0, ticks(n))` behind the game's `if (m+0x53 != seq)`.
 fn blend(w: &mut World, id: MobyId, s: u8, n: i32) {
@@ -339,7 +411,19 @@ pub fn slot_start(w: &mut World, id: MobyId, mouth: V) -> i32 {
     let r = approach(w, id, mouth);
     if r == 0 {
         if w.m(id).state != x.held { return 0; }
-        w.mm(id).state = x.release;
+        w.mm(id).state = if x.saved { w.m(id).cmd } else { x.release };
+        return 0;
+    }
+    if x.saved {
+        let s = w.m(id).state;
+        if s.wrapping_sub(x.held.wrapping_sub(1)) < 2 {
+            if s != x.held {
+                w.mm(id).state = x.held;
+                w.mm(id).cmd = s;
+            }
+            return 2;
+        }
+        if let Some(rr) = record(w, id) { set_rs(w, rr, id, rec::STATE, 0); }
         return 0;
     }
     if let Some((only, not_in)) = x.start_only {
@@ -353,14 +437,14 @@ pub fn slot_start(w: &mut World, id: MobyId, mouth: V) -> i32 {
 pub fn slot_swallow(w: &mut World, id: MobyId, point: V) -> i32 {
     let Some(x) = wrappers(w, id) else { return 1 };
     let r = swallow(w, id, point);
-    wrap_state(w, id, x.held, x.release, r)
+    wrap_state(w, id, &x, r)
 }
 
 /// Slot +0x08 `(height, moby, vel, target)`: fired out of the cannon.
 pub fn slot_fire(w: &mut World, id: MobyId, height: f32, vel: V, target: Option<MobyId>) -> i32 {
     let Some(x) = wrappers(w, id) else { return 0 };
     let r = fire_out(w, id, height, vel, target);
-    let r2 = wrap_state(w, id, x.held, x.release, r);
+    let r2 = wrap_state(w, id, &x, r);
     if let (Some(s), Some(rr)) = (x.bounce_sound, record(w, id)) {
         if rs(w, rr, id, rec::STATE) == 6 { w.play_sound(s, 0, id); }
     }
@@ -371,21 +455,31 @@ pub fn slot_fire(w: &mut World, id: MobyId, height: f32, vel: V, target: Option<
 pub fn slot_let_go(w: &mut World, id: MobyId) {
     let Some(x) = wrappers(w, id) else { return };
     let_go(w, id);
-    w.mm(id).state = x.held;
+    match x.let_go {
+        LetGo::Held => w.mm(id).state = x.held,
+        LetGo::Keep => {}
+        LetGo::Hover252 => crate::moby_update::classes::units::hover_zapper::let_go(w, id),
+    }
 }
 
-fn wrap_state(w: &mut World, id: MobyId, held: u8, release: u8, r: i32) -> i32 {
+fn wrap_state(w: &mut World, id: MobyId, x: &Wrappers, r: i32) -> i32 {
     if r == 0 {
-        if w.m(id).state != held { return 0; }
-        w.mm(id).state = release;
+        if w.m(id).state != x.held { return 0; }
+        w.mm(id).state = if x.saved { w.m(id).cmd } else { x.release };
         return 0;
     }
-    w.mm(id).state = held;
+    w.mm(id).state = x.held;
     r
 }
 
-/// Slot +0x14 (every table: `DeleteMoby`).
-pub fn slot_delete(w: &mut World, id: MobyId) { w.delete_moby(id); }
+/// Slot +0x14: `DeleteMoby` (every table but 568's, which parks it: [`Wrappers::pool`]).
+pub fn slot_delete(w: &mut World, id: MobyId) {
+    if wrappers(w, id).is_some_and(|x| x.pool) {
+        crate::moby_update::classes::units::rolling_mine::park(w, id);
+    } else {
+        w.delete_moby(id);
+    }
+}
 
 // ------------------------------------------------------------------------------------------------------------------
 // The shared handlers

@@ -34,6 +34,8 @@ use std::sync::Arc;
 pub const HELP_RECORDS: usize = 148;
 /// Move records (chunk 17, 0x141848 + 8·rec).
 pub const MOVE_RECORDS: usize = 36;
+/// Gadget-help records (chunk 18, 0x141720 + 8·item).
+pub const GADGET_RECORDS: usize = 37;
 /// The help log (chunk 1010, 0x141e08) and the id table 0x1798d0 (`fun_001fecc8` scans 0x96 entries).
 pub const LOG_LEN: usize = 150;
 /// The level-01 address of the log's id table `{s16 help message id, s16 log title id}[150]` (`fun_001fecc8`).
@@ -59,14 +61,16 @@ pub struct Records {
     pub help: [HelpRec; HELP_RECORDS],
     /// 0x141848.
     pub moves: [HelpRec; MOVE_RECORDS],
+    /// 0x141720 (read only here: the directors' "item not used for a while" tests).
+    pub gadget: [HelpRec; GADGET_RECORDS],
 }
 
 impl Default for Records {
-    fn default() -> Self { Records { help: [HelpRec::default(); HELP_RECORDS], moves: [HelpRec::default(); MOVE_RECORDS] } }
+    fn default() -> Self { Records { help: [HelpRec::default(); HELP_RECORDS], moves: [HelpRec::default(); MOVE_RECORDS], gadget: [HelpRec::default(); GADGET_RECORDS] } }
 }
 
 impl Records {
-    pub fn of(gs: &GameState) -> Records { Records { help: gs.global.help, moves: gs.global.move_help } }
+    pub fn of(gs: &GameState) -> Records { Records { help: gs.global.help, moves: gs.global.move_help, gadget: gs.global.gadget_help } }
     /// `help[rec].count` as the code reads it (`lh` / `lhu`); out of range: 0xffff (refused).
     pub fn help_count(&self, rec: i32) -> u16 { usize::try_from(rec).ok().and_then(|r| self.help.get(r)).map_or(0xffff, |r| r.count) }
 }
@@ -229,6 +233,8 @@ pub struct Help {
     pub level: i32,
     pub play_time: i32,
     pub out: HelpOut,
+    /// A camera option reversed (the low byte of 0x15eddc or 0x15ede0 is 0): the Aridia director 1324's camera hint.
+    pub cam_reversed: bool,
 }
 
 impl Default for Help {
@@ -250,6 +256,7 @@ impl Default for Help {
             level: 0,
             play_time: 0,
             out: HelpOut::default(),
+            cam_reversed: false,
         }
     }
 }
@@ -286,6 +293,7 @@ impl Help {
         self.play_time = gs.global.play_time;
         self.bx.text_on = gs.global.helpdesk_text != 0;
         self.bx.voice_on = gs.global.helpdesk_voice != 0;
+        self.cam_reversed = gs.global.cam_pitch_normal & 0xff == 0 || gs.global.cam_yaw_normal & 0xff == 0;
     }
 
     /// The records and the log back into the saved game (after the tick).

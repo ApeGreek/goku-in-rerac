@@ -45,6 +45,9 @@ pub enum Callback {
     /// A census unit port's glow callback (`super::units::PORTS[i]`; draw only): the glow quads (`0x2781d0`)
     /// [`super::units::glow_quads`] lists for it (the lamps 1060's `0x2df3d8`, …); `rc-engine`'s fx_draw draws them.
     UnitGlow(u16),
+    /// A census unit port's quad callback (`super::units::PORTS[i]`; draw only): the `FastDrawQuadReal` quads
+    /// [`super::units::fx_quads`] lists for it (the laser fences 838's `0x30de90`); `rc-engine`'s fx_draw draws them.
+    UnitQuads(u16),
     /// The Walloper's arcs and fist glow (level01 `0x2d1768`, list 2), registered by the hand item's update
     /// (`crate::hero::walloper`; the hand item is not a table moby: registered on Ratchet's). The state part is the
     /// glow's `randi(4)` flicker (`0x2d1e08`), stored in [`DrawCallbacks::walloper_dim`]; `rc-engine`'s walloper_render
@@ -116,7 +119,7 @@ pub fn run_frame(w: &mut World) {
                 w.svc.draw_callbacks.walloper_dim = Some(dim);
             }
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
-            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) => {}
+            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) | Callback::UnitQuads(_) => {}
         }
     }
 }

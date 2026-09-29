@@ -532,6 +532,10 @@ pub trait SoundSink {
     fn set_pitch_bend(&mut self, _slot: i32, _pb: i32) {}
     /// The checkpoint record `0x29ac10` saves the sound layer's reverb request. Default: nothing.
     fn checkpoint_saved(&mut self) {}
+    /// The voice handoff (G-AUD-010): a class's own store of a new owner and position into a playing slot's record
+    /// (`0x13e5c0 + slot·0x70` +0x18 owner, +0x20 position), by which one looping voice moves between the emitters of a
+    /// class (the laser fences 838, the spouts 855 on Rilgar). Default: nothing.
+    fn hand_over(&mut self, _slot: i32, _moby: MobyId, _pos: [f32; 3]) {}
 }
 
 /// One glint (0x16eec0 + i·0x20): the sparkle drawn on idle bolts.
@@ -700,6 +704,9 @@ pub trait Inventory {
     /// `0x1c4530 + i·0x18 + 0xe` / `+0xc`: max ammo / pickup amount.
     fn max_ammo(&self, _item: usize) -> u16 { 0 }
     fn pickup_amount(&self, _item: usize) -> u16 { 0 }
+    /// The item definition's slot type (+0x08 of `0x179f40 + 0x4c·i`: 0 hand, 1 feet, 2 head, 3 back, −1 none): the
+    /// directors' "two hand items owned" tests. Default: −1.
+    fn slot_type(&self, _item: usize) -> i32 { -1 }
     /// `0x15edd0[0..12]`: the ammo item list (0xff ends it).
     fn ammo_list(&self) -> [u8; 12] { [0xff; 12] }
     /// `0x179f40 + type·0x4c + 0x3a` (s16): the pickup class of item `ty` (level01 .data).
@@ -1031,6 +1038,8 @@ pub struct HeroFields {
     pub water_level: f32,
     /// 0x13f52e (s16): the dive lock (level 05's water plane 982 holds it at 5).
     pub dive_lock: i16,
+    /// `0x13fcd8 = 0`: the Swingshot's miss flag taken (Kerwan's director 1342 counts the misses).
+    pub swing_help_clear: bool,
 }
 
 /// Ratchet's pose as a class stores it (native `f32`): position 0x13f3d0 (x, y, z; w kept), yaw 0x13f3e8, target
@@ -1073,6 +1082,7 @@ impl HeroFields {
             hide_hand: false,
             water_level: f32::from_bits(h.water_level.0),
             dive_lock: h.swim.dive_lock,
+            swing_help_clear: false,
         }
     }
 
@@ -1107,6 +1117,7 @@ impl HeroFields {
         h.weapons.ammo = self.ammo;
         h.water_level = Pf(self.water_level.to_bits());
         h.swim.dive_lock = self.dive_lock;
+        if self.swing_help_clear { h.swing.help = 0; }
         for (t, n) in h.weapons.picked.iter_mut().zip(self.ammo_picked.iter()) { *t += n; }
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
@@ -1340,6 +1351,18 @@ impl<'a> World<'a> {
     /// `release_voice_slot(slot)` guarded by the slot's owner ([`SoundSink::release`]).
     pub fn release_sound(&mut self, slot: i32, id: MobyId) {
         if let Some(s) = self.sound.as_deref_mut() { s.release(slot, id); }
+    }
+
+    /// The owner of voice slot `slot` (+0x18: None when freed or out of range) ([`SoundSink::slot_owner`]).
+    pub fn sound_owner(&self, slot: i32) -> Option<MobyId> {
+        if slot < 0 { return None; }
+        self.sound.as_deref().and_then(|s| s.slot_owner(slot)).map(|(o, _)| o)
+    }
+
+    /// A class's store of itself and `pos` into voice slot `slot`'s owner and position ([`SoundSink::hand_over`]).
+    pub fn hand_over_sound(&mut self, slot: i32, id: MobyId, pos: [f32; 3]) {
+        if slot < 0 { return; }
+        if let Some(s) = self.sound.as_deref_mut() { s.hand_over(slot, id, pos); }
     }
 
     /// `SoundSetPitchBend(slot, pb)` 0x2a1988 ([`SoundSink::set_pitch_bend`]; the game writes slot −1's field too:

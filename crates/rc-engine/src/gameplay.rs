@@ -1364,7 +1364,8 @@ fn tick(
     let scene_frame = p.game.camera_paused;
     // The item tables the pickups read (rc_game::moby_update::classes::pickup::ItemTables): the price records, the
     // vendor list 0x15edd0; the owned items and ammo come from Ratchet's mirrors inside the moby hook.
-    let item_base = rc_game::moby_update::classes::pickup::ItemTables::new(&p.svc.interact.tables.shop.records, state.as_deref().map_or([0xff; 12], |s| s.0.global.vendor));
+    let slots: Vec<i32> = p.item_data.as_ref().map_or_else(Vec::new, |d| d.defs.iter().map(|d| d.slot).collect());
+    let item_base = rc_game::moby_update::classes::pickup::ItemTables::new(&p.svc.interact.tables.shop.records, state.as_deref().map_or([0xff; 12], |s| s.0.global.vendor)).with_slots(&slots);
     let parts_cell = RefCell::new(particles.as_deref_mut());
     let svc_cell = RefCell::new(&mut p.svc);
     let (sched, classes_arc, emitters, missions) = (&mut p.sched, &p.classes, &p.emitters, &p.missions);

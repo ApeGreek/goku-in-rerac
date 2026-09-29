@@ -141,12 +141,12 @@ marked; `C:` rows cite one level copy (the others: `clusters.tsv`).
 | Follow / script camera settings from mobys (`camera`) | partly | G-HERO-026 | 38 | 29 | 74 | 615 (19); 351/1301 (10); 877 (6); 1380 (4) | `C:3b375f0ab07b` FUN_002e9758×24; `C:33058002480b` FUN_002f89b0×4; `L01:00313740` FUN_00313740×3; `L01:00313768` FUN_00313768×3; `L01:00313820` FUN_00313820×3; `L01:00313b48` FUN_00313b48×3 |
 | Blob shadows (`shadow`) | partly | G-REN-025 | 7 | 7 | 70 | 1112 (31); 1269 (20); 1110 (12); 871 (4) | `C:bd2754fc3a9b` FUN_00259fe8×6; `L01:0026eec8` FUN_0026eec8×1 |
 | Save bytes variant [L] (`death`) | partly | G-SAV-003 | 4 | 3 | 45 | 44 (21); 44 (17); 78 (7) | `C:641f527e8cd4` FUN_002a35d8×3 |
-| Level sound on a slot (`lsound`) | partly | G-AUD-007 | 14 | 4 | 41 | 466/480/485 (38); 1118 (1); 1109 (1); 1108 (1) | `C:8d520530637e` FUN_0029aec0×3; `C:bcf4ccdaa994` FUN_0027eca0×1 |
+| Level sound on a slot (`lsound`) | partly | G-AUD-007 | 14 | 4 | 41 | 466/480/485 (38); 1118 (1); 1109 (1); 1108 (1) | `C:8d520530637e` FUN_0029aec0×3; `C:bcf4ccdaa994` FUN_0027eca0×1 — **W2 2026-09-29**: L04 `0x27eca0` is `PlayLevelSoundAtMoby`'s copy (has); the 466 family (38) is cheap |
 | Save [conditional] (`save`) | missing | G-SAV-002 | 39 | 38 | 39 | 1005/1016 (2); 1750 (1); 1428 (1); 1455 (1) | `L01:00261448` memcard_Save__Fii×37; `L01:00260e80` memcard_MakeWholeSave×1 |
-| Voice handoff between mobys [override] (`voicehand`) | missing | G-AUD-010 | 2 | 2 | 33 | 838 (26); 855 (7) | `X:838` voice_handoff_838×1; `X:855` voice_handoff_855×1 |
-| Draw-callback sprite helper (`fxdraw`) | partly | G-REN-020 | 20 | 8 | 20 | 1907/1908/1910 (7); 1405/1406/1407 (7); 293 (1); 1919 (1) | `L01:0021e340` DrawSpriteHelper_A×8 |
+| Voice handoff between mobys [override] (`voicehand`) | missing | G-AUD-010 | 2 | 2 | 33 | 838 (26); 855 (7) | `X:838` voice_handoff_838×1; `X:855` voice_handoff_855×1 — **closed W2 2026-09-29**: `SoundSink::hand_over`; 838 ported (`laser_fence`), 855 cheap |
+| Draw-callback sprite helper (`fxdraw`) | partly | G-REN-020 | 20 | 8 | 20 | 1907/1908/1910 (7); 1405/1406/1407 (7); 293 (1); 1919 (1) | `L01:0021e340` DrawSpriteHelper_A×8 — **closed W2 2026-09-29**: VU1 set-up only, re-tagged has; its units are cheap |
 | Particle spawner variant (types from a table) (`particles`) | partly | G-PRT-001 | 5 | 3 | 5 | 1400 (2); 1629 (2); 1400 (1) | `C:b376dbd21da4` FUN_00272cb8×3 |
-| Level height grid (`heightmap`) | missing | G-LVL-008 | 3 | 2 | 3 | 1400 (2); 1400 (1) | `L01:00278020` FUN_00278020×2 |
+| Level height grid (`heightmap`) | missing | G-LVL-008 | 3 | 2 | 3 | 1400 (2); 1400 (1) | `L01:00278020` FUN_00278020×2 — **closed W2 2026-09-29**: `rc_formats::level::HeightGrid`; 1400 still needs `ptype` |
 | Cinematic leftovers (slideshow, the ship registration) (`cine`) | partly | G-CUT-003, G-LVL-001 | 2 | 2 | 2 | 1422 (1); 1353 (1) | `L01:002a2360` FUN_002a2360×1; `L01:002ad558` EnterSlideshowMode×1 |
 | Group command variants (`group`) | partly | G-CLS-023 | 2 | 2 | 2 | 1108 (1); 1051 (1) | `C:40920504317a` FUN_002f9948×2; `C:bcbd2dbe1730` FUN_002f99b0×2 |
 | Leaving the level (`levelexit`) | missing | G-LVL-001 | 2 | 2 | 2 | 436 (1); 834 (1) | `L01:002a29a0` FUN_002a29a0×2 |
@@ -334,6 +334,41 @@ Census after (2026-09-29, `cargo run -p rc-trace -- class-census`): no unit list
 instances unported (was 417 / 4,030 before this wave's two lanes); verdicts cheap 219 / 1,498, missing 145 / 1,884,
 partly 42 / 291, unknown 6 / 8. Freed by this row (only the cheat left, conditional): 340 (04: 28), 333 (08: 8), 217
 (04: 5), 578 (03: 3).
+
+### In the port: W2 lane 2, help directors and quick wins (2026-09-29, level_scripting.md §8)
+
+| unit (this run) | classes (levels) | port |
+|---|---|---|
+| U183 | 838 laser fences (05; 26) | `units/laser_fence.rs` + `Callback::UnitQuads` (G-AUD-010) |
+| U32, U119, U145, U165, U204, U232, U292, U305, U341, U391, U419 | the help directors 1413 (00), 1324 (02), 1342 (03), 1343 (04), 1347 (05), 1348 (06), 1349 (08), 1000 (09), 1344 (10), 422 (12), 558 (13) | `units/help_*.rs`, `units/hints.rs` |
+
+Re-tags (census_systems.tsv): `C:bcf4ccdaa994` (L04 `0x27eca0` = `PlayLevelSoundAtMoby`) has; `L01:0021e340`
+`DrawSpriteHelper_A` has (VU1 set-up only); `X:855` has (the hand-off store is ported); `L01:00278020` has
+(`HeightGrid::height`). Census before → after this lane (both runs include the other lanes' ports of the same
+moment): 412 units / 3,681 created (cheap 219 / 1,498, partly 42 / 291, missing 145 / 1,884) → **397 / 3,454**
+(cheap 217 / 1,532, partly 33 / 233, missing 141 / 1,681). Newly cheap: the 466 family (U154, 38), 855 (U189, 7),
+the four sprite-callback units (U379, U384, U488, U532: 16). Found while porting: the save-only story classes also
+write items, bolts and health directly (G-CLS-029), 558 writes the hero's airless flag 0x14161b (G-HERO-032).
+
+### In the port: W2 lane 1, the ready enemy units (2026-09-29, creatures.md §10)
+
+| unit (this run's id) | classes (levels: created) | reference update | port |
+|---|---|---|---|
+| U553 | 568 rolling mines (18: 20; a pool of the boss 1422) | level18 0x2d5918 | `units::rolling_mine` |
+| U301 | 193 pack biters (09: 49, 15: 44) | level09 0x2e27d8 | `units::pack_biter` |
+| U268 | 252 hover zappers (08, 14: 77), and their two draw callbacks | level08 0x2d2af0, 0x2d4108, 0x2d3878 | `units::hover_zapper` |
+| U407 | 63 flying biters (13: 58) | level13 0x2b50d8 | `units::flying_biter` |
+| U300 | 52 buzz bombs (09, 16: 46) | level09 0x2c5990 | `units::buzz_bomb` |
+| U521 | 1445 area stalkers (16: 24) | level16 0x2e5e08 | `units::area_stalker` |
+| U426 | 1271 the wave gate (13: 1) | level13 0x30af50 | `units::wave_gate` |
+
+Census re-run after them (2026-09-29, with W2 lane 2's ports of the same day): **512** unported class-levels, 3,602
+placed / **3,325 created** instances in **393 units** (verdicts cheap 217 / 1,532, missing 138 / 1,553, partly 32 /
+232, unknown 6 / 8); these seven units took 319 created instances. Left of the lane's list: 1202 (57), 1199 (15),
+1196 (7) on level 10 and 29 (9) on level 13 — 29 is three classes (the turret, its rider 36, its shot 1238: the last
+two created by code, so outside the census). Findings for the census itself: `0x294cb0` / `0x265b38` is ported now
+(`path::toward`); level13 `0x280400` is a type-68 spawner, not `PartType44Spawn` (G-PRT-007; U407 was "has
+particles"); 568 is "cheap" but inert without 1422.
 
 ## Unique classes: the ones that need something no other class needs
 

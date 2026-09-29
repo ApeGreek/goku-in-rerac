@@ -528,3 +528,85 @@ gone; level 08 `RC_HERO_AT=221,180,36.1,1.5708` frame 120 — the gunner 1023 wi
 the pillars (from the south its line of sight is blocked by a wall at y 185.6, so it only hops); level 08
 `RC_HERO_AT=221,200,36.1,-1.5708` frame 120 — a shot bursting on Ratchet's chest (the flash and glow) with a second
 shot 1292 on the floor beside him and a health orb gone.
+
+## 10. W2 lane 1: the ready enemy units (G-ENM-010 / G-ENM-001, 2026-09-29)
+
+Seven units of the census's "ready" list, each one port found by code identity (`units::PORTS`); the full per-function
+coverage table (every call and branch of the update and its private helpers, with the file / function or the gap) is
+the module doc of each port. Tests: `crates/rc-game/tests/classes/enemy_units.rs` (the level harness of
+`creature_classes`).
+
+### 10.1 System or not (the evidence)
+
+| question | finding |
+|---|---|
+| 193 and 63 share most idioms (the 0xb0 / 0xb1 hit rule, the group call, the swerving charge, the bite at key 13) | **not one source**: different census clusters, different states (63 flies: 0xe..0x12), sequences, knock speeds, tests (63's gold-chicken reach, its sight cuboid): two ports, no shared abstraction |
+| the reaction tables of the new classes | **one shared shape, per-class data**: 193, 1445, 63 and 577 have the same slot +0x00 code; they differ in slot +0x08 (63 / 577 play the bounce sound) and in the sequence table, which the class's **init** stores in the record's +0x70. `react::tables_from_overlay(s)` now matches slots +0x00, +0x08, +0x0c (it matched +0x00 alone), and a class's sequence table is read through the record (`react::SEQ_TABLES`, `seq_table_id`). 568 (a saved state and a pool) and 252 (its own let-go) are new shapes: `Wrappers::saved` / `pool` / `let_go` |
+| level09 `0x294cb0` (the census's "nearest points to a pair", 09 / 13 / 15) | one source (cluster dc2339668382): the next waypoint toward a target: `path::toward` (consumers 193, 63) |
+| level18 `0x260790`, level08 `0x268940` | `SpawnBeamExplosion` word for word (only the callees' addresses differ): `fx::beam_explosion` |
+| level13 `0x280400` | not `PartType44Spawn` (type 44) as the census tags it: it takes a type **68** record (G-PRT-007) |
+| level08 `0x2025d8` (252's sphere push) | `jr ra; li v0, 0` in the overlay: a compiled-out function; nothing to port |
+| 568 | a **pool**: parked by its init; only the boss 1422's `0x2d5cf8` throws one (G-ENM-001) |
+| 1445's sequence table (level16 0x161e48) | the same bytes as 193's: one `SEQ_TABLES` entry serves both (data, not code) |
+| 1271 | not an enemy: a gate over moby groups (on level 13 the groups 44, 26 and 20: 63's ground pack is group 20) |
+| 29 (13: 9, not ported) | not one class: its update creates a rider (class 36, update `0x2b4c80`, the one that takes the hits) and fires shots (class 1238, spawner `0x3061c8`, update `0x306300`); neither is in the census (created by code) nor ported: the unit is three ports (G-ENM-001) |
+
+### 10.2 Side effects: coverage and tests
+
+| unit | side effect | ported | test (`enemy_units::`) |
+|---|---|---|---|
+| U553 568 (18: 20) `rolling_mine` | parked on init (hidden, no collision, untargetable) | yes | `rolling_mines_park_on_their_first_update` |
+| | fall, roll-out (roll, heading), the chase within 6 | yes | `a_thrown_mine_falls_rolls_out_and_rolls_to_ratchet` |
+| | a weapon hit → the small beam blast (class sound 1, 5 streaks, no damage), parked | yes | `a_weapon_hit_sets_the_mine_off` |
+| | the fuse → the small blast | yes | `the_fuse_sets_the_mine_off` |
+| | Ratchet within 2 of a falling mine → small; a decoy contact → the large blast: its 1.5 damage sphere hits Ratchet (flags 0x810001, damage 1, type 2 / 1, class 568), camera shake, 20 streaks | yes | `ratchet_near_a_falling_mine_and_a_decoy_contact` |
+| | Ratchet's capsule touching it → large | NOT (G-HERO-033) | — |
+| | the Suck Cannon (its table: taken in 3 / 4, the saved state, the pool delete) | yes | `the_suck_cannon_takes_a_rolling_mine` |
+| | the throw `0x2d5cf8` | NOT (1422, G-ENM-001) | — |
+| U301 193 (09: 49, 15: 44) `pack_biter` | graze, face, the swerving charge, home, stuck; walkways (`path::toward`) | yes | `a_biter_pack_charges_and_bites_ratchet`, `biter_pack_run_is_deterministic` |
+| | the bite on Ratchet (flags 1, damage 1, push 0.2) | yes | `a_biter_pack_charges_and_bites_ratchet` |
+| | a hit: knockback (flash 0xfa, cooldown 60), the pack's +0xbc; death: `SetDeathBits` (save bit, bolts), the death explosion (sound 6) | yes | `weapons_knock_back_and_kill_a_biter` |
+| | the Suck Cannon (`Held7`, its own sequences) | yes | `the_suck_cannon_takes_a_biter` |
+| | the Taunter (alert 240: range 12 → 20) | yes | `the_taunter_alerts_a_biter` |
+| | the deadly floor (surface 1) | yes | `a_biter_on_the_deadly_floor_dies` |
+| | the Giant Clank pack hidden on foot | yes (body 2: G-HERO-005) | `quartu_giant_clank_biters_stay_hidden_on_foot` |
+| | the big-head cheat | NOT (G-SAV-006) | — |
+| U268 252 (08, 14: 77) `hover_zapper` | the bob over home, the drift | yes | `an_idle_zapper_bobs_and_drifts_near_home` |
+| | the chase, the charge (class sound 0 until it ends), the zap: the arc (six quads a tick, FX 0xe) and the hit on Ratchet (flags 1, damage 1) | yes | `a_zapper_chases_charges_and_zaps_ratchet`, `zapper_run_is_deterministic` |
+| | the glow (tween green / red, the quad at joint 3 on list 2) | yes | `a_zapper_chases_charges_and_zaps_ratchet` |
+| | any passed hit kills: `SetDeathBits` (bolts, save bit), class sound 1, the beam explosion | yes | `the_wrench_kills_a_zapper` |
+| | the Suck Cannon (held 5, its let-go home) | yes | `the_suck_cannon_takes_a_zapper` |
+| U407 63 (13: 58) `flying_biter` | hover, fly to random points, the flight path, take off, land | yes | `flyers_hover_and_roam_near_home`, `flyers_land_charge_and_bite_ratchet`, `flyer_run_is_deterministic` |
+| | the bite on Ratchet (flags 1, damage 1) | yes | `flyers_land_charge_and_bite_ratchet` |
+| | knockback (flash, cooldown, the particle off, the pack), death (`SetDeathBits`, bolts, the rate-limited death explosion: sound 4) | yes | `weapons_knock_back_and_kill_a_flyer` |
+| | a pit (z < 5): `SetDeathBits`, deleted | yes | `a_flyer_knocked_into_a_pit_dies` |
+| | the Suck Cannon (critter shape, its sequences), the Taunter (range 32) | yes | `the_suck_cannon_and_the_taunter_act_on_a_flyer` |
+| | the flight glow particle (type 68): the slot taken / freed | yes; the type's update and draw NOT (G-PRT-007) | — |
+
+| U300 52 (09, 16: 46) `buzz_bomb` | hover 0.5 over the ground; the chase at Ratchet's height + 0.8, the wind-up, the circling | yes | `buzz_bombs_chase_ratchet_and_blow_up`, `buzz_run_is_deterministic` |
+| | the buzz (class sound 1, looping; released on death) | yes | `buzz_bombs_chase_ratchet_and_blow_up` |
+| | the fuse's blinks and blast: the 2-unit damage sphere on Ratchet (flags 0x810001, damage 1), class sound 0, `SetDeathBits` | yes | `buzz_bombs_chase_ratchet_and_blow_up` |
+| | hits: knockback (class sound 8, the group), the third kills (the death flight, `SetDeathBits`, the death explosion) | yes | `the_wrench_knocks_back_and_kills_a_buzz_bomb` |
+| | the Taunter / a group call: alert, search range 24 | yes | `the_taunter_alerts_a_buzz_bomb` |
+| U521 1445 (16: 24) `area_stalker` | the walk to a target in its area (off the walls), home | yes | `stalkers_walk_to_ratchet_and_bite`, `stalker_run_is_deterministic` |
+| | the bite (the joint hit: flags 1, damage 1) | yes | `stalkers_walk_to_ratchet_and_bite` |
+| | any hit kills: the death flight, the death explosion (sound 6), `SetDeathBits`; the Suck Cannon (`Held7`) | yes | `a_hit_kills_a_stalker_and_the_suck_cannon_takes_one` |
+| U426 1271 (13: 1) `wave_gate` | its groups gone (Ratchet in its cuboid) → its state and +0xbc | yes | `the_wave_gate_opens_when_its_groups_are_gone` |
+| | Ratchet's ship mode (0x140940, state 0x32) holds it | the port has no ship mode (G-HERO-002 / G-LVL-009): never | — |
+
+Every table resolves on its levels only (`enemy_reaction_tables_resolve`), every unit on its levels with the census's
+counts (`enemy_units_resolve_on_their_levels`).
+
+**Not the game's, noted [L]:** 193's knock direction reads a stack target the tick has not written (the port: Ratchet);
+63's flight-path landing test reads a stack vector that is stale unless the tick picked a random point (the port: the
+target's offset); 252's arc takes joint 2 when the update registers the callback (the game: at the draw, the same
+pose).
+
+### 10.3 Frames (`RC_AUDIO=0 RC_SCENE=0`, two runs each, byte-identical)
+
+- Level 09, `RC_HERO_AT=284.6,175.5,36.3,1.5708`, frame 150: Ratchet on Gaspar's platform with the group-3 pack of
+  spring-antennaed biters 193 around him, charging.
+- Level 13, `RC_HERO_AT=508,446,300,1.5708`, frames 120 / 240: the flyers 63 of group 8 hovering over Gemlik's deck,
+  then landed and biting Ratchet (one mid-bite in the foreground).
+- Level 08, `RC_HERO_AT=272.5,191,35.2,2.4`, frame 148: a hover zapper 252, its glow turned red, firing its blue-white
+  arc into Ratchet.

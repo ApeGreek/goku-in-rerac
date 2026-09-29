@@ -51,6 +51,15 @@
 //! `FastDrawQuadReal` with FX 0xb (the radial glow), CLAMP_1 5, TEX1 bilinear, **ALPHA 0x48** (additive, on display
 //! bytes like every callback draw here).
 //!
+//! **`DrawSpriteHelper_A` 0x21e340** (the boot's `fun_001f76a0`), which the sprite-drawing callbacks call first: the
+//! set-up of the VU1 billboard program 7 (view·projection 0x167140, the guard band 0x1671c0 with −camera·1024, the
+//! fog words, the GIF tags); it keeps no game state. Here the material does the same for every prim (the camera, the
+//! fog), so a callback's port only lists its prims (G-REN-020, 2026-09-29).
+//!
+//! **The census units' quad callbacks** (`Callback::UnitQuads`): the `FastDrawQuadReal` quads
+//! `rc_game::moby_update::classes::units::fx_quads` lists (the laser fences 838's `0x30de90`: ten bars per lit fence
+//! of the group, FX 0x13, additive).
+//!
 //! **The census units' glow callbacks** (`Callback::UnitGlow`): the glow quads `rc_game::moby_update::classes::units::
 //! glow_quads` lists (the lamps 1060's `0x2df3d8`: one quad of size 1.2 / pull 0.5 on each visible lamp of the group).
 //!
@@ -736,6 +745,14 @@ fn draw_list1(
                         let mut b = PrimBuf::default();
                         for q in quads { glow_quad(&mut b, q.size, q.pull, q.point, q.rgba, cam); }
                         out.push(FxGroup { fx: GLOW_FX, additive: true, prims: b });
+                    }
+                    // A census unit port's quads (the laser fences 838, …).
+                    Callback::UnitQuads(i) => {
+                        let Some(g) = rc_game::moby_update::classes::units::fx_quads(&p.game.mobys, &p.svc, i, id) else { continue };
+                        if g.quads.is_empty() { continue; }
+                        let mut b = PrimBuf::default();
+                        for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
+                        out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
                     }
                     // Drawn by crate::water_render / crate::sea_render; the Walloper's arcs by crate::walloper_render; the
                     // range static by crate::visibomb_view.

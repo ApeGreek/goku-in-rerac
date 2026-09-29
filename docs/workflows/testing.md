@@ -407,6 +407,7 @@ The tables below are the audit as taken, minus these four rows.
 | `hero_boots_grind::kalebo_long_grind` | game-checked: Kalebo III (level 16) (L16) + determinism | fast | hero | keep |
 | `hero_boots_magnet::orxon_magnetic_walkway` | game-checked: On a magnetic walkway with the Magneboots [`0x13f658`] (L10) | fast | hero | keep |
 | `hero_cable_kerwan::kerwan_cables_jump_catch_slide_drop` | game-checked: Each cable (L03) | fast | hero | keep |
+| `hero_cable_kerwan::kerwan_cable_reach_is_its_own` | game-checked: Kerwan's own path search reaches 1.7 beside a cable, level 4's (level 00's) 0.9 [`0x205830`, `0x20cd08`] (L03) | fast | hero | keep |
 | `hero_damage::take_damage_takes_at_most_one` | game-checked: take damage takes at most one (disc data) | fast | hero | keep |
 | `hero_damage::hit_knocks_back_and_hurts` | game-checked: A contact hit from an enemy in front (disc data) | fast | hero | keep |
 | `hero_damage::hazard_hit_kills_and_raises_the_death_flag` | game-checked: The hazard classes 0x4eb / 0x558 kill at once (0x80, health 0, no push) [`0x141401`] (disc data) | fast | hero | keep |
@@ -504,7 +505,8 @@ The tables below are the audit as taken, minus these four rows.
 | `hero_reactive_novalis::novalis_suck_cannon_vacuums_an_ammo_pickup` | game-checked: The ammo crate 552 (class 511) broken next to Ratchet drops Bomb Glove ammo (he holds 10 of 40) [`0x2db850`, `0x307a50`] (L01) + determinism | fast | weapons | keep |
 | `hero_surfaces::surface_ids_per_level` | survey (no assert): prints each level's world / moby surface ids (all levels) | medium | hero | **drop**: superseded; `hero_surfaces::every_level_handles_its_own_surfaces` runs the same `surfaces(n)` on every level and asserts on it |
 | `hero_surfaces::every_level_handles_its_own_surfaces` | game-checked: Every surface id a level's collision uses is handled by that level's own reaction, or by no level's (0xa, 0x1f (all levels) | medium | hero | keep |
-| `hero_surfaces::aridia_quicksand_sink_jump_out_and_fade` | game-checked: Aridia (level 2) quicksand, surface 3 (L02) | fast | hero | keep |
+| `hero_surfaces::aridia_quicksand_sink_jump_out_and_fade` | game-checked: Aridia (level 2) quicksand, surface 3: the sink rates and the fade 1.2 deep, with Aridia's capsule flags 0x324 (L02) | fast | hero | keep |
+| `hero_surfaces::deadly_liquid_pass_levels_have_no_such_faces` | data/format: levels 6 and 14 (pass surface 0xd) have no surface-0xd face [`0x22a1d0`, `0x224db0`] (L06, L14) | fast | hero | keep |
 | `hero_surfaces::slippery_floor_is_the_slide` | game-checked: A slippery floor (surface 7, levels 12 and 14) (L01) | fast | hero | keep |
 | `hero_surfaces::novalis_flow_surface_is_the_sinking_floor` | game-checked: Novalis' flow chutes (surface 4 [`0x13f530`] (L01) | fast | hero | keep; doc says the flow 679 "is not ported" — stale since `hero_followups` ported it |
 | `hero_swingshot_levels::pull_on_real_targets` | game-checked: On Aridia and Kerwan (L02+L03) + determinism | medium | hero | keep |
@@ -771,6 +773,7 @@ The tables below are the audit as taken, minus these four rows.
 | `hero/suck_vortex::circle_spring_rotation` | port logic: circle spring rotation | fast | lib:weapons | keep |
 | `hero/suck_vortex::vacuum_reach` | port logic: vacuum reach | fast | lib:weapons | keep |
 | `hero/surface::level_rules` | port logic: level rules | fast | lib:hero | keep |
+| `hero/surface::pass_surface_per_level` | port logic: the per-level pass-through surface table and flags [`0x233940`, `0x248268`] | fast | lib:hero | keep |
 | `hero/surface::reaction_flags_per_level` | port logic: The flags of the reaction follow the level's rules | fast | lib:hero | keep |
 | `hero/surface::steep_ramp_slides_him_down` | port logic: A slope steeper than 50° is not ground | fast | lib:hero | keep |
 | `hero/surface::slippery_ramp_slides_him_down` | port logic: A slippery ramp (surface 7, level 0) | fast | lib:hero | keep |

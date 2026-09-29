@@ -162,3 +162,39 @@ pub fn parse_level_core(index: &[u8], data_size: usize) -> Result<LevelCore> {
     core.blocks = blocks;
     Ok(core)
 }
+
+/// The level height grid (core header +0xa4 `heightmap_offset`, a data-space offset; G-LVL-008): what
+/// `LoadLevelCoreData` 0x258128 hands to `FUN_002530f0`, which keeps the header in 0x15fc98..0x15fca4 and points
+/// 0x15fca8 at the cells (a zero offset clears all five). Present on Batalia (08), Orxon (12) and Oltanis (14), whose
+/// weather emitter 1400 reads it. Layout: `s32 width, s32 rows, f32 low, f32 high`, then `u8 cells[rows][width]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeightGrid {
+    /// 0x15fc98: cells per row (x).
+    pub width: i32,
+    /// 0x15fc9c: rows (y; the game never reads it).
+    pub rows: i32,
+    /// 0x15fca0 / 0x15fca4: the heights of cell values 255 and 0.
+    pub low: f32,
+    pub high: f32,
+    pub cells: Vec<u8>,
+}
+
+impl HeightGrid {
+    /// The grid of a level (None when the header's offset is 0 or the block does not fit the data).
+    pub fn parse(header: &LevelCoreHeader, data: &[u8]) -> Option<HeightGrid> {
+        let o = usize::try_from(header.heightmap_offset).ok().filter(|&o| o > 0)?;
+        let b = Buf(data);
+        let (width, rows) = (b.i32(o).ok()?, b.i32(o + 4).ok()?);
+        let (low, high) = (f32::from_bits(b.u32(o + 8).ok()?), f32::from_bits(b.u32(o + 12).ok()?));
+        let n = usize::try_from(width).ok()?.checked_mul(usize::try_from(rows).ok()?)?;
+        Some(HeightGrid { width, rows, low, high, cells: data.get(o + 16..o + 16 + n)?.to_vec() })
+    }
+
+    /// `FUN_00278020(p)` (level01 0x278020): `(high − low)·(1 − cell/255) + low` of the cell `width·(int)y + (int)x` (the `cvt.w.s`
+    /// truncation). None outside the grid (the game reads whatever lies there) [L].
+    pub fn height(&self, x: f32, y: f32) -> Option<f32> {
+        let i = self.width.checked_mul(y as i32)?.checked_add(x as i32)?;
+        let c = *self.cells.get(usize::try_from(i).ok()?)?;
+        Some((self.high - self.low) * (1.0 - c as f32 / 255.0) + self.low)
+    }
+}

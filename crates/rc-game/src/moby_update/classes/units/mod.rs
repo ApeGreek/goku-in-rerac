@@ -42,6 +42,25 @@
 //! | U523 | 1667–1671 Kalebo air traffic (16) | level16 0x2e76b8 | [`kalebo_traffic`] |
 //! | U25 | 749 Veldin horny toads (00, 18) | level00 0x2d4610 | [`horny_toad`] |
 //! | U287 | 1023 hopping gunners (08, 09), and their shot 1292 | level08 0x301158, 0x307298 | [`hop_gunner`] |
+//! | U553 | 568 rolling mines (18; the pool of the boss 1422) | level18 0x2d5918 | [`rolling_mine`] |
+//! | U301 | 193 pack biters (09, 15) | level09 0x2e27d8 | [`pack_biter`] |
+//! | U268 | 252 hover zappers (08, 14), and their draw callbacks (the glow, the arc) | level08 0x2d2af0, 0x2d4108, 0x2d3878 | [`hover_zapper`] |
+//! | U407 | 63 flying biters (13) | level13 0x2b50d8 | [`flying_biter`] |
+//! | U300 | 52 buzz bombs (09, 16) | level09 0x2c5990 | [`buzz_bomb`] |
+//! | U521 | 1445 area stalkers (16) | level16 0x2e5e08 | [`area_stalker`] |
+//! | U426 | 1271 the wave gate (13) | level13 0x30af50 | [`wave_gate`] |
+//! | U183 | 838 Rilgar laser fences (05; one looping voice per group, G-AUD-010) | level05 0x30dc68 | [`laser_fence`] |
+//! | U32 | 1413 the Veldin help director (00) | level00 0x2e0988 | [`help_veldin`] |
+//! | U119 | 1324 the Aridia help director (02) | level02 0x2ee890 | [`help_aridia`] |
+//! | U145 | 1342 the Kerwan help director (03) | level03 0x2df520 | [`help_kerwan`] |
+//! | U165 | 1343 the Eudora help director (04) | level04 0x2e4418 | [`help_eudora`] |
+//! | U204 | 1347 the Rilgar help director (05) | level05 0x31bf40 | [`help_rilgar`] |
+//! | U232 | 1348 the Blarg help director (06) | level06 0x3083b0 | [`help_blarg`] |
+//! | U292 | 1349 the Batalia help director (08) | level08 0x307540 | [`help_batalia`] |
+//! | U305 | 1000 the Gaspar help director (09) | level09 0x300888 | [`help_gaspar`] |
+//! | U341 | 1344 the Orxon help director (10) | level10 0x2e85b8 | [`help_orxon`] |
+//! | U391 | 422 the Hoven help director (12) | level12 0x2ed280 | [`help_hoven`] |
+//! | U419 | 558 the Gemlik help director (13) | level13 0x2f3778 | [`help_gemlik`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -80,6 +99,26 @@ pub mod rail_car;
 pub mod kalebo_traffic;
 pub mod horny_toad;
 pub mod hop_gunner;
+pub mod laser_fence;
+pub mod help_veldin;
+pub mod help_aridia;
+pub mod help_kerwan;
+pub mod help_eudora;
+pub mod help_rilgar;
+pub mod help_blarg;
+pub mod help_batalia;
+pub mod help_gaspar;
+pub mod help_orxon;
+pub mod help_hoven;
+pub mod help_gemlik;
+pub mod hints;
+pub mod rolling_mine;
+pub mod pack_biter;
+pub mod hover_zapper;
+pub mod flying_biter;
+pub mod buzz_bomb;
+pub mod area_stalker;
+pub mod wave_gate;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -136,6 +175,28 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U25", level: horny_toad::REFERENCE_LEVEL, func: horny_toad::UPDATE_FN, classes: &horny_toad::CLASSES, update: horny_toad::update, joints: &horny_toad::JOINTS },
     UnitPort { unit: "U287", level: hop_gunner::REFERENCE_LEVEL, func: hop_gunner::UPDATE_FN, classes: &hop_gunner::CLASSES, update: hop_gunner::update, joints: &hop_gunner::JOINTS },
     UnitPort { unit: "U287 shot", level: hop_gunner::REFERENCE_LEVEL, func: hop_gunner::SHOT_FN, classes: &hop_gunner::SHOT_CLASSES, update: hop_gunner::shot_update, joints: &[] },
+    UnitPort { unit: "U553 mine", level: rolling_mine::REFERENCE_LEVEL, func: rolling_mine::UPDATE_FN, classes: &rolling_mine::CLASSES, update: rolling_mine::update, joints: &[] },
+    UnitPort { unit: "U301", level: pack_biter::REFERENCE_LEVEL, func: pack_biter::UPDATE_FN, classes: &pack_biter::CLASSES, update: pack_biter::update, joints: &[] },
+    UnitPort { unit: "U268 252", level: hover_zapper::REFERENCE_LEVEL, func: hover_zapper::UPDATE_FN, classes: &hover_zapper::CLASSES, update: hover_zapper::update, joints: &hover_zapper::CLASSES },
+    // Draw callbacks only (no class runs them: `Callback::UnitGlow` / `Callback::UnitQuads` payloads).
+    UnitPort { unit: "U268 252 glow", level: hover_zapper::REFERENCE_LEVEL, func: hover_zapper::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U268 252 arc", level: hover_zapper::REFERENCE_LEVEL, func: hover_zapper::ARC_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U407 63", level: flying_biter::REFERENCE_LEVEL, func: flying_biter::UPDATE_FN, classes: &flying_biter::CLASSES, update: flying_biter::update, joints: &[] },
+    UnitPort { unit: "U300 52", level: buzz_bomb::REFERENCE_LEVEL, func: buzz_bomb::UPDATE_FN, classes: &buzz_bomb::CLASSES, update: buzz_bomb::update, joints: &[] },
+    UnitPort { unit: "U521 1445", level: area_stalker::REFERENCE_LEVEL, func: area_stalker::UPDATE_FN, classes: &area_stalker::CLASSES, update: area_stalker::update, joints: &area_stalker::CLASSES },
+    UnitPort { unit: "U426 1271", level: wave_gate::REFERENCE_LEVEL, func: wave_gate::UPDATE_FN, classes: &wave_gate::CLASSES, update: wave_gate::update, joints: &[] },
+    UnitPort { unit: "U183", level: laser_fence::REFERENCE_LEVEL, func: laser_fence::UPDATE_FN, classes: &laser_fence::CLASSES, update: laser_fence::update, joints: &[] },
+    UnitPort { unit: "U32 help", level: help_veldin::REFERENCE_LEVEL, func: help_veldin::UPDATE_FN, classes: &help_veldin::CLASSES, update: help_veldin::update, joints: &[] },
+    UnitPort { unit: "U119 help", level: help_aridia::REFERENCE_LEVEL, func: help_aridia::UPDATE_FN, classes: &help_aridia::CLASSES, update: help_aridia::update, joints: &[] },
+    UnitPort { unit: "U145 help", level: help_kerwan::REFERENCE_LEVEL, func: help_kerwan::UPDATE_FN, classes: &help_kerwan::CLASSES, update: help_kerwan::update, joints: &[] },
+    UnitPort { unit: "U165 help", level: help_eudora::REFERENCE_LEVEL, func: help_eudora::UPDATE_FN, classes: &help_eudora::CLASSES, update: help_eudora::update, joints: &[] },
+    UnitPort { unit: "U204 help", level: help_rilgar::REFERENCE_LEVEL, func: help_rilgar::UPDATE_FN, classes: &help_rilgar::CLASSES, update: help_rilgar::update, joints: &[] },
+    UnitPort { unit: "U232 help", level: help_blarg::REFERENCE_LEVEL, func: help_blarg::UPDATE_FN, classes: &help_blarg::CLASSES, update: help_blarg::update, joints: &[] },
+    UnitPort { unit: "U292 help", level: help_batalia::REFERENCE_LEVEL, func: help_batalia::UPDATE_FN, classes: &help_batalia::CLASSES, update: help_batalia::update, joints: &[] },
+    UnitPort { unit: "U305 help", level: help_gaspar::REFERENCE_LEVEL, func: help_gaspar::UPDATE_FN, classes: &help_gaspar::CLASSES, update: help_gaspar::update, joints: &[] },
+    UnitPort { unit: "U341 help", level: help_orxon::REFERENCE_LEVEL, func: help_orxon::UPDATE_FN, classes: &help_orxon::CLASSES, update: help_orxon::update, joints: &[] },
+    UnitPort { unit: "U391 help", level: help_hoven::REFERENCE_LEVEL, func: help_hoven::UPDATE_FN, classes: &help_hoven::CLASSES, update: help_hoven::update, joints: &[] },
+    UnitPort { unit: "U419 help", level: help_gemlik::REFERENCE_LEVEL, func: help_gemlik::UPDATE_FN, classes: &help_gemlik::CLASSES, update: help_gemlik::update, joints: &[] },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.
@@ -224,10 +285,36 @@ pub struct GlowQuad {
     pub rgba: u32,
 }
 
+/// One `FastDrawQuadReal` quad of a unit's draw callback, in world space: corners in GS strip order, ST, GS RGBA.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FxQuad {
+    pub corners: [[f32; 3]; 4],
+    pub st: [[f32; 2]; 4],
+    pub rgba: [u32; 4],
+}
+
+/// A unit draw callback's quads with their FX texture and blend (ALPHA 0x48 additive, else 0x44).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FxQuads {
+    pub fx: usize,
+    pub additive: bool,
+    pub quads: Vec<FxQuad>,
+}
+
+/// The quads of the draw callback unit row `i` registered for moby `id` (`Callback::UnitQuads(i)`; draw only).
+pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Option<FxQuads> {
+    match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
+        Some((laser_fence::REFERENCE_LEVEL, laser_fence::UPDATE_FN)) => laser_fence::fx_quads(table, svc, id),
+        Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
+        _ => None,
+    }
+}
+
 /// The glow quads of the draw callback unit row `i` registered for moby `id` (`Callback::UnitGlow(i)`; draw only).
 pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Vec<GlowQuad> {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((lamp::REFERENCE_LEVEL, lamp::UPDATE_FN)) => lamp::glow_quads(table, svc, id),
+        Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::GLOW_FN)) => hover_zapper::glow_quads(table, id),
         _ => Vec::new(),
     }
 }

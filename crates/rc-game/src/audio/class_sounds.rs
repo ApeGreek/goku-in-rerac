@@ -131,7 +131,8 @@ impl AudioSystem {
     /// defs before the footsteps), `SoundSlotAlloc(def, flags, moby, 0, 0x400)`; the slot remembers the index (+0xe) and
     /// the owner (+0x18). Every caller on the disc passes moby 0: no owner and no position, so the sound plays 2-D at
     /// fixed volume at the listener (`SoundSlotAlloc` adds flags 0x11). With a moby (`at` = its id and position +0x10)
-    /// the sound follows it like a class sound (privileged for Ratchet `hero`). Draws the def's pitch bend from `rng`
+    /// the sound follows it like a class sound (privileged for Ratchet `hero`). Level04's `0x27eca0` is the same code (a
+    /// second copy in that overlay: the 466 family's skill point; G-AUD-007). Draws the def's pitch bend from `rng`
     /// when it gets a slot (defs 0 and 1 have none on any level, so these plays draw nothing). A negative index (the
     /// game would read before the defs; no caller passes one) is refused.
     #[allow(clippy::too_many_arguments)]
@@ -183,6 +184,15 @@ impl SoundSink for ClassSoundSink<'_> {
     }
     /// The checkpoint record's reverb copy ([`AudioSystem::checkpoint_saved`]).
     fn checkpoint_saved(&mut self) { self.audio.checkpoint_saved(); }
+    /// The voice handoff: the slot's owner (+0x18) and position (+0x20) rewritten by a class (no state test, as the
+    /// game: a freed slot takes the owner too and ignores it).
+    fn hand_over(&mut self, slot: i32, moby: MobyId, pos: [f32; 3]) {
+        let hero = self.hero;
+        if let Some(s) = usize::try_from(slot).ok().and_then(|i| self.audio.slots.slots.get_mut(i)) {
+            s.owner = Some(crate::audio::voices::Owner { id: moby as u32, privileged: Some(moby) == hero });
+            s.pos = pos;
+        }
+    }
 }
 
 /// The trigger check at the end of `RatchetAnimAdvance` (0x247d48): when key A and key B were the same

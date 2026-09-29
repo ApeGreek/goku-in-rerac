@@ -56,8 +56,8 @@ logic = porting its classes (G-CLS-001, `docs/plan/class_census.md`), against th
 | checkpoint record `FUN_0029ac10(point, euler)` | respawn record, kills made permanent | 54, 18 | `classes::checkpoint::record` |
 | `PointInCuboid` 0x274820 | the trigger test (cuboid index in a pvar) | 86, 19 | `moby_update::triggers::point_in_cuboid`, `World::in_cuboid` |
 | `GiveItem` 0x275760 | item to the player | 19, 12 | NPC item gifts through the talk system / item offers only (no class caller ported) |
-| `Help_Request(msg, rec)` 0x225818 | help box request (§4) | 41, 18 | **not callable from classes** (G-UI-017) |
-| help / move record bump (inline code, §4) | `{count, time/600, level mask}` | 44 classes read / write chunks 16 / 17 / 18 | records typed in `GameState`; bump = `hero::melee::bump_record`; no class writer (G-SAV-009) |
+| `Help_Request(msg, rec)` 0x225818 | help box request (§4) | 41, 18 | `Help::request` (G-UI-017 system ported; directors §8) |
+| help / move record bump (inline code, §4) | `{count, time/600, level mask}` | 44 classes read / write chunks 16 / 17 / 18 | records typed in `GameState`; bump = `hero::melee::bump_record`; class writers: the directors of §8 (`units/hints.rs`) |
 | global flags 0x13d388[128] | cross-level story state (0x13d397 Novalis arrival, 0x13d3ec..ee Gemlik, 0x13d3a0 / a2 Kerwan) | 78, 19 | read through `TalkGame::flags` / `Cinematic::arrival_seen`; no general class writer (G-SAV-010) |
 | `try_set_help_message` 0x278f58 / `force_help_message` 0x279000 | the △ prompt | 23 / 9, 14 / 8 | `Interact::try_prompt` / `force_prompt` (interaction.md) |
 | `FUN_0026e0e0(group, cmd)` / `MobyGroupCount` 0x26e008 | moby group commands / counts | 17 / 6, 6 / 4 | count ported (`enemy_spawner::group_count`); commands G-CLS-023 |
@@ -74,20 +74,20 @@ same code as a level-01 class (generic, mostly ported). Update address in that l
 
 | L | classes |
 |---|---|
-| 00 | 834 0x2d9dc8 [SVf] (Veldin's Clank; its init rule is ported: `GameState::on_veldin_clank_init`); 1413 0x2e0988 [Hrs] |
-| 01 | 280* [DCf]; 730* / 790* 0x2fad68 [SVDPfW] (ported: `mission_npc`); 750* [SVDPW]; 774* [DPW]; 805* [D]; 1341* 0x30acb8 [Hrs] (help-hint director) |
-| 02 | 713 0x2ddc88 [HCrs]; 786 0x2e0dc0 [HDIrW]; 788 0x2e1950 [HDIW]; 805* [D]; 1005 0x2ea210 [HSCIW]; 1324 0x2ee890 [Hrsf] |
-| 03 | 750* [SVDPW]; 805* [D]; 890 0x2da870 [DIW]; 909 0x2db558 [DIW]; 1342 0x2df520 [Hrsf] (§4) |
-| 04 | 280* [DCf]; 805* [D]; 1120 0x2e1a10 [SIW]; 1190 0x2e3078 [SVDPfW]; 1343 0x2e4418 [Hrsf] |
-| 05 | 439 0x2f87a8 [Hrsf]; 805* [D]; 919 0x317470 [PW]; 1347 0x31bf40 [Hrsf] |
-| 06 | 750* [SVDPW]; 805* [D]; 1016 0x2f4638 [HSCIW]; 1028 0x2f55a0 [HDCW]; 1035 0x2f6470 [Hr]; 1061 0x2fc640 [Sf]; 1105 0x301070 [HSVDCIfW]; 1109 0x302578 [HSVDPCrfW]; 1302 0x307d30 [D]; 1348 0x3083b0 [Hrf] |
+| 00 | 834 0x2d9dc8 [SVf] (Veldin's Clank; its init rule is ported: `GameState::on_veldin_clank_init`); 1413 0x2e0988 [Hrs] (ported §8) |
+| 01 | 280* [DCf]; 730* / 790* 0x2fad68 [SVDPfW] (ported: `mission_npc`); 750* [SVDPW]; 774* [DPW]; 805* [D]; 1341* 0x30acb8 [Hrs] (help-hint director; ported) |
+| 02 | 713 0x2ddc88 [HCrs]; 786 0x2e0dc0 [HDIrW]; 788 0x2e1950 [HDIW]; 805* [D]; 1005 0x2ea210 [HSCIW]; 1324 0x2ee890 [Hrsf] (ported §8) |
+| 03 | 750* [SVDPW]; 805* [D]; 890 0x2da870 [DIW]; 909 0x2db558 [DIW]; 1342 0x2df520 [Hrsf] (§4; ported §8) |
+| 04 | 280* [DCf]; 805* [D]; 1120 0x2e1a10 [SIW]; 1190 0x2e3078 [SVDPfW]; 1343 0x2e4418 [Hrsf] (ported §8) |
+| 05 | 439 0x2f87a8 [Hrsf]; 805* [D]; 919 0x317470 [PW]; 1347 0x31bf40 [Hrsf] (ported §8) |
+| 06 | 750* [SVDPW]; 805* [D]; 1016 0x2f4638 [HSCIW]; 1028 0x2f55a0 [HDCW]; 1035 0x2f6470 [Hr]; 1061 0x2fc640 [Sf]; 1105 0x301070 [HSVDCIfW]; 1109 0x302578 [HSVDPCrfW]; 1302 0x307d30 [D]; 1348 0x3083b0 [Hrf] (ported §8) |
 | 07 | 436 0x2f5ba0 [SVPfW]; 750* [SVDPW]; 805* [D]; 886 0x30bf90 [D]; 1106 0x314150 [D] |
-| 08 | 253 0x2d42d8 [Hrf]; 280* [DCf]; 805* [D]; 1130 0x302ce8 [DPfW]; 1144 0x305270 [DPW]; 1283 0x3065d8 [DIW]; 1349 0x307540 [Hrf] |
-| 09 | 805* [D]; 1000 0x300888 [Hr]; 1290* 0x308818 [HSDIrW] |
-| 10 | 18 0x298668 [SIW]; 750* [SVDPW]; 805* [D]; 1229 0x2e4a88 [Hr]; 1302 0x2e7cd8 [D]; 1326 0x2e8358 [SfW]; 1344 0x2e85b8 [Hrf] |
+| 08 | 253 0x2d42d8 [Hrf]; 280* [DCf]; 805* [D]; 1130 0x302ce8 [DPfW]; 1144 0x305270 [DPW]; 1283 0x3065d8 [DIW]; 1349 0x307540 [Hrf] (ported §8) |
+| 09 | 805* [D]; 1000 0x300888 [Hr] (ported §8); 1290* 0x308818 [HSDIrW] |
+| 10 | 18 0x298668 [SIW]; 750* [SVDPW]; 805* [D]; 1229 0x2e4a88 [Hr]; 1302 0x2e7cd8 [D]; 1326 0x2e8358 [SfW]; 1344 0x2e85b8 [Hrf] (ported §8) |
 | 11 | 23 0x2cb668 [HW]; 90 0x2d0710 [HIW]; 114 0x2d0fa8 [HDIfW]; 298 0x2f0e40 [HDrfW]; 805* [D]; 1179 0x30ee00 [Hr]; 1242 0x313290 [HDCrs] |
-| 12 | 282 0x2e6c48 [DfW]; 326 0x2e9f68 [Hr]; 328 0x2eb570 [DIW]; 422 0x2ed280 [Hr]; 805* [D]; 886 0x2ff838 [D]; 1267 0x303540 [SVDPCW]; 1274 0x3069d0 [S]; 1345 0x3081b0 [D]; 1404 0x3093c8 [Sf] |
-| 13 | 69 0x2bb068 [DC]; 304* / 1456..1465* [SVfW]; 558 0x2f3778 [Hr]; 805* [D]; 1353 0x30b628 [SVPfW] (§4) |
+| 12 | 282 0x2e6c48 [DfW]; 326 0x2e9f68 [Hr]; 328 0x2eb570 [DIW]; 422 0x2ed280 [Hr] (ported §8); 805* [D]; 886 0x2ff838 [D]; 1267 0x303540 [SVDPCW]; 1274 0x3069d0 [S]; 1345 0x3081b0 [D]; 1404 0x3093c8 [Sf] |
+| 13 | 69 0x2bb068 [DC]; 304* / 1456..1465* [SVfW]; 558 0x2f3778 [Hr] (ported §8); 805* [D]; 1353 0x30b628 [SVPfW] (§4) |
 | 14 | 684 0x2ed280 [Sf] (also hides the ship: `FUN_002a2450`); 805* [D]; 851 0x2fba20 [DIW]; 924 0x2fefe0 [DPW]; 1354 0x305758 [HSDIW] |
 | 15 | 805* [D]; 1179 0x2d9100 [Hr]; 1388 0x2ea748 [SIW]; 1419 0x2eb4c0 [SVDPW]; 1446 0x2ec760 [SVDPfW]; 1451 0x2ed068 [S]; 1469 0x2ed398 [Hrf] |
 | 16 | 439 0x2c7788 [Hrsf]; 805* [D]; 1377 0x2e3190 [HDIfW]; 1455 0x2e6808 [HIrW] |
@@ -196,3 +196,51 @@ gate on `count == 0` (never closed) or `mask ≥ 0` (never shown on any level) t
   its output was kept in the agent scratchpad `scripting/census.txt`).
 * Checked: the class unit tests above; `cutscene_novalis`, `interaction_vendor`, `gold_bolt_infobot_novalis`,
   `bolt_crank_novalis` pass; `novalis_hero_digest` with `RC_HERO_DIGEST_NO_IDLE=1` byte-identical before / after.
+
+## 8. W2 lane 2 (2026-09-29): the quick wins and the help directors
+
+### 8.1 Quick wins: system or not
+
+| gap | finding (evidence) | ported | test |
+|---|---|---|---|
+| G-AUD-010 voice handoff | **Not a shared routine**: 838 (`0x30dc68`) and 855 (`0x3150f0`) each inline their own hand-off (838 tests the owner's state 1, loops sound 0 with flags 4 and follows; 855 tests state 2, plays sound 0 with flags 0xd (no follow) and places the voice 2.5 along its row 0). What they share is one **store**: the slot record's owner +0x18 and position +0x20 (`0x13e5c0 + slot·0x70`). | the store once: `SoundSink::hand_over` (the audio port's `ClassSoundSink` rewrites the slot), `World::hand_over_sound` / `sound_owner`; consumer 838 `units/laser_fence.rs` (U183, 26 on 05) with its bars callback `0x30de90` (`Callback::UnitQuads`, `units::fx_quads`, rc-engine fx_draw: FX 0x13, additive, ten bars per lit fence of the group). 855 (U189, 7) is census-cheap now: a G-CLS-027 port | `laser_fence::tests::the_nearest_fence_takes_the_loop_and_the_switch_turns_it_off` (every side effect: loop start, hand-off owner + position, power-down sound 1, collision off, state 2, one callback per tick, the quads); `quick_wins::laser_fences_rilgar_hand_one_voice_along` (Rilgar data: 26 fences, one group, one shared slot word, no second play) |
+| G-AUD-007 `0x27eca0` | **Not a system**: level04's own copy of `PlayLevelSoundAtMoby` 0x2a1770 (the same masked code; the census missed it because the overlay has the function twice). Its only caller, the 466 family's `0x2ca420`, uses it for the skill point jingle (G-SAV-007). | nothing new: `World::play_level_sound`; re-tagged `has` | `quick_wins::eudora_level_sound_is_play_level_sound_at_moby` |
+| G-REN-020 `DrawSpriteHelper_A` 0x21e340 | **Not a system**: the VU1 billboard program's set-up (view·projection 0x167140, guard band 0x1671c0, fog words, GIF tags, `0x2b4c28`); no game state. rc-engine's fx material does the same per prim. The callers' own draws (e.g. U532's `0x2f5690`: strips through `0x1faf00`) are their class ports. | re-tagged `has` (cited in `rc-engine/src/fx_draw.rs`); its 4 units / 16 instances are census-cheap | census re-run |
+| G-LVL-008 height grid | **A small engine read**: `LoadLevelCoreData` hands core +0xa4 to `0x2530f0` (0x15fc98 width, 0x15fc9c rows, 0x15fca0 / a4 low / high, 0x15fca8 cells); `0x278020` reads `(high − low)(1 − cell/255) + low` at `width·(int)y + (int)x`. Consumers: 1400 (twice: its update and `SpawnImpactSparks` 0x2780b0). | `rc_formats::level::HeightGrid` (512 × 512 on 08 / 12 / 14); re-tagged. 1400 stays blocked by G-PRT-001 (type 01) and `0x272cb8` | `quick_wins::height_grid_on_its_three_levels` |
+
+### 8.2 The help directors ported
+
+Ordinary class ports (`units::PORTS`, rows "U… help"), each with its full coverage table in its module doc. The shared
+inline patterns (the cuboid test, "group ok", "idle", the record bump, the arm, the 18-second reminder, the crank
+tries) are written once in `units/hints.rs`: the game repeats them byte for byte in each director, so this is a
+coding convenience, not a game system.
+
+| class (level) | module | ported side effects | NOT ported (gap) |
+|---|---|---|---|
+| 1413 (00) | `help_veldin` | 6 hints (3, 0x4e2a, 5, 4, 0, 1 / 2 by health and the watched crates) | — |
+| 1324 (02) | `help_aridia` | 10 hints; flag 0x14; record writes `H[0x10]`, `H[0x12]`, `H[0x76]` := 0xffff; pos copy; dune-jump state | the skill point 0x13d409 (G-SAV-007) |
+| 1342 (03) | `help_kerwan` | 14 hints incl. the cable help 0xbbf; flags 0x1a, 0x18; stats `M[3]`, `M[15]`, `M[16]` (cable used), `M[19]`; the Swingshot miss flag taken (`HeroFields::swing_help_clear`) | the skill point 0x13d40b (G-SAV-007) |
+| 1343 (04) | `help_eudora` | 9 hints incl. the crank tries; flags 0x1c..0x1f; stats `M[17]`, `M[24]`, `M[25]` | — |
+| 1347 (05) | `help_rilgar` | 9 hints; stats `H[0x25]`, `H[0x5e]`; `H[0x24]` / `H[0x44]` retired; `M[29]` reset; the swim / dive counters; pos copies | the pad activation `0x30c928` (G-SAV-003) |
+| 1348 (06) | `help_blarg` | 5 hints (the crossed records 0x2e / 0x2f kept); `H[0x28]` retired; flag 0x25 | — |
+| 1349 (08) | `help_batalia` | 4 hints; flag 0x2f; `H[0x70]` retired on magnetic walls; grind state | the skill point 0x13d413 (G-SAV-007) |
+| 1000 (09) | `help_gaspar` | the hint 9001 and its record (count on item 11, time / mask every tick) | the skill point 0x13d416 and its platform counter 0x1613c8 (G-SAV-007) |
+| 1344 (10) | `help_orxon` | 7 hints; the level word 0x161f38 (read by `0x2dfc38`, unported) | — |
+| 422 (12) | `help_hoven` | 3 hints; stat `H[0x6e]` from the hover counters | the skill point 0x13d41c (G-SAV-007) |
+| 558 (13) | `help_gemlik` | the hint 13000; stat `H[0x6f]` | the airless flag 0x14161b (G-HERO-032) |
+
+Every request goes through `Help::request` (refused while a box is up, a voice plays or the record is 0xffff), is
+logged, and shows through the ported box (voice `30000 + help_audio`, record bump on close). Tests:
+`help_directors::*` (11, one per director on its level's data: trigger → message and record, logged; the gates that
+stop repeats; the flags and stats written; the message in the level text, its voice stream and the bump on close).
+Frames: three levels (Veldin's welcome from 1413, Gaspar's 9001 from 1000, Orxon's 10000 from 1344), identical
+across two runs.
+
+### 8.3 Not ported this pass (filed)
+
+* The save-only story / NPC classes (1120, 1190, 1290, 18, 1326, 23, 1354, 1388, 1419, 1750): besides
+  `memcard_Save` (logged, G-SAV-002) they write items, bolts and health directly and drive the dialogue helpers:
+  G-CLS-029.
+* 439 (05, 16) and 1469 (15): hero-state branches (G-HERO-002 / G-HERO-005); 1179 (11, 15) and 586 (18): pad-like
+  classes with the help 0x2b01 / 0x2b02 reminders, per-instance save bytes (G-SAV-003) and draw callbacks (G-CLS-027).
+* 855 (the spouts): census-cheap now, G-CLS-027.

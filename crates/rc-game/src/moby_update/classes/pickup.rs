@@ -124,10 +124,12 @@ pub struct ItemTables {
     pub max: [u16; N],
     pub amount: [u16; N],
     pub list: [u8; 12],
+    /// The item definitions' slot types (+0x08; −1 unknown).
+    pub slot: [i32; N],
 }
 
 impl Default for ItemTables {
-    fn default() -> Self { ItemTables { owned: [false; N], ammo: [0; N], max: [0; N], amount: [0; N], list: [0xff; 12] } }
+    fn default() -> Self { ItemTables { owned: [false; N], ammo: [0; N], max: [0; N], amount: [0; N], list: [0xff; 12], slot: [-1; N] } }
 }
 
 impl ItemTables {
@@ -139,6 +141,12 @@ impl ItemTables {
             t.max[i] = u16::from_le_bytes([r[0xe], r[0xf]]);
         }
         t
+    }
+
+    /// The item definitions' slot types (`crate::inventory::ItemInfos`, +0x08).
+    pub fn with_slots(mut self, slots: &[i32]) -> ItemTables {
+        for (d, &s) in self.slot.iter_mut().zip(slots) { *d = s; }
+        self
     }
 
     /// This tick's owned items and ammo (Ratchet's mirrors).
@@ -157,6 +165,7 @@ impl Inventory for ItemTables {
     fn max_ammo(&self, item: usize) -> u16 { self.max.get(item).copied().unwrap_or(0) }
     fn pickup_amount(&self, item: usize) -> u16 { self.amount.get(item).copied().unwrap_or(0) }
     fn ammo_list(&self) -> [u8; 12] { self.list }
+    fn slot_type(&self, item: usize) -> i32 { self.slot.get(item).copied().unwrap_or(-1) }
 }
 
 /// `0x13d428[item]` as this tick's earlier class updates left it (a pickup earlier in the loop counts).
