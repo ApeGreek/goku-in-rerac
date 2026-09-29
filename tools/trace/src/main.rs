@@ -55,6 +55,12 @@ Commands:
       size/SHA-1 table against the committed one. --extract-into also extracts twice (full, --ntsc-only; ~7 GiB)
       into that scratch folder and checks the file set and hashes. Default image: RC_ISO, else the ISO in the
       personal folder. Use --release. Exit status 0 = all checks pass, 1 = a check failed.
+  overlay-diff [--cite DIR]... [--fn L01:ADDR]... [--callees N] [--name NAME] [--out DIR] [--max-lines N]
+      The masked function x level diff (docs/workflows/ghidra.md, masked overlay diff): the rows are the
+      level-01 (or level-00) functions cited in the .rs files under each --cite DIR plus each --fn, and their
+      overlay callees N calls deep; every level's counterpart is compared after masking the relocated fields.
+      Default: --cite crates/rc-game/src/hero --callees 1 --name hero. Writes NAME.tsv, NAME_matrix.txt and
+      NAME_diffs.txt (only the differing instructions) to work/overlay_diff/ (--out).
   class-census [--out DIR] [--tags FILE] [--extracted DIR]
       Static census of the unported moby classes on levels 00-18 (docs/plan/class_census.md): per class the
       placed / created instances, its class-port unit (update + private callees, grouped across levels by
@@ -151,6 +157,29 @@ fn run() -> Result<i32> {
                 "class census: {} unported class-levels ({} placed, {} created instances), {} class-port units, {} shared functions -> {}",
                 s.classes, s.placed, s.created, s.units, s.shared, s.out.display()
             );
+            Ok(0)
+        }
+        "overlay-diff" => {
+            let mut cite = Vec::new();
+            while let Some(d) = a.opt("--cite")? { cite.push(PathBuf::from(d)); }
+            let mut fns = Vec::new();
+            while let Some(f) = a.opt("--fn")? {
+                let (l, x) = f.split_once(':').context("--fn LNN:ADDR")?;
+                let l: u32 = l.trim_start_matches('L').parse().context("--fn level")?;
+                if l > 1 { bail!("--fn: the reference is level 00 or 01"); }
+                fns.push((l, u32::from_str_radix(x.trim_start_matches("0x"), 16).context("--fn address")?));
+            }
+            let defaults = cite.is_empty() && fns.is_empty();
+            if defaults { cite.push(PathBuf::from("crates/rc-game/src/hero")); }
+            let callee_depth = a.opt("--callees")?.map(|v| v.parse()).transpose()?.unwrap_or(if defaults { 1 } else { 0 });
+            let name = a.opt("--name")?.unwrap_or_else(|| if defaults { "hero".into() } else { "functions".into() });
+            let out = a.opt("--out")?.map(PathBuf::from).unwrap_or_else(|| rc_trace::work_dir().join("overlay_diff"));
+            let max_lines = a.opt("--max-lines")?.map(|v| v.parse()).transpose()?.unwrap_or(24);
+            let extracted = a.extracted()?;
+            a.done()?;
+            let o = rc_trace::overlay_diff::Options { cite, fns, callee_depth, name, out, max_lines };
+            let s = rc_trace::overlay_diff::run(&extracted, &rc_trace::work_dir(), &rc_trace::repo_root(), &o)?;
+            println!("overlay-diff: {} rows, cells {:?}, {} rows with own differences -> {}", s.rows, s.counts, s.own_diff_rows, s.out.display());
             Ok(0)
         }
         "disc-check" => {

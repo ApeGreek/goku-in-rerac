@@ -143,6 +143,22 @@ pub fn rules(level: i32) -> SurfaceRules {
     usize::try_from(level).ok().and_then(|i| LEVEL_RULES.get(i)).copied().unwrap_or(SUPERSET)
 }
 
+/// The surface id Ratchet's own collision passes through, per level (index = 0x15ed84): the capsule passes'
+/// query flags `0x20 | id << 8 | 4` (`HeroCapsulePasses` 0x233940, `0x24` on level01; state 0x7f always uses
+/// 0xd24) and `LandEta` 0x248268's ground line (the same flags). Each overlay compiles its own constant
+/// (docs/plan/level_generalisation.md H2, `rc-trace overlay-diff`): 0 (water) on 16 levels, 3 (the quicksand)
+/// on level 2 (capsule 0x222270: `state == 0x7f ? 0xd24 : 0x324`; `LandEta` 0x2360c8), 0xd (the deadly liquid)
+/// on levels 6 and 0xe (capsule 0x22a1d0 / 0x224db0 and `LandEta` 0x242950 / 0x23bed0: 0xd24 in every state).
+/// On Aridia the capsule no longer holds Ratchet 0.25 into the quicksand: he sinks as 0x68 says. (On 6 and 0xe the
+/// sinking death 0x7f uses 0xd24 on every level anyway, and their data has no surface-0xd face.)
+pub const PASS_SURFACE: [u8; 19] = [0, 0, 3, 0, 0, 0, 0xd, 0, 0, 0, 0, 0, 0, 0, 0xd, 0, 0, 0, 0];
+
+/// [`PASS_SURFACE`] of level `level` (unknown: level01's 0).
+pub fn pass_surface(level: i32) -> u8 { usize::try_from(level).ok().and_then(|i| PASS_SURFACE.get(i)).copied().unwrap_or(0) }
+
+/// The query flags of Ratchet's own collision (module doc of [`PASS_SURFACE`]): `exclude_surface(id) | 4`.
+pub fn pass_flags(level: i32) -> QueryFlags { QueryFlags::exclude_surface(pass_surface(level)) | QueryFlags::MOBY_SUBMASK }
+
 // ------------------------------------------------------------------------------------------------
 // The block fields.
 
@@ -991,5 +1007,16 @@ mod tests {
         }
         assert!(states(&r).contains(&0x7b), "{:?}", states(&r));
         assert!(r.hero.position()[2] < 20.0 - 1.2 + 0.02, "faded at {:?}", r.hero.position());
+    }
+
+    /// The surface Ratchet's own collision passes through ([`PASS_SURFACE`], per level): 0 (water) on level01 and
+    /// the unknown level (Novalis unchanged), 3 (the quicksand) on level 2, 0xd (the deadly liquid) on 6 and 0xe.
+    /// (Aridia's is visible: `tests/hero/hero_surfaces.rs`; on 6 and 0xe the deadly-liquid death 0x7f already uses
+    /// 0xd24 on every level and their data has no surface-0xd face, so nothing there shows it.)
+    #[test]
+    fn pass_surface_per_level() {
+        assert_eq!((pass_surface(1), pass_surface(-1), pass_surface(2), pass_surface(6), pass_surface(14)), (0, 0, 3, 0xd, 0xd));
+        assert_eq!(PASS_SURFACE.iter().filter(|&&s| s == 0).count(), 16);
+        assert_eq!((pass_flags(1).bits(), pass_flags(2).bits(), pass_flags(6).bits(), pass_flags(14).bits()), (0x24, 0x324, 0xd24, 0xd24));
     }
 }

@@ -25,7 +25,7 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 
 | # | Status | Where / how |
 |---|---|---|
-| X1, X2 | **fixed (product)** | `rc_formats::level_overlay` (above); `overlay_diff.py` not re-run |
+| X1, X2 | **fixed (product)**; X1 tool **done 2026-09-29** | `rc_formats::level_overlay` (above); the masked diff `rc-trace overlay-diff` (H2 below) answers the identity questions with that same mask, so `overlay_diff.py` is not re-run (it keeps building `clusters.tsv` for naming) |
 | C1 | **fixed** | `rc_game::moby_update::classes::LevelPorts`: a class runs a port when its `lvl.vtbl` entry is the same code as the port's reference function (level 01; level 03 for the swing target). Class-number lists remain the fallback for classes not in the table. Engine: `gameplay::level_ports()` (class table, joint lists, `moby_spawn`). Novalis: identical for every placed class (only the unplaced 731 gains `MissionNpcUpdate`, as the game) |
 | C1 found | fixed by C1 | `FxGroupUpdate` runs other body-piece classes on **every** level (Gemlik 1733–1735, 1801–1804); grass on 00/02/08; `PathPlatformUpdate` 1141 on 10; the ember update on 10 (1806/1807) and 15 (200…210) |
 | C2 | open (N/A) | the flyer update exists only on 01; the shared path driver is called from other levels' own updates |
@@ -41,8 +41,8 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 | M5, M6 | **fixed** | quick-select gp block `at(0x15f718)` (+0x10 on 05 / 16, from the `$gp` operands), page table at +0x20, d-pad `at(0x17e098)` (0x17df18 on 13) |
 | W1–W4 | **fixed** | see "Water on every level" below (the earlier "Gemlik has no water" was wrong: 13 has a ripple module and 22 patches) |
 | K1 | open (N/A on 13) | 13 uses the generic star dispatch (120 twinkle + 8 moving) |
-| H1 | partly open | the level-13 branches (below) are in unported code; the footstep branch belongs to the hero agent |
-| H2 | open | not diffed |
+| H1 | hero part **done** (2026-09-29 check) | every hero branch is in the port (H2 below); the engine branches wait for systems not ported (H2 below) |
+| H2 | **done 2026-09-29** | "H2: Ratchet's code per level" below: 2 per-level constants ported, the rest is level 00's superset, the Hoverboard, the bodies |
 | G1 | open | Gemlik's arrival is scene 0 from its own director class 1353 (`0x30b628`, Gemlik-only: content). `RC_SCENE=+0` forces scene 0 (it plays: 868 ticks, actors 0 / 10 / 1289, speech, subtitles) |
 | A1 | ok as is | `entry` pauses the music on 13; the landing sequence (not ported) unpauses it: a direct boot plays unpaused, the post-landing state |
 | A2 | done | reverb (ported 2026-09-28: audio.md "Reverb zones and level sounds") |
@@ -98,6 +98,81 @@ Weapons / Gadgets pages, which are stubs); `GameStateUpdate` creates class 0x509
 (Novalis registry unchanged; per-level ports and externals), `rc-game/tests/ui/gemlik_generalisation.rs` (menus on 13 and
 all levels, body pieces, `gemlik_content_gap` report), `rc-game/tests/world/all_levels_smoke.rs` (19 levels: load, spawn,
 load pass, N ticks of the full tick with a scripted pad; Gemlik 3,000 ticks).
+
+## H2: Ratchet's code per level (2026-09-29)
+
+**Question.** Every overlay compiles its own copy of the hero code; the port is level 01's code plus the parts of
+level 00 (the superset build) level 01 lacks. Does any level's copy do something the port does not?
+
+**Method** (X1; regenerable: `cargo run -p rc-trace -- overlay-diff`, docs/workflows/ghidra.md "Masked overlay
+diff"). The rows are the 324 level-01 / level-00 functions `crates/rc-game/src/hero/**` cites and their 235 direct
+callees (559). For each level 00–18 the tool finds the counterpart (exact masked copy; else the call sites of known
+callers, the callers of known callees, or the clearly most similar body) and compares after masking what a relink
+changes (`jal`, `%hi`/`%lo`, `$gp`, branch and stack offsets). Then it checks boot addresses, constants (relocated
+pointers taken as equal) and callees on the aligned pairs, and splits switches of 16+ cases into case bodies. Last,
+it asks whether a level's differing words are **level 00's code** (register-blind, in any order). Cells: `=`
+identical 8480, `c` only a callee differs 817, `s` differs from level 01 but all of it is level 00's code 374, `S`
+switch case set only 1, `U` code neither level 01 nor level 00 has 48, `k` constants only 0, `D` differs without a
+level-00 copy 41, `?` no counterpart 301 (mostly: the level lacks the function).
+
+**Result: the port's "level 01 + level 00 superset" model holds for every level**, with these exceptions. Every `U`
+cell was read (its runs are in `work/overlay_diff/hero_diffs.txt`):
+
+| What differs | Levels | Kind | Evidence | Port |
+|---|---|---|---|---|
+| The surface Ratchet's own collision passes through: capsule passes `HeroCapsulePasses` 0x233940 and `LandEta` 0x248268's ground line, flags `0x20 \| id << 8 \| 4` | 0 (water) on 16 levels; **3** on 02 (capsule 0x222270: `state == 0x7f ? 0xd24 : 0x324`; `LandEta` 0x2360c8); **0xd** on 06, 14 (capsules 0x22a1d0 / 0x224db0: 0xd24 in every state; `LandEta` 0x242950 / 0x23bed0) | (a) constant per level | `addiu s2, zero, 0x24` → `0x324` / `0xd24` at the aligned instruction; nothing else differs | **ported**: `hero::surface::PASS_SURFACE` / `pass_flags` (physics.rs capsule, common.rs `land_eta`). Visible on Aridia (quicksand): Ratchet now sinks as the 0x68 physics says (1 u/s to (n + 1)/2, then 0.25 u/s, the fade 1.2 below the top) instead of being held 0.25 in. Levels 06 / 14 have no surface-0xd face in their data (world or moby collision): faithful, not visible |
+| The grind-path search (the cable's) | **03** only: Kerwan's own `0x205830` (the only cable level without rails); 04, 06–10, 13, 14, 16–18 compile level 00's `0x20cd08` | (c) another function | L03: xy distance (`0x1f9b80`, VU0 `.xy`) < 1.7 and \|dz\| < 1.5 in every state; L00: 0.3 / 0.9 (+0.5 with 0x13f51a) and 1.5 / 10 | **ported**: `hero::boots::FIXED_REACH_LEVELS` / `reach`. Visible: on Kerwan the jump catches a cable up to 1.7 beside it (the port had 0.9) |
+| Hoverboard states 0x6b..0x6f and their hooks (groups 0x15 / 0x16) in the move pipeline 0x233de0, move-collide 0x23c458, capsule passes, ground probe, surface reaction (surfaces 5 / 6), wrench selection 0x2307e0, the hand-item switch 0x240ed8 (case 0x1c), 0x22df10, 0x2408e8, 0x247880; state 0x3e (gravity mode 2) | 05, 16 | (d) code only those levels have | every run tests group 0x16 / (group − 0x15) < 2, states 0x6b..0x6f, or sits in case 0x3e | not ported: G-HERO-008 (+ G-HERO-029 mode 2) |
+| The body branches (0x1413f4 < 3, Giant Clank's capsule 5.25 / 4.45 / 3.75) in `HeroSizeCapsule` 0x231ae0, the hit intake 0x231580, L00 0x227638 | 15, 18 (the Giant Clank levels without Clank) | (b) body tests, level 00's code arranged for fewer bodies | the only uncovered words are the `slti v0, body, 3` of the reshaped chain | not ported: G-HERO-005 |
+| The idle helper `0x2405a0` → the level's idle-per-body function (L06 0x239528 …) | 06, 07, 10, 13, 15, 17, 18 (`D`: no level-00 copy found) | (b) body switch | census `C:f5aa57dd48b9` | not ported: G-HERO-002 / G-HERO-005 |
+| Mask artefacts, checked | 02, 06, 14 hit intake (`lbu +0x28` of the hit message slot, relocated table 0x1785a8 / 0x178728 / 0x1788a8); 06 ground probe (one branch target); FlyerPathDriver's constant on 03 / 04 / 14 (a "load" from `.text`: the tool now skips it) | none | read | — |
+| `PartType47Spawn` 0x286cb0 | 02, 06, 11, 12, 14 | [L] the level lacks it | the counterpart is a similar particle update (0.49) that never calls `CreatePart(0x2f)`: the matching, not the code | — |
+
+**SetState, physics, transitions (the census's 10 "not code-identical" copies).** Case by case they are the case
+set only: each level compiles the states it can reach (hero_states.md §0), and every shared case body is level 00's
+or level 01's code (`s`). Beyond that, only the Hoverboard / 0x3e cases on 05 / 16 are `U`. So a class's call into its
+level's `SetState` copy is the port's `SetState` for every state the port has (G-HERO-002 keeps the scripted states
+themselves).
+
+**What `s` means for the port.** 31 level-01 hero functions have more code in their level-00 copy (the L00 column
+of `hero_matrix.txt`: the slippery floor, Magneboots, grind / cable, sinking liquids, bodies, e.g. AirAccel's
+copy of the velocity into 0x13f480 on the surface-7 levels). Where a level takes that superset code, the port
+behaves like the game only if it ported that part of level 00. That is a level-independent audit of the port
+against level 00, not a per-level difference: G-HERO-031.
+
+**H1 (level-number branches), rechecked.** In the port already: the physics' 0x31 level 0xf (surface.rs), the
+transitions' 0x76 levels 0xf / 0x11 and 0x77 levels 3 / 6 / 0x10 (damage.rs), idle's level 0xc (idle.rs), the ground
+probe's footstep class on 1 / 0x12 (physics.rs). The other reads of 0x15ed84 in physics / transitions are the move
+records' per-level bit (G-SAV-009). Engine branches still open, each waiting for its system:
+`InLevelFrameUpdate` 0x2aba68 (level 0xf with Giant Clank: G-HERO-005; levels 8 / 0xc in state 0x32: G-LVL-009),
+`GameStateUpdate` 0x2a4080 (class 0x509 on 10 with the O2 mask / 0xd: the landing, G-LVL-001), `InitLevelRenderGlobals`
+0x255958 (0xd, < 9, 10) and `PauseAllSounds` 0x28bf50 (0xd) (render / audio: G-LVL-002).
+
+**Coverage** (the per-level parts changed; the rest of each function was ported earlier and is unchanged):
+
+| address | what it does | ported / NOT ported / n/a |
+|---|---|---|
+| 0x233940 (+0x10c) | capsule flags 0x24; state 0x7f → 0xd24 | `physics.rs` capsule passes: `surface::pass_flags(level)`, 0xd24 in 0x7f |
+| L02 0x222270 | `state == 0x7f ? 0xd24 : 0x324` | `pass_flags(2)` = 0x324 |
+| L06 0x22a1d0, L14 0x224db0 | 0xd24 in every state | `pass_flags(6 / 14)` = 0xd24 |
+| 0x248268 (3 sites) | `CollLine_Fix(pos, end, 0x24, 0, 0)`: the ground where the parabola ends | `common.rs` `land_eta`: `pass_flags(level)` |
+| L02 0x2360c8, L06 0x242950, L14 0x23bed0 | the same line with 0x324 / 0xd24 / 0xd24 | same |
+| L03 0x205830 | loop over the level's grind paths (`0x15f710` count, `0x15f70c` records of 0x20) | `boots::find_rail` (`paths(env)`) |
+| | skip the excluded path (`param_7`); `param_8` filter | `exclude`; n/a: `param_8` is 0 at the only caller 0x205a68 |
+| | a path with points (`**(rec+0x10) != 0`) | `gp.points.is_empty()` |
+| | inside the path's bounding sphere (`0x1f9b48`, 3D, +0xc radius) | `spline::dist3(c, p) <= bsphere[3]` |
+| | nearest point `0x24c9b0(12, 10, 0, …)` | `spline::nearest(.., 12.0, 10.0, 0.0, p)` |
+| | xy distance `0x1f9b80` < 1.7, \|dz\| (`0x1f8bb0`) < 1.5 | `boots::reach` (level 3) |
+| | outputs: path, point, cursor, the path's +0x14 flag | the returned tuple |
+| L03 0x205a68 | the cable contact (level 00's 0x20d330 with Kerwan's search and hand point 0x205a30) | `cable_contact_probe` (unchanged) |
+
+Side effects: none new (collision queries and the rail / cable contact state only). Tests:
+`hero_surfaces::aridia_quicksand_sink_jump_out_and_fade` (level 2: the game's sinking),
+`hero::surface::tests::pass_surface_per_level` (the table: Novalis and the unknown level 0x24),
+`hero_surfaces::deadly_liquid_pass_levels_have_no_such_faces` (06 / 14: no surface-0xd face, so nothing to see;
+0x7f uses 0xd24 on every level anyway),
+`hero_cable_kerwan::kerwan_cable_reach_is_its_own` (level 3, and level 4's search on the same data). Novalis:
+`pass_surface(1)` = 0 and the reach of level 1 are the old values (the NO_IDLE digest is unchanged).
 
 ## Common classes pass (2026-09-28)
 
@@ -301,9 +376,7 @@ How the address is found on another level:
   - `InitLevelRenderGlobals` 0x255958: 0xd, < 9, 10.
   - `PauseAllSounds` 0x28bf50: 0xd.
   Source list: `grep 'Ram0015ed84 [!=]=' work/decomp/level01.elf/*.c`.
-- **H2** `HeroStatePhysics` is 21,408 bytes, and no other overlay has a function of that size. `HeroStateTransitions`
-  0x242930 (19,120 B) has a same-size function only in 02. 0x23cf98, 0x233de0 and 0x240ed8 are cluster
-  singletons. Diff each against its counterparts in two or three overlays (Ghidra) before assuming it is identical.
+- **H2** Done 2026-09-29: "H2: Ratchet's code per level" above (the tool, the table, the two ports).
 
 ### Game state / scene / audio
 - **G1** `rc-engine/src/scene_render.rs:72` (`NOVALIS_ARRIVAL = 5`) and `:227-232` (`level != 1` → no
@@ -329,9 +402,8 @@ How the address is found on another level:
 - **T4** `port_sim.rs:40-44` (EMITTER/RIPPLE_UPDATE, RIPPLE_CLASS, SHIP_CLASS 531), `:111`, `:298`.
 
 ### Tooling
-- **X1** `tools/ghidra/scripts/overlay_diff.py`: also mask the 16-bit immediates of loads, stores and `addiu` whose base
-  comes from a `lui` (and `$gp` ones, already done). Re-run it. Expect most n = 5 / n = 1 rows (0x28e600, the hero
-  functions) to become n = 19.
+- **X1** Done 2026-09-29: `rc-trace overlay-diff` (the port's mask, `%lo` included, per function and level, with the
+  differing instructions); `overlay_diff.py`'s `clusters.tsv` remains the naming table.
 - **X2** There is no single place to ask "where is X on level N". Add `rc_formats::level_overlay`:
   - sections (with `lvl.vtbl`),
   - a vtbl reader,

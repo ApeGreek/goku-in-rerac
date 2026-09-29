@@ -48,7 +48,7 @@
 //! docs/plan/hero_states.md "Cable slide 0x74"). The cables are grind paths too; only Kerwan's (3) are cables. Cable
 //! contact `0x20d330` (the overlays of [`CABLE_LEVELS`]): a rising jump (group 4, 0x13f76e = 0) or the fall
 //! (group 2), 0x13f534 = 0, the hand point (0.3 ahead, 1.34 up in his frame) near a grind path (the rail search
-//! above) and −0.7 (−1.2 on the tick □ is pressed) .. 0.4 above it. Taken by the jump group ([`jump_contacts`]) and
+//! above; Kerwan's own search reaches 1.7 across and 1.5 up or down in every state: [`FIXED_REACH_LEVELS`]) and −0.7 (−1.2 on the tick □ is pressed) .. 0.4 above it. Taken by the jump group ([`jump_contacts`]) and
 //! the fall; the weapon check leaves □ to the grab (no jump attack 0x14 at a cable). Entry: the wrench forced into
 //! the hand (0x1413f7). Physics: the hands follow the path at a speed that approaches 14 u/s at 9·dt² (half the
 //! entry speed along it to start), a spring pulls the hands onto it; past the end he flies on and falls (6, 8-tick
@@ -218,19 +218,33 @@ fn path_pts(paths: &[GrindPath], i: Option<usize>) -> Option<&[spline::Point]> {
 // ------------------------------------------------------------------------------------------------
 // Contacts (the hero update between the wall probe and the transitions).
 
-/// `0x20cd08(p, …, exclude, 0)`: the first grind path near `p` (module doc).
-fn find_rail(paths: &[GrindPath], p: V3, group: i32, f51a: bool, exclude: Option<usize>) -> Option<(usize, V3, Cursor, bool)> {
+/// The levels whose overlay compiles the fixed-reach path search (Kerwan's `0x205830`, `rc-trace overlay-diff`,
+/// docs/plan/level_generalisation.md H2): the only cable level without grind rails. The others with a search
+/// compile level00's `0x20cd08` (levels 4, 6–10, 13, 14, 16–18: the same code).
+pub const FIXED_REACH_LEVELS: [i32; 1] = [3];
+
+/// The reach of the path search: (horizontal, vertical). Level00's `0x20cd08`: 0.3 in groups 0 / 1, else 0.9;
+/// with 0x13f51a set 0.5 more and 10 vertically, else 1.5. Kerwan's `0x205830`: 1.7 and 1.5 in every state.
+fn reach(level: i32, group: i32, f51a: bool) -> (f32, f32) {
+    if FIXED_REACH_LEVELS.contains(&level) { return (1.7, 1.5); }
+    let (mut hr, mut vr) = (if (group as u32) < 2 { 0.3 } else { 0.9 }, 1.5);
+    if f51a {
+        vr = 10.0;
+        hr += 0.5;
+    }
+    (hr, vr)
+}
+
+/// `0x20cd08(p, …, exclude, 0)` (Kerwan: `0x205830`): the first grind path near `p` (module doc): inside its
+/// bounding sphere, the nearest point `q` (the 12 / 10 search) within the [`reach`] of `p` (xy distance, |dz|).
+fn find_rail(paths: &[GrindPath], p: V3, level: i32, group: i32, f51a: bool, exclude: Option<usize>) -> Option<(usize, V3, Cursor, bool)> {
     for (i, gp) in paths.iter().enumerate() {
         if Some(i) == exclude || gp.points.is_empty() { continue; }
         let c = [gp.bsphere[0], gp.bsphere[1], gp.bsphere[2]];
         if !(spline::dist3(c, p) <= gp.bsphere[3]) { continue; }
         let closed = gp.flag != 0;
         let Some((q, cur)) = spline::nearest(&gp.points, closed, 12.0, 10.0, 0.0, p) else { continue };
-        let (mut hr, mut vr) = (if (group as u32) < 2 { 0.3 } else { 0.9 }, 1.5);
-        if f51a {
-            vr = 10.0;
-            hr += 0.5;
-        }
+        let (hr, vr) = reach(level, group, f51a);
         if spline::dist2(p, q) < hr && (p[2] - q[2]).abs() < vr { return Some((i, q, cur, closed)); }
     }
     None
@@ -277,7 +291,7 @@ fn rail_contact_probe(h: &mut Hero, paths: &[GrindPath], level: i32) {
         || (matches!(st, 0x29 | 0x2a) && (h.boots.off_rail != 0 || h.boots.f914 != 0))
         || (h.group == 4 && (h.jump.descending != 0 || h.f51a != 0));
     if !ok { return; }
-    let Some((i, q, cur, closed)) = find_rail(paths, pos, h.group, h.f51a != 0, None) else { return };
+    let Some((i, q, cur, closed)) = find_rail(paths, pos, h.idle.level, h.group, h.f51a != 0, None) else { return };
     let dz = pos[2] - q[2];
     let b = &mut h.boots;
     if (st != 0x29 || b.f914 == 0 || Some(i) != b.rail) && -0.5 < dz && (dz < 0.57 || h.f51a != 0) {
@@ -290,7 +304,7 @@ fn cable_contact_probe(h: &mut Hero, env: &Env, paths: &[GrindPath]) {
     if h.f534 != 0 { return; }
     let hand = hand_point(h);
     if !((h.group == 4 && h.jump.descending == 0) || h.group == 2) { return; }
-    let Some((i, q, cur, closed)) = find_rail(paths, hand, h.group, h.f51a != 0, None) else { return };
+    let Some((i, q, cur, closed)) = find_rail(paths, hand, h.idle.level, h.group, h.f51a != 0, None) else { return };
     let lo = if env.pad.pressed & button::SQUARE != 0 { -1.2 } else { -0.7 };
     let dz = hand[2] - q[2];
     if lo < dz && dz < 0.4 {
@@ -1079,7 +1093,7 @@ fn rail_switch(h: &mut Hero, c: &mut Ctx) {
         if ended { q = add(f3(h.pos), scl(f3(h.disp), ticks(0x30) as f32)); }
         q[0] += side.cos() * d;
         q[1] += side.sin() * d;
-        if let Some((i, _, _, closed)) = find_rail(paths, q, h.group, h.f51a != 0, h.boots.rail) {
+        if let Some((i, _, _, closed)) = find_rail(paths, q, h.idle.level, h.group, h.f51a != 0, h.boots.rail) {
             let b = &mut h.boots;
             (b.old_rail, b.old_cur, b.old_closed, b.old_pt) = (b.rail, b.cur, b.closed, b.rail_pt);
             (b.rail, b.closed) = (Some(i), closed);

@@ -126,3 +126,35 @@ fn kerwan_cables_jump_catch_slide_drop() {
         assert_eq!(ride(&lv, KERWAN, [g[0], g[1], g[2] + 0.05], yaw, 900, input), recs, "cable {i}: deterministic");
     }
 }
+
+/// Kerwan's own path search (`0x205830`, `rc_game::hero::boots::FIXED_REACH_LEVELS`) reaches 1.7 across in every
+/// state; level00's `0x20cd08` (the other cable levels' code) only 0.9 in the jump. Standing 1.25 beside a cable,
+/// facing along it, the rising jump's hands catch it on Kerwan (7 → 0x74); with level 4's search the same jump
+/// misses (7, then the landing). Headless on Kerwan's data both times.
+#[test]
+fn kerwan_cable_reach_is_its_own() {
+    let Some(lv) = level_data(KERWAN) else { return };
+    let jump = |t: u32| if t == 30 { PadInput::neutral().press(button::CROSS) } else { PadInput::neutral() };
+    let mut checked = 0;
+    for i in 0..3 {
+        let p = &lv.paths[i].points;
+        let (a, b) = (p[0], p[1]);
+        let yaw = (b[1] - a[1]).atan2(b[0] - a[0]);
+        let l = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+        for side in [1.0f32, -1.0] {
+            // 1.5 along the cable, 1.25 to its side; the ground under that point, the cable 2.2..2.9 above it.
+            let q = [a[0] + (b[0] - a[0]) * 1.5 / l, a[1] + (b[1] - a[1]) * 1.5 / l, a[2] + (b[2] - a[2]) * 1.5 / l];
+            let s = [q[0] - yaw.sin() * 1.25 * side, q[1] + yaw.cos() * 1.25 * side];
+            let Some(hit) = coll_line(&lv.mesh, [s[0], s[1], q[2] - 0.1], [s[0], s[1], q[2] - 8.0], QueryFlags::NONE) else { continue };
+            if !(2.2..2.9).contains(&(q[2] - hit.point[2])) || hit.normal[2] < 0.99 { continue; }
+            let at = [hit.point[0], hit.point[1], hit.point[2] + 0.05];
+            let own = states(&ride(&lv, KERWAN, at, yaw, 120, jump));
+            let l00 = states(&ride(&lv, 4, at, yaw, 120, jump));
+            eprintln!("cable {i} side {side}: Kerwan {own:x?}, level 4's search {l00:x?}");
+            assert_eq!(own.iter().map(|x| x.1).take(3).collect::<Vec<_>>(), [0, 7, 0x74], "cable {i}: Kerwan catches it");
+            assert!(l00.iter().all(|x| x.1 != 0x74), "cable {i}: level00's reach misses it");
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "a flat floor 1.25 beside a cable");
+}

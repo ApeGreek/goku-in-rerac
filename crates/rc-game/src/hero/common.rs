@@ -111,7 +111,8 @@ impl Hero {
     }
 
     /// `LandEta(maxT, g, h)` 0x248268 (mode 0): ticks until the feet reach height `h` under constant gravity
-    /// `g` (h < 0: the ground where the parabola ends after `maxT` ticks, found with a line, flags 0x24).
+    /// `g` (h < 0: the ground where the parabola ends after `maxT` ticks, found with a line, flags 0x24 on level01:
+    /// [`super::surface::pass_flags`]).
     /// Returns `maxT` when there is no such ground or root.
     pub(super) fn land_eta(&self, c: &Ctx, max_t: Pf, g: Pf, mut h: Pf) -> Pf {
         if h < Pf::ZERO {
@@ -119,7 +120,7 @@ impl Hero {
             e[2] = e[2] - (((max_t * max_t) + max_t) * Pf::b(0x3f00_0000)) * g;
             e = vadd(e, self.pos);
             clip_to_world(self.pos, &mut e);
-            if let Some(o) = c.env.line(self.pos, e, 0x24) {
+            if let Some(o) = c.env.line(self.pos, e, super::surface::pass_flags(self.idle.level).bits()) {
                 if slope_of(from_f32x3(o.normal)) <= SLOPE_MAX { h = Pf::f(o.point[2]); }
             }
         }

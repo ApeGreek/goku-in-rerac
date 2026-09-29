@@ -75,6 +75,9 @@ pub struct Graph {
     /// Function → the data keys it forms: `G:<address>` for a global it reads or writes (outside `.text`, at or
     /// above the boot ELF's 0x100000), `G:<address>=<value>` for a loaded global compared with a constant.
     pub data: HashMap<u32, BTreeSet<String>>,
+    /// The starts with evidence of their own (a `jal` target, a class-table update, or right after a `jr ra` +
+    /// delay slot), as opposed to a code address only formed with `lui`/`%lo`.
+    pub strong: BTreeSet<u32>,
 }
 
 fn words_of(s: &rc_formats::font::OverlaySection) -> Vec<u32> { s.data.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect() }
@@ -105,7 +108,8 @@ impl Graph {
         let mut strong: BTreeSet<u32> = text.iter().filter(|&&w| w >> 26 == 3).map(|&w| (w & 0x03ff_ffff) << 2).collect();
         strong.extend(ov.vtbl().iter().map(|e| e.update));
         let is_fn = |a: u32| strong.contains(&a) || (a >= ts + 8 && at(a - 8) == JR_RA);
-        let mut g = Graph { starts: starts.clone(), callees: HashMap::new(), callers: HashMap::new(), jalr: HashMap::new(), extent: HashMap::new(), data: HashMap::new() };
+        let strong_starts: BTreeSet<u32> = starts.iter().copied().filter(|&a| is_fn(a)).collect();
+        let mut g = Graph { starts: starts.clone(), callees: HashMap::new(), callers: HashMap::new(), jalr: HashMap::new(), extent: HashMap::new(), data: HashMap::new(), strong: strong_starts };
         for &f in &starts {
             let Some(n) = ov.extent(f) else { continue };
             let Some(code) = ov.code(f, n) else { continue };
@@ -304,7 +308,7 @@ fn key_of(level: u32, f: u32, ov: &LevelOverlay, to_l01: &Relocation, cl: &Clust
 }
 
 /// Function names from the decompiler export (`work/decomp/<program>/index.tsv`).
-fn names(work: &Path, program: &str) -> HashMap<u32, String> {
+pub fn names(work: &Path, program: &str) -> HashMap<u32, String> {
     let Ok(s) = std::fs::read_to_string(work.join("decomp").join(program).join("index.tsv")) else { return HashMap::new() };
     s.lines().filter_map(|l| { let mut it = l.split('\t'); Some((u32::from_str_radix(it.next()?, 16).ok()?, it.next()?.to_string())) }).collect()
 }

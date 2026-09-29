@@ -36,6 +36,40 @@ Run every command from the repo root with the Ghidra GUI open on the project and
 The export lands in `work/decomp/<program>/` (one `.c` per function plus `index.tsv`; git-ignored, it is the game's
 code). Agents and people read decompiled code there.
 
+## Masked overlay diff: does a function differ between levels?
+
+Each level overlay compiles its own copy of the engine and hero code, linked at other addresses. `overlay-diff`
+answers "is level N's copy the same code as level 01's, and if not, what differs" without Ghidra (it reads
+`extracted/levels/NN/overlay.bin`; names come from `work/decomp/*/index.tsv` when present). Read disassembly only for
+the cells it flags.
+
+| Task | Command |
+|---|---|
+| The hero table (the functions `crates/rc-game/src/hero/**` cites, and their callees) | `cargo run -p rc-trace -- overlay-diff` |
+| Any functions | `cargo run -p rc-trace -- overlay-diff --fn L01:23cf98 --fn L00:20cd08 --name mine` |
+| Functions another module cites | `cargo run -p rc-trace -- overlay-diff --cite crates/rc-game/src/moby_update --callees 0 --name classes` |
+| Longer hunks (default 24 lines a side) | add `--max-lines 400` |
+
+Outputs in `work/overlay_diff/`: `NAME_matrix.txt` (one character per level), `NAME.tsv` (the counterpart address
+and the counts per cell), `NAME_diffs.txt` (per differing cell only the differing instructions, disassembled, with
+two aligned instructions of context; "level code neither level 01 nor level 00 has" first).
+
+| Cell | Meaning |
+|---|---|
+| `=` | identical after masking the relocated fields (`jal` targets, `%hi`/`%lo`, `$gp`, stack offsets), and the same boot addresses, constants and callees |
+| `c` | the function's own code is identical; a callee differs (see the callee's row) |
+| `S` | a switch whose shared cases are identical; only the set of cases differs |
+| `k` | the same code reading other constants |
+| `s` | differs from level 01, but all of it is level 00's (the superset build's) code |
+| `U` | the level has code neither level 01 nor level 00 has: read these |
+| `D` | differs, and there is no level-00 copy to check against |
+| `?` | no counterpart found (the level lacks the function, or the matching failed; the method is in the TSV) |
+
+Method and limits: `tools/trace/src/overlay_diff.rs` (module doc); results for the hero:
+`docs/plan/level_generalisation.md` H2. It replaces re-running `overlay_diff.py` for identity questions (X1): the
+masking is the port's own (`rc_formats::level_overlay::mask`, `%lo` included), so there is no second copy of it.
+`overlay_diff.py` still builds `names/clusters.tsv` for the naming flow.
+
 ## Set up from scratch
 
 Only for a new machine or a lost project. Needs `extracted/` (docs/workflows/game-data.md), the PS2 processor module

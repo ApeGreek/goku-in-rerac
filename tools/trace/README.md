@@ -24,6 +24,7 @@ camera, fog, `rand` stream, moby table), and per-tick hero recordings replayed t
 | Replay a recording through the port | `cargo run --release -p rc-trace -- replay-hero --trace FILE` |
 | Check the disc reader and the extractor against your disc image (the checks no test may run; docs/workflows/testing.md §10) | `cargo run --release -p rc-trace -- disc-check [--extract-into DIR]` |
 | Census of the unported moby classes and the shared systems they call (no PCSX2; reads `extracted/`, tags `tools/ghidra/names/census_systems.tsv`; docs/plan/class_census.md) | `cargo run -p rc-trace -- class-census` → `work/census/` |
+| The masked function × level diff: does a function (the hero's by default) differ between the level overlays, and how (no PCSX2; reads `extracted/`; docs/workflows/ghidra.md "Masked overlay diff") | `cargo run -p rc-trace -- overlay-diff` → `work/overlay_diff/` |
 
 ## Inputs and outputs
 

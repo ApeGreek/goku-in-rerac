@@ -677,7 +677,8 @@ impl Hero {
             }
         }
         self.pos = vadd(self.pos, off);
-        let flags = QueryFlags(if self.state == 0x7f { 0xd24 } else { 0x24 });
+        // 0x24 on level01; the surface passed through is per level (super::surface::PASS_SURFACE).
+        let flags = if self.state == 0x7f { QueryFlags(0xd24) } else { super::surface::pass_flags(self.idle.level) };
         let r = self.cap_radius;
         for _ in 0..8 {
             // The capsule / sphere kernels with a2 = Ratchet (0x1413d0): world mesh, then the mobys of `env.mobys`.

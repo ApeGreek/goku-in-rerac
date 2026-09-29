@@ -123,9 +123,11 @@ fn find_surface(mesh: &collision::Collision, id: u8) -> Option<[f32; 3]> {
 }
 
 
-/// Aridia (level 2) quicksand, surface 3: dropped onto it Ratchet sinks in (0x68: the capsule stops him 0.25
-/// below the top while the anim sinks), ✕ jumps him out (0x69, the jump system, h = depth + 1.7), he falls back
-/// in (0x68, the second try) and without ✕ the death fade comes after 170 ticks.
+/// Aridia (level 2) quicksand, surface 3: dropped onto it Ratchet sinks in (0x68), ✕ jumps him out (0x69, the
+/// jump system, h = depth + 1.7), he falls back in (0x68, the second try) and without ✕ sinks to the death fade.
+/// Aridia's own capsule and `LandEta` pass through surface 3 (flags 0x324, `rc_game::hero::surface::PASS_SURFACE`),
+/// so nothing holds him on the face: the n-th try sinks at 1 u/s to (n + 1)/2 below the top, then at 0.25 u/s,
+/// and the fade comes 1.2 below the top (L00 0x22bf00), here before the 170-tick limit.
 #[test]
 fn aridia_quicksand_sink_jump_out_and_fade() {
     let Some(lv) = level_data(2) else { eprintln!("skipped: no extracted/levels/02"); return };
@@ -133,21 +135,39 @@ fn aridia_quicksand_sink_jump_out_and_fade() {
     let x = |t: u32| if (60..62).contains(&t) { PadInput::neutral().press(button::CROSS) } else { PadInput::neutral() };
     let recs = drop_in(&lv, 2, [p[0], p[1], p[2] + 1.5], 0.0, 300, x);
     let s = states(&recs);
+    let depth = |t: usize| p[2] - recs[t].1[2];
     eprintln!("quicksand at {p:?}: states {s:?}");
     assert_eq!(s.iter().map(|x| x.1).collect::<Vec<_>>(), vec![0x68, 0x69, 0x68], "{s:?}");
     assert_eq!(s[1].0, 60, "the jump out on the ✕ press (after 15 ticks)");
     let top = recs[70..110].iter().map(|r| r.1[2]).fold(f32::MIN, f32::max);
     assert!(top > p[2] + 1.0, "the jump out rises above the sand: {top} vs {}", p[2]);
-    // Sinking in: the feet end 0.25 below the top (the capsule on the face).
-    let z = recs[55].1[2];
-    assert!((z - (p[2] - 0.25)).abs() < 0.01, "sunk to {z}, top {}", p[2]);
-    // The fade after 170 ticks of the second try, not before.
+    // The first try (n = 0): past 0.5 deep before the ✕, then 0.25 u/s (the capsule no longer stops him 0.25 in).
+    assert!(depth(55) > 0.5, "sunk to {} by tick 55", depth(55));
+    assert!((depth(58) - depth(56) - 2.0 * 0.25 / 60.0).abs() < 1e-3, "0.25 u/s past 0.5: {}", depth(58) - depth(56));
+    // The second try (n = 1): 1 u/s to 1.0 deep, then 0.25 u/s.
     let back = s[2].0 as usize;
-    assert_eq!(recs[back + 170].2, 0);
-    assert_eq!(recs[back + 172].2, 1);
+    let one = (back..300).find(|&t| depth(t) > 1.0).expect("1.0 deep");
+    assert!((depth(one - 2) - depth(one - 4) - 2.0 / 60.0).abs() < 1e-3, "1 u/s above 1.0");
+    assert!((depth(one + 4) - depth(one + 2) - 2.0 * 0.25 / 60.0).abs() < 1e-3, "0.25 u/s below 1.0");
+    // The fade 1.2 below the top, before the 170-tick limit.
+    let fade = recs.iter().position(|r| r.2 != 0).expect("the death fade");
+    assert!(fade > back && fade < back + 170, "fade at {fade}, second try from {back}");
+    assert!((depth(fade - 1) - 1.2).abs() < 0.01, "faded {} deep", depth(fade - 1));
     // Level 1 (Novalis) compiles no rule for surface 3: the same face is plain ground there.
     let recs = drop_in(&lv, 1, [p[0], p[1], p[2] + 1.5], 0.0, 60, |_| PadInput::neutral());
     assert!(recs.iter().all(|r| r.0 != 0x68), "{:?}", states(&recs));
+}
+
+/// Levels 6 and 0xe compile their capsule and `LandEta` with flags 0xd24 (`rc_game::hero::surface::PASS_SURFACE`:
+/// Ratchet passes through the deadly liquid, surface 0xd), but neither level's collision (world mesh or moby
+/// classes) has a surface-0xd face, so their constant changes nothing their data can show (docs/plan/
+/// level_generalisation.md H2). Aridia's (3) is the visible one (above).
+#[test]
+fn deadly_liquid_pass_levels_have_no_such_faces() {
+    for n in [6usize, 14] {
+        let Some((world, mobys)) = surfaces(n) else { continue };
+        assert!(!world.contains_key(&0xd) && !mobys.contains_key(&0xd), "level {n}: surface 0xd in {world:?} / {mobys:?}");
+    }
 }
 
 /// A slippery floor (surface 7, levels 12 and 14): walking onto it is the slide 0x2f; Novalis' rules ignore 7.
