@@ -2,7 +2,8 @@
 
 What runs when, which tests belong to which area, and the audit of every test in the workspace (2026-09-29). All
 commands run from the repo root with `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`. Tests that need game data
-skip themselves when `extracted/` is absent.
+skip themselves when `extracted/` is absent; `--no-game-data` (CI) runs as if it were and lists those tests as SKIPPED
+(`tools/xtask/README.md`).
 
 **No test relies on the user's personal files** (§10): not the disc image, savestates, PCSX2 traces, screen
 recordings, the settings file or session output in `work/`, not even "skip if missing". Tests read `extracted/`

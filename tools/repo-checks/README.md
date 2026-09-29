@@ -12,8 +12,8 @@ Dev only, never ships. No dependencies; it exists for its tests. Rules: `docs/pl
      `Screen Recording`; files under a `tests/` folder also never read `RC_ISO` or `HOME` (`home_dir`,
      `Application Support`). There is no allow-list. Tool sources (`tools/*/src`) are not scanned: the dev tools read
      personal material on purpose (`src/lib.rs` `guarded_dirs`).
-  3. The top level holds only `crates tools docs extracted work target dist`, dotfiles, `Cargo.toml`, `Cargo.lock` and
-     `README.md`.
+  3. The top level holds only `crates tools docs extracted work target dist`, dotfiles, `Cargo.toml`, `Cargo.lock`,
+     `README.md` and `CHANGELOG.md`.
   4. Tests run only through `cargo xtask test-*` (docs/workflows/testing.md §1): no `.cargo/config.toml` alias runs
      `test` or `nextest`; no file under `crates/`, `tools/`, `docs/` (or `README.md`, `.config/nextest.toml`) names
      the retired `cargo test-all` alias except as the alias; and the workflow docs (`README.md`, `docs/workflows/`,

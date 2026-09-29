@@ -172,7 +172,11 @@ pub fn startup() -> PathBuf {
 
 /// The data root chosen by [`startup`]; before it (unit tests), the same order without `--data-dir` or checks.
 pub fn data_root() -> PathBuf {
-    ROOT.get().cloned().unwrap_or_else(|| resolve(None, std::env::var_os("RC_DATA_DIR"), std::env::var_os("RC_EXTRACTED")).0)
+    ROOT.get().cloned().unwrap_or_else(|| {
+        // Unit tests only (the game sets ROOT at startup): `--no-game-data` runs list them as skipped.
+        rc_formats::test_data::note_data_request();
+        resolve(None, std::env::var_os("RC_DATA_DIR"), std::env::var_os("RC_EXTRACTED")).0
+    })
 }
 
 /// The bytes of `rel` (a path relative to the data root, as the extractor names it).

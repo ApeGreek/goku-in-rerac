@@ -8,7 +8,7 @@
 #   rerac[.exe]              the runtime (crate rc-engine; plain release build, never `--features dev`)
 #   rerac-extract[.exe]      the extractor (crate rc-extract)
 #   assets/shaders/*.wgsl    the runtime's shaders (found next to the executable; rc-engine main.rs `asset_dir`)
-#   rerac-manifest.json      the version manifest, version taken from crates/rc-engine/Cargo.toml
+#   rerac-manifest.json      the version manifest, version taken from [workspace.package] in Cargo.toml
 #   README.txt
 # Nothing from the disc is ever packaged: the folder is checked against that exact file list.
 # The folder itself is a valid launcher version (the launcher's Development source can point at it).
@@ -28,8 +28,9 @@ done
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$repo"
 
-version="$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/rc-engine/Cargo.toml | head -n1)"
-[ -n "$version" ] || { echo "cannot read the version from crates/rc-engine/Cargo.toml" >&2; exit 1; }
+# The one workspace version: `version` under [workspace.package] (every crate inherits it).
+version="$(awk '/^\[/ { in_pkg = ($0 == "[workspace.package]") } in_pkg && /^version = "/ { gsub(/^version = "|"$/, ""); print; exit }' Cargo.toml)"
+[ -n "$version" ] || { echo "cannot read the version from [workspace.package] in Cargo.toml" >&2; exit 1; }
 
 exe=""
 case "$(uname -s)" in

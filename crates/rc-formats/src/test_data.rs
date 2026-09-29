@@ -14,10 +14,27 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 /// The development data root: `RC_EXTRACTED` (when set and non-empty), else `<workspace>/extracted`.
 pub fn root() -> PathBuf {
+    note_data_request();
     std::env::var_os("RC_EXTRACTED")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../extracted"))
+}
+
+/// `cargo xtask test-* --no-game-data` (CI: no disc, no `extracted/`) points `RC_EXTRACTED` at an empty folder and
+/// sets `RC_NO_GAME_DATA_LOG`. Then every request for the data root appends `<test binary> <test name>` (libtest names
+/// the test's thread) to that file, and xtask lists those tests as SKIPPED: a test that returns early for lack of data
+/// is never a silent pass. Without the variable (every normal run) this does nothing.
+pub fn note_data_request() {
+    let Some(log) = std::env::var_os("RC_NO_GAME_DATA_LOG").filter(|v| !v.is_empty()) else { return };
+    let exe = std::env::current_exe().ok().and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned())).unwrap_or_default();
+    // Cargo names test executables `<target>-<hash>`.
+    let bin = exe.rsplit_once('-').map_or(exe.as_str(), |(b, _)| b);
+    let test = std::thread::current().name().unwrap_or("<unnamed thread>").to_string();
+    // One write per line: appends from parallel tests stay whole lines.
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+        let _ = std::io::Write::write_all(&mut f, format!("{bin} {test}\n").as_bytes());
+    }
 }
 
 /// `levels/NN` under [`root`].

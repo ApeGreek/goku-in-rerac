@@ -1,0 +1,103 @@
+# Release: builds the version package with `cargo xtask package` and publishes it as a GitHub Release
+# (docs/workflows/release.md). Cut a release by pushing a tag `vX.Y.Z[-pre]`; X.Y.Z must equal the workspace version.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)release, e.g. v0.1.0-alpha. Empty: build the package only (no release)."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tag being released: the pushed tag, or the manual input (empty: package only).
+  TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  # Optional secret (docs/workflows/release.md); here so a step's `if` can test it.
+  SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+
+jobs:
+  release:
+    runs-on: macos-14 # Apple Silicon, the tested platform
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.tag || github.ref }}
+
+      - name: Rust toolchain (rustup, stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Release build of rerac + rerac-extract, then the allow-listed folder and its zip in dist/ (tools/package).
+      - name: cargo xtask package
+        run: cargo xtask package
+
+      - name: Find the package
+        id: pkg
+        run: |
+          zip="$(ls dist/rerac-*.zip)"
+          dir="${zip%.zip}"
+          version="$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' "$dir/rerac-manifest.json")"
+          ls -l "$zip" "$dir" "$dir/assets/shaders"
+          if [ -n "$TAG" ]; then
+            want="${TAG#v}"; want="${want%%-*}"
+            if [ "$version" != "$want" ]; then
+              echo "::error::tag $TAG does not match the workspace version $version (Cargo.toml [workspace.package])"
+              exit 1
+            fi
+          fi
+          echo "zip=$zip" >> "$GITHUB_OUTPUT"
+          echo "manifest=$dir/rerac-manifest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the package (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rerac-package
+          path: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.manifest }}
+
+      # Notes: the CHANGELOG.md section `## <tag>`, else the tag's annotation.
+      - name: Release notes
+        if: env.TAG != ''
+        run: |
+          awk -v h="## $TAG" '$0 == h { on = 1; next } on && /^## / { exit } on { print }' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+            git tag -l --format='%(contents)' "$TAG" > notes.md
+          fi
+          cat notes.md
+
+      - name: GitHub Release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$TAG" in *-alpha*|*-beta*|*-rc*) pre="--prerelease" ;; esac
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "${{ steps.pkg.outputs.zip }}" "${{ steps.pkg.outputs.manifest }}" --clobber
+            gh release edit "$TAG" --notes-file notes.md $pre
+          else
+            gh release create "$TAG" "${{ steps.pkg.outputs.zip }}" "${{ steps.pkg.outputs.manifest }}" \
+              --verify-tag --title "ReRAC $TAG" --notes-file notes.md $pre
+          fi
+
+      # Optional: tell the site (re-rac/re-rac.github.io) to rebuild. Runs only when the repository secret
+      # SITE_DISPATCH_TOKEN exists (a token allowed to create repository_dispatch events on the site repo).
+      - name: Notify the site
+        if: env.TAG != '' && env.SITE_DISPATCH_TOKEN != ''
+        run: |
+          GH_TOKEN="$SITE_DISPATCH_TOKEN" gh api repos/re-rac/re-rac.github.io/dispatches \
+            -f event_type=release-published -f "client_payload[tag]=$TAG" \
+            -f "client_payload[repository]=$GITHUB_REPOSITORY"

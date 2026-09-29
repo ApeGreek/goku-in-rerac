@@ -27,6 +27,11 @@ Every test command:
   (`NEXTEST` and `CARGO_TEST` in `src/test.rs`). `--cargo-test` forces `cargo test`;
 * passes the arguments after `--` on: to nextest (e.g. `--no-capture`), or to the test binaries under `cargo test`;
 * runs every step even when one fails, and exits 1 if any failed.
+* with `--no-game-data` (all three; CI, `docs/workflows/release.md`), runs as on a machine without `extracted/`: every
+  step gets `RC_EXTRACTED` = the empty folder `target/no-game-data/empty` (`RC_DATA_DIR` cleared) and
+  `RC_NO_GAME_DATA_LOG`, to which each test that asks for the data root (`rc_formats::test_data::root`, rc-engine's
+  `data_root` in unit tests) appends its name; at the end the command lists those tests as SKIPPED (on GitHub Actions
+  also a warning annotation and the step summary). No digest and no sweep in that mode.
 
 Targeting (`test-quick` and `test-job`; the same meaning under both runners):
 
