@@ -131,7 +131,7 @@ marked; `C:` rows cite one level copy (the others: `clusters.tsv`).
 | Path helpers not linked on Novalis (`path`) | partly | G-CLS-025 | 1 (was 53) | 1 (was 31) | 2 (was 1,108) | 947 (2) (was 75/115/116 (246); 827 (155); 749 (106); 1564 (92)) | `L01:00277260` FUN_00277260×1 (2026-09-29 W1: `C:c4c12687d93c` FUN_00262e40, `C:49a176c9f6de` FUN_00270d00, `C:17a7139ba6a7` FUN_00263710, `C:aeb1c69a6e0e` FUN_00264558, `L01:00277d40`, `C:a3bbdace838c` FUN_002a0260 are has: `rc_game::path`) |
 | Hero scripted states, bodies and the branches on them (`herostate`) | partly | G-HERO-002, G-HERO-005, G-LVL-002 (H2) | 96 | 68 | 880 | 827 (155); 193 (93); 638 (64); 1843 (60) | `G:001413d4=00000032` hero_state_0x32×14; `G:001413f4=00000002` body_giant_clank×13; `G:001413f4=00000001` body_clank×12; `C:8a18636e69bd` FUN_002223f8×11; `C:ea215dba76e7` FUN_002356a0×5; `C:2f2e9be4c73e` FUN_00230b38×4 |
 | NPC look-at manipulators and animation leftovers (`anim`) | partly | G-HERO-009 | 47 | 42 | 422 | 638 (64); 238 (54); 623 (51); 294 (40) | `L01:002777d8` FUN_002777d8×40; `C:94cf214dfe7f` FUN_0027b9c0×2; `L01:0026c7a8` MobyAnimBlendEx×2; `L01:002b52a8` FUN_002b52a8×1 |
-| Creature-layer copies not linked on Novalis (`creature`) | partly | G-ENM-009 | 23 | 22 | 363 | 238 (54); 294 (40); 1023 (40); 1112 (31) | `C:d001715051e4` FUN_0024e830×18; `C:ad33de15cdab` FUN_00247c10×7; `C:a8d6490c966c` FUN_0025b710×1 |
+| Creature-layer copies not linked on Novalis (`creature`) | has (2026-09-29) | ~~G-ENM-009~~ | 0 (was 23) | 0 (was 22) | 0 (was 363) | (was 238 (54); 294 (40); 1023 (40); 1112 (31)) | the three clusters re-tagged has / ported ("In the port: creature units") |
 | Effect-moby spawners not linked on Novalis (`fxmoby`) | partly | G-CLS-026 | 31 | 21 | 276 | 623 (51); 79 (30); 541 (29); 1511 (26) | `C:494499ccf189` FUN_0028dee8×15; `C:01476b25f86a` FUN_002de3e0×3; `C:60ae58782f11` FUN_002e1c98×3; `C:48e5de3f3f27` FUN_00300c60×2; `C:a0194c2bd0e8` FUN_002ef868×2 |
 | Point-light flicker (`light`) | partly | G-REN-024 | 12 | 6 | 256 | 1246 (126); 580 (82); 615 (19); 612 (15) | `C:5d1f33c5603a` FUN_0025fb60×6 |
 | Moby platforms and riders (`platform`) | partly | G-CLS-024 | 7 | 7 | 181 | 1246 (126); 812 (25); 574 (17); 1381 (8) | `L01:002753b0` FUN_002753b0×3; `C:584a926e540b` FUN_00265358×2; `L01:00275290` FUN_00275290×2; `L01:002752c0` FUN_002752c0×2; `L01:00275528` FUN_00275528×2 |
@@ -316,6 +316,24 @@ helper from its own walk code but is a creature (hit handler `0x25e9d8`, death e
 `0x25bd28`: G-ENM-009). U326 (947, 10: 2) needs `0x277260` (left in G-CLS-025). The other former path units (827,
 749, 580, 1262, 238, 294, 857, 1213 / 1212 …) wait on the cheat, the light flicker, the creature copies, the hero
 states or their own draw callbacks (unit_systems.tsv).
+
+### In the port: creature units (2026-09-29, W1 lane 2, G-ENM-009)
+
+System or not first (creatures.md §9.1): the census's three `creature` clusters were two already-ported functions
+(`C:d001715051e4` = `0x274b78`, `C:ad33de15cdab` / `C:a8d6490c966c` = `0x26de80`; re-tagged has) and the random
+wander `C:9a9b8f2fffcb` `0x261630` (six levels; the census had folded it into each consumer's private code), ported as
+`creature::walker::wander`; the joint hit `C:76f90a069f65` / `0x26e830` got a real port (`attack::joint_hit`). Units,
+in `units::PORTS`; coverage tables in creatures.md §9.3, tests `rc-game/tests/creature_classes.rs`.
+
+| unit | classes (levels) | created | reference | port | notes |
+|---|---|---|---|---|---|
+| U25 | 749 horny toads (00, 18) | 106 | level00 0x2d4610 | `units::horny_toad` | wander / chase / bite (joint hit, flags 1); dies from any hit; lure, Suck Cannon (`react::VELDIN_749`), presses floor switches |
+| U287 | 1023 hopping gunners (08, 09), shot 1292 | 40 | level08 0x301158, 0x307298 | `units::hop_gunner` | carried gun 1025, hop arc, 20-shot bursts, club, knockback / death, morph keep byte |
+
+Census after (2026-09-29, `cargo run -p rc-trace -- class-census`): no unit lists `creature`; 412 units / 3,681 created
+instances unported (was 417 / 4,030 before this wave's two lanes); verdicts cheap 219 / 1,498, missing 145 / 1,884,
+partly 42 / 291, unknown 6 / 8. Freed by this row (only the cheat left, conditional): 340 (04: 28), 333 (08: 8), 217
+(04: 5), 578 (03: 3).
 
 ## Unique classes: the ones that need something no other class needs
 

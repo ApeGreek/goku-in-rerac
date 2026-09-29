@@ -13,8 +13,9 @@
 //!   the carried update [`carried`] 0x305260 (the classes call it from their own state: 577 state 7, 572 / 866
 //!   state 0xe, 270 state 5), [`land`] 0x3051a8 and the burst [`burst`] 0x304798.
 //!   Classes with a table (all 19 overlays' `lvl.vtbl`): 270 everywhere; 577 (01); 572 / 866 (01, 05, 11); 749
-//!   (00, 18), 580 (02), 340 (04), 827 (06, 10), 252 (08, 14), 193 (09, 15), 1246 (11), 238 (12), 63 (13), 1445 (16),
-//!   1382 (17), 568 / 1906 (18) — those classes are not ported. 865 and 459 keep the default: never sucked.
+//!   (00, 18: [`VELDIN_749`], reversed on level 00, found by [`tables_from_overlays`]); 580 (02), 340 (04), 827 (06,
+//!   10), 252 (08, 14), 193 (09, 15), 1246 (11), 238 (12), 63 (13), 1445 (16), 1382 (17), 568 / 1906 (18) — those
+//!   classes are not ported. 865 and 459 keep the default: never sucked.
 //! * **The damage record** (the creature header's +0x00, `FUN_002711f8`) carries two more weapon inputs: **+0x18 the
 //!   lure** (the Taunter's `0x2cc830` writes its moby; 577 turns it into its 240-tick alert, 572 into its alert,
 //!   459 into its 600-tick alert — the classes already read it, as `ALERT`), +0x04 (s16) the Morph-o-Ray's full meter
@@ -96,8 +97,10 @@ pub const BOUNCE_MARK: f32 = 1.23456;
 /// if state != held { return 0 } state = 1 } else { state = held } return r` with these per-class differences.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Wrappers {
-    /// The class's state while the Suck Cannon has it (577: 7, amoeboids: 0xe, chicken: 5).
+    /// The class's state while the Suck Cannon has it (577: 7, amoeboids: 0xe, chicken: 5, 749: 9).
     pub held: u8,
+    /// The state a refused slot puts a held moby back in (`state = 1`; 749's level00 wrappers: 5).
+    pub release: u8,
     /// Slot +0x00's extra gate (the amoeboids' 0x2efa88: only class 866 is taken, and not in its state 8).
     pub start_only: Option<(i16, u8)>,
     /// Slot +0x08: a class sound when the fire-out starts bouncing (577: 2, chicken: 1).
@@ -111,13 +114,18 @@ pub struct Wrappers {
 }
 
 /// 577's table 0x20c3f4 (0x2f1c78, 0x2f1cc8, 0x2f1d18, 0x2f1dc8, 0x2f1df8).
-pub const CRITTER: Wrappers = Wrappers { held: 7, start_only: None, bounce_sound: Some(2), seqs: [2, 2, 2, 9, 4, 10, 10, 6, 4], record: 0x60 };
+pub const CRITTER: Wrappers = Wrappers { held: 7, release: 1, start_only: None, bounce_sound: Some(2), seqs: [2, 2, 2, 9, 4, 10, 10, 6, 4], record: 0x60 };
 /// 866's table 0x20c40c and 572's 0x20c3dc (0x2efa88, 0x2efaf8, 0x2efb48, 0x2efb98, 0x2efbc8); the sequence table
 /// by class (866 gp−0x51b0, else gp−0x51c0).
-pub const AMOEBOID_866: Wrappers = Wrappers { held: 0xe, start_only: Some((866, 8)), bounce_sound: None, seqs: [1, 1, 1, 6, 6, 6, 6, 6, 6], record: 0xc0 };
+pub const AMOEBOID_866: Wrappers = Wrappers { held: 0xe, release: 1, start_only: Some((866, 8)), bounce_sound: None, seqs: [1, 1, 1, 6, 6, 6, 6, 6, 6], record: 0xc0 };
 pub const AMOEBOID_572: Wrappers = Wrappers { seqs: [1; 9], ..AMOEBOID_866 };
 /// 270's table (0x2e0a28, 0x2e0a78, 0x2e0ac8, 0x2e0b78, 0x2e0ba8); record: see the chicken module.
-pub const CHICKEN: Wrappers = Wrappers { held: 5, start_only: None, bounce_sound: Some(1), seqs: [2, 2, 2, 0, 0, 0, 0, 0, 0], record: 0xe0 };
+pub const CHICKEN: Wrappers = Wrappers { held: 5, release: 1, start_only: None, bounce_sound: Some(1), seqs: [2, 2, 2, 0, 0, 0, 0, 0, 0], record: 0xe0 };
+
+/// 749's table (level00 0x1ea7ec: 0x2d56e0, 0x2d5730, 0x2d5780, 0x2d57d0, 0x2d5800; level18 0x1f34b0 the same code):
+/// held 9, a refused slot → 5, no bounce sound, the sequence table gp−0x52a0 (level00 0x161960: 4, 4, 4, then 0),
+/// the record at pvar +0xd0 (0x2d5800).
+pub const VELDIN_749: Wrappers = Wrappers { held: 9, release: 5, start_only: None, bounce_sound: None, seqs: [4, 4, 4, 0, 0, 0, 0, 0, 0], record: 0xd0 };
 
 /// `0x2defb0(target)`: the Morph-o-Ray's morph (a spawn and a delete: `crate::moby_update::classes::chicken::morph`).
 pub fn morph_target(w: &mut World, target: MobyId) -> Option<MobyId> {
@@ -129,6 +137,8 @@ pub fn morph_target(w: &mut World, target: MobyId) -> Option<MobyId> {
 pub const REF_CRITTER: u32 = 0x2f1c78;
 pub const REF_AMOEBOID: u32 = 0x2efa88;
 pub const REF_CHICKEN: u32 = 0x2e0a28;
+/// The reaction tables reversed on other levels: (level, slot +0x00's address there, the table).
+pub const OTHER_REFS: [(u32, u32, Table); 1] = [(0, 0x2d56e0, Table::Veldin749)];
 
 /// A ported reaction table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -136,6 +146,8 @@ pub enum Table {
     Critter,
     Amoeboid,
     Chicken,
+    /// 749 (levels 00, 18: [`VELDIN_749`]).
+    Veldin749,
 }
 
 /// The Suck Cannon as its last update left it (module doc).
@@ -209,6 +221,21 @@ pub fn tables_from_overlay(target: &rc_formats::level_overlay::LevelOverlay, lev
     out
 }
 
+/// [`tables_from_overlay`] plus the tables reversed on other levels ([`OTHER_REFS`]; `reference(level)` gives their
+/// overlays): what the engine loads for a level.
+pub fn tables_from_overlays(target: &rc_formats::level_overlay::LevelOverlay, level01: &rc_formats::level_overlay::LevelOverlay, reference: &dyn Fn(u32) -> Option<std::sync::Arc<rc_formats::level_overlay::LevelOverlay>>) -> std::collections::HashMap<i16, Table> {
+    let mut out = tables_from_overlay(target, level01);
+    for (level, r, t) in OTHER_REFS {
+        let Some(ov) = reference(level) else { continue };
+        let rel = rc_formats::level_overlay::Relocation::new(&ov, target);
+        for e in target.vtbl() {
+            let Some(slot0) = target.u32(e.w8) else { continue };
+            if same_small(&rel, &ov, target, r, slot0) { out.insert(e.o_class as i16, t); }
+        }
+    }
+    out
+}
+
 /// The slot functions are reached only through the tables, so a function extent may be unknown: compare 16 masked
 /// words when [`rc_formats::level_overlay::Relocation::same_code`] cannot tell.
 fn same_small(rel: &rc_formats::level_overlay::Relocation, a: &rc_formats::level_overlay::LevelOverlay, b: &rc_formats::level_overlay::LevelOverlay, ra: u32, tb: u32) -> bool {
@@ -232,6 +259,7 @@ pub fn wrappers(w: &World, id: MobyId) -> Option<Wrappers> {
         Table::Critter => CRITTER,
         Table::Amoeboid => if w.m(id).o_class == 866 { AMOEBOID_866 } else { AMOEBOID_572 },
         Table::Chicken => CHICKEN,
+        Table::Veldin749 => VELDIN_749,
     })
 }
 
@@ -311,7 +339,7 @@ pub fn slot_start(w: &mut World, id: MobyId, mouth: V) -> i32 {
     let r = approach(w, id, mouth);
     if r == 0 {
         if w.m(id).state != x.held { return 0; }
-        w.mm(id).state = 1;
+        w.mm(id).state = x.release;
         return 0;
     }
     if let Some((only, not_in)) = x.start_only {
@@ -325,14 +353,14 @@ pub fn slot_start(w: &mut World, id: MobyId, mouth: V) -> i32 {
 pub fn slot_swallow(w: &mut World, id: MobyId, point: V) -> i32 {
     let Some(x) = wrappers(w, id) else { return 1 };
     let r = swallow(w, id, point);
-    wrap_state(w, id, x.held, r)
+    wrap_state(w, id, x.held, x.release, r)
 }
 
 /// Slot +0x08 `(height, moby, vel, target)`: fired out of the cannon.
 pub fn slot_fire(w: &mut World, id: MobyId, height: f32, vel: V, target: Option<MobyId>) -> i32 {
     let Some(x) = wrappers(w, id) else { return 0 };
     let r = fire_out(w, id, height, vel, target);
-    let r2 = wrap_state(w, id, x.held, r);
+    let r2 = wrap_state(w, id, x.held, x.release, r);
     if let (Some(s), Some(rr)) = (x.bounce_sound, record(w, id)) {
         if rs(w, rr, id, rec::STATE) == 6 { w.play_sound(s, 0, id); }
     }
@@ -346,10 +374,10 @@ pub fn slot_let_go(w: &mut World, id: MobyId) {
     w.mm(id).state = x.held;
 }
 
-fn wrap_state(w: &mut World, id: MobyId, held: u8, r: i32) -> i32 {
+fn wrap_state(w: &mut World, id: MobyId, held: u8, release: u8, r: i32) -> i32 {
     if r == 0 {
         if w.m(id).state != held { return 0; }
-        w.mm(id).state = 1;
+        w.mm(id).state = release;
         return 0;
     }
     w.mm(id).state = held;

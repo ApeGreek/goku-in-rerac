@@ -1,5 +1,10 @@
 //! Target acquisition `0x274b78(range, moby, &out)`: whom a creature goes for this tick.
 //!
+//! **Level copies** (G-ENM-009, 2026-09-29): level03 `0x24e830`, level04 `0x252e18`, level07 `0x2886d8`, level12
+//! `0x278ba8` (cluster d001715051e4) are this function: their decompiled code is identical to `0x274b78` but for the
+//! two decoy lists' addresses (`0x1b0cb0` / `0x1dd580` on level 01, `0x1b0930` / `0x1d1680` on level 03: `%lo`
+//! operands the cluster hash does not mask), so [`acquire`] serves them.
+//!
 //! * Ratchet (`0x1413d0`) by default, **no target** while his movement group (`0x1413dc`) is 0x18 or his state
 //!   (`0x1413d4`) is 0x72 (the cutscene hold): kind 2 then, and every field of the record is zero.
 //! * A decoy nearer than `range` (the **xy** distance, `fun_001f9b80` = `VecDistance2` 0x221398; the port read it as

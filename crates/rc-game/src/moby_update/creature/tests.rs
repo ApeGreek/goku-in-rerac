@@ -463,3 +463,89 @@ fn move_ground_walks_a_floor_and_refuses_a_step() {
     assert_eq!(to[0], 120.0);
 }
 
+
+#[test]
+fn lerp_rot_goes_the_short_way() {
+    assert!((lerp_rot(0.0, 1.0, 0.5) - 0.5).abs() < 1e-6);
+    // From 3 toward −3 (6.28 − 6 = 0.28 the short way, across π).
+    let x = lerp_rot(3.0, -3.0, 0.5);
+    assert!(diff_rots(x, 3.0 + (2.0 * PI - 6.0) / 2.0) < 1e-5, "{x}");
+    assert_eq!(lerp_rot(1.0, 2.0, 0.0), 1.0);
+}
+
+/// A moby (class 577's test anim) with a wander record at pvar 0: home (120, 120, 10), radius 0.4, step 0.05, turn
+/// 0.05, leash 1.5, shy 3, timer range 60..150 (749's values).
+fn wander_sim(at: [f32; 3], hero: [f32; 3]) -> Sim {
+    let mut p = vec![0u8; 0x80];
+    let set = |p: &mut Vec<u8>, o: usize, b: &[u8]| p[o..o + b.len()].copy_from_slice(b);
+    for (o, x) in [(0x0, 120.0f32), (0x4, 120.0), (0x8, 10.0), (0x10, 0.4), (0x14, 0.05), (0x18, 0.05), (0x1c, 1.5), (0x20, 3.0)] { set(&mut p, o, &x.to_le_bytes()); }
+    set(&mut p, 0x2c, &60i16.to_le_bytes());
+    set(&mut p, 0x2e, &150i16.to_le_bytes());
+    let mut s = Sim::new(577, at, p, hero);
+    s.table.mobys[1].mode &= !PVAR_HEADER;
+    s
+}
+
+#[test]
+fn wander_picks_turns_and_steps_on_the_ground() {
+    let mut s = wander_sim([120.0, 120.0, 10.0], [150.0, 150.0, 10.0]);
+    let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, 1);
+    w.coll = Some(&s.mesh);
+    let r0 = *w.rng;
+    walker::wander(&mut w, 1, 0.5, 0.5, 0);
+    // The pick: randf_sym(π/4, 5π/6) added to the heading, rand_range(60, 150) turn ticks; nothing else draws.
+    assert_eq!(draws(&r0, w.rng), 2);
+    let h = pf(&w, 1, walker::wr::HEADING);
+    assert!((0.785..=2.62).contains(&h.abs()), "heading {h}");
+    let t = pi16(&w, 1, walker::wr::TIMER);
+    assert!((60..=150).contains(&t), "timer {t}");
+    assert_eq!(pi16(&w, 1, walker::wr::TURNING), 1);
+    // The step: 0.05 along the yaw (0 before the turn), z on the floor.
+    let p = pos(&w, 1);
+    assert!((p[0] - 120.05).abs() < 1e-4 && (p[1] - 120.0).abs() < 1e-4 && p[2] == 10.0, "{p:?}");
+    // Turning: the yaw approaches the heading by at most 0.05 a tick.
+    let y0 = yaw(&w, 1);
+    walker::wander(&mut w, 1, 0.5, 0.5, 0);
+    assert!((yaw(&w, 1) - y0).abs() <= 0.05 + 1e-6 && yaw(&w, 1) != y0);
+}
+
+#[test]
+fn wander_heads_home_past_the_leash_and_shies_from_ratchet() {
+    let mut s = wander_sim([122.0, 120.0, 10.0], [150.0, 150.0, 10.0]);
+    let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, 1);
+    w.coll = Some(&s.mesh);
+    set_pi16(&mut w, 1, walker::wr::TURNING, 1);
+    set_pi16(&mut w, 1, walker::wr::TIMER, 100);
+    walker::wander(&mut w, 1, 0.5, 0.5, 0);
+    // 2 from home (leash 1.5): the heading points home, a new turn of 30..90 ticks.
+    let h = pf(&w, 1, walker::wr::HEADING);
+    let p = pos(&w, 1);
+    assert!((h - atan(120.0 - p[0], 120.0 - p[1])).abs() < 1e-5, "heading {h}");
+    let t = pi16(&w, 1, walker::wr::TIMER);
+    assert!((30..=90).contains(&t), "timer {t}");
+    // Ratchet 1.5 away (shy 3), inside the leash: the heading turns half way (1.5 / 3) toward away from him.
+    let mut s = wander_sim([120.0, 120.0, 10.0], [118.5, 120.0, 10.0]);
+    let mut w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, 1);
+    w.coll = Some(&s.mesh);
+    set_pi16(&mut w, 1, walker::wr::TURNING, 1);
+    set_pi16(&mut w, 1, walker::wr::TIMER, 100);
+    set_pf(&mut w, 1, walker::wr::HEADING, PI / 2.0);
+    set_yaw(&mut w, 1, PI / 2.0);
+    walker::wander(&mut w, 1, 0.5, 0.5, 0);
+    let p = pos(&w, 1);
+    let d = dist2(p, [118.5, 120.0, 10.0, 0.0]);
+    let away = atan(p[0] - 118.5, p[1] - 120.0);
+    let want = lerp_rot(PI / 2.0, away, d / 3.0);
+    assert!((pf(&w, 1, walker::wr::HEADING) - want).abs() < 1e-5);
+}
+
+#[test]
+fn the_sphere_hit_template_pushes_along_the_facing() {
+    let mut s = Sim::new(577, [120.0, 120.0, 10.0], critter_pvars(), [150.0, 150.0, 10.0]);
+    s.table.mobys[1].rotation[2] = PI / 2.0;
+    let w = World::new(&mut s.table, &s.hero, &mut s.rng, &s.classes, &mut s.svc, 1);
+    let t = attack::sphere_template(&w, 1, 1.0, 2.0, 1, 0, 1);
+    let d = t.dir.map(|x| f32::from_bits(x.0));
+    assert!(d[0].abs() < 1e-6 && (d[1] - 2.0).abs() < 1e-6 && d[2] == 1.0 && d[3] == crate::hero::damage::EXACT_PUSH_W, "{d:?}");
+    assert_eq!((t.attacker, t.flags, t.b18, t.b19, t.h1a, t.damage, t.w20), (Some(1), 1, 0, 1, 577, Pf::ONE, 1));
+}

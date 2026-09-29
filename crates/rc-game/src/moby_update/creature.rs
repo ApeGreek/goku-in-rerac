@@ -7,10 +7,10 @@
 //! |---|---|---|
 //! | [`target`] | `0x274b78`, `0x274df8` | target acquisition: Ratchet (or a decoy nearer than the range), none in his cutscene states |
 //! | [`turn`] | `SpringTurn2` 0x26d058, `0x270cc0` / 0x270ac0 / 0x2709f8, `Approach` 0x270728 | turning towards a heading, eased approach |
-//! | [`walker`] | `SeedJumpPattern` 0x26d930, `0x26d9a8`, `0x26d8b0` / `0x26d610`, `0x26d1d0` | ground walking: speed ramp, ledge probe, moby-vs-world move with step-up and gravity |
+//! | [`walker`] | `SeedJumpPattern` 0x26d930, `0x26d9a8`, `0x26d8b0` / `0x26d610`, `0x26d1d0`, `0x26de80`, `0x26d270`, level00 `0x261630` | ground walking: speed ramp, ledge probe, moby-vs-world move with step-up and gravity, the walk toward a point, the free ground move, the random wander |
 //! | [`knock`] | `0x271418`, `0x271558`, `0x26fa48`, `0x26faf0` | knockback / thrown / death flight: ballistic move, landing, bounce, crate hits, anim timing |
 //! | [`damage`] | `0x26f378` (+ `MobyGetHitMessage` 0x26f320 in `services`) | the hit resolver: per-attack-kind cooldown, damage tables, the wrench's push redirect |
-//! | [`attack`] | `0x26eaa8`, `0x26e090` | hits dealt (to Ratchet through his moby's hit message, P2's intake), group alert |
+//! | [`attack`] | `0x26eaa8`, `0x26e090`, `0x26e830`, level00 `0x2599e8` | hits dealt (to Ratchet through his moby's hit message, P2's intake), group alert, the sphere hit ahead of a moby (at a joint) |
 //! | [`flash`] | `0x272318` / `0x2723f8` | the hit flash on the moby's ambient colour |
 //! | [`fx`] | `0x273f50`, `SpawnBeamExplosion` 0x273310, `BreakFxB` 0x278ad8, `0x2efbf8`, `0x2f3570` | death explosion, explosion effect, break pieces, rate limiter, explosion light |
 //! | [`projectile`] | `CollLine_Fix` / `coll_sphere_mobys` with a template, `PartType04/08/15/16/22/26Spawn` | enemy shots' sweep and hit template; particle records of the unported types |
@@ -123,6 +123,9 @@ fn wrap_once(s: f32) -> f32 {
 pub fn add_rot(a: f32, b: f32) -> f32 { wrap_once(a + b) }
 /// `fast_subtract_rotations` 0x222040: `a − b` wrapped once.
 pub fn sub_rot(a: f32, b: f32) -> f32 { wrap_once(a - b) }
+/// `0x25b750` (level00; cluster a3aa13a8e1c8 on levels 00, 04, 06, 10, 12, 14, 18, not linked on level 01): the angle
+/// `t` of the way from `a` to `b`, `add_rot(a, sub_rot(b, a)·t)` ([`walker::wander`]'s turn away from Ratchet).
+pub fn lerp_rot(a: f32, b: f32, t: f32) -> f32 { add_rot(a, sub_rot(b, a) * t) }
 /// `FastDiffRots` 0x222100: the unsigned angle between `a` and `b` (`|a − b|`, `2π − ` it when ≥ π).
 pub fn diff_rots(a: f32, b: f32) -> f32 {
     let d = (a - b).abs();

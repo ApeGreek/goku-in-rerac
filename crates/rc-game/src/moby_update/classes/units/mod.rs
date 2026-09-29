@@ -40,6 +40,8 @@
 //! | U36 | 1564 path gliders (00, 07, 10, 18) | level00 0x2e3a88 | [`path_glider`] |
 //! | U495 | 257 Kalebo rail cars (16) | level16 0x2c3d38 | [`rail_car`] |
 //! | U523 | 1667–1671 Kalebo air traffic (16) | level16 0x2e76b8 | [`kalebo_traffic`] |
+//! | U25 | 749 Veldin horny toads (00, 18) | level00 0x2d4610 | [`horny_toad`] |
+//! | U287 | 1023 hopping gunners (08, 09), and their shot 1292 | level08 0x301158, 0x307298 | [`hop_gunner`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -76,6 +78,8 @@ pub mod help_director;
 pub mod path_glider;
 pub mod rail_car;
 pub mod kalebo_traffic;
+pub mod horny_toad;
+pub mod hop_gunner;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -129,6 +133,9 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U36", level: path_glider::REFERENCE_LEVEL, func: path_glider::UPDATE_FN, classes: &path_glider::CLASSES, update: path_glider::update, joints: &[] },
     UnitPort { unit: "U495", level: rail_car::REFERENCE_LEVEL, func: rail_car::UPDATE_FN, classes: &rail_car::CLASSES, update: rail_car::update, joints: &[] },
     UnitPort { unit: "U523", level: kalebo_traffic::REFERENCE_LEVEL, func: kalebo_traffic::UPDATE_FN, classes: &kalebo_traffic::CLASSES, update: kalebo_traffic::update, joints: &[] },
+    UnitPort { unit: "U25", level: horny_toad::REFERENCE_LEVEL, func: horny_toad::UPDATE_FN, classes: &horny_toad::CLASSES, update: horny_toad::update, joints: &horny_toad::JOINTS },
+    UnitPort { unit: "U287", level: hop_gunner::REFERENCE_LEVEL, func: hop_gunner::UPDATE_FN, classes: &hop_gunner::CLASSES, update: hop_gunner::update, joints: &hop_gunner::JOINTS },
+    UnitPort { unit: "U287 shot", level: hop_gunner::REFERENCE_LEVEL, func: hop_gunner::SHOT_FN, classes: &hop_gunner::SHOT_CLASSES, update: hop_gunner::shot_update, joints: &[] },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.

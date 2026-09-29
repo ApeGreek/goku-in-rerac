@@ -376,3 +376,155 @@ tables are matched against level 01's by `react::tables_from_overlay` (Rilgar: {
 and is never taken; 459 too). The lure: 577 (+0x38 → +0x214 = `ticks(240)`), 572 family (+0x38 alert), 459 (+0x38 →
 +0x1e2 = `ticks(600)`) already read and clear it; the Taunter now writes it. Test: `tests/hero_reactive_novalis.rs`.
 
+
+## 9. The creature-layer copies of the other levels (G-ENM-009, 2026-09-29, W1 lane 2)
+
+### 9.1 System or not, per function (the evidence)
+
+Method: the decompiled copies (`work/decomp/levelNN.elf/`) diffed after masking the addresses (`DAT_`/`FUN_`/`%lo`
+operands), the callees mapped to their level-01 copies through `tools/ghidra/names/clusters.tsv`, the disassembly
+(GhidraMCP) where the decompile drops a line.
+
+| function (census cluster) | copies | finding | port |
+|---|---|---|---|
+| decoy-aware target acquisition, level03 `0x24e830` (d001715051e4) | 03, 04 `0x252e18`, 07 `0x2886d8`, 12 `0x278ba8` | **already ported**: identical to level01 `0x274b78` except the two decoy lists' addresses (`0x1b0930` / `0x1d1680` vs `0x1b0cb0` / `0x1dd580`), which the cluster hash does not mask | `creature::target::acquire` (its module doc) |
+| steering toward a target, level03 `0x247c10` (ad33de15cdab), level02 `0x25b710` (a8d6490c966c) | 00, 02–05, 07, 08, 10, 17, 18 | **already ported**: identical to level01 `0x26de80`; the only difference is the address of the `VecZero` each overlay calls first (01 `0x221170`, 03 `0x1f8bf8`, 02 `0x2102c8`: the same four stores) | `creature::walker::walk_to` |
+| random wander, level00 `0x261630` (9a9b8f2fffcb) | 00, 04 `0x254348`, 06 `0x2701c0`, 10 `0x254140`, 12 `0x27a0d8`, 18 `0x263970` | **one shared source, not on level 01**: the six copies decompile alike; consumers 749 (00, 18), 340 (04), 857 (06, 10), 238 (12). The census folded it into each unit's private code (one caller per level), so it never showed as a blocker of 749 | **new** `creature::walker::wander` (+ its angle lerp `0x25b750`, cluster a3aa13a8e1c8, 7 levels: `creature::lerp_rot`) |
+| the joint sphere hit, level00 `0x2599e8` (76f90a069f65; 00, 06, 10, 16, 18) over level01 `0x26e830` | | one source; the census had tagged both "has" as wrappers, but no port existed | **new** `creature::attack::joint_hit` / `sphere_hit` / `sphere_template` |
+| the floor switch's press, level00 `0x2d5830` (5f30809d27b0; 00, 05 `0x30c928`, 18) | | the same code as the switch 830's own press (level05), inlined before in `floor_switch::update` | factored out: `floor_switch::press` (two consumers: the switch, 749) |
+| move-collide `0x26d270`, hop `0x270340` | | already ported (gaps.md) | — |
+
+Nothing else of the creature system is missing: after the re-tag the census lists no unit under `creature`
+(class_census.md). The reaction table of 749 is level code (level00 `0x2d56e0`..): `react::VELDIN_749`, matched on
+every level by `react::tables_from_overlays` (`react::OTHER_REFS`; the engine uses it, `rc-engine/src/gameplay.rs`).
+`react::Wrappers` gained `release` (the state a refused slot returns to: 1 for the level-01 tables, 5 for 749).
+
+### 9.2 Helpers: coverage
+
+| address | what it does | ported |
+|---|---|---|
+| `0x261630` not turning: heading += `randf_sym(π/4, 5π/6)` (unwrapped), timer `rand_range(R.2c, R.2e)` | the pick | `walker::wander` |
+| turning: `0x270ac0(heading, R.18, &yaw, 0)`, `FastDecTimer_s16(R.2a)` → not turning | the turn | `wander` (`turn::approach_rot`, now public) |
+| step R.14 along the yaw; `0x26d270(up, R.10, max_dz, 0.5236, m, &pos, &to, 0)`; z = `GroundHeight(0.5, pos, 0)` (0 on a miss, as in the game) | the move | `wander` (`walker::move_ground`) |
+| refused / pushed or beyond R.1c (xy) from home → heading home, turn `rand_range(ticks 30, ticks 90)` | the leash | `wander` |
+| Ratchet (0x13f3d0) within R.20 (xy): heading = `0x25b750(heading, away, d / R.20)` | shy of Ratchet | `wander`, `lerp_rot` |
+| `0x26e830`: dir = row 0 (mode 0x100) or (cos yaw, sin yaw, 0), × push, z 1, w 5627.925; `0x26e808(damage, tmpl, m, flags, dir)`, +0x18 / +0x19 type bytes, +0x1a class; `coll_sphere_mobys(r, centre, sphere_flags, m, tmpl)` | the sphere hit | `attack::sphere_hit`, `sphere_template` |
+| level00 `0x2599e8`: `0x2645a8(m, list)`, then `0x26e830` with damage `(f32) n` and flags `n` | at a joint | `attack::joint_hit` |
+
+Unit tests (`moby_update::creature::tests`): `lerp_rot_goes_the_short_way`, `wander_picks_turns_and_steps_on_the_ground`
+(2 draws per pick, the step, the turn limit), `wander_heads_home_past_the_leash_and_shies_from_ratchet`,
+`the_sphere_hit_template_pushes_along_the_facing`; `floor_switch::tests::press_opens_the_path` (unchanged, through
+`press`).
+
+### 9.3 The units these alone blocked
+
+| unit | classes (levels: created) | port |
+|---|---|---|
+| U25 | 749 the horny toads (00: 16, 18: 90) | `units::horny_toad` |
+| U287 | 1023 the hopping gunners (08: 6, 09: 34) + their shot 1292 (spawned) and gun 1025 (no update) | `units::hop_gunner` |
+
+Left, freed by this row but not ported here (only the cheat, conditional, remains; G-ENM-001 / G-ENM-010): 340
+(04: 28; also calls the wander, has a reaction table), 333 (08: 8), 217 (04: 5), 578 (03: 3). Still blocked by
+other systems: 238 / 294 (12; the NPC look-at, G-HERO-009), 1112 / 1110 / 1269 (the blob-shadow list, G-REN-025),
+573 / 574 / 612 / 1059 / 427 / 563 / 326 / 631 / 1106 / 1041 / 625 / 1281 (anim, platforms, light flicker, effect
+mobys, particle types, hero state).
+
+#### U25: 749, the horny toads (00: 16, 18: 90) — `units::horny_toad`
+
+| address | what it does | ported / not |
+|---|---|---|
+| `0x2d5160` game mode 2 → +0x31 = 0, mode \|= 1 (else visible, mode &= ~1) | hide in the cutscene mode | `veldin_critter::pre` |
+| `0x26f320(0x330000)` → `0x26f378(…, col 4)` | the hit and the resolver | `pre` (`World::get_hit`, `damage::resolve`) |
+| damage, out5 ≠ 1, not dying → death flight: K fields (40·dt², 14·dt², 13·dt, 14·dt, 0.75, 2·dt, flags 0x29, radius 0x200), health −= damage, untargetable, `0x26fa48` aim, `randi(2)`, `0x271418` seq 6/7, keys 14/25, state 0xc | the death | `pre` (`knock::aim`, `knock::start`) |
+| flash +0x67 = 0x78, `0x272318` | the red flash | `flash::start` |
+| `SetDeathBits(m, 0, −1)` → `BoltBurst` | the bolts, the save bits | `crate_::set_death_bits` |
+| +0xa4 = 0xff; `0x2723f8` | hit slot, flash ramp | `pre`, `flash::update` |
+| `0x274df8(24 / 64, …, area path)` (+ none → Ratchet, 0x13f3d0) | the target search with decoys | `target::acquire_in` (+ the −1 path [L]) |
+| +0x276 dec; lure +0x38 → `randf(180, 240)` ticks | the Taunter | `pre` |
+| state 5 / 8 with the alert → 10, blend 4 | the chase start | `pre` |
+| `0x26f020` + b7f 0x15 when drawn within 26 of the camera | the shadow probe | `shadows::probe_down` |
+| `0x263ac8(2.1, m, 1, +0x200)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+| case 0: scale ×0.75 (gp−0x5294), home, blend 1, D+9 = 1, +0x140 seq table, the wander record (step 2·dt, turn 2.967·dt, leash 1.5 / 0.75 near (150, 127)), +0x58 / +0x5a, the three starts (5; arrival path 3; face 1; or DeleteMoby) | init | `init` |
+| case 1: face moby +0x1ec (`0x270cc0`), gone → 8 | | `update` |
+| cases 2 / 3 / 4: the arrival path (node walk, wait for a target, → 5 at the end, → 6 on a target) | | `update` (no instance on 00 / 18 has an arrival path) |
+| case 5: blend 4 at `rand_range(0, 5)`, speed `randf(0.92, 1.08)`, `0x261630` wander, target → side `randf(−20, 20)`°, 6 | wander | `walker::wander` |
+| case 6: `0x2d54c8` walk to the target, within 2 and facing 10° → 7 (blend 5 frame 7) | | `walk` |
+| case 7: `0x2765b0(34)` → `0x2599e8(0.333, 1, 1, m, 0, 1, 0, 1, 0)` | the bite on Ratchet (flags 1, damage 1) | `attack::joint_hit` / `sphere_hit` |
+| case 8: walk home, 1.5 → 5 | | `update` |
+| case 9: `0x2dc9f0` = `0x305260` carried; landed → 5, rec state 0 | Suck Cannon | `react::carried` (table `react::VELDIN_749`) |
+| case 10: 2.5 ahead crosses the area (`0x261968` = `0x276640`) → turn + seq 2/3 (`randi(2)` ×2), else walk | chase | `chase` (`region::crosses`) |
+| case 0xb: `0x271558` & 0x140 → 5 | knockback | `knock::update` |
+| case 0xc: landed → class sound 7, `0x2742a8(0.75, 10, m, pos)` (3 spark pairs, 2 flashes, light 10), DeleteMoby | death end | `fx::piece_explosion` |
+| tail: `GroundHeight` + `Approach(7·dt)`; `0x261d78(0.25, area)` but in 4 | ground, walls | `after`, `path::push_from_walls` |
+| tail: switch +0x1f0 class 0x33e within 1 → `0x2d5830` | presses a floor switch 830 (L18 #388 → switch 417) | `floor_switch::press` (shared with the switch itself) |
+| `0x2d54c8`: heading (+ side when > 2), blend settled: `0x270cc0`, `0x270830` speed, `0x26d610(0.5, 0.5, 0, 0x10)`, vz | the walk | `walk` |
+| table slots 0x2d56e0 / 0x2d5730 / 0x2d5780 / 0x2d57d0 / 0x2d5800: held 9, refused → 5, record +0xd0, seqs gp−0x52a0 | Suck Cannon wrappers | `react::VELDIN_749` |
+
+
+What 749 is (frame below): the Veldin horny toad. Its bite hits Ratchet's moby (flags 1, damage 1; P2's intake
+turns it into the hurt state); every weapon's hit (mask 0x330000) through the resolver kills it (health 1).
+
+#### U287: 1023, the hopping gunners (08: 6, 09: 34), and their shot 1292 — `units::hop_gunner`
+
+| address | what it does | ported / not |
+|---|---|---|
+| `0x301158` top: not drawn and farther than 40 from the camera → nothing | the update range | `hop_gunner::update` |
+| `0x26dae0(2.5, m, 6, +0x170)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+| `0x264650` = `0x26f020` + b7f 0x17 within 29 | the shadow probe | `shadows::probe_down` |
+| game mode 2 → nothing | | `update` |
+| Ratchet dead (0x3d) for < ticks(30), state ∉ {8, 10, 4, 11}, within 25, `randi(0x31)` = 0 → blend 0xe, 8 | the celebration | `update` |
+| the damage record's keep byte +0x2e = 2 → DeleteMoby self and gun | the Morph-o-Ray's morph | `delete_with_gun` |
+| `0x3024d8`: scale × gp−0x4a80 (1.0), walker top speed 3·dt | | `pre` |
+| gun: `CreateMoby(0x401)` once (draw / update 0x40, drawn, mode 0x100, joint 4), self targetable; then `fun_0020cca8` joint-4 rows → gun rows, joint point → gun position, its matrix | the carried gun | `pre`, `joint_matrix` (`attach_matrix`) |
+| `0x26f320(0x330000)`, `0x26f378(col 4)`; out5 ≠ 1 and not dying: health −= damage; reaction = 3 for an attacker of class 0x47, 1 at no health | | `pre` |
+| common K: radius 0x200, zoff 0.5, flags 9, gravity 37·dt², +0x3d = 0 | | `pre` |
+| 1 / 2: untargetable, 15·dt / 11·dt, keys 11 / 16, zoff 0.25, `0x26fa48`, `0x271418` seq 0xc, state 0xb, flash 0xf0, `BoltBurst(m, 2, 3, 0, −1)` (flags 0: returns at once in the game) | the death flight | `pre` (`knock::*`, `crate_::bolt_burst`) |
+| 3–8: 10·dt / 3·dt, keys 5 / 10, seq 8, state 0xa, flash 0x78 | knockback | `pre` |
+| 9 / 10: flash 0xfa; `0x272318` flash start; +0xa4 = 0xff; `0x2723f8` | | `pre`, `flash::*` |
+| lure +0x38 → +0x1d8 = `randf(180, 240)` ticks; range = +0x1e4 (+6 alerted) | the Taunter | `pre` |
+| `randi(4)` = 0: `0x274df8(range, area)`, farther than range or > 3 in z → kind 2; else the target's position followed (gone → none) | target search, decoys | `target::acquire_in` |
+| no target → Ratchet; states 0 / 4 / 5 / 7: z snaps down to `GroundHeight(0.5)` | | `pre` |
+| case 0: D+9 0, keep byte 1, column 1, health 2, meter 2, +0x58 15 / +0x5a 12; missing area / hop path → printf + DeleteMoby; SeedJumpPattern + walker words; `rand()&1` → mirror; at hop point 0; patrol path → direction `rand()&1`, node `0x264558`, blend 2 over `rand()%4 + 7`, state 1; else 3 | init | `init` |
+| case 1: patrol with `0x2635a0` = `0x26de80` walk_to; target + wait out → nearest hop point, 2 | | `walker::walk_to`, `path::nearest_at_distance` |
+| case 2: walk to the nearest hop point (blend 2), within 1 or the speed → 3 | | `update` |
+| case 3: face (`0x270cc0`), idle 0 / 1 (`rand()`, ticks(7) + `rand()%7`), > 5 hops → rest 10 (ticks(7) + `rand_range(0, ticks 5)`), wait out → hop 4 (seq 0x10 / 0x12 by side), within 3.3 → club 7 | | `ready`, `start_hop` |
+| case 4: keys 12..23 lerp + arc 2·(1 − (2f−1)²); landed: `CollLine_Fix` line of sight (the hit moby 0x174658 must be the target; the game's stale output on a miss is none here [L]) → fire 5 / wait 3 `randf(45, 90)`, > 5 hops → rest, within 3.3 → club | the hop | `hop_state` |
+| case 5: within 3.3 → club; timer ticks(5 + trunc(l1·1.3 + l0)); count += 1; odd shots skipped under load; `0x307190` at the gun's joint 0 with (cos, sin, −1/n)·20·dt, ticks(180), scale ×1.7; > 20 → hop | the burst | `fire`, `spawn_shot` |
+| case 6: back to hop point 0 (`0x2745f0` 24·dt, `0x26d610(0.6, 0.6, 0)`), wrap → 3 | (no code enters 6) | `update` |
+| case 7: keys 16.5..20: `0x26e808(1, m, 1, dir)` + `coll_sphere_mobys(0.8, joint 4 − 0.25 z, 0, m)`; wrap → 2 | the club on Ratchet | `update` (template w lane [L]) |
+| cases 8 / 9: wrap → 3 (blend 0) | | `update` |
+| case 0xa: `0x271558` & 0x40 → club or fire (blend 6 over ticks(10) + `rand_range(0, ticks 7)`); & 0x120 → DeleteMoby | | `update` |
+| case 0xb: & 0x160 → `SetDeathBits(m, 0, −1)`, `0x273f50(0.5, 13, m, pos, 0)`, `BreakFxB` 1692–1694, DeleteMoby self and gun | the death | `fx::death_explosion`, `fx::break_piece` |
+| `0x307298` (1292) state 1: target gone → 2; unloaded: type-4 trail (`randf(0.95, 0.985)` vel, 0.1 behind, 0x6f00afff / 0xff, ticks(15..20), 0x28, ticks(7..10), additive); pos += vel; `CollLine_Fix(new, old, 0x10, shooter)`: a hit not on the shooter → `0x26eaa8(1, moby, shot, 0x10001, point, vel)` (L08 `0x2640f8` is the same code) and 2; life out → 2 | the shot | `shot_update`, `attack::hit_moby`, `fx::part04` |
+| 1292 state 2: `0x273f50(0.25, 13 or 0 under load / shot 1, m, pos, −1)`, DeleteMoby | | `fx::death_explosion` |
+
+**Not the game's, noted [L]:** a path index of −1 in the target search makes the game read the word before its
+path table as a polygon (level00 `0x1b04ac`: 1.0f): no placed 749 / 1023 has one; the port searches without a
+polygon. The hop's line of sight reads the collision output's moby, which a miss leaves stale in the game; the port
+reads none (the gunner waits instead of firing). The club's template w lane is the normalised difference's.
+
+### 9.4 Verification
+
+`crates/rc-game/tests/creature_classes.rs` (the level harness of `path_classes.rs`, plus Ratchet's class and
+sequences so his moby's collision is posed, his moby moved with the hero block, a particle system, and the reaction
+tables of `tables_from_overlays`): `units_resolve_on_their_levels` (749 → U25 on 00 / 18: 106; 1023 → U287 on 08 /
+09: 40; 1292 → its shot row), `reaction_tables_resolve` (749's table on 00 and 18 only; 577's on 01 unchanged),
+`horny_toads_wander_around_home_on_the_ground` (00 and 18: sequence 4, anim speed 0.92..1.08, on the ground, near
+home), `horny_toad_goes_for_ratchet_and_bites` (states 6 → 7, a record for Ratchet's moby: flags 1, damage 1, type
+0 / 1, class 749, the exact push), `a_wrench_hit_kills_the_horny_toad` (0xc, untargetable, SetDeathBits and 4
+bolts, class sound 7, 3 spark pairs, one explosion light), `the_taunter_lures_the_horny_toad_into_its_chase`,
+`the_suck_cannon_takes_the_horny_toad` (its table, record +0xd0, held 9, the carried update back to 5),
+`a_knocked_horny_toad_presses_its_floor_switch` (level 18 toad 388 → switch 417: pressed, sound 0, killed bit),
+`gunner_hops_between_its_points_and_fires_bursts_at_ratchet` (4 hops and 4 bursts in 10 s, the arc ≤ 2, the gun at
+joint 4, 64 shot hits on Ratchet with flags 0x10001, a shot's step, trail and end light),
+`gunner_clubs_ratchet_up_close`, `the_wrench_knocks_the_gunner_back_then_kills_it` (reaction 3 → 0xa, then 0xb, the
+three pieces, the gun deleted, sound 0, SetDeathBits' bolts; `BoltBurst(2, 3, 0)` drops none, as the game's flags 0
+returns), `the_morph_ray_keep_byte_and_the_taunter_act_on_the_gunner`, and two determinism runs
+(`horny_toad_bite_run_is_deterministic`, `gunner_run_is_deterministic`).
+
+Frames (`RC_AUDIO=0 RC_SCENE=0`, two runs each, byte-identical; scratch `w1c/frames/`): level 00
+`RC_HERO_AT=150.5,122,29.5,0` frame 150 — a horny toad beside Ratchet, who is in his hurt pose with a health orb
+gone; level 08 `RC_HERO_AT=221,180,36.1,1.5708` frame 120 — the gunner 1023 with its gun 1025 in its hands between
+the pillars (from the south its line of sight is blocked by a wall at y 185.6, so it only hops); level 08
+`RC_HERO_AT=221,200,36.1,-1.5708` frame 120 — a shot bursting on Ratchet's chest (the flash and glow) with a second
+shot 1292 on the floor beside him and a health orb gone.

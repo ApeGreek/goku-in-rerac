@@ -1274,7 +1274,7 @@ chicken (reaction tables); the Taunter lures 577, the amoeboids and 459 (and tri
 | slot +0x10 the suck record (577 +0x60, amoeboids +0xc0, chicken global) | wrappers | `react::record` |
 | slot +0x14 delete (default `DeleteMoby` wrapper) | 0x20c3ac | `react::slot_delete` |
 | the carried update `0x305260`, landing `0x3051a8`, burst `0x304798` | class states 7 / 0xe / 5 | `react::{carried, land, burst}` |
-| the other levels' tables: 749, 580, 340, 827, 252, 193, 1246, 238, 63, 1445, 1382, 568, 1906 | | not ported (G-ENM-001) |
+| the other levels' tables: ~~749~~ (ported 2026-09-29: `react::VELDIN_749`, found by `tables_from_overlays`; creatures.md §9), 580, 340, 827, 252, 193, 1246, 238, 63, 1445, 1382, 568, 1906 | | not ported (G-ENM-001) |
 | the lure: the Taunter writes record +0x18 (`0x2cc830`); 577 (240-tick alert), 572 family (alert), 459 (600 ticks), the mine 74 (reach ×3) read and clear it | | ported (`taunter`, the classes, `mine`) |
 | the morph meter: record health (the meter), s16 +0x04 (the scale), +0x0e keep byte; excluded 0x58e / 0x452 | `0x2d2450`, `0x2defb0` | ported (`morph_ray`, `react::morph_target`) |
 

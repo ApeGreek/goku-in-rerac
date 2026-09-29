@@ -1,5 +1,12 @@
 //! Ground walking for creatures (level01 `SeedJumpPattern` 0x26d930, the step `0x26d9a8`, the move `0x26d8b0` /
-//! `0x26d610` and the ledge probe `0x26d1d0`).
+//! `0x26d610` and the ledge probe `0x26d1d0`; the walk toward a point `0x26de80`, the free ground move `0x26d270`; the
+//! random wander of the other levels, level00 `0x261630`).
+//!
+//! **Level copies** (G-ENM-009, 2026-09-29; the census's cluster hashes differ only by a callee's address): level03
+//! `0x247c10` / level02 `0x25b710` (clusters ad33de15cdab, a8d6490c966c: levels 00, 02–05, 07, 08, 10, 17, 18) are
+//! [`walk_to`] word for word — the only difference is the address of the `VecZero` they call first (level01
+//! `0x221170`, level03 `0x1f8bf8`, level02 `0x2102c8`: each overlay's own copy of the same four stores) and of the
+//! `SpringTurn2` / [`step`] copies. The wander `0x261630` has no level-01 copy: [`wander`].
 //!
 //! The walker record `J` (f32 words; the class's pvar, e.g. critter 577 at +0x180, amoeboid at +0x170):
 //!
@@ -339,4 +346,78 @@ fn move_ground_in(w: &mut World, id: MobyId, k: [f32; 4], from: &mut V, to: Opti
     from[0] = x;
     from[1] = y;
     ok
+}
+
+/// The random wander's record (`0x261630`'s last argument; 749 keeps it at pvar +0x240, 340 at its own offset).
+pub mod wr {
+    /// +0x00 vec: the home point the leash measures from.
+    pub const HOME: usize = 0x00;
+    /// +0x10: the move's collision radius; +0x14 the step a tick; +0x18 the turn step a tick.
+    pub const RADIUS: usize = 0x10;
+    pub const STEP: usize = 0x14;
+    pub const TURN: usize = 0x18;
+    /// +0x1c: the leash (xy distance from home); +0x20 the distance within which Ratchet is shied from.
+    pub const LEASH: usize = 0x1c;
+    pub const SHY: usize = 0x20;
+    /// +0x24: the heading the wander turns toward.
+    pub const HEADING: usize = 0x24;
+    /// +0x28 s16: 1 while turning toward a picked heading, 0 = pick a new one; +0x2a s16 its timer; +0x2c / +0x2e s16
+    /// the timer's range (`rand_range`).
+    pub const TURNING: usize = 0x28;
+    pub const TIMER: usize = 0x2a;
+    pub const T_MIN: usize = 0x2c;
+    pub const T_MAX: usize = 0x2e;
+}
+
+/// `0x261630(up, max_dz, moby, R)` (level00; the same code on levels 04 `0x254348`, 06 `0x2701c0`, 10 `0x254140`, 12
+/// `0x27a0d8`, 18 `0x263970`, cluster 9a9b8f2fffcb; not linked on level 01): a random wander on the ground around a home
+/// point ([`wr`]).
+///
+/// 1. Not turning: heading += `randf_sym(π/4, 5π/6)`, timer = `rand_range(R.2c, R.2e)`, turning. Turning: the yaw
+///    approaches the heading by at most R.18 (`0x270ac0`); the timer out → not turning.
+/// 2. The step: `to = pos + R.14·(cos yaw, sin yaw)`, [`move_ground`]`(up, R.10, max_dz, 30°, pos → to, flags 0)` (the
+///    moby's xy follows), then z = `GroundHeight(0.5, pos, 0)` (0 over no ground, as in the game).
+/// 3. The move refused or pushed, or farther than R.1c (xy) from home: head home (the heading = the direction to it), a
+///    turn of `rand_range(ticks 30, ticks 90)`. Otherwise Ratchet (his feet) within R.20 (xy): the heading turns
+///    toward "away from him" by the fraction `distance / R.20` ([`super::lerp_rot`]).
+pub fn wander(w: &mut World, id: MobyId, up: f32, max_dz: f32, r: usize) {
+    let g = |w: &World, o: usize| super::pf(w, id, r + o);
+    if super::pi16(w, id, r + wr::TURNING) == 0 {
+        let d = w.rng.randf_sym(f32::from_bits(0x3f49_0fdb), f32::from_bits(0x4027_8d36));
+        let h = g(w, wr::HEADING) + d;
+        super::set_pf(w, id, r + wr::HEADING, h);
+        let (a, b) = (super::pi16(w, id, r + wr::T_MIN), super::pi16(w, id, r + wr::T_MAX));
+        let t = w.rng.rand_range(a as i32, b as i32);
+        super::set_pi16(w, id, r + wr::TIMER, t as i16);
+        super::set_pi16(w, id, r + wr::TURNING, 1);
+    } else {
+        let mut yaw = super::yaw(w, id);
+        super::turn::approach_rot(g(w, wr::HEADING), g(w, wr::TURN), &mut yaw);
+        super::set_yaw(w, id, yaw);
+        if super::dec_timer_pvar_s16(w, id, r + wr::TIMER) != 0 { super::set_pi16(w, id, r + wr::TURNING, 0); }
+    }
+    let mut pos = super::pos(w, id);
+    let (c, s) = cs(super::yaw(w, id));
+    let step = g(w, wr::STEP);
+    let mut to = [pos[0] + c * step, pos[1] + s * step, pos[2], pos[3]];
+    let ok = move_ground(w, id, up, g(w, wr::RADIUS), max_dz, f32::from_bits(0x3f06_0a92), &mut pos, &mut to, 0);
+    pos[2] = super::ground::ground(w, pos, 0.5, 0).z;
+    super::set_pos(w, id, pos);
+    let home = super::pv4(w, id, r + wr::HOME);
+    if ok == 0 || g(w, wr::LEASH) < super::dist2(pos, home) {
+        super::set_pf(w, id, r + wr::HEADING, super::atan(home[0] - pos[0], home[1] - pos[1]));
+        let (a, b) = (w.ticks(30), w.ticks(90));
+        let t = w.rng.rand_range(a, b);
+        super::set_pi16(w, id, r + wr::TIMER, t as i16);
+        super::set_pi16(w, id, r + wr::TURNING, 1);
+    } else {
+        let hero = w.hero.pos.map(|x| f32::from_bits(x.0));
+        let dh = super::dist2(pos, hero);
+        let shy = g(w, wr::SHY);
+        if dh < shy {
+            let away = super::atan(pos[0] - hero[0], pos[1] - hero[1]);
+            let h = super::lerp_rot(g(w, wr::HEADING), away, dh / shy);
+            super::set_pf(w, id, r + wr::HEADING, h);
+        }
+    }
 }

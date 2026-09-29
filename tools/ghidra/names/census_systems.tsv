@@ -109,7 +109,7 @@ L01:0026cc00	FUN_0026cc00	math	has	V	Hermite
 L01:0026cc38	FUN_0026cc38	math	has	V	
 L01:00276380	fun_00214a98	math	has	V	
 L01:002764a8	load_display_text_resource_entry	math	has	V	
-C:d001715051e4	FUN_0024e830	creature	missing	L	target acquisition variant (hero states 0x18 / 0x72, decoys 0xcb / 0x76c) not on L01; the port has 0x274b78
+C:d001715051e4	FUN_0024e830	creature	has	V	= 0x274b78 target::acquire (identical decompile; only the decoy lists 0x1b0930 / 0x1d1680 differ: %lo), 2026-09-29 G-ENM-009
 L01:0020cc78	STUB_printf	debug	ignore	V	STUB_printf
 L01:00220f18	raise_kernel_trap	debug	ignore	V	trap
 boot:00120478	fptodp	debug	ignore	L	float to double (printf args)
@@ -208,9 +208,9 @@ L01:00271258	FUN_00271258	creature	has	V	burn sparks: creature/knock.rs `burn_sp
 L01:002ff768	FUN_002ff768	water	has	V	water-entry splash 775 spawner: classes/splash.rs, hero/fx.rs
 L01:0026d270	FUN_0026d270	creature	has	V	moby move-collide: creature/walker.rs `move_ground` (the floating pushables 695 are a class port, G-CLS-005)
 L01:00270340		creature	has	V	hop / jump step: the Doom bot's `jump_step` (doom_bot.rs, class-local; a second caller should share it)
-C:ad33de15cdab	FUN_00247c10	creature	missing	L	steering toward a target (SpringTurn2 + walker step), not on L01
-C:a8d6490c966c	FUN_0025b710	creature	missing	L	same steering helper, other copy
-C:9a9b8f2fffcb		creature	missing	L	random wander, not on L01
+C:ad33de15cdab	FUN_00247c10	creature	has	V	= 0x26de80 walker::walk_to (identical; only the VecZero callee address differs), 2026-09-29 G-ENM-009
+C:a8d6490c966c	FUN_0025b710	creature	has	V	= 0x26de80 walker::walk_to (identical; only the VecZero callee address differs), 2026-09-29 G-ENM-009
+C:9a9b8f2fffcb	FUN_00261630	creature	has	V	random wander, not on L01: walker::wander (2026-09-29 G-ENM-009; consumers 749, 340, 857, 238)
 C:6857983d1481	FUN_00278d00	group	has	L	group members' +0xbc = command (0x26e090's job), level copy
 L01:0026e150	FUN_0026e150	group	has	V	group iteration (crate_.rs)
 L01:0026e238	FUN_0026e238	group	has	V	group iteration

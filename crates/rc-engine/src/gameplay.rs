@@ -673,8 +673,8 @@ fn map_tick(p: &mut Play, report: &rc_game::tick::TickReport, gs: Option<&GameSt
     p.svc.map.reveal(&inp, &flags);
 }
 
-/// The loaded level's ported class reaction tables (`rc_game::moby_update::creature::react::tables_from_overlay`: the
-/// level's `lvl.vtbl` third words against level 01's tables). Built once per process; empty without the overlays (the
+/// The loaded level's ported class reaction tables (`rc_game::moby_update::creature::react::tables_from_overlays`: the
+/// level's `lvl.vtbl` third words against level 01's tables and the ones reversed on other levels). Built once per process; empty without the overlays (the
 /// class-number fallback).
 pub fn level_reactions() -> &'static std::collections::HashMap<i16, rc_game::moby_update::creature::react::Table> {
     use rc_formats::level_overlay::LevelOverlay;
@@ -682,8 +682,9 @@ pub fn level_reactions() -> &'static std::collections::HashMap<i16, rc_game::mob
     T.get_or_init(|| {
         let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
         let overlay = |l: u32| -> Option<LevelOverlay> { LevelOverlay::parse(&crate::disc_source::level_file(&root, l, "overlay.bin").ok()?).ok() };
+        let reference = |l: u32| overlay(l).map(std::sync::Arc::new);
         match (overlay(index), overlay(1)) {
-            (Some(t), Some(r)) => rc_game::moby_update::creature::react::tables_from_overlay(&t, &r),
+            (Some(t), Some(r)) => rc_game::moby_update::creature::react::tables_from_overlays(&t, &r, &reference),
             _ => Default::default(),
         }
     })

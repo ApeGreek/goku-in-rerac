@@ -72,23 +72,32 @@ pub fn update(w: &mut World, id: MobyId) {
             let v = (((ph.sin() * 4.0 - 3.0) * 128.0) as i32).clamp(0x20, 0x80) as u32;
             w.mm(id).glow = v << 16 | v << 8 | 0x8000_0000 | v;
             let h = w.hero;
-            if h.ground_moby == Some(id) && h.air_ticks == 0 {
-                let (sid, ms) = (w.m(id).spawn_id, w.m(id).mission);
-                w.svc.save.killed.insert(sid, ms.wrapping_add(2));
-                if ms == 0xff || (w.missions.mission_slot(ms) != 0xff && w.missions.mission_done(level, ms) == 0xff) {
-                    w.svc.save.collected.insert(sid, ms.wrapping_add(2));
-                }
-                let m = w.mm(id);
-                m.cmd = 1;
-                m.state = 2;
-                m.glow = PRESSED_GLOW;
-                w.play_sound(0, 0, id);
-                let (path, key) = (p::i32(&w.m(id).pvars, 0), p::ff(&w.m(id).pvars, 4));
-                open_path(w, path, key);
-            }
+            if h.ground_moby == Some(id) && h.air_ticks == 0 { press(w, id); }
         }
         _ => {}
     }
+}
+
+/// Level05 `0x30c928(switch)` (the same code as level00 `0x2d5830` and level18 `0x2e1880`, cluster 5f30809d27b0): the
+/// press, when the switch is armed (state 1): killed[spawn id] = mission + 2 (and collected when its mission is none
+/// or done), +0xbc = 1, → 2, the green glow, `PlayClassSound(0, 0)`, the path opened. Ratchet standing on it and
+/// (level 00 / 18) a knocked Veldin creature 749 landing within 1 of it press it
+/// ([`crate::moby_update::classes::units::horny_toad`]).
+pub fn press(w: &mut World, id: MobyId) {
+    if w.m(id).state != 1 || w.m(id).pvars.len() < 8 { return; }
+    let level = w.svc.level;
+    let (sid, ms) = (w.m(id).spawn_id, w.m(id).mission);
+    w.svc.save.killed.insert(sid, ms.wrapping_add(2));
+    if ms == 0xff || (w.missions.mission_slot(ms) != 0xff && w.missions.mission_done(level, ms) == 0xff) {
+        w.svc.save.collected.insert(sid, ms.wrapping_add(2));
+    }
+    let m = w.mm(id);
+    m.cmd = 1;
+    m.state = 2;
+    m.glow = PRESSED_GLOW;
+    w.play_sound(0, 0, id);
+    let (path, key) = (p::i32(&w.m(id).pvars, 0), p::ff(&w.m(id).pvars, 4));
+    open_path(w, path, key);
 }
 
 #[cfg(test)]

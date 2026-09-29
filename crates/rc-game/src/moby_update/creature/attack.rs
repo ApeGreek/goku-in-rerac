@@ -80,3 +80,34 @@ pub fn area_push(w: &mut World, list: &[MobyId], centre: V, attacker: MobyId, da
         w.deliver_hit(t, &tmpl);
     }
 }
+
+/// `0x26e830(r, damage, push, moby, centre, flags, type, subtype, sphere_flags)`: a hit on every moby a sphere at
+/// `centre` touches (but the attacker): the template `0x26e808(damage, tmpl, moby, flags, dir)` with `dir` = the
+/// moby's facing (its row 0 with mode 0x100, else `(cos yaw, sin yaw, 0)`) scaled by `push`, then z = 1 and the exact
+/// push marker w = 5627.925; +0x18 / +0x19 the type bytes, +0x1a the moby's class; then `coll_sphere_mobys(r, centre,
+/// sphere_flags, moby, tmpl)`. The bite of 749 (through [`joint_hit`]); the census counts 12 more unported units.
+/// Returns the number of mobys listed.
+#[allow(clippy::too_many_arguments)]
+pub fn sphere_hit(w: &mut World, r: f32, damage: f32, push: f32, id: MobyId, centre: V, flags: u32, b18: u8, b19: u8, sphere_flags: u32) -> usize {
+    use crate::moby_update::services::{pf, pv};
+    let tmpl = sphere_template(w, id, damage, push, flags, b18, b19);
+    w.sphere_mobys(pf(r), pv(centre), sphere_flags, Some(id), Some(&tmpl))
+}
+
+/// The template of [`sphere_hit`] (`0x26e808` with the facing push, the type bytes and the class).
+pub fn sphere_template(w: &World, id: MobyId, damage: f32, push: f32, flags: u32, b18: u8, b19: u8) -> crate::moby_update::services::HitTemplate {
+    use crate::moby_update::services::{pf, HitTemplate};
+    let m = w.m(id);
+    let f = if m.mode & crate::moby_runtime::mode::KEEP_ROWS != 0 { m.rows[0] } else { let (c, s) = super::cs(m.rotation[2]); [c, s, 0.0, 0.0] };
+    let d = super::scale(f, push);
+    HitTemplate { dir: [pf(d[0]), pf(d[1]), Pf::ONE, Pf::b(0x45af_df66)], attacker: Some(id), flags, b18, b19, h1a: m.o_class as u16, damage: pf(damage), w20: 1 }
+}
+
+/// Level00 `0x2599e8(r, _, push, moby, list, n, type, subtype, sphere_flags)` (the same code on levels 06, 10, 16, 18:
+/// cluster 76f90a069f65; not linked on level 01): [`sphere_hit`] at joint list `list`'s point (`0x2645a8`) with
+/// damage `(f32) n` and template flags `n` (one register serves both).
+#[allow(clippy::too_many_arguments)]
+pub fn joint_hit(w: &mut World, r: f32, push: f32, id: MobyId, list: usize, n: i32, b18: u8, b19: u8, sphere_flags: u32) -> usize {
+    let p = w.joint_point(id, list);
+    sphere_hit(w, r, n as f32, push, id, p, n as u32, b18, b19, sphere_flags)
+}

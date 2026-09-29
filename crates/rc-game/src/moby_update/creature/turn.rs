@@ -44,7 +44,7 @@ pub fn spring_turn2_pvar(w: &mut World, id: MobyId, target: f32, acc: f32, damp:
 }
 
 /// `0x270ac0(t, step, &x, 0)`: an angle-valued approach (the difference wrapped, clamped to ±`step`, added wrapped).
-fn approach_rot(t: f32, step: f32, x: &mut f32) {
+pub fn approach_rot(t: f32, step: f32, x: &mut f32) {
     let d = sub_rot(t, *x).clamp(-step, step);
     *x = add_rot(*x, d);
 }
