@@ -1,7 +1,7 @@
 //! Sound data: the 989snd bank file (`sound_bank` lump), the game's `SoundDef` records and the core-index
 //! bank-id remap, the level header's music table, and the gameplay sections the sound code reads (sound
 //! instances, env sample points). Spec: docs/plan/audio.md §2 (bank, defs, remap), §3.3 (sound instances),
-//! §4 (music). Snapshot-tested in `tests/golden.rs` (sound test).
+//! §4 (music). Snapshot-tested in `tests/formats/golden.rs` (sound test).
 //!
 //! Bank file: `u32 type = 3, u32 nchunks = 2, {u32 off, u32 size}[2]`. Chunk 0 is an `SBlk` SFX block
 //! (version 1: 12-byte sound records, 0x28-byte grains), chunk 1 the raw SPU ADPCM the tones point into.

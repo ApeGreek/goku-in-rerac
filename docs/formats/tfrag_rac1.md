@@ -296,7 +296,7 @@ On disk: 20 × u16 = 0x28 bytes, unpacked as V4_16 UNSIGNED so each u16 becomes 
 | 0x24 | 4.z | `strips_addr` | |
 | 0x26 | 4.w | `texture_ad_gifs_addr` | equals `ad_gifs_common_addr` |
 
-**Verified (2026-09-26, all 20,016 retail tfrags, asserted in `crates/rc-formats/tests/golden.rs`):** each vertex-info tier is `[one entry per position] ++ [extra entries]`, and the "unknown" lanes describe the extra range: 0.y / 0.w / 1.y = extra count for common / LOD-01 / LOD-0, and 2.x / 2.z / 3.x = its VU address (= tier address + that tier's position count). So the common, LOD-01 and LOD-0 vertex-info counts are `positions_*_count + extra`, and the LOD-01 / LOD-0 "unknown indices 2" arrays have exactly 0.w / 1.y entries (one per extra entry). This matches the VU1 L47/L48 passes in `docs/plan/vu1_tfrag_analysis.md` §5.
+**Verified (2026-09-26, all 20,016 retail tfrags, asserted in `crates/rc-formats/tests/formats/golden.rs`):** each vertex-info tier is `[one entry per position] ++ [extra entries]`, and the "unknown" lanes describe the extra range: 0.y / 0.w / 1.y = extra count for common / LOD-01 / LOD-0, and 2.x / 2.z / 3.x = its VU address (= tier address + that tier's position count). So the common, LOD-01 and LOD-0 vertex-info counts are `positions_*_count + extra`, and the LOD-01 / LOD-0 "unknown indices 2" arrays have exactly 0.w / 1.y entries (one per extra entry). This matches the VU1 L47/L48 passes in `docs/plan/vu1_tfrag_analysis.md` §5.
 
 `doc`'s VU-memory table places `vertex_info_part_2_addr` in lane w of quadword 2 and omits several fields; the code's mapping above is the one that round-trips, so prefer it. `doc` also confirms in prose that only the LOD-01 and LOD-0 vertex-info entries have their first "vertex data offset" populated.
 
@@ -697,7 +697,7 @@ Ambient/directional interaction: Wrench documents nothing beyond the above. **[u
 ### 4.1 Verified from the game's `LightTfrags` (2026-09-26)
 
 Full derivation and math: `docs/plan/tfrag_lighting.md`; port: `crates/rc-formats/src/tfrag_light.rs`.
-Checked on every tfrag of all 19 NTSC-U levels by `crates/rc-formats/tests/tfrag_light_golden.rs`.
+Checked on every tfrag of all 19 NTSC-U levels by `crates/rc-formats/tests/formats/tfrag_light_golden.rs`.
 
 | Ofs | Type | Field | Meaning (from the EE code) |
 | --- | --- | --- | --- |

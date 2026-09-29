@@ -60,7 +60,7 @@ numbers-only fixture (no raw memory), commit it, and test the port against it wi
 | Task | Command |
 |---|---|
 | Rewrite the Novalis spawn fixture | `cargo run -p rc-trace -- distill-spawn --state novalis_spawn` |
-| Run the regression | `cargo test -p rc-trace --test novalis_spawn` |
+| Run the regression | `cargo test-all --test trace -- novalis_spawn::` |
 
 `distill-spawn` writes `tools/trace/tests/fixtures/novalis_spawn.tsv` only after running the fixture checks and the
 savestate checks side by side and finding the same tallies. A new scene gets its own `distill-*` command in the same

@@ -15,7 +15,7 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 - `crates/rc-formats`: all loaders, golden-tested on all 19 levels against committed snapshot hashes (`data/loader_snapshots.tsv`, generated while byte-identical to the retired C++ oracle) (wad, toc, level core, textures, tfrag, tie, shrub, sky, moby, gadget, collision, occlusion, particle/FX textures, moby animation, lighting passes, disc/ISO reader, gameplay sections, fog zones, hud/strings/sound-bank/scene in flight). PS2 float model in `tfrag_light::ps2`.
 - `crates/rc-game`: pure gameplay logic, no Bevy: collision kernels, rng, particles, hero controller + pad + follow camera + tick, fog zones, sky stars, water sim, moby runtime; scheduler/menus/game-state/audio/scene player in flight.
 - `crates/rc-engine`: Bevy app. One module per renderer (`tfrag_*`, `tie_*`, `shrub_*`, `moby_*`, `sky_*`, `particle_render`, `water_render`, `hud_*`, …), `gs_state.rs` (GS alpha/depth rules), `determinism.rs` (frame-exact capture), `occlusion.rs`, `fog_state.rs`, `disc_source.rs`. Env switches are listed in `README.md`.
-- `crates/rc-extract`: `randcrw-extract` (Tier 0 archive checked against `data/scus_971_99.tsv`, Tier 1 cache, Tier 2 exports). The C++ oracle (`src/core`, `tools/extract`) was retired on 2026-09-27; a new loader gets a golden test in `crates/rc-formats/tests/golden.rs` that records snapshot rows (`tests/snapshot/mod.rs`).
+- `crates/rc-extract`: `randcrw-extract` (Tier 0 archive checked against `data/scus_971_99.tsv`, Tier 1 cache, Tier 2 exports). The C++ oracle (`src/core`, `tools/extract`) was retired on 2026-09-27; a new loader gets a golden test in `crates/rc-formats/tests/formats/golden.rs` that records snapshot rows (`tests/formats/snapshot/mod.rs`).
 - `docs/formats/*`: verified format docs. `docs/plan/*`: one investigation doc per system (player_controller, moby_update_catalogue, particles, hud_text, audio, world_animation, occlusion_culling, collision_queries, game_state, menus, cutscenes_transitions, moby_animation, moby_skinning_lighting, tfrag_lighting, tie_lighting, shrub_lighting, sky_render_notes, game_camera_fog, level_sweep, trace_harness). `docs/plan/roadmap.md` has a dated status block at the top.
 - `tools/` (dev only, never ships; each tool has a README): `tools/trace` (package `rc-trace`: PCSX2 savestate/PINE
   comparison harness, `docs/plan/trace_harness.md`), `tools/ghidra/scripts` + `tools/ghidra/names` (Ghidra scripts and
@@ -34,7 +34,7 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 1. **Investigation (docs-only).** Read-only; produces `docs/plan/<system>.md` with addresses, struct offsets, math, confidence lines per finding, unknowns, and a "Port plan". Always precedes a port of a system nobody has reversed yet.
 2. **Port.** Implements exactly what a doc says, with tests, and appends an "In the port" section to that doc. Ports never guess: when the doc is ambiguous the agent reads the disassembly (Ghidra MCP) and pins it.
 
-Loaders follow a fixed recipe: verify the format against the decomp and the spec, add a golden test that records every parsed section for levels 0–18 into the snapshot table (`RC_SNAPSHOT_WRITE=1 cargo test -p rc-formats --test golden`, rows for that test only), check invariants independent of the loader, prove the test can fail by breaking one thing and restoring it, report totals. Changing an existing loader's output means regenerating its rows, with the reason stated.
+Loaders follow a fixed recipe: verify the format against the decomp and the spec, add a golden test that records every parsed section for levels 0–18 into the snapshot table (`RC_SNAPSHOT_WRITE=1 cargo test-all --test formats -- golden::`, rows for that test only), check invariants independent of the loader, prove the test can fail by breaking one thing and restoring it, report totals. Changing an existing loader's output means regenerating its rows, with the reason stated.
 
 Renderers follow a fixed recipe: establish the GS state and math from the decomp, implement, verify with `RC_SCREENSHOT_FRAME=N` captures the agent LOOKS at with Read, check determinism (two runs byte-identical), report fps with `RC_NOVSYNC=1`.
 
@@ -50,14 +50,15 @@ Every brief carries, in this order:
   - "Run the engine with `RC_SCENE=0`."
   - "Every port-only option (one the original game does not have) goes on the native-looking 'Port Options' page under Options."
   - "Add every item you leave unfinished to `docs/plan/gaps.md` (new IDs in the right section) and mark the gaps you close there (struck through, with the date and your doc § or file); your report lists both."
-  - "Tests (docs/workflows/testing.md §2.1): the unit tests (`cargo test-all --lib --bins`), the integration groups of your areas (`cargo test-all --test …`, areas: <named in the brief>), the shared-code guard set (NO_IDLE digest and `all_levels_smoke`) if you touched shared code, clippy on your files (`cargo clippy-all`), and `cargo check-all` once at the end. Never run `cargo test -p …`, `cargo test --workspace`, or `cargo test-all` without `--lib`/`--bins`/`--test`."
+  - "Tests (docs/workflows/testing.md §2.1): `cargo xtask test-job <areas> [shared]` (areas: <named in the brief>): the unit tests, the integration binaries of your areas, and with `shared` (if you touched shared code) the NO_IDLE digest compared with the baseline and `all_levels_smoke`; take the baseline with `cargo xtask digest-baseline` before your first edit if there is none. Single binaries by hand: `cargo test-all --test <area> -- <module>::`. Then clippy on your files (`cargo clippy-all`), and `cargo check-all` once at the end. Never run `cargo test -p …`, `cargo test --workspace`, or `cargo test-all` without `--lib`/`--bins`/`--test`."
 - **Test policy (2026-09-29): see `docs/workflows/testing.md`** (tiers, the area → tests map, the test audit). Two
   tiers. Per job: the unit tests, the integration groups of the areas the brief names ("areas: weapons, classes"),
   the shared-code guard set (NO_IDLE hero digest and `all_levels_smoke`) when the job touched shared code, and one
-  final `cargo check-all`. Full suite (`RC_AUDIO=0 cargo test-all --no-fail-fast`): only on merge to main, or for a big
+  final `cargo check-all`; the first three are one command, `cargo xtask test-job <areas> [shared]`. Full suite (`cargo xtask test-full`: nextest when
+  installed, else `RC_AUDIO=0 cargo test-all --no-fail-fast`; it also compares the NO_IDLE digest with the baseline and fails on a mismatch): only on merge to main, or for a big
   shared-code commit; the coordinator runs it through the commit agent and writes the result to
-  `work/test-results/latest.txt` (git-ignored) with the time, HEAD and `git status --short`, and refreshes the digest
-  baseline there. Failures go back to the agent that owns the files.
+  `work/test-results/latest.txt` (git-ignored) with the time, HEAD and `git status --short`. The digest baseline is
+  rewritten only by `cargo xtask digest-baseline`, when the user has accepted an intended hero change. Failures go back to the agent that owns the files.
 - **Gap register.** `docs/plan/gaps.md` is the one list of known gaps. Every report and doc update adds the agent's
   unfinished items there (new IDs) and strikes the ones it closes.
   File gaps at the system level: name the missing shared system, and list the specific object or level only as a

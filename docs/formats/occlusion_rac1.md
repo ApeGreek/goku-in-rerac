@@ -2,7 +2,7 @@
 
 Precomputed potentially-visible sets for tfrags, tie instances and mobys. Three pieces of data, all read
 from the game code (level01 overlay addresses; boot ELF equivalents in brackets). Code:
-`crates/rc-formats/src/occlusion.rs` (golden test `occlusion_for_every_level` in `crates/rc-formats/tests/golden.rs`).
+`crates/rc-formats/src/occlusion.rs` (golden test `occlusion_for_every_level` in `crates/rc-formats/tests/formats/golden.rs`).
 Per-frame rule and renderer plan: `docs/plan/occlusion_culling.md`.
 
 Wrench (`src/engine/occlusion.cpp`, `docs/occlusion_culling.md`) was used for orientation only. Its

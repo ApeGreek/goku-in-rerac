@@ -1,6 +1,6 @@
 //! Tie (instanced static prop) classes and gameplay tie instances. Spec: docs/formats/tie_rac1.md.
 //! Ported from the retired C++ reference extractor (git 2230812; `parse_tie_class`, `tie_triangles`,
-//! `parse_tie_instances`); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! `parse_tie_instances`); `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! The packet semantics follow the game, not only Wrench: the EE DMA builder (`TieProc`,
 //! level01 0x2a9a90) fixes what each packet-header byte uploads, and the VU1 program 13507

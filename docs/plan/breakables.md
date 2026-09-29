@@ -2,7 +2,7 @@
 
 Addresses are level01 unless a level is named. Code: `crates/rc-game/src/moby_update/classes/breakables.rs` (the
 general system), `breakables/novalis.rs` (Novalis's own props), `bomb_water.rs`; `crates/rc-engine/src/fx_draw.rs`
-(the ship glass); tests `crates/rc-game/tests/breakables_levels.rs`, `bomb_water::tests`.
+(the ship glass); tests `crates/rc-game/tests/classes/breakables_levels.rs`, `bomb_water::tests`.
 
 ## 1. Survey method
 

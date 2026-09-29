@@ -279,7 +279,7 @@ Code: `rc_formats::{sound_bank, vag}` (first verified against the C++ oracle's `
 `audio/grain_vm.rs` 989snd block player, `audio/music.rs` music EE + IOP streams), `rc-engine/src/audio_out.rs`
 (bevy_audio output). Tags as above; **T** = checked by a test here.
 
-**Formats (T, golden).** `sound_banks_for_every_level` (`crates/rc-formats/tests/golden.rs`) serialises, per level
+**Formats (T, golden).** `sound_banks_for_every_level` (`crates/rc-formats/tests/formats/golden.rs`) serialises, per level
 and for the global bank, the bank header, sounds, grains, sample extents, both decodes of every sample, remapped
 level defs, map, per-class ids and defs and the music table, and checks each section against the committed
 snapshot hashes (`data/loader_snapshots.tsv`; generated while byte-identical to the retired C++ `rc_extract sound`
@@ -518,7 +518,7 @@ shared engine code that had not been ported. Addresses level01 (boot equivalents
 * The hand item's advance (`hero::items::advance_item`): its triggers queue with the item's sounds.
 * Footsteps (path 6), the wrench hit selection (path 5), sound instance classes 1 and 2 (path 8).
 
-**Conformance** (`crates/rc-game/tests/sound_conformance.rs`, all 19 levels): every trigger and loop sound of every
+**Conformance** (`crates/rc-game/tests/ui/sound_conformance.rs`, all 19 levels): every trigger and loop sound of every
 sequence of every loaded class (level classes, Ratchet's `ratchet_seq`, the gadgets) resolves to a def with a valid
 bank id and, played at the listener through `AudioSystem::play_class_sound`, gets a slot and a live 989snd handle: 4252
 references, 4251 played, 1 refused exactly as the game refuses it (level 13 class 83 seq 1: volumes 0..20 < 0x20). Every
@@ -627,6 +627,6 @@ switch and across two runs; music held until the resume as before. `RC_UNDERWATE
 music at 3/5.
 
 **Tests**: `audio::reverb::tests` (box ramp / exits, dirty priorities, checkpoint, env radius, preset decay, glide, echo
-delay); `tests/reverb_conformance.rs` on all 19 levels: 98 boxes parse and behave, the wet signal in the mix (13 levels with
+delay); `tests/ui/reverb_conformance.rs` on all 19 levels: 98 boxes parse and behave, the wet signal in the mix (13 levels with
 boxes) and none away from them, deterministic; 13 enabled / 2 disabled env points; defs 0 / 1 play with a live handle and
 no draw; the 102 call sites.

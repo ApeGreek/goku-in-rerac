@@ -142,7 +142,7 @@ arm: `AnimCtl::eval_chains_with` in the hand attach and the wrench's hand point)
 
 * Unit: `particles::type62::tests`, `particles::type59::tests`, `pickup::tests` (the cubic, the rotation sense, the
   item tables), the existing `weapons::tests` (the arm while running, now on the layer).
-* `crates/rc-game/tests/hero_gameplay_novalis.rs` (full ticks: the scheduler, particles, moby collision, the hero with
+* `crates/rc-game/tests/weapons/hero_gameplay_novalis.rs` (full ticks: the scheduler, particles, moby collision, the hero with
   the wrench and the glove, the hit path): the bolt crate 376 pays bolts; the nanotech crate 533 (on 377) shows 8 orbs,
   heals 2 → 3 and 3 → 4, and does nothing at 4 / 4 (the free cluster waits); the ammo crate 552 fills the glove 38 → 40
   (capped) and leaves its pickup at 40 / 40; a glove throw while running at the spawn plays sequence 66 on the arm
@@ -169,7 +169,7 @@ Code: `crates/rc-game/src/moby_update/classes/gold_bolt.rs` (1134, `GoldBoltUpda
 0x2fce68); the module docs carry the pvar layouts and state machines. Both are registered by class number and run on
 every level whose class table names the same function (`LevelPorts`): the gold bolt on levels 1–18 (17 overlays byte
 for byte, Gemlik's up to relocations), the infobot on 0, 1, 3–8, 10, 12–15, 17 (checked by
-`tests/gold_bolt_infobot_novalis.rs::registered_on_the_levels_with_identical_code`). Placement comes from each
+`tests/classes/gold_bolt_infobot_novalis.rs::registered_on_the_levels_with_identical_code`). Placement comes from each
 level's instances: 40 gold bolts on the disc (none on 00), pvar +0x00 = the index in the level's 4 bytes.
 
 **Reused**: the script camera and the cinematic call layer (`CameraScript` mode 1 snap + targets, `CameraScript2(0)`,
@@ -216,7 +216,7 @@ kind 6 nodes) already read the count; spending is the offer's existing `GoldWeap
   ("Infobot for Planet Aridia acquired", 1180 ticks), the worker leaves. The mission NPC's Kerwan reward
   (`UnlockPlanet(3)` after scene 3 → movie 3 → scene 4) now goes the same way.
 
-**Tests** (`crates/rc-game/tests/gold_bolt_infobot_novalis.rs`, headless, game state of a first arrival): both
+**Tests** (`crates/rc-game/tests/classes/gold_bolt_infobot_novalis.rs`, headless, game state of a first arrival): both
 Novalis camera variants (959 orbit, 958 cuboids 0x51 → 0x50): picked up on the tick Ratchet is in reach, idle bob
 within spawn + 1 ± 0.3, FadeToBlack(10), 0x72 + animation 0x82 + hand hidden, bolt on him, letterbox and script
 camera for the whole 398-tick cutaway, then control back, banner 21427 / 180, save request, count +1, chunk-3003 byte
@@ -453,7 +453,7 @@ missile's re-targets and triple blast, the Tesla's second target); the shot stat
 help; the R.Y.N.O.'s item state 3 (no writer in the level code); the Blaster's `fun_0020d580` in the hold state 0x72;
 0x141618 branches.
 
-**Tests** (`crates/rc-game/tests/hero_guns_novalis.rs`, headless on the arrival state with `GiveItem(id, equip)`,
+**Tests** (`crates/rc-game/tests/weapons/hero_guns_novalis.rs`, headless on the arrival state with `GiveItem(id, equip)`,
 every run twice identical): per weapon the def row and ammo; Blaster standing (draw, one shot per 6 ticks per ammo,
 40 u/s, firing sequence 4, breaks crate 376, put away), running (arm layer 57), a critter targeted (green marker)
 and hit, first person (0x1e, red crosshair, shots below the eye); Devastator at the critters (shot 54, one missile /
@@ -529,7 +529,7 @@ flight uses (0, 0, 1) for the stale normal [L]; the whistle's aliveness is the p
 element (G-UI-011); the mines' lure list 0x1b0c30 (batch 2); the gold cannon (G-WPN-009); the stats (G-SAV-009). (The
 vortex, the vacuum and the rings: §10.1; crates, the pickup sound and the full coverage table: §10.2.)
 
-**Tests** (`crates/rc-game/tests/hero_reactive_novalis.rs`, headless, every run twice identical): Novalis — a critter
+**Tests** (`crates/rc-game/tests/weapons/hero_reactive_novalis.rs`, headless, every run twice identical): Novalis — a critter
 pulled (records 1 → 7 on the release → 2 → 3 → 4), held and hidden (held 1), fired (record 5 → 6) and burst at a wall
 more than 10 units on; the Taunter lures both pit critters (their +0x18 set, cleared by them the next tick) and knocks
 the first of four crates in front (a hit record, broken). Rilgar (level 05) — the level's tables resolve to {270, 572,
@@ -940,7 +940,7 @@ cone line); `FUN_002731d0` as an angle wrap; a `GroundHeight` miss keeps the chi
 shot statistics 0x141728.. — G-SAV-009; the gold Morph-o-Ray (not mirrored) — G-WPN-009; the big-head cheat
 manipulator on the chicken (`0x278720`).
 
-**Tests**: `crates/rc-game/tests/hero_morph.rs` (headless, twice identical): Novalis — a critter 577 morphed (the
+**Tests**: `crates/rc-game/tests/weapons/hero_morph.rs` (headless, twice identical): Novalis — a critter 577 morphed (the
 beam every tick of the hold, the critter deleted, the chicken at its place changing state, the light faded after);
 a big amoeboid 572 with level 07's 3 / 3 record held 60 ticks then morphed; the Suck Cannon (asked for after the
 morph) swallowing the chicken (its record 1 → 2 → 3 → 4, held state 5); Rilgar — a small amoeboid 866 morphed.
@@ -1169,7 +1169,7 @@ the gloves' pvars start clear with the hand moby's creation; the hit templates' 
 orientation (the glove's joint-0 frame) is not written; the decoy / mine lists 0x1b0cb0 / 0x1b0c30 are the table's
 objects; objects on moving platforms do not ride them (0x13f64c never set); the gold gloves are not mirrored.
 
-**Tests** (`crates/rc-game/tests/hero_gloves.rs`, headless on the arrival state with `GiveItem(id, equip)`, every run
+**Tests** (`crates/rc-game/tests/weapons/hero_gloves.rs`, headless on the arrival state with `GiveItem(id, equip)`, every run
 twice identical; the rows carry the objects, their class sounds, the hero-side sounds, particle counts, lights, the
 shake and the bolts): Novalis — the decoy thrown from the throw state (voice 0x1a, one ammo, the next decoy at once),
 held → flying → standing, a critter 577 comes to it and bites it 4 → 3 → 2 → 1 → 0 (a class sound 0 and the red flash
@@ -1340,7 +1340,7 @@ checked on PCSX2 (G-TOOL-007).
 helpers as the other states. **[L]**: the fist glow's quad corners `fun_001f9d20` read as a rotation plus the centre;
 the gravity step of the sparkle point in gravity mode 0 only (Magneboots: along the normal in the game).
 
-**Tests** (`tests/hero_weapons4.rs`, twice identical; `walloper::tests`): Novalis — the lunge into a big amoeboid 572
+**Tests** (`tests/weapons/hero_weapons4.rs`, twice identical; `walloper::tests`): Novalis — the lunge into a big amoeboid 572
 (swing sound, after-images made at T = 8 and faded, 3 spheres a tick in the window, one hit sound, sparkles, the
 amoeboid hit, the lunge back to 0, the arcs and draw ending), a lunge in the open (only Ratchet listed, no sparkles, it
 carries him forward, two lunges), a crate broken; Rilgar — a small amoeboid 866 hit. Unit: the aim search's scores and
@@ -1372,7 +1372,7 @@ instructions) and `0x302438` / `0x2cb808` / `0x2cb968` from the disassembly. Cod
 gun), `moby_update/classes/visibomb.rs` (the missile, its launch, end, look, glow and explosion),
 `follow_camera/type6.rs` (the camera mode), `hero/scripted.rs` (0x1d), `classes/rc_range.rs` (the static, the cut-off),
 `rc-engine/src/visibomb_view.rs` + `assets/shaders/missile_view.wgsl` (the look in the renderer). Tests:
-`rc-game/tests/hero_visibomb.rs` (Novalis, Rilgar), the unit tests of those modules.
+`rc-game/tests/weapons/hero_visibomb.rs` (Novalis, Rilgar), the unit tests of those modules.
 
 * **Ids** (the item table 0x179f40, checked by `visibomb_is_item_13_with_its_classes`): item **13**, gun class **163**
   (update `0x2c8cc0`, def +0x18 = 2: both glove-holding layers; no arm sequences, def +0x30 = 0), the missile **172**
@@ -1669,7 +1669,7 @@ mouse, 577, 572, the chicken, the decoy, the drones); `attack::area_push` = `0x2
 (the knockback, the bots); `ground::key_time` / `ground::ground`; `turn::spring_turn2_pvar`; particle type 32 (the
 canister).
 
-**Tests** (twice identical where integration): `tests/hero_doom.rs` — `novalis_bots_blow_up_a_critter` (the throw from
+**Tests** (twice identical where integration): `tests/weapons/hero_doom.rs` — `novalis_bots_blow_up_a_critter` (the throw from
 0x23 with voice 0x1a and one ammo, the next canister at once, the canister 0 → 1 → 2 → 3 → 4 → gone, glows held and
 flying, four bots 8 ticks apart, a bot targeting critter 592, its blast: light, sparks, streaks, puffs, the shake,
 class sound 0, the critter 1 → −2 and dead, another bot's blast elsewhere), `rilgar_bot_blows_up_an_amoeboid` (the

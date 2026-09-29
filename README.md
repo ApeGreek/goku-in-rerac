@@ -49,7 +49,9 @@ Rust comes from Homebrew's rustup; put it on `PATH` first:
 ```
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 cargo dev                        # run the engine (Bevy dynamically linked, fast relink)
-cargo test-all                   # all tests (the ones that need game data skip without extracted/)
+cargo xtask test-quick           # unit tests of every crate (about 5 s)
+cargo xtask test-job hero world  # a job's tier: unit tests + the areas' integration binaries (docs/workflows/testing.md)
+cargo xtask test-full            # the full suite (tests needing game data skip without extracted/)
 cargo xtask regen-data           # (re)build the dev game data extracted/ from your disc image (RC_ISO)
 cargo xtask package              # release packaging (tools/package/package.sh)
 cargo xtask help                 # the other dev chores
@@ -67,11 +69,17 @@ static Bevy. For rc-engine alone use `cargo test -p rc-engine --features dev`; t
 so `cargo test -p <crate>` needs no feature. Check and clippy share one Bevy check build (metadata only, which a test
 build cannot reuse). Release builds and `tools/package` stay static (never `--features dev`).
 
-The loaders' golden tests (`crates/rc-formats/tests/golden.rs`) compare what the Rust loaders produce for all 19
+The integration tests are 11 binaries, one per area: rc-game's `hero`, `weapons`, `classes`, `world` and `ui`, and
+`formats`, `data`, `extract`, `movies`, `trace`, `guards` (`tests/<area>/main.rs`, one module per former test file:
+`cargo test-all --test hero -- --exact hero_novalis::novalis_hero_digest`). The `cargo xtask test-*` commands run the
+tiers of `docs/workflows/testing.md` with `RC_AUDIO=0`, through cargo-nextest when it is installed
+(`cargo install cargo-nextest --locked`; settings in `.config/nextest.toml`), else through `cargo test-all`.
+
+The loaders' golden tests (`crates/rc-formats/tests/formats/golden.rs`) compare what the Rust loaders produce for all 19
 levels with `crates/rc-formats/data/loader_snapshots.tsv` (per test, level and section: item count, byte count,
 SHA-1). The table was generated while the output was byte-identical to the C++ reference extractor, retired on
-2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo test -p
-rc-formats --test golden` rewrites the rows of the tests that ran.
+2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo test-all
+--test formats -- golden::` rewrites the rows of the tests that ran.
 
 ## Game data
 

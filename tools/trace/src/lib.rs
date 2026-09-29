@@ -56,7 +56,7 @@ pub fn savestates_dir() -> PathBuf { personal_dir().join("savestates") }
 /// Hero recordings: `~/PS2/ratchet1/traces/`.
 pub fn recordings_dir() -> PathBuf { personal_dir().join("traces") }
 
-/// The committed Novalis spawn fixture (`distill-spawn` writes it, `tests/novalis_spawn.rs` reads it).
+/// The committed Novalis spawn fixture (`distill-spawn` writes it, `tests/trace/novalis_spawn.rs` reads it).
 pub fn spawn_fixture() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/novalis_spawn.tsv") }
 
 /// Refuses an output path inside the game-data tree: this tool never writes into `extracted/`.

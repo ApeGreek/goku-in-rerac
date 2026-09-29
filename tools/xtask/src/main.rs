@@ -3,6 +3,7 @@
 
 mod classify;
 mod regen;
+mod test;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -22,6 +23,26 @@ commands:
         --check           only list what the folder holds; change nothing (no disc needed)
   package [--no-build]
       Release packaging: runs tools/package/package.sh (dist/randcrw-<version>-<os>-<arch>/ and its .zip).
+
+test tiers (docs/workflows/testing.md §2; RC_AUDIO=0; cargo-nextest when installed, else `cargo test-all`):
+  test-quick [crate]
+      Unit tests only: every crate's lib and bin tests (`cargo test-all --lib --bins`, about 5 s). With nextest a
+      crate name runs just that crate's (without nextest every crate runs: a single one would rebuild).
+  test-job <area>...
+      The per-job tier: the unit tests plus the integration binaries of each area. Areas (aliases):
+        hero, weapons, classes (creatures, mobys), world (levels, collision, water), ui (menus, hud, map, save,
+        vendor), audio, formats, data, extract, video (movies), engine (render, input: unit tests only), trace,
+        repo (guards, layout), shared (for shared code: the all-levels smoke, and the NO_IDLE hero digest
+        compared with work/test-results/hero_digest_no_idle.txt).
+  test-full
+      The full suite (on merge to main, or when the coordinator asks), then the NO_IDLE hero digest compared
+      with the baseline; a mismatch fails. It never rewrites the baseline.
+  digest-baseline
+      The only command that writes the NO_IDLE hero digest baseline, and prints what changed: for a human who
+      has decided a digest change is intended, or before a job's first edit when there is none.
+    Options of the test commands:
+      --cargo-test        use `cargo test-all` even when nextest is installed
+      -- <args>           passed on: to nextest (e.g. --no-capture), or to the test binaries under cargo test
   help
       This list.";
 
@@ -45,6 +66,10 @@ fn main() -> ExitCode {
     match cmd.as_str() {
         "regen-data" => regen::run(rest),
         "package" => package(rest),
+        "test-quick" => test::quick(rest),
+        "test-job" => test::job(rest),
+        "test-full" => test::full(rest),
+        "digest-baseline" => test::baseline(rest),
         "help" | "--help" | "-h" => { println!("{HELP}"); ExitCode::SUCCESS }
         other => {
             eprintln!("error: unknown command {other:?}\n\n{HELP}");

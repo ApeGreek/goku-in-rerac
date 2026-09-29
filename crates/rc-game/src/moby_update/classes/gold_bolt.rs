@@ -63,7 +63,7 @@ pub const UPDATE_FN: u32 = 0x307ca0;
 /// Classes that run [`update`].
 pub const CLASSES: [i16; 1] = [1134];
 /// The overlays whose class table runs this function for 1134 (byte-identical in all but 13, which differs only in
-/// relocated addresses; checked by `tests/gold_bolt_infobot_novalis.rs` through `LevelPorts`).
+/// relocated addresses; checked by `tests/classes/gold_bolt_infobot_novalis.rs` through `LevelPorts`).
 pub const LEVELS: [u32; 18] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 /// `ShowBanner(0x53b3, −1)`: "Gold Bolt Acquired".
 pub const BANNER_MSG: i32 = 0x53b3;

@@ -1,8 +1,8 @@
 # randcrw loader snapshots: SCUS_971.99 v1.00 (NTSC-U), all 19 levels. Hashes, sizes and counts only (no disc bytes).
 # Columns: test<TAB>scope<TAB>key<TAB>items<TAB>bytes<TAB>sha1. scope = level (00..18) or global; items = byte
 # strings hashed; bytes = their total size; sha1 over the strings in order, each prefixed by its length (u64 LE).
-# Generated 2026-09-27 by crates/rc-formats/tests/golden.rs while the Rust output was byte-identical to the retired
-# C++ reference extractor's dumps (git 2230812). Rewrite rows: RC_SNAPSHOT_WRITE=1 cargo test -p rc-formats --test golden
+# Generated 2026-09-27 by crates/rc-formats/tests/formats/golden.rs while the Rust output was byte-identical to the retired
+# C++ reference extractor's dumps (git 2230812). Rewrite rows: RC_SNAPSHOT_WRITE=1 cargo test-all --test formats -- golden::
 collision	00	collision.cell record	5783	92528	c7cfc2bc765e869e4b4769533992de5e4dc1a9de
 collision	00	collision.faces	5783	213644	def51e634c8fdd4b80914f221b3f2ac2a3290c5c
 collision	00	collision.header	1	8	f7cbb1d8c1b3ea1eec2e945d7fe8b0006c26efba

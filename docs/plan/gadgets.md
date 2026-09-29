@@ -77,7 +77,7 @@ The back packs' data make the Heli-Pack (607) and Thruster-Pack (608) changes qu
 2 ticks, the slot is empty 1 tick, and the Hydro-Pack unfolds; out of it the Hydro-Pack folds for 6 ticks, 1 empty
 tick, the Heli-Pack. The feet slot deletes at once (no put-away animation); the head slot uses the same put-away as the
 back. The port runs exactly this (`idle::back_slot_states` / `back_swap`, `worn`), so no animation was missing: the
-change *is* that short in the game (`tests/hero_pack_swap_novalis.rs` pins the sequence and the tick counts).
+change *is* that short in the game (`tests/hero/hero_pack_swap_novalis.rs` pins the sequence and the tick counts).
 
 **`GiveItem(id, equip)`** 0x275760 (`GameState::give_item`): acquired, owned, the item's ammo, the vendor stock, a
 free quick-select slot for a hand item; with `equip` the request of hand (type 0), head (2) or back (3) — never feet.
@@ -216,10 +216,10 @@ foot IK of `0x22c5c0` (only its feet scale); 0x14161b (0); `FUN_00248ad8`'s grav
 branch still read the owned byte [L]; the hint list's ✕ Equip / △ Exit are the disc's list, drawn as any list.
 
 **Tests**: `inventory::tests` (the page rules per slot, the close requests), `hero::worn::tests` (Grindboots with the
-grind group, Magneboots and water, the O2 Mask under water, menu requests), `tests/gadgets_novalis.rs` (the first
+grind group, Magneboots and water, the O2 Mask under water, menu requests), `tests/ui/gadgets_novalis.rs` (the first
 arrival's state with no grants and no pack moves; the page on the disc's records: open, back grid focus, icons,
 name label, preview view, equip Thruster / denied Hydro, close request, the swap in play, the stomp and the
 Thruster glide, then the Heli-Pack back and its glide; feet toggle and head equip requests), the existing boots
-tests (the magnetic floor now through the automatic Magneboots). `tests/hero_pack_swap_novalis.rs` (2026-09-28): the back swap's
+tests (the magnetic floor now through the automatic Magneboots). `tests/hero/hero_pack_swap_novalis.rs` (2026-09-28): the back swap's
 sequence and tick counts into and out of the Novalis lake (Heli-Pack → Hydro-Pack → Heli-Pack), and the Thruster long
 jump's after-images.

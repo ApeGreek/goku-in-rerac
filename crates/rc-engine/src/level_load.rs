@@ -2,7 +2,7 @@
 //!
 //! Inputs (the Tier 0 archive `randcrw-extract` writes, never shipped with the repo):
 //! `levels/NN/core_index.bin`, `levels/NN/core_data.bin` (WAD-compressed), `levels/NN/gs_ram.bin`.
-//! The call chain is the one `crates/rc-formats/tests/golden.rs` checks against the committed snapshot hashes.
+//! The call chain is the one `crates/rc-formats/tests/formats/golden.rs` checks against the committed snapshot hashes.
 
 use anyhow::{Context, Result};
 use rc_formats::{level, texture, tfrag};

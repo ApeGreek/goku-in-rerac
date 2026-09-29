@@ -1,6 +1,6 @@
 //! Tfrag terrain block. Spec: docs/formats/tfrag_rac1.md. Ported from the retired
 //! C++ reference extractor (git 2230812; `parse_tfrags`, `tfrag_triangles`);
-//! `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! Beyond the C++ struct, [`Tfrag`] also carries the mini-sphere array and the
 //! 8-corner cube, which the C++ reference did not parse.
@@ -108,7 +108,7 @@ const _: () = assert!(std::mem::size_of::<TfragHeader>() == 0x40);
 ///
 /// Each vertex-info tier (common, lod01, lod0) is `[one entry per position] ++ [extra entries]`;
 /// the `unk_*` lanes are the extra ranges' counts and VU addresses. Verified on every retail
-/// tfrag by `tests/golden.rs` (addr = tier addr + position count; tier size = positions + extra).
+/// tfrag by `tests/formats/golden.rs` (addr = tier addr + position count; tier size = positions + extra).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Pod, Zeroable)]
 pub struct TfragVuHeader {

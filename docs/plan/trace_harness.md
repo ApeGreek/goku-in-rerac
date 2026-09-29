@@ -158,7 +158,7 @@ port; by default they are culled by the game's unbuilt view, as in the game). `p
 port's statics right after its load pass (no savestate needed). The loader's spawn test is ported
 (`rc_formats::moby_spawn::spawn_test` / `loader_spawns`), so `port_sim` creates the same 929 slots as the RAM.
 Not modelled in `port_sim` (expected to differ): the arrival scene (actors, camera), hand items, +0x31 beyond a
-draw-distance stand-in, the unported classes. Regression: `tests/novalis_spawn.rs` compares the port with the
+draw-distance stand-in, the unported classes. Regression: `tests/trace/novalis_spawn.rs` compares the port with the
 committed, numbers-only fixture `tools/trace/tests/fixtures/novalis_spawn.tsv` (needs only `extracted/`; skipped
 without it). `distill-spawn <source>` rewrites the fixture from a savestate (`--state novalis_spawn`) or its dump,
 after checking that the fixture checks and the savestate checks give the same tallies on it.
@@ -194,7 +194,7 @@ Other commands, for future comparisons:
     works, and the RAM is read back.
 * `pine` test: a fake Unix-socket server checks the framing and the 50000-per-message batching
   (120000 reads = 3 messages).
-* `tests/synthetic.rs`, on the real Novalis data: the tfrags block is placed at an arbitrary
+* `tests/trace/synthetic.rs`, on the real Novalis data: the tfrags block is placed at an arbitrary
   base, with relocated `data` pointers, the light bank and the level global, as the game does.
   * With our lit RGBA written in: 1004/1004 tfrags and 51331/51331 vertices match
     (129 blended).

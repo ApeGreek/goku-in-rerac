@@ -81,7 +81,7 @@ impl AudioSystem {
 }
 
 /// `g_footstep_level_base` (level01 0x1bdca0, one byte per level; the same 19 bytes in every level overlay, at a
-/// per-overlay address: checked by `tests/sound_conformance.rs`): the first footstep level def of the level, before
+/// per-overlay address: checked by `tests/ui/sound_conformance.rs`): the first footstep level def of the level, before
 /// the moby-attached defs are added.
 pub const FOOTSTEP_LEVEL_BASE: [u8; 19] = [0, 2, 6, 1, 0, 2, 2, 0, 2, 2, 1, 7, 0, 0, 4, 0, 0, 0, 0];
 /// `0x15f574`: the level defs played at a moby (`PlayLevelSoundAtMoby` 0x2a1770 takes indices below it; 2 in every

@@ -383,7 +383,7 @@ pub struct Marker {
 }
 
 /// The mission and marker lists of the 19 levels (read from the level01 overlay: the same records in every overlay,
-/// `tests/map_levels.rs`), the turned markers' sizes and the prices.
+/// `tests/ui/map_levels.rs`), the turned markers' sizes and the prices.
 #[derive(Clone, Debug, Default)]
 pub struct MapTables {
     pub missions: Vec<Vec<Mission>>,

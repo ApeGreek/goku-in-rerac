@@ -2,7 +2,7 @@
 //!
 //! Every reader here follows the specification in `docs/formats/`. The readers were first verified byte for byte
 //! against a C++ reference extractor, retired on 2026-09-27 (git history at 2230812); the golden tests now
-//! check their output against the committed snapshot table `data/loader_snapshots.tsv` (`tests/golden.rs`).
+//! check their output against the committed snapshot table `data/loader_snapshots.tsv` (`tests/formats/golden.rs`).
 
 pub mod buf;
 pub mod wad;

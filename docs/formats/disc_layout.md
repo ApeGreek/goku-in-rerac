@@ -218,7 +218,7 @@ ELF located via `SYSTEM.CNF` (2.6 A, probe B as fallback) and each level's lumps
 container sliced by its ByteRange table (2.11), `gameplay_ntsc`/`gameplay_pal`/`occlusion` as whole
 sector ranges, and the audio/scene lumps sized by the 2.5 probes. The result is byte-identical to
 the Tier 0 archive's `extracted/levels/NN/*.bin` (first written by the retired C++ `rc_extract unpack`) for all 19 levels of the NTSC-U disc (a plain
-2048-byte image, 2,057,664 sectors); see `tests/golden.rs::disc_matches_extracted_for_every_level`.
+2048-byte image, 2,057,664 sectors); see `tests/formats/golden.rs::disc_matches_extracted_for_every_level`.
 
 ---
 

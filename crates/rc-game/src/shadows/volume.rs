@@ -14,7 +14,7 @@
 //! in model space: `x·J0 + y·J1 + z·J2 + J3`), R the rotation rows (+0xc0..+0xe0) and the radius `p.w·k` (the
 //! joint and row transforms only write xyz). A capsule end with −n segments is then pushed **away** from the other
 //! end by `n·16/4096` of the segment (A first, then B from the new A) and becomes flat. Checked against the
-//! game's posed list in RAM (`tests/shadow_volume_novalis.rs`).
+//! game's posed list in RAM (`tests/world/shadow_volume_novalis.rs`).
 //!
 //! **Outlines**, in the plane perpendicular to the unit direction `d`, every ring turning right-handed about `d`:
 //! * sphere: `n` points `c + R(d, k·6.28/n)·(e·r)`, k = 1..=n (e = [`DirFrame::perp`]); note 6.28, not 2π;

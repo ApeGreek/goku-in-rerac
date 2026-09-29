@@ -3,7 +3,7 @@
 The census units (class_census.md, `work/census/units.tsv`) whose first copy is on levels 09–18, ported one unit per
 port under `crates/rc-game/src/moby_update/classes/units/` and registered in `units::PORTS` (`ClassUpdate::Unit(i)`,
 found on every level by code identity through `LevelPorts`). The levels 00–08 half is a sibling batch in the same
-registry. Tests: `crates/rc-game/tests/cheap_classes_b.rs` (registration and instance counts, then each unit headless
+registry. Tests: `crates/rc-game/tests/classes/cheap_classes_b.rs` (registration and instance counts, then each unit headless
 on one of its levels).
 
 Unit ids are the census run of 2026-09-28 20:05 (they are renumbered by every run; the reference update is the stable

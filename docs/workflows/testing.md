@@ -10,12 +10,18 @@ Every test or check command goes through the aliases in `.cargo/config.toml`, so
 
 | What | Command |
 |---|---|
-| All unit tests (every crate's `src/` tests; rc-engine's live in the `randcrw` bin) | `cargo test-all --lib --bins` |
-| Some integration binaries | `cargo test-all --test <file> --test <file> …` |
-| One test | `cargo test-all --test <file> -- --exact <test_fn>` |
+| All unit tests (every crate's `src/` tests; rc-engine's live in the `randcrw` bin) | `cargo xtask test-quick` (= `cargo test-all --lib --bins`) |
+| A job's tier (§2.1) | `cargo xtask test-job <area…> [shared]` |
+| Some integration binaries | `cargo test-all --test <binary> --test <binary> …` (the binaries of §3) |
+| One former test file | `cargo test-all --test <binary> -- <module>::` |
+| One test | `cargo test-all --test <binary> -- --exact <module>::<test_fn>`, or a substring: `cargo test-all --test hero novalis_hero_digest` |
 | Type check of everything, with tests | `cargo check-all` |
 | Lints | `cargo clippy-all` |
-| Full suite | `RC_AUDIO=0 cargo test-all --no-fail-fast` |
+| Full suite | `cargo xtask test-full` (or `RC_AUDIO=0 cargo test-all --no-fail-fast`) |
+
+The `cargo xtask test-*` commands set `RC_AUDIO=0` and run through cargo-nextest when it is installed, else through
+`cargo test-all` (§8). The integration binaries are one per area (§3), each with one module per former test file, so a
+test's path is `<module>::<test_fn>`, e.g. `hero_novalis::novalis_hero_digest` in the binary `hero`.
 
 Do not use `cargo test -p <crate>` or `cargo test --workspace`. `cargo test -p rc-game --lib` resolved other features
 and recompiled rc-formats and rc-game from scratch (32 s, measured 2026-09-29) next to the shared copy, and plain
@@ -36,28 +42,36 @@ Each brief names its areas, for example "areas: weapons, classes". The job runs:
    - Ratchet's NO_IDLE digest. It must be byte-identical to the baseline, unless the brief changes hero behaviour on
      purpose. The test runs with the package as its working directory, so give it absolute paths:
 
+     `cargo xtask test-job … shared` does this. By hand:
+
      ```
      RC_HERO_DIGEST="$PWD/work/test-results/digest_job.txt" RC_HERO_DIGEST_NO_IDLE=1 \
-       cargo test-all --test hero_novalis -- --exact novalis_hero_digest
+       cargo test-all --test hero -- --exact hero_novalis::novalis_hero_digest
      cmp work/test-results/hero_digest_no_idle.txt work/test-results/digest_job.txt
      ```
 
-     The baseline `work/test-results/hero_digest_no_idle.txt` (git-ignored) is written by the full-suite run at each
-     merge, with the same command. A job that has no baseline takes its own before its first edit.
-   - `cargo test-all --test all_levels_smoke`: 19 levels × 600 ticks and Gemlik × 3000 (about 26 s).
+     The baseline `work/test-results/hero_digest_no_idle.txt` (git-ignored) is written only by
+     `cargo xtask digest-baseline`, which prints what changed. Run it only when a human has decided a digest change is
+     intended, or when there is no baseline yet (a job takes one before its first edit). `test-job shared` and
+     `test-full` only compare with it, and fail on a mismatch. A test that rewrote its own reference on every run
+     would bake regressions in.
+   - `cargo test-all --test world -- all_levels_smoke::`: 19 levels × 600 ticks and Gemlik × 3000 (about 26 s).
 4. **`cargo check-all`** once at the end, and `cargo clippy-all` for the job's files (as before).
 
 The report lists every command run and its result.
 
 ### 2.2 Full suite
 
-`RC_AUDIO=0 cargo test-all --no-fail-fast` runs only:
+`cargo xtask test-full` (or `RC_AUDIO=0 cargo test-all --no-fail-fast`) runs only:
 - on merge to main;
 - for a big shared-code commit, when the coordinator decides it.
 
 The coordinator runs it through the commit agent and writes `work/test-results/latest.txt` (time, HEAD,
-`git status --short`, per-suite counts, failures). The same run refreshes the digest baseline (§2.1). The last full run
-(2026-09-29 02:52) took about 9 min of test time (520 s summed over the suites, before `creature_classes` was added). `water_levels` alone took 176 s (§6).
+`git status --short`, per-suite counts, failures). The same run compares the NO_IDLE digest with the baseline (§2.1)
+and fails on a mismatch; it never rewrites the baseline. The last full run
+(2026-09-29 02:52, before the merge) took about 9 min of test time (520 s summed over the suites, before
+`creature_classes` was added); `water_levels` alone took 176 s. After the merge job (§5) the full suite under nextest
+takes 139 s (1167 run, 26 ignored).
 
 ### 2.3 What counts as shared code
 
@@ -68,22 +82,24 @@ Shared code is code that every level or every tick runs through. A change to it 
 
 ## 3. Area map (per-job groups)
 
-The unit tests of every area run in step 1 of §2.1. The table lists each area's integration binaries.
-- **Today:** the files listed.
-- **After the merge job (§5):** one binary per group, with the old files as modules. Then `cargo test-all --test <group>`,
-  or `--test <group> -- <file>::` for part of one.
+The unit tests of every area run in step 1 of §2.1. The table lists each area's integration binary and its modules
+(the former test files, merged 2026-09-29, §5): `cargo test-all --test <binary>`, or `--test <binary> -- <module>::`
+for one module. `cargo xtask test-job <area…>` runs the unit tests plus the listed binaries; its area table is `AREAS`
+in `tools/xtask/src/test.rs`, which this table documents (area names and aliases are the same).
 
-Aliases: creatures and mobys → `classes`; levels, collision and water → `world`; menus, HUD, map, save and vendor → `ui`.
-Wall times are summed from the 2026-09-29 full run.
+Aliases: creatures and mobys → `classes`; levels, collision and water → `world`; menus, HUD, map, save and vendor → `ui`;
+movies → `video`; render and input → `engine`; guards and layout → `repo`.
+Wall times: the 2026-09-29 full run before the merge, summed over the old binaries; for `classes` and `world` also
+the merged binary under `cargo test` (per-binary caches, §5).
 
-| Area | Integration binaries today | Merged binary | Unit-test modules (in the lib) | Wall time today |
+| Area | Modules (former test files) | Binary | Unit-test modules (in the lib) | Wall time |
 |---|---|---|---|---|
 | hero | `hero_boots_grind` `hero_boots_magnet` `hero_cable_kerwan` `hero_damage` `hero_followups` `hero_ledge_novalis` `hero_novalis` `hero_pack_swap_novalis` `hero_packs_novalis` `hero_platform_novalis` `hero_surfaces` `hero_swingshot_levels` | `hero` | `hero::*` except the weapon modules, `follow_camera`, `pad`, `afterimage` | ~8 s |
 | weapons | `hero_doom` `hero_gameplay_novalis` `hero_gloves` `hero_guns_novalis` `hero_morph` `hero_pyrocitor_novalis` `hero_reactive_novalis` `hero_targeting_novalis` `hero_visibomb` `hero_weapons4` `hero_weapons_novalis` | `weapons` | `hero::{blaster,comet,devastator,guns,melee,morph_ray,pyrocitor,ryno,suck_cannon,suck_vortex,tesla,walloper,weapons,…}`, `targeting` | ~8 s |
-| classes | `bolt_crank_novalis` `breakables_levels` `cheap_classes_a` `cheap_classes_b` `common_classes_levels` `creature_classes` `creatures_enemies_novalis` `creatures_novalis` `explosion_survey` `gold_bolt_infobot_novalis` `moby_update_novalis` `path_classes` | `classes` | `moby_update::*` (classes, creature, units), `moby_runtime`, `path`, `spline` | ~200 s (§6) |
-| world | `all_levels_smoke` `cutscene_novalis` `level_ports` `moby_collision_novalis` `novalis_collision` `novalis_world` `sea_levels` `shadow_volume_novalis` `water_levels` | `world` | `particles::*`, `water::*`, `shadows::*`, `collision_query`, `fog_zones`, `point_lights`, `sky_stars`, `cinematic`, `rng`, `ps2v` | ~290 s (§6) |
-| ui | `gadgets_novalis` `game_state_novalis` `gemlik_generalisation` `help_novalis` `interaction_vendor` `map_levels` `pause_pages_novalis` | `ui` | `menus::*`, `map::*`, `hud`, `help`, `game_state`, `inventory`, `movie_player`, `scene_player` | ~8 s |
-| audio | `reverb_conformance` `sound_conformance`, plus `hero_guns_novalis -- --exact novalis_ryno_salvo_sounds_mix_without_overflow` | in `ui`: `--test ui -- reverb_conformance:: sound_conformance::` | `audio::*` | ~3 s |
+| classes | `bolt_crank_novalis` `breakables_levels` `cheap_classes_a` `cheap_classes_b` `common_classes_levels` `creature_classes` `creatures_enemies_novalis` `creatures_novalis` `explosion_survey` `gold_bolt_infobot_novalis` `moby_update_novalis` `path_classes` | `classes` | `moby_update::*` (classes, creature, units), `moby_runtime`, `path`, `spline` | ~200 s before; 14 s merged |
+| world | `all_levels_smoke` `cutscene_novalis` `level_ports` `moby_collision_novalis` `novalis_collision` `novalis_world` `sea_levels` `shadow_volume_novalis` `water_levels` | `world` | `particles::*`, `water::*`, `shadows::*`, `collision_query`, `fog_zones`, `point_lights`, `sky_stars`, `cinematic`, `rng`, `ps2v` | ~290 s before; 32 s merged |
+| ui | `gadgets_novalis` `game_state_novalis` `gemlik_generalisation` `help_novalis` `interaction_vendor` `map_levels` `pause_pages_novalis` `reverb_conformance` `sound_conformance` | `ui` | `menus::*`, `map::*`, `hud`, `help`, `game_state`, `inventory`, `movie_player`, `scene_player` | ~8 s |
+| audio | `reverb_conformance` `sound_conformance` (in `ui`), plus `weapons -- --exact hero_guns_novalis::novalis_ryno_salvo_sounds_mix_without_overflow` | in `ui`: `--test ui -- reverb_conformance:: sound_conformance::` | `audio::*` | ~3 s |
 | formats | `golden` `level_overlay_disc` `moby_anim_golden` `moby_collision_disc` `moby_shadow_disc` `occlusion_frames` `scene_coverage` `tfrag_light_golden` (rc-formats) | `formats` | rc-formats lib | ~6 s |
 | data | `lifecycle` `roundtrip` (rc-data) | `data` | rc-data lib | ~3 s |
 | extract (extractor, launcher side) | `synthetic`, `golden` (rc-extract; `golden` is `#[ignore]`, run it by hand with a disc) | `extract` | rc-extract lib and bin | <1 s |
@@ -91,67 +107,87 @@ Wall times are summed from the 2026-09-29 full run.
 | engine (render, input, engine glue) | none | — | the `randcrw` bin's tests | — |
 | trace tools | `hero_replay_selfcheck` `novalis_spawn` `synthetic` (tools/trace) | `trace` | rc-trace lib | ~2 s |
 | repo layout (new crates, dependencies, top-level files) | `guards` (tools/repo-checks) | `guards` | — | <1 s |
-| shared code (§2.3) | the guard set of §2.1: `hero_novalis -- --exact novalis_hero_digest` (digest compare) and `all_levels_smoke` | — | — | ~27 s |
+| shared code (§2.3; area `shared`) | the guard set of §2.1: `hero -- --exact hero_novalis::novalis_hero_digest` (digest compare) and `world -- all_levels_smoke::` | — | — | ~27 s |
 
-A brief with "areas: weapons, classes" today runs
-`cargo test-all --test hero_doom --test hero_gameplay_novalis … --test path_classes`, with the files of both rows.
+A brief with "areas: weapons, classes" runs `cargo xtask test-job weapons classes`: the unit tests plus
+`--test weapons --test classes`. The areas `engine` (unit tests only) and `repo` (`guards`) and the aliases are in
+`cargo xtask help`.
 
 ## 4. A separate canary set?
 
-The user decides. My view: it is not worth a separately maintained list.
-- The unit tests plus the shared-code guard set (digest and `all_levels_smoke`, about 30 s) already are the canary.
-- Run them once more when the coordinator commits a batch of several jobs without the full suite. That catches
-  cross-area breakage that each job's own areas miss.
-- A hand-picked list would drift out of date with every new port.
+No (decided 2026-09-29). The unit tests plus the shared-code guard set (`cargo xtask test-job shared`: digest and
+`all_levels_smoke`, about 30 s) are the canary. The coordinator runs them once more when it commits a batch of
+several jobs without the full suite; that catches cross-area breakage that each job's own areas miss. A hand-picked
+list would drift out of date with every new port.
 
-## 5. Proposed merge groups (next job)
+## 5. The merge (done 2026-09-29)
 
-Today there are 70 integration binaries. The proposal merges them into 11:
+The 70 integration binaries are now 11. Each group is `tests/<group>/main.rs` with one `mod` per former file, so every
+test keeps its name as `<file>::<test_fn>` (the two repeated names, `units_resolve_on_their_levels` and `survey`, stay
+apart). rc-video's `movies.rs` and repo-checks' `guards.rs` were already one binary each and stay where they are.
 
-| Crate | Now | Merged binaries |
+| Crate | Before | Binaries now |
 |---|---|---|
-| rc-game | 53 | 5: `hero`, `weapons`, `classes`, `world`, `ui` (audio stays inside `ui`) |
-| rc-formats | 8 | 1: `formats` (keeps `snapshot/mod.rs` as a module) |
+| rc-game | 53 | 5: `hero`, `weapons`, `classes`, `world`, `ui` (audio is inside `ui`) |
+| rc-formats | 8 | 1: `formats` (with `formats/snapshot/mod.rs`, the snapshot table writer) |
 | rc-data | 2 | 1: `data` |
 | rc-extract | 2 | 1: `extract` |
-| rc-video | 1 | 1: `movies` |
-| repo-checks | 1 | 1: `guards` |
+| rc-video | 1 | 1: `movies` (unchanged) |
+| repo-checks | 1 | 1: `guards` (unchanged) |
 | tools/trace | 3 | 1: `trace` |
 
-Notes for the merge job:
-- **Keep each old file as a module** of its group (`tests/<group>/main.rs` with `mod hero_novalis;` …). The test paths
-  then read `hero_novalis::novalis_hero_digest`.
-  - The shared names cannot clash: `units_resolve_on_their_levels` (4 files) and `survey` (2 files).
-  - Each file's own helpers (`load`, `ports`, `novalis`) stay private to their module.
-- **Speed, with no assertion changes:**
-  - Thirteen tests build `LevelPorts` for all 19 levels (§6), at about 1.1 s per level each.
-  - A per-binary `OnceLock` cache of the 19 `LevelPorts`, and of the parsed overlays, would pay that cost once per
-    binary. I estimate `classes` and `world` would drop from minutes to well under a minute.
-  - `water_inventory_all_levels` rebuilds `water_data(level)` inside its 7-port loop. Hoisting it out of the loop is
-    the single biggest win.
-- **Heat:** a merged binary runs all its tests on every core. If the laptop runs hot, cap it with `RUST_TEST_THREADS=4`.
-- **No global state to watch for:**
-  - No integration test calls `set_var`.
-  - rc-data's life-cycle tests use their own `Lumps` and per-test temp folders.
-  - The rc-formats snapshot writer already holds a mutex.
+What changed besides the moves (no test function or assertion changed):
+- **Per-process caches** in `crates/rc-game/tests/common/mod.rs` (`#[path = "../common/mod.rs"] mod common;` in
+  `classes` and `world`): the parsed level overlays, the per-level `LevelPorts` (keyed by level and external list),
+  and the per-level `LevelWaterData`. The files' own `overlay` / `ports` / `water_data` helpers now return clones of
+  the cached values; four in-body `LevelPorts::from_overlays(overlay(level), overlay, &[])` calls
+  (`gold_bolt_infobot_novalis`, `sea_levels` ×2, `all_levels_smoke::run_level`) call the same cache. Checked: the
+  printed per-level output of `gold_bolt_infobot_novalis` and `sea_levels` is byte-identical before and after, and
+  the NO_IDLE hero digest is identical.
+- **The four no-assert surveys are `#[ignore]`** (§6); `--ignored` still runs them.
+- **Paths:** the fixture `include_str!` of `shadow_volume_novalis` (`../fixtures/`), repo-checks' `KNOWN_OFFENDERS`,
+  and the `tests/<file>.rs` / `--test <file>` references in the sources, docs and README now name the merged paths.
+- **Heat:** a merged binary runs all its tests on every core under `cargo test`; cap it with `RUST_TEST_THREADS=4`.
+  nextest is capped at 8 threads (§8).
+
+Measured (M-series laptop, 2026-09-29, the dev build shared through the aliases):
+
+| | Before | After |
+|---|---|---|
+| Integration binaries | 70 | 11 |
+| `cargo test-all --no-run` after touching `crates/rc-game/src/lib.rs` (warm) | 20.4 s | 10.4 s |
+| The integration binaries on disk (executables + `.dSYM`) | 2.2 GB | 0.46 GB |
+| `du -sh target` | 11 GB | 13 GB, of which 3.2 GB are the 68 stale old binaries and their incremental state (`cargo clean` drops them); about 9.8 GB without them |
+| `classes` + `world` under `cargo test` | ~490 s summed (200 + 290) | 14 s + 32 s |
+| `water_levels::water_inventory_all_levels` | 167 s | 48.5 s (nextest, under full-suite load) |
+| Full suite | ~520 s summed test time (`cargo test`, 87 suites, run one after another) | 139 s wall (`cargo xtask test-full`, nextest, 8 threads) |
+
+Under nextest every test is its own process, so the caches only save the repeated parses inside one test; the
+13 tests that scan all 19 levels each still build their own `LevelPorts` (30–52 s each under load). Under `cargo test`
+they share one build per binary: `classes` and `world` then take 46 s together, so a `cargo test-all` full run is
+estimated at about 90 s with far less CPU (not measured: the job allowed one full run). `--cargo-test` picks it.
 
 ## 6. Slow tests and tests that look wrong
 
-**Slow** (over 10 s each; all others are under ~3 s):
+**Slow** (over 10 s each; all others are under ~3 s). "Before": the old binaries under `cargo test`. "Nextest": the
+2026-09-29 full run after the merge, one process per test with 8 running at once, so the times include contention;
+under `cargo test` the merged binaries share one `LevelPorts` build per level (§5).
 
-| Test | Measured |
-|---|---|
-| `water_levels::water_inventory_all_levels` | 167 s |
-| `level_ports::every_level_runs_the_ports_its_class_table_names` | ~45 s |
-| `breakables_levels::every_placed_breakable_breaks_on_its_level` and `every_breakable_class_resolves_its_data_on_every_level` | ~25–48 s |
-| the four `units_resolve_on_their_levels` | 22–24 s each |
-| `common_classes_levels::common_classes_resolve_on_their_levels` | ~25 s |
-| `gold_bolt_infobot_novalis::registered_on_the_levels_with_identical_code` | ~22 s |
-| `sea_levels::sea_inventory_all_levels` and `sea_ports_run_on_their_levels` | ~20–44 s |
-| `all_levels_smoke::all_levels_load_spawn_and_tick` | ~26 s |
-| `water_levels::managers_run_on_their_levels` | 12.7 s |
+| Test | Before | Nextest |
+|---|---|---|
+| `water_levels::water_inventory_all_levels` | 167 s | 48.5 s (`water_data` cached per level) |
+| `level_ports::every_level_runs_the_ports_its_class_table_names` | ~45 s | 34.9 s |
+| `breakables_levels::every_placed_breakable_breaks_on_its_level` and `every_breakable_class_resolves_its_data_on_every_level` | ~25–48 s | 40.0 s, 39.3 s |
+| the four `units_resolve_on_their_levels` | 22–24 s each | 37–39 s each |
+| `common_classes_levels::common_classes_resolve_on_their_levels` | ~25 s | 39.2 s |
+| `gold_bolt_infobot_novalis::registered_on_the_levels_with_identical_code` | ~22 s | 36.9 s |
+| `sea_levels::sea_inventory_all_levels` and `sea_ports_run_on_their_levels` | ~20–44 s | 52.1 s, 30.0 s |
+| `all_levels_smoke::all_levels_load_spawn_and_tick` | ~26 s | 40.0 s |
+| `water_levels::managers_run_on_their_levels` | 12.7 s | 21.7 s |
 
-**Look wrong or weak.** No flaky test was seen: every test is headless, and the determinism checks pass run to run.
+**Look wrong or weak.** No flaky or order-dependent test was seen: every test is headless, the determinism checks pass
+run to run, and the merged binaries (all tests in one process under `cargo test`) and nextest (one process per test)
+give the same results.
 - `breakables_levels::novalis_breaks_every_breakable_kind`: `assert!((4..=7).contains(&got) || got > 0)`. The range
   half is vacuous; only `got > 0` is checked.
 - `hero_surfaces::novalis_flow_surface_is_the_sinking_floor`: the doc says the flow class 679 "is not ported". It is,
@@ -159,7 +195,7 @@ Notes for the merge job:
 - `guards::top_level_holds_only_the_agreed_folders` fails while a user screen recording sits in the repo root. This is
   expected, but it turns every full run red.
 
-**Surveys that assert nothing but run every time** (candidates for `#[ignore]`; kept as they are):
+**Surveys that assert nothing** (`#[ignore]` since 2026-09-29; run them with `--ignored --nocapture`):
 - `creature_classes::survey_pvars`
 - `creature_classes::survey_tables`
 - `gemlik_generalisation::gemlik_content_gap` (it builds Gemlik's ports, ~1 s)
@@ -200,13 +236,13 @@ Each row carries four fields.
 | | Before | After |
 |---|---|---|
 | Tests (`#[test]` fns) | 1188 | 1186 |
-| Integration binaries | 70 | 70 (the merge is the next job) |
+| Integration binaries | 70 | 70; 11 after the merge job (§5) |
 
 | Crate | Unit before → after | Integration before → after | Binaries | `#[ignore]` |
 |---|---|---|---|---|
-| rc-game | 564 → 564 | 286 → 284 | 53 | 17 |
+| rc-game | 564 → 564 | 286 → 284 | 53 (5 after the merge) | 17 (20 after the merge job: 3 surveys) |
 | rc-formats | 147 → 147 | 34 → 34 | 8 | 0 |
-| rc-engine | 67 → 67 | 0 | 0 | 0 |
+| rc-engine | 67 → 67 | 0 | 0 | 0 (1 after the merge job: 1 survey) |
 | rc-data | 5 → 5 | 6 → 6 | 2 | 0 |
 | rc-extract | 24 → 24 | 5 → 5 | 2 | 3 |
 | rc-video | 8 → 8 | 3 → 3 | 1 | 2 |
@@ -226,7 +262,7 @@ Pin kinds after the drops (1186 tests):
 | determinism | 9 (plus 84 behaviour tests that also assert it) |
 | regression | 7 |
 | repo guard | 5 |
-| survey (no assert) | 4 |
+| survey (no assert) | 4 (ignored since the merge job: 26 ignored in all) |
 | dev helper | 2 |
 
 ### 7.3 Dropped (2)
@@ -295,8 +331,8 @@ Pin kinds after the drops (1186 tests):
 | `common_classes_levels::floor_switches_other` | game-checked: floor switches other (disc data) | medium | classes | keep |
 | `creature_classes::units_resolve_on_their_levels` | exists/resolves: Every unit's classes resolve to the unit on its levels (and to nothing else), with the census's instance counts. (all levels) | slow (23.5 s) | classes | keep |
 | `creature_classes::reaction_tables_resolve` | exists/resolves: The reaction tables reversed on other levels are found by code identity on every level that has them. (all levels) | medium (2.3 s) | classes | keep |
-| `creature_classes::survey_pvars` | survey (no assert): The pvars of the created instances of `oc` on `level`, as words (survey). (disc data) | medium | classes | keep; survey with no assert that runs every time (suggest `#[ignore]`) |
-| `creature_classes::survey_tables` | survey (no assert): The class-table entries (update, reaction table and its six slots) of the unit classes (survey). (disc data) | medium | classes | keep; survey with no assert that runs every time (suggest `#[ignore]`) |
+| `creature_classes::survey_pvars` | survey (no assert): The pvars of the created instances of `oc` on `level`, as words (survey). (disc data) | medium | classes | ignored (survey, 2026-09-29); run with `--ignored` |
+| `creature_classes::survey_tables` | survey (no assert): The class-table entries (update, reaction table and its six slots) of the unit classes (survey). (disc data) | medium | classes | ignored (survey, 2026-09-29); run with `--ignored` |
 | `creature_classes::horny_toads_wander_around_home_on_the_ground` | game-checked: horny toads wander around home on the ground (disc data) | medium (2.6 s) | classes | keep |
 | `creature_classes::horny_toad_goes_for_ratchet_and_bites` | game-checked: horny toad goes for ratchet and bites (disc data) | medium | classes | keep |
 | `creature_classes::horny_toad_bite_run_is_deterministic` | determinism: horny toad bite run is deterministic (disc data) | medium (2.2 s) | classes | keep |
@@ -334,7 +370,7 @@ Pin kinds after the drops (1186 tests):
 | `gemlik_generalisation::gemlik_class_table_runs_the_body_pieces` | exists/resolves: Gemlik (13) body pieces 1733–1735, 1801–1804 run FxGroupUpdate (L13) | medium | ui | **drop**: duplicate of `level_ports::every_level_runs_the_ports_its_class_table_names` (same seven classes, same `FxPiece` assert on L13) |
 | `gemlik_generalisation::gemlik_pause_menu_is_novalis_tree_at_gemlik_addresses` | game-checked: gemlik pause menu is novalis tree at gemlik addresses [`0x161fe0`] (L01+L13) | medium | ui | keep |
 | `gemlik_generalisation::every_level_loads_the_pause_menu` | exists/resolves: every level loads the pause menu (all levels) | medium | ui | keep |
-| `gemlik_generalisation::gemlik_content_gap` | survey (no assert): Gemlik's content gap (a queue for later, not a check) (L13) | medium | ui | keep; "not a check" (its doc) but runs every time and builds L13 ports (suggest `#[ignore]`) |
+| `gemlik_generalisation::gemlik_content_gap` | survey (no assert): Gemlik's content gap (a queue for later, not a check) (L13) | medium | ui | ignored (survey, 2026-09-29); run with `--ignored` |
 | `gold_bolt_infobot_novalis::gold_bolt_pickup_orbit_camera` | game-checked: gold bolt pickup orbit camera (disc data) | medium | classes | keep |
 | `gold_bolt_infobot_novalis::gold_bolt_pickup_cuboid_camera` | game-checked: gold bolt pickup cuboid camera (disc data) | fast | classes | keep |
 | `gold_bolt_infobot_novalis::gold_bolt_is_deterministic` | determinism: gold bolt is deterministic (disc data) | fast | classes | keep |
@@ -345,7 +381,7 @@ Pin kinds after the drops (1186 tests):
 | `help_novalis::log_table_on_every_level` | exists/resolves: log table on every level (all levels) | medium | ui | keep |
 | `help_novalis::director_look_and_map_hints_in_its_cuboids` | game-checked: director look and map hints in its cuboids (disc data) | fast | ui | keep |
 | `help_novalis::infobot_hint_box_on_the_level_text` | game-checked: infobot hint box on the level text (disc data) | fast | ui | keep |
-| `help_novalis::print_cuboids` | survey (ignored): Prints the director's cuboid centres (`cargo test -p rc-game --test help_novalis print_cuboids -- --ignored… (L01) | ignored | ui | keep |
+| `help_novalis::print_cuboids` | survey (ignored): Prints the director's cuboid centres (`cargo test-all --test ui help_novalis::print_cuboids -- --ignored… (L01) | ignored | ui | keep |
 | `hero_boots_grind::spline_follower_on_every_levels_grind_paths` | game-checked: The data the spline follower relies on, on every level (all levels) | fast | hero | keep |
 | `hero_boots_grind::oltanis_grind_jump_and_rail_switch` | game-checked: Oltanis (level 14) (L14) | fast | hero | keep |
 | `hero_boots_grind::kalebo_long_grind` | game-checked: Kalebo III (level 16) (L16) + determinism | fast | hero | keep |
@@ -525,7 +561,7 @@ Pin kinds after the drops (1186 tests):
 | `shadow_volume_novalis::directions_and_slab_match_the_game` | game-checked: Directions 0 and 1 from Ratchet's light (light word 0 [`0x1af000`, `0x1af010`] (disc data) | fast | world | keep |
 | `sound_conformance::every_animation_sound_and_footstep_resolves_and_plays` | exists/resolves: every animation sound and footstep resolves and plays [`0x15f5f0`] (all levels) | medium | ui | keep |
 | `sound_conformance::footstep_constants_in_every_overlay` | exists/resolves: The footsteps' code constants [`0x15f574`] (all levels) | fast | ui | keep |
-| `water_levels::water_inventory_all_levels` | game-checked: water inventory all levels (all levels) | slow (167 s) | world | keep; slow outlier: `water_data(level)` is rebuilt inside the 7-port × 19-level loop |
+| `water_levels::water_inventory_all_levels` | game-checked: water inventory all levels (all levels) | slow (167 s before the merge job) | world | keep; `water_data` is now cached per level (§5) |
 | `water_levels::managers_run_on_their_levels` | game-checked: Runs every level with a patch manager for 400 ticks with the camera looking at the manager's patch 0 (all levels) | slow (12.7 s) | world | keep |
 | `water_levels::novalis_751_port_is_the_ripple_module` | game-checked: The 751 port against the ripple module alone on the same stream (L01) | fast (0.9 s) | world | keep |
 | `water_levels::rilgar_swim_and_wade` | game-checked: Rilgar (05) (L05) | medium (7.4 s) | world | keep |
@@ -1322,7 +1358,7 @@ Pin kinds after the drops (1186 tests):
 | `moby_lod::shine_alpha` | port logic: shine alpha | fast | lib:engine | keep |
 | `moby_lod::shine_basis_straight_ahead_is_the_camera_rotation` | port logic: shine basis straight ahead is the camera rotation | fast | lib:engine | keep |
 | `moby_lod::low_lod_uses_the_first_low_joint_count_slots` | game-checked: The low-LOD joint mapping (all levels) | fast | lib:engine | keep |
-| `moby_lod::novalis_metal_classes` | survey (no assert): Novalis metal classes, their packets' textures (−2 chrome / −3 glass) and the TEX1/CLAMP words of their ad-gifs, for… (L01) | fast | lib:engine | keep; survey with no assert (suggest `#[ignore]`) |
+| `moby_lod::novalis_metal_classes` | survey (no assert): Novalis metal classes, their packets' textures (−2 chrome / −3 glass) and the TEX1/CLAMP words of their ad-gifs, for… (L01) | fast | lib:engine | ignored (survey, 2026-09-29); run with `--ignored` |
 | `moby_render::moby_blend_pick_and_draws` | port logic: MobyProc's per-moby choice | fast | lib:engine | keep |
 | `moby_render::point_light_merge_weights` | port logic: The point-light merge | fast | lib:engine | keep |
 | `moby_render::glow_parts_blend_their_soft_edge_on_display_bytes` | port logic: A glow part's soft edge (the TEST_1 fail half) blends on display bytes | fast | lib:engine | keep |
@@ -1503,3 +1539,44 @@ Pin kinds after the drops (1186 tests):
 | `regen::never_replaces_the_repo_home_or_root` | port logic: never replaces the repo home or root (disc data) | fast | lib:xtask | keep |
 | `regen::staging_sits_on_the_same_filesystem` | port logic: staging sits on the same filesystem (disc data) | fast | lib:xtask | keep |
 | `regen::formats_numbers` | port logic: formats numbers | fast | lib:xtask | keep |
+
+## 8. cargo-nextest and the xtask tier commands
+
+**Install** (once): `cargo install cargo-nextest --locked` (0.9.146 on 2026-09-29). It lands in `~/.cargo/bin`
+(`CARGO_HOME`), which is not on this machine's `PATH`; `cargo nextest …` still works because cargo looks in
+`$CARGO_HOME/bin` for subcommands. Only calling `cargo-nextest` directly needs the folder on `PATH` (fish:
+`fish_add_path ~/.cargo/bin`; zsh: `export PATH="$HOME/.cargo/bin:$PATH"` in `~/.zprofile`).
+
+**By hand:** `RC_AUDIO=0 cargo nextest run --workspace --features rc-engine/dev [--lib --bins | --test <binary>] [-E
+<filterset>]`. The flags are those of the `test-all` alias, so nextest reuses the dev (dynamic) Bevy build.
+
+**Settings:** `.config/nextest.toml`, profile `default`:
+- `fail-fast = false`;
+- a test is flagged SLOW after 30 s (and every 30 s after); nothing is killed;
+- `test-threads = 8`, the same cap as the build's `jobs = 8`;
+- the final summary lists the slow and failed tests again;
+- test group `loader-snapshots` (one at a time): the rc-formats `golden::` tests, which rewrite one shared file
+  (`crates/rc-formats/data/loader_snapshots.tsv`) under `RC_SNAPSHOT_WRITE=1`. Under `cargo test` a mutex serialises
+  them; nextest's one process per test defeats the mutex. No other test shares a file or an environment variable:
+  the temp folders carry the process id and the test name, no test calls `set_var`, and the `RC_*` variables are
+  only read.
+
+**Doctests:** none (every lib's `Doc-tests` runs 0), so the nextest runs miss nothing. When one appears, add
+`cargo test-all --doc` to `test-full` (`full_steps` in `tools/xtask/src/test.rs`).
+
+**Determinism:** the shared guard set (`cargo xtask test-job shared`, 851 tests plus the digest) was run twice under
+nextest on 2026-09-29: all passed both times, and the two NO_IDLE digests are byte-identical to each other and to
+the baseline taken before the merge.
+
+**The commands** (`cargo xtask help`; `tools/xtask/README.md`):
+
+| Command | Runs |
+|---|---|
+| `cargo xtask test-quick [crate]` | the unit tests (`--lib --bins`); with nextest a crate name narrows it (`-E package(<crate>)`) |
+| `cargo xtask test-job <area…>` | the unit tests and the areas' binaries of §3 in one nextest run (a filterset for the partial areas `audio` and `shared`); with `shared`, then the digest compare |
+| `cargo xtask test-full` | the whole suite with `--no-fail-fast`, then the digest compared with the baseline (a mismatch fails) |
+| `cargo xtask digest-baseline` | the only writer of the baseline; prints what changed. Run it only when a human has decided the digest change is intended |
+
+Each sets `RC_AUDIO=0`; `--cargo-test` uses `cargo test-all` instead of nextest; arguments after `--` go to nextest
+(or to the test binaries under `cargo test`). The runner choice matters for the level scans: see the end of §5.
+

@@ -1,6 +1,6 @@
 //! Level textures: 8-bit indexed pixels with a 256-entry RGBA32 CLUT in CSM1
 //! order. Spec: docs/formats/textures_rac1.md (§3, §4, §9, §12, §12b).
-//! Ported from the retired C++ reference extractor (git 2230812); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! Ported from the retired C++ reference extractor (git 2230812); `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 
 use crate::buf::{invalid, Buf, Result};
 use crate::level::{LevelCore, ShrubBillboardInfo};

@@ -1,7 +1,7 @@
 //! The port's hero, headless, driven by a recorded trace's pad bytes (`rc-trace replay-hero`). Doc:
 //! docs/plan/hero_feel_pass.md.
 //!
-//! The run is the hero-only harness of rc-game's pack tests (`tests/hero_packs_novalis.rs`) on the recorded level:
+//! The run is the hero-only harness of rc-game's pack tests (`tests/hero/hero_packs_novalis.rs`) on the recorded level:
 //! the level's collision, Ratchet (his class and his own sequence table), the back items (packs 607 / 608 / 609 and
 //! Clank 601 when the level has them), the follow camera, one `rc_game::tick::Game` ticked with the recorded pad
 //! bytes through `Game::tick` (the port's normal input path: `PadState::update` → the hero → the camera). **No

@@ -1,6 +1,6 @@
 //! Shrub (small instanced prop) classes and gameplay shrub instances. Spec: docs/formats/shrub_sky_rac1.md
 //! part 1. Ported from the retired C++ reference extractor (git 2230812;
-//! `parse_shrub_class`, `shrub_triangles`, `parse_shrub_instances`); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! `parse_shrub_class`, `shrub_triangles`, `parse_shrub_instances`); `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! The packet semantics follow the VU1 shrub program 56467 (EE 0x101768, uploaded by `ShrubProc`,
 //! level01 0x29cdf0; spec 1.3b), not only Wrench:

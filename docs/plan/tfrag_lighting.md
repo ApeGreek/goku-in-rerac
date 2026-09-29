@@ -2,7 +2,7 @@
 
 Port: `crates/rc-formats/src/tfrag_light.rs` (math, parsers, unit tests),
 `crates/rc-engine/src/tfrag_light.rs` (load-time glue, `RC_NO_LIGHT=1` escape),
-`crates/rc-formats/tests/tfrag_light_golden.rs` (data assumptions, all 19 levels).
+`crates/rc-formats/tests/formats/tfrag_light_golden.rs` (data assumptions, all 19 levels).
 Format table for the per-vertex record: `docs/formats/tfrag_rac1.md` §4.1.
 
 Confidence tags: **[verified]** read from the disassembly and/or checked on the retail data;

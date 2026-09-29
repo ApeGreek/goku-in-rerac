@@ -24,10 +24,10 @@ pub const PERSONAL_PATTERNS: &[&str] = &[".p2s", "~/PS2", "PS2/ratchet1", "work/
 /// entry when it is fixed (the guard fails on a stale entry).
 pub const KNOWN_OFFENDERS: &[(&str, &str)] = &[
     // The disc golden tests fall back to the ISO in the personal folder when RC_ISO is unset.
-    ("crates/rc-formats/tests/golden.rs", "Needs the user's disc image (`RC_ISO`, else `~/PS2/ratchet1/"),
-    ("crates/rc-formats/tests/golden.rs", ".join(\"PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso\")"),
-    ("crates/rc-game/tests/game_state_novalis.rs", ".join(\"PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso\")"),
-    ("crates/rc-extract/tests/golden.rs", "RC_ISO=~/PS2/ratchet1/...iso"),
+    ("crates/rc-formats/tests/formats/golden.rs", "Needs the user's disc image (`RC_ISO`, else `~/PS2/ratchet1/"),
+    ("crates/rc-formats/tests/formats/golden.rs", ".join(\"PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso\")"),
+    ("crates/rc-game/tests/ui/game_state_novalis.rs", ".join(\"PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso\")"),
+    ("crates/rc-extract/tests/extract/golden.rs", "RC_ISO=~/PS2/ratchet1/...iso"),
 ];
 
 /// Lexical normalisation (`a/b/../c` → `a/c`), relative to the repo root.

@@ -1,6 +1,6 @@
 //! Level collision mesh. Spec: docs/formats/collision_rac1.md; runtime queries:
 //! docs/plan/collision_queries.md. Ported from the retired C++ reference
-//! extractor (git 2230812; `parse_collision`, `collision_triangles`); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! extractor (git 2230812; `parse_collision`, `collision_triangles`); `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! RAC1 has one collision block per level, at `LevelCoreHeader::collision` in the decompressed
 //! core data. It holds the baked world-space mesh of all static geometry (tfrags plus whatever

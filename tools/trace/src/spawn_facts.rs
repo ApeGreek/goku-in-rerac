@@ -3,7 +3,7 @@
 //! without the user's savestate or its 32 MiB EE dump. Numbers only, no raw memory: counters, the fog and
 //! underwater look, the RAM light bank, per-chunk and per-palette FNV-1a hashes, and the moby table's
 //! slot / class / spawn id / state columns. The committed fixture is `tools/trace/tests/fixtures/novalis_spawn.tsv`;
-//! `tests/novalis_spawn.rs` compares the port (needing only `extracted/`) with it.
+//! `tests/trace/novalis_spawn.rs` compares the port (needing only `extracted/`) with it.
 //!
 //! Every check here mirrors one in [`crate::novalis_spawn`] and produces the same tally name; `distill-spawn`
 //! runs both on the dump it distils and refuses to write a fixture whose tallies disagree. Tie and shrub

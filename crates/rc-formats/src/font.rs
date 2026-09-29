@@ -1,5 +1,5 @@
 //! The game's three bitmap fonts: glyph tables in the level overlay and the FX textures they index.
-//! Spec: docs/plan/hud_text.md §3.1. Snapshot-tested in `tests/golden.rs` (HUD test).
+//! Spec: docs/plan/hud_text.md §3.1. Snapshot-tested in `tests/formats/golden.rs` (HUD test).
 //!
 //! A font is an FX texture (`GetEffectTex__Fii(n)`, level01 0x21ae98: n = 1 regular, 2 small, 3 large; 256×128
 //! PSMT8, decoded by [`crate::particle_tex`]) plus a 232-entry [`Glyph`] table indexed by the byte value.

@@ -80,7 +80,7 @@ CSV, `dump-ee` default `work/trace/<name>_ee.bin`, `replay-hero` output). `--sta
 `~/PS2/ratchet1/savestates/NAME.p2s`. New commands: `save-state NAME` (keep the newest PCSX2 state) and
 `distill-spawn` (below).
 
-**The spawn test.** `tests/novalis_spawn.rs` used to read `extracted/traces/novalis_spawn_ee.bin`, a dump of the user's
+**The spawn test.** `tests/trace/novalis_spawn.rs` used to read `extracted/traces/novalis_spawn_ee.bin`, a dump of the user's
 savestate. `distill-spawn` now reads such a dump once and writes `tests/fixtures/novalis_spawn.tsv` (176 KB of
 numbers: counters, fog and underwater look, RAM light bank, per-chunk FNV-1a hashes, the 1022 moby slots' slot /
 class / spawn id / state / mode / group / distances / load-pass draws, per-palette hashes of 1508 ties and 1208
@@ -116,9 +116,9 @@ Deferred because they need product changes (hard limit of the reorg) or a Ghidra
    data.
 5. **Engine captures default to `work/captures/`** (product, `rc-engine` `RC_SCREENSHOT`): a relative or bare name
    lands there instead of the working directory.
-6. **The disc golden tests' ISO fallback** (product tests): `crates/rc-formats/tests/golden.rs`
-   (`disc_matches_extracted_for_every_level`, doc line and fallback line), `crates/rc-game/tests/game_state_novalis.rs`
-   (`disc_save_game_lump_matches_extracted`) and the example command in `crates/rc-extract/tests/golden.rs` name
+6. **The disc golden tests' ISO fallback** (product tests): `crates/rc-formats/tests/formats/golden.rs`
+   (`disc_matches_extracted_for_every_level`, doc line and fallback line), `crates/rc-game/tests/ui/game_state_novalis.rs`
+   (`disc_save_game_lump_matches_extracted`) and the example command in `crates/rc-extract/tests/extract/golden.rs` name
    `~/PS2/ratchet1/<disc>.iso`. Make them `RC_ISO`-only, then drop the four `KNOWN_OFFENDERS` entries in
    `tools/repo-checks/src/lib.rs`.
 7. **Merge the three apply scripts** (`apply_boot_names.py`, `apply_overlay_names.py`, `apply_doc_names.py`) into

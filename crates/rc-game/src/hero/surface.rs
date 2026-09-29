@@ -27,7 +27,7 @@
 //!
 //! **Per level.** Each overlay compiles its own reaction with only the rules of the surfaces that level can
 //! meet ([`LEVEL_RULES`], read from the 18 distinct functions: level 3 shares level 1's). The port implements the
-//! superset once and switches the rules per level with that table. The test `tests/hero_surfaces.rs` checks the
+//! superset once and switches the rules per level with that table. The test `tests/hero/hero_surfaces.rs` checks the
 //! data: every surface id a level's collision (world mesh and moby class collision) uses is handled by that
 //! level's own rules or by no level at all (0xa, 0xf..0x1e never are), so the per-level switch only matters
 //! for data a level does not have.

@@ -151,7 +151,7 @@ copied.**
 - `crates/rc-formats/src/disc.rs` is `Disc`. It reads the ToC at sector 1500, the level headers, the boot ELF via
   `SYSTEM.CNF`, and `level(id) → LevelFiles` (11 level-group members). It also provides `level_stream_lumps`
   (music, bindata, speech, scene), `read_lump`, `scene_region`, `scene_speech` and `save_game_lump`.
-  `tests/golden.rs::disc_matches_extracted_for_every_level` proves the level-group bytes identical to the Tier 0
+  `tests/formats/golden.rs::disc_matches_extracted_for_every_level` proves the level-group bytes identical to the Tier 0
   archive. **Added by Stage 1a:** `RAC1_GLOBAL_FIELDS` + `Disc::global_lumps` (port of the retired C++ reader's
   `rac1_global_fields`/`global_lumps`, including the duplicate-name suffix rule) and `Disc::archive_files` (the whole Tier 0 file
   plan as byte ranges of the image). `IsoImage::volume_sectors` exposes the PVD size (truncation check). Build
@@ -379,10 +379,10 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
 
   A cold cache (first start after deleting it) loads level 01 up to the window in 191 ms, writing its 5 lumps.
   `prepare` for all 19 levels takes 0.2 s (release, 4 workers); a full `extract` including it 4.7 s.
-- **Fidelity checks:** `crates/rc-data/tests/roundtrip.rs` (all 133 lumps of the 19 levels: lazily built, re-read by
+- **Fidelity checks:** `crates/rc-data/tests/data/roundtrip.rs` (all 133 lumps of the 19 levels: lazily built, re-read by
   a fresh store, `read_lump` and `prepare`'s check all equal `wad::decompress` of Tier 0, whose output the rc-formats golden test checks against the committed snapshot
   hashes);
-  `tests/lifecycle.rs` (stale stamp, corrupt lump, unwritable cache, once per process); `RC_SCENE=0
+  `tests/data/lifecycle.rs` (stale stamp, corrupt lump, unwritable cache, once per process); `RC_SCENE=0
   RC_SCREENSHOT_FRAME=300` on Novalis byte-identical before and after, with a warm and with a cold cache.
 - **For v2+ (E2 and later):** add a kind (`kind.<name> = <version>` in the stamp, files under `<kind>/`), keep
   Tier 0 paths as the key, and add its round-trip test. Tier 2 exports are a separate tree (not under `cache/`).

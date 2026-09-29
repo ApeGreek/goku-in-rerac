@@ -571,8 +571,8 @@ widget: no second page system), `rc-game/src/audio/scene.rs` (`AudioSystem::menu
 `pause_groups` / `continue_groups`), `rc-game/src/audio.rs` (`sound_update_with`), `rc-game/src/menus/mod.rs`
 (`MenuSound::event`), `rc-engine/src/menu_render.rs` (the calls, `menu_sound_frame`, `MenuDraw::Image` → the HUD atlas
 slots of `rc-engine/src/hud_images.rs`), `rc-formats/src/pif.rs` (the pictures). Tests:
-`rc-game/tests/pause_pages_novalis.rs` (9 tests, disc data), `audio::scene::tests::menu_open_holds_music_and_world_sounds_and_plays_menu_sounds`,
-the page-machine tests in `menus/pause/tests.rs`, `tests/gadgets_novalis.rs`.
+`rc-game/tests/ui/pause_pages_novalis.rs` (9 tests, disc data), `audio::scene::tests::menu_open_holds_music_and_world_sounds_and_plays_menu_sounds`,
+the page-machine tests in `menus/pause/tests.rs`, `tests/ui/gadgets_novalis.rs`.
 
 **What the game does to the audio** (the play-test finding "the music keeps playing"). `EnterMenuMode` 0x28bf50 calls
 `snd_PauseAllSoundsInGroup(0x1d)` (boot 0x12e3e8: 989snd groups 0, 2, 3, 4 hold where they are), `music_Pause(0)` and
@@ -667,7 +667,7 @@ Code: `rc-game/src/map.rs` (files, masks, transforms, zones, the fog writer), `r
 per-level reveal predicates), `rc-game/src/menus/pause/map_page.rs` (the page: compose, pan / zoom, draw, globe,
 legend, missions' status, markers), the engine's `gameplay.rs` (`map_setup`, `map_file`, `map_tick`),
 `menu_render.rs` (the open / close hand-over, the Select / R3 rule, the map-used record, the palettes and hooks),
-`scene_render.rs` (the save's pack). Tests: `rc-game/tests/map_levels.rs` (6, disc data, all 19 levels),
+`scene_render.rs` (the save's pack). Tests: `rc-game/tests/ui/map_levels.rs` (6, disc data, all 19 levels),
 `map::predicates::tests` (53 predicates against the game's own code), `menus::pause::map_page::tests` (3).
 Frames: `scratchpad/helpmap/frames/{map01,map05,map13,mapfog,mapomatic}_{a,b}.png`.
 

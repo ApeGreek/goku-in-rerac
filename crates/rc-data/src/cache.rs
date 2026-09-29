@@ -1,6 +1,6 @@
 //! The Tier 1 engine cache on disk, version 1: every WAD lump the engine reads, decompressed once by the same
 //! golden-tested `rc_formats::wad::decompress` the engine used to call on every load. Nothing is converted, so the
-//! cached bytes are exactly `wad::decompress(Tier 0 file)` (round-trip test `tests/roundtrip.rs`, all 19 levels).
+//! cached bytes are exactly `wad::decompress(Tier 0 file)` (round-trip test `tests/data/roundtrip.rs`, all 19 levels).
 //!
 //! Layout under the data folder (docs/plan/launcher_extractor.md §6.2 and "Tier 1 as built"):
 //! ```text

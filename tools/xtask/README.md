@@ -9,6 +9,28 @@ dependencies: it shells out to `cargo` and to `tools/package/package.sh`, so bui
 | `cargo xtask help` | Lists the commands (also `cargo xtask` alone). |
 | `cargo xtask regen-data` | Rebuilds the dev game data folder `extracted/` from your disc image (below). |
 | `cargo xtask package [--no-build]` | Runs `tools/package/package.sh` with the same arguments (`docs/workflows/release.md`). |
+| `cargo xtask test-quick [crate]` | Unit tests of every crate (`cargo test-all --lib --bins`); with nextest, a crate name runs only its. |
+| `cargo xtask test-job <area…>` | A job's test tier: the unit tests plus each area's integration binaries (below). |
+| `cargo xtask test-full` | The full suite, then the NO_IDLE hero digest compared with the baseline (a mismatch fails; never rewritten). |
+| `cargo xtask digest-baseline` | The only writer of the digest baseline `work/test-results/hero_digest_no_idle.txt`; prints what changed. Only when a digest change is intended. |
+
+## The test commands
+
+The tiers of `docs/workflows/testing.md` §2 (the doc has the policy; this is the mechanics). Every test command:
+* sets `RC_AUDIO=0` and runs from the repo root;
+* uses cargo-nextest when `cargo nextest` answers (settings: `.config/nextest.toml`), passing the flags of the
+  `test-all` alias (`--workspace --features rc-engine/dev`) so the dev Bevy build is shared; else `cargo test-all`.
+  `--cargo-test` forces `cargo test-all`;
+* passes the arguments after `--` on: to nextest (e.g. `--no-capture`), or to the test binaries under `cargo test`;
+* runs every step even when one fails, and exits 1 if any failed.
+
+The areas of `test-job` are the table `AREAS` in `src/test.rs` (testing.md §3 documents it): `hero`, `weapons`,
+`classes` (`creatures`, `mobys`), `world` (`levels`, `collision`, `water`), `ui` (`menus`, `hud`, `map`, `save`,
+`vendor`), `audio` (the two conformance modules of `ui` and one Ryno test of `weapons`), `formats`, `data`, `extract`,
+`video` (`movies`), `engine` (`render`, `input`; unit tests only), `trace`, `repo` (`guards`, `layout`), and `shared`:
+the all-levels smoke plus the NO_IDLE hero digest, written to `work/test-results/digest_job.txt` and compared byte
+for byte with the baseline (missing baseline: the step fails and says to run `digest-baseline`). With nextest a job is
+one run with a filterset; with `cargo test` it is one run for the whole binaries plus one per filtered part.
 
 ## `regen-data`
 
@@ -49,5 +71,5 @@ It needs free space for the new data (about 4.4 GiB) while the old folder still 
 
 Exit codes: 0 done (or `--check`), 1 refused or failed (the old folder unchanged), 2 bad arguments or no disc image.
 
-**Tests:** `cargo test -p xtask` (argument parsing, the leftover classifier against the committed Tier 0 table, the
+**Tests:** `cargo xtask test-quick xtask` (argument parsing, the test-tier table and its steps, the leftover classifier against the committed Tier 0 table, the
 safety guard, staging paths). End to end it was run against scratch folders only, with `--data-dir`.

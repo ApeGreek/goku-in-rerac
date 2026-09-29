@@ -184,7 +184,7 @@ overlay bytes (it is not a function in the Ghidra project).
   `crate::hud_render::HudFeed` carries the prompt and the vendor's HUD requests. `RC_GIVE_BOLTS=<n>` (debug) sets the
   bolts at the start; `RC_INTERACT_TRACE=1` logs prompt owners, hand-offs, purchases and sounds.
 * Tests: `interact::tests` (lease, vendor and talk rules, wrap, gold bolts, node parse), `menus::vendor::tests` (list,
-  prices, camera), `hud::tests::prompt_slot_12_shows_while_requested`, `crates/rc-game/tests/interaction_vendor.rs`
+  prices, camera), `hud::tests::prompt_slot_12_shows_while_requested`, `crates/rc-game/tests/ui/interaction_vendor.rs`
   (Novalis headless: prompt → △ → mode 5 → ✕ ✕ buys the Pyrocitor → △ → back, bolts 5000 → 2500, owned, quick
   select [10, 16], stock byte 0x50; determinism).
 
@@ -214,7 +214,7 @@ no `RC_SCENE`: tick 1 the worker's auto node 0 hands off scene 0 (queued behind 
 (landmark 3) is written; scene 5 plays (1532 frames), then scene 0 (2318 ticks, actors 0 / 774 / 10 / 750, 2342
 frames); at its end crate::scene_render places Ratchet and signals the dialogue, which advances to node 2 (bolts ≥ 500)
 and shows "△ Buy Infobot for 500 bolts" in slot 12 (frame 3960). With `RC_SCENE=0` the same hand-off is logged and
-dropped. Headless: `crates/rc-game/tests/interaction_vendor.rs`. `novalis_hero_digest` byte-identical (2800 lines).
+dropped. Headless: `crates/rc-game/tests/ui/interaction_vendor.rs`. `novalis_hero_digest` byte-identical (2800 lines).
 
 ## 8. Racing and other hand-offs (what each needs)
 
@@ -429,7 +429,7 @@ Timing (NTSC frames): open = 1 (△ tick) + 4 (FadeToBlack) + 40 = 45 frames to 
 * **Measured after the rebuild** (realtime run, `RC_INTERACT_TRACE=1`, wall clock from the △ tick): substate 0 from
   63 ms (the 4 fade frames), the menu at 747 ms (frame 144 = △ + 44; the game: 45 frames incl. the △ frame = 733 ms);
   △ in the menu → mode 0 in 48 frames (≈ 800 ms; substate 2 at +7, the exit at +47). Headless
-  (`tests/interaction_vendor.rs`): open → menu 44 frames, △ → mode 0 48 frames, with the world ticking on exactly
+  (`tests/ui/interaction_vendor.rs`): open → menu 44 frames, △ → mode 0 48 frames, with the world ticking on exactly
   the 40 + 40 frames of substates 0 / 2.
 
 ## 10. The vendor in the port (rebuild, 2026-09-28)

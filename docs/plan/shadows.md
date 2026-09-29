@@ -326,7 +326,7 @@ At most 3 at once (the concurrency cap). Ownership lists exclude files other run
    record). The port's `moby_anim::evaluate_chains` (the joints' frames in model space) matches the game's list to **3.1e-5 units** on the 11
    records whose joints are not under the moby's runtime joint-modifier list (+0x64: the idle joint records and the head / torso
    manipulators, which neither the port's evaluator nor its drawn pose applies); the 10 records under it (head, ears, arms) differ by up to
-   0.18 units, exactly as the port's drawn Ratchet differs from the game's. Test: `crates/rc-game/tests/shadow_volume_novalis.rs`. **[H]**
+   0.18 units, exactly as the port's drawn Ratchet differs from the game's. Test: `crates/rc-game/tests/world/shadow_volume_novalis.rs`. **[H]**
 4. **Face orientation.** The game classifies faces by the sign of the screen area with GS y-down; Bevy uses `front_facing`. With exact ±1 counting
    the sign only has to be consistent, so either convention works, but a wrong global sign gives inverted shadows. Test with the debug view.
 5. **Blended world fragments.** The port draws the RGB-only halves of world alpha tests and billboard pass 2 in Transparent3d, after the resolve.
@@ -385,9 +385,9 @@ and rules, a fixed multiply blend, casters drawn after the pass, the game's quir
 
 | Package | Where | What |
 |---|---|---|
-| S1 loader | `crates/rc-formats/src/moby_shadow.rs`, `tests/moby_shadow_disc.rs` | `ShadowBlock::of_class` / `parse_level`; all 19 levels: 154 entries, 79 classes, 1,668 capsules, 45 spheres, ≤ 21 records, counts {−10, 0, 4..16}, joints < joint count; the test was seen failing on a broken record size |
+| S1 loader | `crates/rc-formats/src/moby_shadow.rs`, `tests/formats/moby_shadow_disc.rs` | `ShadowBlock::of_class` / `parse_level`; all 19 levels: 154 entries, 79 classes, 1,668 capsules, 45 spheres, ≤ 21 records, counts {−10, 0, 4..16}, joints < joint count; the test was seen failing on a broken record size |
 | S2 game side | `crates/rc-game/src/shadows.rs`; one call line each in `moby_update/classes/{critter,amoeboid,talking_npc,path_enemy}.rs`; moby +0x84 / +0x88 in `moby_runtime.rs` | `update_shadow_dir`, `light_dir` (`fun_0020d510`), `update_hero_shadow`, `set_ground`, `probe_down`, `probe_along_dir` (ready, not wired: see below) |
-| S3 volumes | `crates/rc-game/src/shadows/volume.rs`, `tests/shadow_volume_novalis.rs` + `tests/fixtures/shadow_ratchet_novalis_idle.tsv` (numbers only) | posing, `ShadowSetDir`, sphere / capsule outlines, slab prisms, size by distance, budget |
+| S3 volumes | `crates/rc-game/src/shadows/volume.rs`, `tests/world/shadow_volume_novalis.rs` + `tests/fixtures/shadow_ratchet_novalis_idle.tsv` (numbers only) | posing, `ShadowSetDir`, sphere / capsule outlines, slab prisms, size by distance, budget |
 | S4 GPU pass | `crates/rc-engine/src/shadow_render.rs`, `assets/shaders/shadow_{volume,resolve}.wgsl`, `main.rs` (plugin line) | per tick (after `GameTick`): Ratchet's shadow and direction 0; per frame (`Last`): MobyProc's shadow deferral, cull, size, budget and the volumes; render world: `Core3d` system between `main_opaque_pass_3d` and `main_transparent_pass_3d` |
 | S5 casters | `crates/rc-engine/src/moby_render.rs` (`caster_pass`, `CASTER_BAND`), `gs_state.rs` (`GsPass::LateOpaque`) | a class with a shadow block has its Z-writing draws at the start of Transparent3d (after the shadow pass), its metal next; everything else unchanged |
 | Setting | `crates/rc-game/src/menus/pause/port.rs` (row "Shadows", the game's own On / Off strings 20314 / 20315), `menu_render.rs`, `render_settings.rs` (`load_key` / `save_key`) | on by default; `shadows = on/off` in the port settings file; `RC_SHADOWS=0/1` overrides at start |

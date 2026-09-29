@@ -222,8 +222,8 @@ in `tick.rs` (`Game::tick_with_sound`) and the hero test constructors. `MobyScen
 **Done (2026-09-26).** `platform.rs` (the whole of 0x249618, general: any moby with a platform block, snapshot
 `platform::Carriers` in `Env::world`), `surface.rs` (the superset reaction switched per level by `LEVEL_RULES`,
 the states 0x2f / 0x31 / 0x68 / 0x69 / 0x7b, the seams in the ground / walk / idle / melee / probe / capsule code),
-tests `platform::tests`, `surface::tests`, `tests/hero_platform_novalis.rs` (the lift carries Ratchet down, the
-steep bank at its foot, determinism), `tests/hero_surfaces.rs` (surface ids per level vs rules, Aridia quicksand,
+tests `platform::tests`, `surface::tests`, `tests/hero/hero_platform_novalis.rs` (the lift carries Ratchet down, the
+steep bank at its foot, determinism), `tests/hero/hero_surfaces.rs` (surface ids per level vs rules, Aridia quicksand,
 ice on levels 12 / 14, Novalis' flow chutes). Open: ~~the flow class 679~~ (done, "Hero follow-ups" below), the
 landing picker's leading slippery test (jump.rs), the Thruster hover's slippery brake (packs.rs), the sinking
 ~~floor's sand particles (`0x22b140(4, 2)`, the 6-draw `0x286cb0` spawn: still not ported, so the `rand` stream
@@ -234,7 +234,7 @@ diverges from the PS2 while sinking)~~ (done: `hero/fx.rs` PartType47Spawn, surf
 `HeroTakeDamage` 0x226fa8, the hurts 0x16 / 0x75 / 0x76, the deaths 0x3d / 0x77 / 0x79 / 0x7c / 0x7f / 0x80 / 0x82, the
 burn bounce 0x3c, the death sequence 0x2319b0 → `Hero::fell_out`; the engine respawns on that flag at the checkpoint),
 `stance.rs` (1, 0x1e, 0x40 / 0x41, 0x65..0x67), the hero sounds inside the hero update (`HeroSounds`,
-`audio::class_sounds::HeroClassSounds`, `Game::tick_with_hero_sounds`). Tests `tests/hero_damage.rs`. Open (see the
+`audio::class_sounds::HeroClassSounds`, `Game::tick_with_hero_sounds`). Tests `tests/hero/hero_damage.rs`. Open (see the
 module docs): the hurts' and deaths' particles and 0x7f's bubble moby, the queued voices 0x236810, 0x1413f5.
 The original plan:
 - The hit intake 0x231580 (seam `damage::hit_intake`, first call of the transitions): hit record, invulnerability
@@ -256,7 +256,7 @@ The original plan:
 ### P3 — ledges and the wall jump
 **Done (2026-09-26).** `ledge.rs` (probes A 0x22c9a0, B 0x22d090, C 0x22d838; 0x18..0x1c, the wall jump 0x11;
 `Hero::ledge_blk`, `Hero::ledge_camera_yaw` for the camera), the 0x11 / 0x1c jump parameters in `jump.rs`. Tests
-`ledge::tests`, `tests/hero_ledge_novalis.rs` (grab and climb on Novalis, the digest scripts enter no ledge state).
+`ledge::tests`, `tests/hero/hero_ledge_novalis.rs` (grab and climb on Novalis, the digest scripts enter no ledge state).
 Moby ledges (the pvar flag) and the hang on a moving ledge came with the follow-ups. The original plan:
 - Probes A / B / C and the states; 0x11 / 0x1c through the jump system (`jump_block_defaults`-style entry +
   `phys_jump` / `tr_jump`); seams exist: `wall_ledge_probe_a` (jump physics), `wall_ledge_probe_b`
@@ -273,7 +273,7 @@ the Heli long jump's windup push, the double jump's pack boost, the long-jump gl
 picker's slippery test), the owned-items mirror and the back slot (§2), the wall-ahead probe 0x13f598 / 0x13f5a0 /
 0x13f5a4 / 0x13f5a5 of `0x23c458` (physics.rs), the hero's looping-sound slots 0x141568 (`packs::flush_sounds`,
 `HeroSounds::release`), pack hits after the hero update (`packs::deliver_hits`, `HitSink::deliver`). Tests
-`packs::tests` (12), `tests/hero_packs_novalis.rs` (glide, both long jumps, stomp, the Hydro-Pack on the back in the
+`packs::tests` (12), `tests/hero/hero_packs_novalis.rs` (glide, both long jumps, stomp, the Hydro-Pack on the back in the
 lake, determinism). Open: ~~the stomp's camera shake~~ (done, Hero polish), ~~the Thruster jumps'
 after-images `0x277428`~~ and ~~the Thruster flame mobys (class 0xa7)~~ (done 2026-09-28: "Thruster flames",
 "After-images" below), the pad vibration `0x248920`, ~~the ledge climb's Thruster voice (0x1c)~~ (done), the
@@ -293,8 +293,8 @@ moby (0x140430, item slot **1**) to be the Magneboots (class 0xad; since 2026-09
 `Hero::magneboots_on`, which the automatic swap fills: docs/plan/gadgets.md); SetState(2) with
 0x13f658 = 1 becomes 0x3f (walk.rs); idle and stop take 0x28 on the rail contact (ground.rs). The grind hit
 0x13f90e is `damage::Damage::grind_hit`. Tests: `boots::tests` (11), `spline::tests` (5),
-`tests/hero_boots_grind.rs` (every level's 37 grind paths; Oltanis 14: grind, grind jump, rail switch 2 → 3;
-Kalebo III 16: 20 s on the long rail 1 with the obstacles' grind hurts, deterministic), `tests/hero_boots_magnet.rs`
+`tests/hero/hero_boots_grind.rs` (every level's 37 grind paths; Oltanis 14: grind, grind jump, rail switch 2 → 3;
+Kalebo III 16: 20 s on the long rail 1 with the obstacles' grind hurts, deterministic), `tests/hero/hero_boots_magnet.rs`
 (Orxon 10: idle in mode 1, 0x3f, no boots = mode 0). Engine: `RC_GIVE_ITEMS=29 RC_HERO_AT=x,y,z,yaw` (new debug
 placement in gameplay.rs). Open: the grind / cable loop sounds (slot 0x141568, now general: `HeroSounds::release`),
 the type-25 sparks as particles (`Boots::sparks` records them with their draws), the grind wrench's hit sphere
@@ -347,7 +347,7 @@ code: no per-level code.
 - **Not ported / left**: the level cameras above; the help message 0xbbf and the 0x1418c8 stat (Kerwan's script moby,
   unported); the hit intake while hanging uses the ported generic path.
 - **Tests**: `boots::tests` `a_rising_jump_catches_the_cable`, `square_is_the_wrench_grab_not_the_jump_attack`,
-  `ride_to_the_end_no_jump_off`, `cable_slide` (distilled Kerwan numbers); `tests/hero_cable_kerwan.rs` (Kerwan's 3
+  `ride_to_the_end_no_jump_off`, `cable_slide` (distilled Kerwan numbers); `tests/hero/hero_cable_kerwan.rs` (Kerwan's 3
   cables on the level mesh: ✕ from the platform → 7 → 0x74 → 6 → 0, anims 0x73 → 0x66, 14 u/s, off ≤ 1.1 past the
   end, deterministic). Engine: `RC_LEVEL=3 RC_HERO_AT=197.137,148.537,76.03,2.912 RC_PLAY_SCRIPT="30:press X"`.
 
@@ -361,7 +361,7 @@ hand item's update level01 0x2dbdc0 with its hook and rope), `moby_update/classe
 pull targets on 2, 3, 4, 5, 7, 10..18; swing targets on 2..7, 9..11, 13..16, 18 (none on 0, 1, 8). Engine: the
 Swingshot (0xd0) and its hook (0xd1) drawn by moby_attach, the rope `0x2dba30` as a camera-facing textured strip
 (effect texture 0xf); `RC_GIVE_ITEMS=12` also requests it into the hand. Tests: `swingshot::tests` (10),
-`classes::swing_target::tests` (2), `tests/hero_swingshot_levels.rs` (Aridia: a pull and a swing; Kerwan: a swing;
+`classes::swing_target::tests` (2), `tests/hero/hero_swingshot_levels.rs` (Aridia: a pull and a swing; Kerwan: a swing;
 deterministic). Open: ~~the target glints (particle type 60: its draw is made, the particle not created)~~ (done: `classes/swing_target.rs`), the targets'
 camera look-at hint `0x2eb4c0`, the look-stance aiming beams `0x20fb60`, the Swingshot's class sounds (queued in
 `SwingItem::sounds`, not played: their pitch-bend draws are missing from the stream, as the wrench's hit sounds), the
@@ -397,7 +397,7 @@ Hologuise, the PDA) and the holster check 0x2405f8 are not ported. The original 
   physics, the reaction and the transitions (the loop's voice becomes 0x141570; a group change releases it, the slot-2
   part of 0x2283a8).
 - **`HeroOnMoby`** 0x277fb8's ledge branch (group 3 / state 0x1c: the ledge moby 0x13f848).
-- Tests: `tests/hero_followups.rs`, `classes::flow::tests`, `surface::tests::sinking_floor_state`.
+- Tests: `tests/hero/hero_followups.rs`, `classes::flow::tests`, `surface::tests::sinking_floor_state`.
 
 ### Hero polish (the audiovisual feedback the packages left out)
 **Done (2026-09-26).**
@@ -582,7 +582,7 @@ the game.
 - Tests: `comet::tests` (5: with the first-person orientation and spin at 0° / 30° / 60° / 84° against
   Rz(yaw)·Ry(−p)·Rz(n·dt·24.43), and the old world-z step differing when pitched),
   `services::tests::rows_euler_*` (2), `weapons::tests` (4), `anim::tests::loop_exit_jumps_to_the_key`,
-  `follow_camera::tests::first_person_*` (2), `classes::bomb::tests`, `tests/hero_weapons_novalis.rs` (the Comet-Strike
+  `follow_camera::tests::first_person_*` (2), `classes::bomb::tests`, `tests/weapons/hero_weapons_novalis.rs` (the Comet-Strike
   breaks a crate and the wrench returns, a bomb breaks a crate, first person in / aim / out, the first-person throw;
   deterministic). The `novalis_hero_digest` guard is byte-identical up to the look stance at tick 980 of the moves
   script, where the first-person camera now comes up (camera state only; the digest ignores the new idle fields).
@@ -620,7 +620,7 @@ still ends it). [H: disassembly of 0x2e0c68 and SetState case 0x3b]
   +0x2c)`) is still treated as a snap there.
 - **Not ported** (counted): `0x316e88`, the visit-state save `0x29b0a0`, the tail's Novalis global flags 0x13d394 /
   0x13d395; Eudora's and Batalia's consumers (other classes, e.g. a lift z − 15 · progress on Eudora).
-- Tests: `crank::tests` (7), `classes::bolt_crank::tests` (4), `tests/bolt_crank_novalis.rs` (crank #296: latched at
+- Tests: `crank::tests` (7), `classes::bolt_crank::tests` (4), `tests/classes/bolt_crank_novalis.rs` (crank #296: latched at
   tick 40, done at tick 180 with the doors at their targets, let go and idle the next tick, sunk 0.5; let go early at
   0.71 it unwinds and the doors close; deterministic; the class on levels 1 / 4 / 8). The `novalis_hero_digest` guard
   is byte-identical (its runs have no moby loop; `loop_in` is not part of the hashed block).
@@ -689,7 +689,7 @@ Hologuise), the Hoverboard. Each gets a module when started; the registry alread
   `HeroSounds::anim_advanced`).
 
 **Proof of identical behaviour.**
-- `crates/rc-game/tests/hero_novalis.rs::novalis_hero_digest` (new guard): with `RC_HERO_DIGEST=<file>` it runs
+- `crates/rc-game/tests/hero/hero_novalis.rs::novalis_hero_digest` (new guard): with `RC_HERO_DIGEST=<file>` it runs
   the lake swim / dive with and without the Hydro-Pack and a move script (jumps, double jump, running jump,
   crouch, flip, fall off the plateau, L1 into the unported look stance), 2800 ticks, and writes per tick the state,
   timer, position and a hash of the whole hero block, Ratchet's anim state, camera, pad and RNG. Before vs after

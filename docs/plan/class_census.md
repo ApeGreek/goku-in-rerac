@@ -261,13 +261,13 @@ G-AUD-010. **Census artefacts**: U36 (class 27, 01: 10) is the particle emitter 
 (`LevelPorts::external`); the census counts only `LevelPorts::get`. Not reached (budget): U211, U168, U182, U248, U207,
 U123, U208, U278, U215 and the smaller units of the appendix (G-CLS-027).
 
-Tests: `rc-game/tests/cheap_classes_a.rs` (every unit resolves on exactly its census levels with the census's counts;
+Tests: `rc-game/tests/classes/cheap_classes_a.rs` (every unit resolves on exactly its census levels with the census's counts;
 unit addresses distinct; one headless behaviour test per unit on one of its levels); unit tests in each module.
 
 ### In the port: cheap wins, levels 09–18 (2026-09-28, G-CLS-027 part B)
 
 Same registry and conventions as part A (unit ids of the re-run before it). The coverage tables are in
-docs/plan/class_units_levels_09_18.md and the module docs; tests `rc-game/tests/cheap_classes_b.rs`.
+docs/plan/class_units_levels_09_18.md and the module docs; tests `rc-game/tests/classes/cheap_classes_b.rs`.
 
 | unit | classes (levels) | created | reference | port | notes |
 |---|---|---|---|---|---|
@@ -300,7 +300,7 @@ The path helpers first (`rc-game/src/path.rs`: the system-or-not table of every 
 `0x262e40` / `0x277d40`, `push_from_walls` `0x261d78`, `nearest_at_distance` `0x264558` / `0x2a0260` = the flyer
 driver's `0x28b510`, which now calls it; `0x263710` / `0x261b48` are `ClampToPath`, `World::clamp_to_path_hit`), then
 the units the helpers alone blocked, in `units::PORTS`; coverage tables in the module docs, tests
-`rc-game/tests/path_classes.rs` (an owned-slot sound sink, so `SoundIsAlive` is the game's check).
+`rc-game/tests/classes/path_classes.rs` (an owned-slot sound sink, so `SoundIsAlive` is the game's check).
 
 | unit | classes (levels) | created | reference | port | notes |
 |---|---|---|---|---|---|
@@ -323,7 +323,7 @@ System or not first (creatures.md §9.1): the census's three `creature` clusters
 (`C:d001715051e4` = `0x274b78`, `C:ad33de15cdab` / `C:a8d6490c966c` = `0x26de80`; re-tagged has) and the random
 wander `C:9a9b8f2fffcb` `0x261630` (six levels; the census had folded it into each consumer's private code), ported as
 `creature::walker::wander`; the joint hit `C:76f90a069f65` / `0x26e830` got a real port (`attack::joint_hit`). Units,
-in `units::PORTS`; coverage tables in creatures.md §9.3, tests `rc-game/tests/creature_classes.rs`.
+in `units::PORTS`; coverage tables in creatures.md §9.3, tests `rc-game/tests/classes/creature_classes.rs`.
 
 | unit | classes (levels) | created | reference | port | notes |
 |---|---|---|---|---|---|

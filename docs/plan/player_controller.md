@@ -336,7 +336,7 @@ table + the entry / physics / transitions dispatch), `hero/states.rs` (SetState 
 one file per group (`ground.rs` 0/3/4, `walk.rs` 2/0x73, `air.rs` 6, `jump.rs` the jump group, `melee.rs`, `swim.rs`) and the
 package stubs. Files before that split: `pad.rs` (§1), `moby_runtime.rs`, `hero.rs` + `hero/physics.rs` (§4, §5), `hero/states.rs` (§3), `hero/anim.rs`
 (§6), `follow_camera.rs` (§7), `tick.rs` (§0). Tests: unit tests in each module (flat hand-built meshes) and
-`tests/hero_novalis.rs` (disc data, skipped without `extracted/`). Engine wiring: §11.
+`tests/hero/hero_novalis.rs` (disc data, skipped without `extracted/`). Engine wiring: §11.
 
 **Arithmetic.** All float math runs on the PS2 FPU/VU model (`ps2v::Pf`: round toward zero, no denormals, the adder's
 guard-bit rule; operators in the game's op order), with the game's own trig: the VU0 28259 sine polynomial
@@ -680,7 +680,7 @@ Table by back item (`0x22ddd8(3)`): 2 → 0x17c070 {(0: 4, 11), (0: 3, 10), (0: 
 ### 13.6 Checks
 * Sequence 1 and 2 both wrap **188 ticks** after `SetAnim(12, seq, 0)` on the disc data: slot 1 (record 0 cooldown
   128 = 330 − 202, sequence timer 14, t = 0.97 = curve −2 step 14) and slot 2 (sequence 2 after 100 ticks on
-  frames 32 → 33, t = 0; cooldown 20, record 1 cooldown 230) agree (`tests/hero_novalis.rs`).
+  frames 32 → 33, t = 0; cooldown 20, record 1 cooldown 230) agree (`tests/hero/hero_novalis.rs`).
 * Hero-only replay of 3600 idle ticks from the load pass: 1.87 draws / tick, 1887 in ticks 2439..3511
   (the report's estimate of ≈ 1200 missed the back table and the SetAnim draw).
 
@@ -797,7 +797,7 @@ level 0x13f640, the depth 0x1415f4 and the flags of the surface reaction; no lev
   roll straighten; air runs out after 910 ticks → 0x6a (sinking, locked), the O2 mask stops the drain; ✕ in deep water →
   0x12 on the curve, apex > W + 0.5, back to 0x37; swimming up a ramp → 0x36 → 0x73 → 2, out of the water; a `WaterQuery`
   height replaces the face's.
-- `tests/hero_novalis.rs` `novalis_walk_into_the_lake_swim_and_dive`: from the spawn, `LAKE_SCRIPT` runs off the ledge to the
+- `tests/hero/hero_novalis.rs` `novalis_walk_into_the_lake_swim_and_dive`: from the spawn, `LAKE_SCRIPT` runs off the ledge to the
   z-40 walkway and walks into the lake (water faces z ≈ 39.0–39.3, floor ≈ 33.5) at tick ~528 → 0x37 → 0x36; `DIVE_SCRIPT` (R1 at
   760, R1+□ + stick 761–820, R1 to 900): with the pack 0x35 down to z ≈ 34.1; without it R1 does nothing and □ gives 0x33.
 - Engine (`RC_SCENE=0`, frame-exact): `RC_PLAY_SCRIPT="0-214:stick 0 -1,215-299:stick 0.5 -0.85,300-399:stick 0.2 -0.98,400-700:stick 0 -1"`,

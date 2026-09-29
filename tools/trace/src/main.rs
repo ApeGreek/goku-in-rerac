@@ -472,7 +472,7 @@ fn distill_spawn(mut a: Args) -> Result<i32> {
     let facts = SpawnFacts::from_ee(&img, &extracted)?;
     let header = format!(
         "Novalis spawn facts, distilled by `cargo run -p rc-trace -- distill-spawn` from {}.\n\
-         Compared with the port by tools/trace/tests/novalis_spawn.rs (needs only extracted/). Doc: docs/workflows/pcsx2.md.",
+         Compared with the port by tools/trace/tests/trace/novalis_spawn.rs (needs only extracted/). Doc: docs/workflows/pcsx2.md.",
         img.source.rsplit('/').next().unwrap_or("")
     );
     let text = facts.to_tsv(&header);

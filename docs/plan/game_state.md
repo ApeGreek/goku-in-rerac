@@ -233,7 +233,7 @@ galaxy page = 0x13d510. First-visit story flights exist for 0, 0→1, 4, from 7,
 
 **Code.** `crates/rc-formats/src/save_game.rs` (format, tables, lump, item tables), `Disc::save_game_lump`
 (+ `toc::global_sector_range` / `SAVE_GAME_FIELD`), `crates/rc-game/src/game_state.rs` (state and rules),
-`crates/rc-game/tests/game_state_novalis.rs`. Nothing is copied from the disc: descriptor tables, template,
+`crates/rc-game/tests/ui/game_state_novalis.rs`. Nothing is copied from the disc: descriptor tables, template,
 vendor list and item records come from the boot ELF / `save_game` lump / level overlay at run time.
 
 * `ChunkTables::from_boot_elf` reads both tables (47 global, 11 per level; `GetDataSize` 0x1530 / 0xaa4, file

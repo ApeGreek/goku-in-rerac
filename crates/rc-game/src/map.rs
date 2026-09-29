@@ -417,7 +417,7 @@ impl Default for MapState {
     }
 }
 
-/// The tables the map reads from the level overlay (the same in every overlay: see `tests/map_levels.rs`).
+/// The tables the map reads from the level overlay (the same in every overlay: see `tests/ui/map_levels.rs`).
 #[derive(Clone, Debug)]
 pub struct Tables {
     pub transforms: [Transform; LEVELS],

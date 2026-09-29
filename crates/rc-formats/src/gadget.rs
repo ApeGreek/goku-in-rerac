@@ -1,6 +1,6 @@
 //! RAC1 gadget classes: Ratchet's hand-held weapons and gadgets (the wrench among them). Spec:
 //! docs/formats/moby_rac1.md section 0.4. Ported from the retired C++ reference extractor
-//! (git 2230812); `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! (git 2230812); `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! Layout. The core index header's `gadget_count` (+0x80) / `gadget_offset` (+0x84) give a table of
 //! [`GadgetEntry`] records (0x10 bytes: `offset_in_asset_wad`, `class_number` = o_class,

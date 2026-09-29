@@ -224,7 +224,7 @@ critter on a hand-built floor: 1 load draw (the mirror), 3 draws per hover pick,
 moby: attacker, flags 1, damage 1); a wrench-like hit: death flight (not targetable), three pieces 1747–1749, the explosion
 light, bolts.
 
-**Novalis headless** (`tests/creatures_novalis.rs`: the loader's spawn test, `load_level_mobys`, the scheduler's load pass
+**Novalis headless** (`tests/classes/creatures_novalis.rs`: the loader's spawn test, `load_level_mobys`, the scheduler's load pass
 and moby loop, the moby collision, the hero with the wrench through the engine's hit sink): 14 critters and 5 big
 amoeboids awake at the start; next to critter group 1 the hoverers land, walk and bite, Ratchet goes hurt (0x16) and loses
 all 4 HP (death 0x3d) in 600 ticks; with □ every 24 ticks two critters die by the wrench (death flight 99), 6 pieces, 2
@@ -255,7 +255,7 @@ flash and the bolt counter (245); `RC_HERO_AT=55,145,40.6,-2.3`: a medium amoebo
 
 ### Enemies (2026-09-28)
 
-**Headless** (`tests/creatures_enemies_novalis.rs`, the same level harness plus the trigger volumes, the joint lists and a
+**Headless** (`tests/classes/creatures_enemies_novalis.rs`, the same level harness plus the trigger volumes, the joint lists and a
 MobyProc +0x31 stand-in; every run twice, identical rows): the dropship brings 309 / 311 / 312 from the spawn point and
 each lands within 1.5 of its drop cuboid (the RAM comparison below: within 0.015); trooper 310 wakes, flies down,
 fires 4 globs, Ratchet hurt 3 times (4 → 1 HP, state 0x16); the wrench kills 310 (stagger 0xc, death 0xe, four pieces,
@@ -284,7 +284,7 @@ impact bursts) and the fires' smoke and embers (the ember burst: 40 × 11 draws)
 layer's 3 per tick (wiring), the foam, the idle fidgets, the particle *updates* of types 16 / 22 / 26 (killed on their
 first update) — see trace_results_novalis.md.
 
-**Fixture / digest:** `tools/trace/tests/novalis_spawn.rs` passes unchanged (the ported classes change no slot fact at
+**Fixture / digest:** `tools/trace/tests/trace/novalis_spawn.rs` passes unchanged (the ported classes change no slot fact at
 load: class, spawn id and index are the loader's); `novalis_hero_digest` identical (md5 4d404f3d…, the same as the
 other agents' runs today: the digest runs without mobys).
 
@@ -318,7 +318,7 @@ through.
 Every class below was read from the level01 disassembly (Ghidra MCP, read-only) and checked against the level tables
 (`lvl.vtbl` of all 19 overlays × `tools/ghidra/names/clusters.tsv`): the listed levels are every level whose class table
 runs the same function for the same class, so the class-keyed registry is right on all of them. Standard `f32`; the
-formulas, constants, sounds, order and `rand` draws are the game's. Tests: `crates/rc-game/tests/novalis_world.rs`
+formulas, constants, sounds, order and `rand` draws are the game's. Tests: `crates/rc-game/tests/world/novalis_world.rs`
 (7 tests: init, cycles, draws and determinism of each).
 
 **What each thing is in the game, and which port system it uses** (no new system where one existed):
@@ -374,7 +374,7 @@ sequence table, the suck record's offset = the header's +0x14 record) and by cal
 state: 577 (state 7; a landed let-go → 0xe with the hover wait `ticks(180)`), 572 / 866 (state 0xe → 1). The level's
 tables are matched against level 01's by `react::tables_from_overlay` (Rilgar: {270, 572, 866}; 865 keeps the default
 and is never taken; 459 too). The lure: 577 (+0x38 → +0x214 = `ticks(240)`), 572 family (+0x38 alert), 459 (+0x38 →
-+0x1e2 = `ticks(600)`) already read and clear it; the Taunter now writes it. Test: `tests/hero_reactive_novalis.rs`.
++0x1e2 = `ticks(600)`) already read and clear it; the Taunter now writes it. Test: `tests/weapons/hero_reactive_novalis.rs`.
 
 
 ## 9. The creature-layer copies of the other levels (G-ENM-009, 2026-09-29, W1 lane 2)
@@ -505,7 +505,7 @@ reads none (the gunner waits instead of firing). The club's template w lane is t
 
 ### 9.4 Verification
 
-`crates/rc-game/tests/creature_classes.rs` (the level harness of `path_classes.rs`, plus Ratchet's class and
+`crates/rc-game/tests/classes/creature_classes.rs` (the level harness of `path_classes.rs`, plus Ratchet's class and
 sequences so his moby's collision is posed, his moby moved with the hero block, a particle system, and the reaction
 tables of `tables_from_overlays`): `units_resolve_on_their_levels` (749 → U25 on 00 / 18: 106; 1023 → U287 on 08 /
 09: 40; 1292 → its shot row), `reaction_tables_resolve` (749's table on 00 and 18 only; 577's on 01 unchanged),

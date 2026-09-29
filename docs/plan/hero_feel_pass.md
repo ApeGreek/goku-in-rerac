@@ -154,7 +154,7 @@ were built, so the live test is pending (§1). Checked offline:
 - The addresses, read with `hero-snap` from the user's savestates: Novalis (slots 1 / 2: camera 0x167240) and
   Kerwan (slot 3: camera 0x166ec0, the only record the scan finds), Heli-Pack owned and on the back (0x1404f4 = 2,
   0x1404f8 = 2), Ratchet standing (state 0, air ticks 0), the pad rebuilt as neutral.
-- The pipeline on level data: `tests/hero_replay_selfcheck.rs` (a pad-only recording on Novalis → replay → the
+- The pipeline on level data: `tests/trace/hero_replay_selfcheck.rs` (a pad-only recording on Novalis → replay → the
   port's trace through the file format → replayed again from its own first sample: no divergence at all, and the
   long jumps are segmented), and `replay-hero` on a Kerwan trace seeded from the slot-3 savestate.
 - The port's Heli-Pack long jump on Kerwan's plaza (run, R1 + ✕), for the comparison to come: windup 6 ticks,

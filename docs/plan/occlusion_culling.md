@@ -143,7 +143,7 @@ Checks for the renderer agent:
 ## 6. In the port
 
 Code: `crates/rc-engine/src/occlusion.rs` (load + per-frame mask), consumers in `tfrag_lod.rs`,
-`tie_lod.rs`, `moby_render.rs`, `moby_anim.rs`. Disc-data test: `crates/rc-formats/tests/occlusion_frames.rs`.
+`tie_lod.rs`, `moby_render.rs`, `moby_anim.rs`. Disc-data test: `crates/rc-formats/tests/formats/occlusion_frames.rs`.
 
 * **Load** (`occlusion::load`, called from `level_load.rs` after the sky): grid only when the core has an
   `occlusion` block (a malformed block is an error, a missing one is `None`), mappings from gameplay

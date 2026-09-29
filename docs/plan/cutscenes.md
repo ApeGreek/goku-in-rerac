@@ -227,7 +227,7 @@ three troopers deleted before tick t. With `RC_SCENE=0 RC_HERO_AT=159.5,208.44,4
 runs in the engine: drop-in cutaway from the first ticks for 420 ticks, scene 3 from frame 548, the movie (then a stub: now §5 plays `mpegs[5]`, 48 s, which moves scene 4 later), scene 4 from 1652, the bridge
 cutaway ≈ 3215–3395 (frame 3290: the halves mid-swing under the bars).
 
-**Verified (headless, `crates/rc-game/tests/cutscene_novalis.rs`, Novalis from `extracted/`):**
+**Verified (headless, `crates/rc-game/tests/world/cutscene_novalis.rs`, Novalis from `extracted/`):**
 * the arrival scene is requested once, in tick counter 1, with the ship hidden;
 * drop-in: trigger on the tick Ratchet is in cuboid 42; Ratchet at the cuboid centre, state 0x72, **420 ticks** held
   with the stick pushed (he does not move), letterbox flag, camera exactly at cuboid 43 and turning down after the
@@ -252,7 +252,7 @@ pose copy details. Still not ported: the script camera's collision push `0x20f2a
 
 ### 7.1 Scene data coverage [H]
 
-Every scene on the disc parsed and checked byte by byte (`crates/rc-formats/tests/scene_coverage.rs`, behind
+Every scene on the disc parsed and checked byte by byte (`crates/rc-formats/tests/formats/scene_coverage.rs`, behind
 `test_data::root()`): **138 level scenes** in 19 levels (15 records each; 275 NTSC / PAL regions) plus the **48 global
 lumps** (TOC `anim_looking_thing_2` = space take-off / landing scenes, `things` = item scenes, mode 6, 0x800-byte
 `{offset, size}` table: `scene::lump_chunks`, `Scene::from_lump`): 323 regions, 4,315 chunks, 366,100 ticks,

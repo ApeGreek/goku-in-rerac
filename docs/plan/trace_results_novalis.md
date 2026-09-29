@@ -358,7 +358,7 @@ tolerances of this report are now in `hardware_fidelity_layers.md` "Tolerances".
 Re-run: `cargo run -p rc-trace -- compare-novalis-spawn --ee work/trace/novalis_spawn_ee.bin` (no knobs; report
 `work/trace/novalis_spawn_report_after.txt`). The knob `--load-emitters-culled` is gone (the port's default
 now culls). `--load-emitters-visible` re-creates the old behaviour as a diagnostic. `--load-pre-draws N` now adds
-draws on top of HeroInit's own draw. Regression: `tools/trace/tests/novalis_spawn.rs` asserts every check marked
+draws on top of HeroInit's own draw. Regression: `tools/trace/tests/trace/novalis_spawn.rs` asserts every check marked
 "all" below (since 2026-09-27 against the distilled fixture `tools/trace/tests/fixtures/novalis_spawn.tsv`, no
 savestate needed).
 

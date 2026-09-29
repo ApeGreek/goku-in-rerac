@@ -29,7 +29,7 @@
 //! **Vertex**: 4 × s16 (x, y, z, pad), model units (the class scale applies at run time through `moby+0x2c`).
 //! **Face**: the world mesh's 4-byte record `v0, v1, v2, type` (no quads); normal `(v2−v0)×(v1−v0)`.
 //!
-//! Disc facts (all 19 levels, `tests/moby_collision_disc.rs`): 1064 blobs, 464 / 31 / 350 / 302 primitives of
+//! Disc facts (all 19 levels, `tests/formats/moby_collision_disc.rs`): 1064 blobs, 464 / 31 / 350 / 302 primitives of
 //! kinds 1 / 2 / 3 / 4, 23369 vertices, 38359 faces; every joint primitive's selected joint count is non-zero
 //! and above its joint indices; one class has 257 vertices (level 3 class 825, just past the 256-slot
 //! scratch area the kernels transform into).

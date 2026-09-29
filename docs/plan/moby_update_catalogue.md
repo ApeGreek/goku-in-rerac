@@ -441,7 +441,7 @@ offers".
 
 Code: `crates/rc-game/src/moby_update.rs` (module root and unit tests), `moby_update/scheduler.rs`,
 `moby_update/services.rs`, `moby_update/classes/{mod,bolt,crate_,grass}.rs`; disc test
-`crates/rc-game/tests/moby_update_novalis.rs`. Addresses are level01. Everything runs on the PS2 float model
+`crates/rc-game/tests/classes/moby_update_novalis.rs`. Addresses are level01. Everything runs on the PS2 float model
 (`Pf`, VU0 lanes in the instructions' ACC order) and draws from the one shared `rand` stream.
 
 ### Scheduler (read from the disassembly)
@@ -675,7 +675,7 @@ Code: `crates/rc-game/src/moby_update.rs` (module root and unit tests), `moby_up
   - crate break: bolt classes from an independent 3-coin model; 1 + 9 + 1 + 9·coins draws;
   - TNT fuse: 179 updates, beeps 177/117/57/13, 21 blast updates;
   - grass: trigger and return.
-* Novalis (`tests/moby_update_novalis.rs`):
+* Novalis (`tests/classes/moby_update_novalis.rs`):
   - The level table's addresses for the 11 ported classes match the port.
   - The load pass runs 788 mobys. For 300 ticks, the active count per tick equals an independent f64
     re-computation of the rule: 134 per tick, with a draw-distance stand-in for +0x31.

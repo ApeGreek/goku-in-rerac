@@ -335,7 +335,7 @@ splash when Ratchet falls in. The water-strip VU1 program (resident id 7) has mo
 `LevelWaterData::sea` and state in `WaterWorld::sea`; the after-ties list is `DrawCallbacks::ties`), `rc-engine`
 `sea_render.rs` (the draws, through the shared draw-callback material `fx_draw::FxPrimMaterial`: display-blend effects,
 or `FxPrimParams::opaque` for the FIX ≥ 0x61 / 0x7f Z-writing strips drawn as opaque world surfaces). `RC_SEA=0` turns
-it off. Guards: `rc-game/tests/sea_levels.rs` (the inventory on 19 levels, each port's update on its level).
+it off. Guards: `rc-game/tests/world/sea_levels.rs` (the inventory on 19 levels, each port's update on its level).
 
 ## 4. Reflective overlay (1848), confidence high
 

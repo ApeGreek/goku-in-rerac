@@ -2,7 +2,7 @@
 //! 8-bit textures. Spec: docs/formats/shrub_sky_rac1.md part 2; renderer facts from the
 //! decomp in docs/plan/sky_render_notes.md. Ported from the retired C++
 //! reference extractor (git 2230812; `parse_sky`, `decode_sky_texture`, `sky_gs_vertices`);
-//! `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! How the game draws it (not Wrench's model): the sky is **not** a VU1 program. The EE builds
 //! GS packets with VU0 macro code and sends them over PATH2 (VIF1 DIRECT):

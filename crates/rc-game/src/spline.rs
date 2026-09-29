@@ -18,7 +18,7 @@
 //! last point's w is the distance back to the first, used when the spline is closed). The grind-path header's
 //! word +0x14 (`rc_formats::volumes::GrindPath::flag`) is the closed flag every call passes (1 = closed loop).
 //! Checked on every level's grind paths: w equals the chord to the next point (`tests`, and
-//! `tests/hero_boots_grind.rs`).
+//! `tests/hero/hero_boots_grind.rs`).
 //!
 //! **Quirks kept** (they decide where a rider ends up):
 //! * [`advance`] backwards past the first point of an open spline wraps the index to the last point and then

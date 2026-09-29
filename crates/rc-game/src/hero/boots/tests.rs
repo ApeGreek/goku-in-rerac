@@ -444,6 +444,6 @@ fn ride_to_the_end_no_jump_off() {
     assert!(speeds.windows(2).all(|s| s[1] >= s[0] - 1e-4 && s[1] - s[0] <= 9.0 / 60.0 + 1e-4), "speed rises at 9 u/s²");
     assert!((speeds.last().unwrap() - 14.0).abs() < 1e-3);
     assert_eq!(on_off.unwrap().1, 8);
-    // The grab anim (0x66 follows at 0x73's end: the real anim, tests/hero_cable_kerwan.rs).
+    // The grab anim (0x66 follows at 0x73's end: the real anim, tests/hero/hero_cable_kerwan.rs).
     assert!(r.anim.calls.iter().any(|c| c.1 == 0x73));
 }

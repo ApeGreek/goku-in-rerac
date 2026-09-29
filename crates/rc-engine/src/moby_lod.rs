@@ -350,6 +350,7 @@ mod tests {
     /// Novalis metal classes, their packets' textures (−2 chrome / −3 glass) and the TEX1/CLAMP words of their
     /// ad-gifs, for the notes.
     #[test]
+    #[ignore = "survey: prints, asserts nothing; run with --ignored --nocapture"]
     fn novalis_metal_classes() {
         let Some((core, data, classes)) = level01() else { eprintln!("skipped: no level 01 data"); return };
         for c in classes.iter().filter(|c| !c.class.metal.is_empty()) {

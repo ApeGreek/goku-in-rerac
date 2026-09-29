@@ -367,7 +367,7 @@ enabled (0x1798c0), +0x34 first-input count, +0x38 hold (s16), +0x3a reopened (s
 
 Tests: `help::tests` (gate and log, the log's move-to-end, the state timings and the close bump, △ skip + prompt,
 first-input gate and mode, voice wait / play / stop / kill, suspend / reopen, hero hints), `hud::tests::help_box_draws_from_the_help_system`,
-`units::help_director::tests`, `tests/help_novalis.rs` (the log table on all 19 levels; the director's look and map
+`units::help_director::tests`, `tests/ui/help_novalis.rs` (the log table on all 19 levels; the director's look and map
 hints in its real cuboids; a whole Infobot box on the level text with its voice line). Frame: Ratchet placed in the
 director's look cuboid (`RC_HERO_AT=240.7,175.4,96 RC_PLAY_SCRIPT="2-6:stick 0 -0.3" RC_SCREENSHOT_FRAME=215`): the
 gate opens at tick 124, 1004 "To enter look-around mode, press and hold L1." with voice line 30064; two runs identical.

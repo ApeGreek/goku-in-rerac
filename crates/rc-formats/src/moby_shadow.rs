@@ -1,6 +1,6 @@
 //! Moby class shadow blocks: the proxy shapes a casting class projects as its dynamic shadow. Spec and the
 //! whole shadow system: `docs/plan/shadows.md` §2. The layout is read from the only consumer, *BuildShadowList*
-//! (level01 0x29b948, boot 0x227740), and checked on every class of the disc (`tests/moby_shadow_disc.rs`).
+//! (level01 0x29b948, boot 0x227740), and checked on every class of the disc (`tests/formats/moby_shadow_disc.rs`).
 //!
 //! **Where.** Class header byte 0x0f is the block size in quadwords; the block ends at the skeleton (class
 //! +0x14): it starts at `class[0x14] − 16·class[0x0f]`. A class with 0x0f = 0 casts no shadow
@@ -23,7 +23,7 @@
 //! A capsule end with 0 segments is flat (two outline points); a negative count −k moves that end **away from**
 //! the other one by `k·16/4096` of the segment and makes it flat (0x29bb98: `A += (A − B)·(−k·16/4096)`).
 //!
-//! Disc facts (all 19 levels, `tests/moby_shadow_disc.rs`): 154 class entries with a block (79 distinct classes),
+//! Disc facts (all 19 levels, `tests/formats/moby_shadow_disc.rs`): 154 class entries with a block (79 distinct classes),
 //! 1,713 records: 1,668 capsules and 45 spheres; every block ends exactly on its `last` record; every joint is below
 //! the class joint count; segment counts are −10, 0 or 4..=16.
 

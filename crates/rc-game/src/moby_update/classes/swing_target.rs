@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn registry_maps_both_target_classes() {
         // Reversed on level 03 and not on level 01: the class-number (level-01) registry has no port for them; level 03's
-        // table runs this one (`LevelPorts`, tests/hero_swingshot_levels.rs).
+        // table runs this one (`LevelPorts`, tests/hero/hero_swingshot_levels.rs).
         for oc in CLASSES { assert_eq!(crate::moby_update::scheduler::port_update_fn(oc), None, "class {oc}"); }
         assert!(crate::moby_update::classes::ClassUpdate::SwingTarget.classes() == CLASSES && crate::moby_update::classes::ClassUpdate::SwingTarget.reference_level() == 3);
     }

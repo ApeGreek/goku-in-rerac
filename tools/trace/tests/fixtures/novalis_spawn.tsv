@@ -1,5 +1,5 @@
 # Novalis spawn facts, distilled by `cargo run -p rc-trace -- distill-spawn` from novalis_spawn_ee.bin.
-# Compared with the port by tools/trace/tests/novalis_spawn.rs (needs only extracted/). Doc: docs/workflows/pcsx2.md.
+# Compared with the port by tools/trace/tests/trace/novalis_spawn.rs (needs only extracted/). Doc: docs/workflows/pcsx2.md.
 # Numbers only (no raw memory); floats in Rust's shortest round-trip form, hashes FNV-1a 64 in hex.
 # Record types (first column):
 #   counter  name value

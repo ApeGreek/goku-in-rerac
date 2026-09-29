@@ -167,7 +167,7 @@ y into z's), the line cell list 255 entries, the sphere/capsule cell list 127 ce
 
 **Verification.** Unit tests on hand-built cells (`crates/rc-game/src/collision_query/tests.rs`: hit/miss, one/two-sided, exclusion flags, quad split,
 inclusive edges, strictly-closer across two cells, early out, DDA tie order, sphere/capsule push-out, capsule height culling). Disc test
-(`crates/rc-game/tests/novalis_collision.rs`, skipped without `extracted/`): 1000 seeded vertical rays over the Novalis tfrag box hit 60.7 % (the box
+(`crates/rc-game/tests/world/novalis_collision.rs`, skipped without `extracted/`): 1000 seeded vertical rays over the Novalis tfrag box hit 60.7 % (the box
 includes void); rays from 1 unit above each of the 983 moby instances hit 949 (96.5 %), median drop below the instance 0.000; the class-0 instance
 (Ratchet's spawn, index 0, (162.53, 136.39, 60.5)) is 0.500 above the landing pad (type 0x1f). Not yet compared against a PCSX2 trace.
 
@@ -190,7 +190,7 @@ along world z, not rotated); **4** capsule between joints `lh +4` / `lh +6`, rad
 none on the disc). Disc (19 levels): 1064 blobs, kinds 1-4 = 464 / 31 / 350 / 302, 23369 vertices, 38359 faces, 104 posed
 classes; every joint primitive's selected joint count is non-zero and above its joints. Class 825 (level 3) has 257 vertices,
 one past the 256-slot scratch area (the kernels overwrite the start of the DDA lists; harmless). Test:
-`crates/rc-formats/tests/moby_collision_disc.rs` (counts pinned; no C++ oracle — the format has no other reader).
+`crates/rc-formats/tests/formats/moby_collision_disc.rs` (counts pinned; no C++ oracle — the format has no other reader).
 
 **Transforms.** Mesh vertices: `((r0·s)·x + (r1·s)·y) + (r2·s)·z` (rows `+0xc0/d0/e0` pre-scaled by `+0x2c`), relative to
 `pos·1024`; the triangle tests are the world ones in that frame (`record` adds `pos·1024`). Primitive points: `(r0·p.x + r1·p.y) +
@@ -262,7 +262,7 @@ the class blob's), the camera moby 0x3ef (`Camera_handleCollWithHero`).
 **Verification.** Unit tests (`collision_query/tests.rs`): grid registration order / swap-removal / off-grid / delete; a box
 mesh hit by a line (vs a nearer world floor, ignore, flag 0x9, one-sidedness), blocking a capsule and a sphere; a sphere
 primitive by line / sphere / capsule (entry point, unshrunk best, push-out), masks, `coll_sphere_mobys`; a joint capsule
-(side, cap, sphere) and the pose cache round robin; hero groups. Disc (`crates/rc-game/tests/moby_collision_novalis.rs`): after
+(side, cap, sphere) and the pose cache round robin; hero groups. Disc (`crates/rc-game/tests/world/moby_collision_novalis.rs`): after
 120 ticks the 344 stack has settled; a line down onto crate 344 (ignoring 342 on it) hits its top face at z 66.390625 = 344.z + 1
 = where 342 rests (kind 0x107f); world-only the same line reaches the ground; a bolt dropped 1.5 above crate 342 settles on it
 (rest z 67.390625 = the crate top; world-only it falls through to 65.08). `moby_update_novalis`: 82 stacked crates, as with the

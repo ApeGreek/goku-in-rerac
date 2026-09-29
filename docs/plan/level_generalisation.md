@@ -50,7 +50,7 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 
 ### Water on every level (2026-09-28)
 
-**Survey** (by code identity against level 01, `rc-game/tests/water_levels.rs::water_inventory_all_levels`):
+**Survey** (by code identity against level 01, `rc-game/tests/world/water_levels.rs::water_inventory_all_levels`):
 
 | level | ripple module | manager (update, reference code) | patches | other water |
 |---|---|---|---|---|
@@ -78,7 +78,7 @@ the other liquids are collision surfaces (hero `surface.rs`, per-level rules), a
 | W3 | the managers are class ports, `ClassUpdate::Water(i)` (`rc_game::water::managers`, 751 included): `LevelPorts` finds them by code identity; the ripple module lives in the moby system (`Services::water`, `rc_game::water::world::WaterWorld`), registered for drawing with `Callback::RipplePatches`; `water_render` draws whatever module the level has. The engine's 751 external is gone |
 | W4 | `WaterWorld::water_height` = `SetWaterLevel` 0x26ed38: the active patch (`RippleHeightQuery`), then the flat plane (982 on 05), else the caller's hit z (0x1742e0 is the collision output buffer, not a table: the port already passed the hit). The hero probe, the underwater test, the bomb's water entry and the hero's ripples all use it; the managers' stores into the hero block (0x13f640 on 05 / 12, the dive lock 0x13f52e on 05) go through `HeroFields` |
 
-**Guards** (`rc-game/tests/water_levels.rs`): the inventory on 19 levels (every table resolves, each port only on its
+**Guards** (`rc-game/tests/world/water_levels.rs`): the inventory on 19 levels (every table resolves, each port only on its
 level); the managers run on 01/05/07/11/12/13 (a step every 9 ticks, the draw registered, every patch's level = its
 moby's z); 751's port = the ripple module alone on the same stream; swim and wade on **05** (canal / sea) and **11**
 (sea, and a tide pool on the 1158 patches: the level read is the patch's rippled surface). Novalis: `novalis_hero_digest`
@@ -94,9 +94,9 @@ story) — not reachable in a direct boot (ship 1); `PauseAllSounds` sets `0x1ba
 Weapons / Gadgets pages, which are stubs); `GameStateUpdate` creates class 0x509 on the landing (landing not ported);
 `FUN_002a2360` sets the landing position. All open, listed for the landing / pause-grid ports.
 
-**Guards.** `rc-formats/tests/level_overlay_disc.rs` (sections, vtbl, relocation on 13), `rc-game/tests/level_ports.rs`
-(Novalis registry unchanged; per-level ports and externals), `rc-game/tests/gemlik_generalisation.rs` (menus on 13 and
-all levels, body pieces, `gemlik_content_gap` report), `rc-game/tests/all_levels_smoke.rs` (19 levels: load, spawn,
+**Guards.** `rc-formats/tests/formats/level_overlay_disc.rs` (sections, vtbl, relocation on 13), `rc-game/tests/world/level_ports.rs`
+(Novalis registry unchanged; per-level ports and externals), `rc-game/tests/ui/gemlik_generalisation.rs` (menus on 13 and
+all levels, body pieces, `gemlik_content_gap` report), `rc-game/tests/world/all_levels_smoke.rs` (19 levels: load, spawn,
 load pass, N ticks of the full tick with a scripted pad; Gemlik 3,000 ticks).
 
 ## Common classes pass (2026-09-28)
@@ -126,7 +126,7 @@ frame after the moby pass. Not ported (counted in `Services::unported`): the HUD
 Detector's probe point and dig, the static overlay, the mouse's glow sprites (0x30de68), jet particles (type 74),
 blob shadow and the Summoner moby's summon state.
 
-Tests: unit tests in each module; `rc-game/tests/common_classes_levels.rs` (every class resolves on exactly its
+Tests: unit tests in each module; `rc-game/tests/classes/common_classes_levels.rs` (every class resolves on exactly its
 levels; headless behaviour on two levels each); `all_levels_smoke` prints the drop in unported instances.
 
 ## Background: what moves between levels
@@ -269,7 +269,7 @@ How the address is found on another level:
   depend on it. Every level needs its own NPC classes, found from the functions the vtbl names.
 - **C6** `services.rs:773` (`level: 1` default; the engine overrides it at `gameplay.rs:597`) and
   `port_sim.rs:298` (`svc.level = 1`).
-- **C7** `rc-game/tests/moby_update_novalis.rs:218`: `elf_read(…, 0x20bb00, 0x924)`. Use the `lvl.vtbl` section.
+- **C7** `rc-game/tests/classes/moby_update_novalis.rs:218`: `elf_read(…, 0x20bb00, 0x924)`. Use the `lvl.vtbl` section.
 - Already general: `SHIP_CLASSES` (`moby_spawn.rs:30`, 0x160548 identical in all overlays),
   `first_visit_ship(level)`. The level branches in `crate_.rs:108/141/427/710` (0x12, 0xf) and `flyer.rs:489`
   (3/9) are transcribed from the code.

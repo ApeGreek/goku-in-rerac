@@ -1,7 +1,7 @@
 //! Moby (animated character / dynamic object) classes. Spec: docs/formats/moby_rac1.md, with the
 //! skinning/lighting corrections from docs/plan/moby_skinning_lighting.md. Ported
 //! from the retired C++ reference extractor (git 2230812; `parse_moby_class`, `moby_normal`, the index walk);
-//! `tests/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
+//! `tests/formats/golden.rs` checks every section against the committed snapshot table (`data/loader_snapshots.tsv`).
 //!
 //! What the loader resolves at load time, so a renderer never has to replay the PS2 machinery:
 //! * the 9-bit vertex-cache ids (stored 7 vertices late, spec 2.9) and duplicate vertices (2.8);

@@ -322,7 +322,7 @@ a `scene` dump command; retired 2026-09-27); `crates/rc-game/src/scene_player.rs
 `crates/rc-game/src/audio/scene.rs`; `crates/rc-engine/src/scene_render.rs`, `assets/shaders/fade.wgsl`, the
 `SceneLayer` hook in `hud_render.rs`.
 
-**Golden** (`tests/golden.rs` `scenes_for_every_level`): the Rust path re-serialised in the C++ dump layout was
+**Golden** (`tests/formats/golden.rs` `scenes_for_every_level`): the Rust path re-serialised in the C++ dump layout was
 byte-identical to the C++ dump for all 19 levels, NTSC and PAL, and is now checked against the committed snapshot hashes: 138 scenes, 275 regions, 4,081 chunks, 348,572 ticks, 1,004 actors,
 4,284 subtitle entries, 1,858 cut ticks. Invariants checked on every chunk: camera table ends at the first actor record,
 last record = the next chunk's first, enough frames for the last shown tick, stable actor classes, track w = 0. Scene

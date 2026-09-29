@@ -139,7 +139,7 @@ impl LevelData {
             }
         }
         let coll_blobs = rc_formats::moby_collision::parse_level(&core, &data)?;
-        // Ratchet with his own sequence table (core blocks ratchet_seq/NNN), as tests/hero_novalis.rs.
+        // Ratchet with his own sequence table (core blocks ratchet_seq/NNN), as tests/hero/hero_novalis.rs.
         let rblob = core.block(&data, "moby_class/0000").context("Ratchet's class")?;
         let rclass = rc_formats::moby::parse_moby_class(rblob)?;
         let seqs: Vec<Option<MobySequence>> = (0..256)

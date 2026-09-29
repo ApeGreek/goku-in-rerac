@@ -1,5 +1,5 @@
 //! Per-level HUD graphics: the `hud_header` lump and its five `hud_banks`. Spec: docs/plan/hud_text.md §1.
-//! Ported from the retired C++ reference extractor (git 2230812); snapshot-tested in `tests/golden.rs`.
+//! Ported from the retired C++ reference extractor (git 2230812); snapshot-tested in `tests/formats/golden.rs`.
 //!
 //! The header (copied to the HUD heap by `LoadHudBanks__Fv`, level01 0x253e28) holds four tables, all
 //! offsets relative to the header:

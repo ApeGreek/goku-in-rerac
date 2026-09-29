@@ -250,7 +250,7 @@ plateau's edge).
   carry, P1 `hero::platform`): the lift is going down the cliff face with Ratchet idle on its deck, pinned in its
   local space (carry flags 3): (164.75, 152.39, 57.96) at tick 200, (169.57, 157.76, 48.19) at tick 300; he
   arrives with it at the bottom (tick 384). Before the carry he was left behind when the deck slid from under
-  him at tick ~155 and fell to the meadow. Headless: `tests/hero_platform_novalis.rs`, the same positions.
+  him at tick ~155 and fell to the meadow. Headless: `tests/hero/hero_platform_novalis.rs`, the same positions.
 - A headless run of the same script (the port without Bevy) has the lift arrive at the bottom
   (174.50, 159.50, 41.00) at tick ~386, state 0.
 - Determinism: two runs to frame 200 give byte-identical screenshots (md5 6eb46855…) and identical per-tick
@@ -275,5 +275,5 @@ plateau's edge).
 - **Mission NPC 730 / 790** (`classes/mission_npc.rs`, 0x2fad68): drop-in cuboid +0x10 (42) → commands 860; its end
   commands 863 and the hinged bridge 746 (+0xbc = 2). Placement cuboids: +0x30 the checkpoint record (55).
 - **Gunship 688**: cuboid +0x170 → its fly-by (the enemies port) → `creature::ScriptRequest` → `rc_game::cinematic`.
-- Tested headless in `crates/rc-game/tests/cutscene_novalis.rs` (trigger ticks, holds of 420 / 180 / 390 ticks).
+- Tested headless in `crates/rc-game/tests/world/cutscene_novalis.rs` (trigger ticks, holds of 420 / 180 / 390 ticks).
 
