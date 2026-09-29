@@ -3,6 +3,7 @@
 
 mod classify;
 mod regen;
+mod sweep;
 mod test;
 
 use std::ffi::OsString;
@@ -23,6 +24,12 @@ commands:
         --check           only list what the folder holds; change nothing (no disc needed)
   package [--no-build]
       Release packaging: runs tools/package/package.sh (dist/randcrw-<version>-<os>-<arch>/ and its .zip).
+  sweep [--limit <size>] [--dry-run]
+      Keep target/ under a size limit (default 30GB; sizes like 30GB, 20G, 500MB, 2GiB) with cargo-sweep: the
+      least recently used build units go first (never incremental/; `cargo clean` is the full reset). Refuses while
+      another cargo, rustc or cargo-nextest runs. Prints target/ before and after, and what went. Without cargo-sweep
+      it prints `cargo install cargo-sweep --locked` and exits 0. test-full runs it at the end (a failure only warns).
+        --dry-run         only show what it would remove
 
 test tiers (docs/workflows/testing.md §2; RC_AUDIO=0; cargo-nextest when installed, else `cargo test-all`):
   test-quick [crate]
@@ -36,7 +43,7 @@ test tiers (docs/workflows/testing.md §2; RC_AUDIO=0; cargo-nextest when instal
         compared with work/test-results/hero_digest_no_idle.txt).
   test-full
       The full suite (on merge to main, or when the coordinator asks), then the NO_IDLE hero digest compared
-      with the baseline; a mismatch fails. It never rewrites the baseline.
+      with the baseline; a mismatch fails. It never rewrites the baseline. Then `sweep` (a failure only warns).
   digest-baseline
       The only command that writes the NO_IDLE hero digest baseline, and prints what changed: for a human who
       has decided a digest change is intended, or before a job's first edit when there is none.
@@ -70,6 +77,7 @@ fn main() -> ExitCode {
         "test-job" => test::job(rest),
         "test-full" => test::full(rest),
         "digest-baseline" => test::baseline(rest),
+        "sweep" => sweep::main(rest),
         "help" | "--help" | "-h" => { println!("{HELP}"); ExitCode::SUCCESS }
         other => {
             eprintln!("error: unknown command {other:?}\n\n{HELP}");

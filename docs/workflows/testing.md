@@ -1574,9 +1574,31 @@ the baseline taken before the merge.
 |---|---|
 | `cargo xtask test-quick [crate]` | the unit tests (`--lib --bins`); with nextest a crate name narrows it (`-E package(<crate>)`) |
 | `cargo xtask test-job <area…>` | the unit tests and the areas' binaries of §3 in one nextest run (a filterset for the partial areas `audio` and `shared`); with `shared`, then the digest compare |
-| `cargo xtask test-full` | the whole suite with `--no-fail-fast`, then the digest compared with the baseline (a mismatch fails) |
+| `cargo xtask test-full` | the whole suite with `--no-fail-fast`, then the digest compared with the baseline (a mismatch fails), then `cargo xtask sweep` (§9; only warns) |
 | `cargo xtask digest-baseline` | the only writer of the baseline; prints what changed. Run it only when a human has decided the digest change is intended |
 
 Each sets `RC_AUDIO=0`; `--cargo-test` uses `cargo test-all` instead of nextest; arguments after `--` go to nextest
 (or to the test binaries under `cargo test`). The runner choice matters for the level scans: see the end of §5.
+
+## 9. Keeping target/ small
+
+`target/` grows with every feature set, profile and stale test binary (13–16 GB on 2026-09-29; the static-Bevy
+mistakes of §1 roughly double it). `cargo xtask sweep` keeps it under a limit, **30 GB by default**
+(`--limit 20G`, `--limit 500MB`, `--limit 2GiB`; G/GB are decimal), with cargo-sweep
+(`cargo install cargo-sweep --locked`, 0.8.0 on 2026-09-29; like nextest it lands in `~/.cargo/bin` and `cargo sweep`
+finds it there).
+
+* **What goes:** while `target/` holds more file bytes than the limit, the least recently used build units, oldest
+  first: a unit is one `.fingerprint/<name>-<hash>` with its `deps/` and `build/` files, and "used" is the newest access
+  time of its fingerprint files (cargo reads them on every build that includes the unit). What the dev loop and the
+  tests used last stays, so `cargo dev` does not rebuild Bevy. It never touches `incremental/` (not tracked by
+  fingerprints; about half of `target/`) or unhashed outputs such as `target/debug/randcrw`.
+* **Safety:** it refuses (exit 1) while another `cargo`, `rustc` or `cargo-nextest` runs, so it never deletes files
+  under a running build; the `cargo` running the xtask itself does not count. Without cargo-sweep it prints the install
+  line and exits 0.
+* **Output:** `target/` before and after, and the units removed. `--dry-run` shows what it would remove.
+* **When it runs:** at the end of `cargo xtask test-full` (a refusal or failure there only warns; the test result
+  stands), after the coordinator's commit, and by hand whenever.
+* **Full reset:** `cargo clean` (then the next `cargo dev` rebuilds everything, Bevy included: minutes, not seconds).
+  It is also the only way to drop a big stale `incremental/`.
 

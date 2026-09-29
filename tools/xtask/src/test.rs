@@ -4,7 +4,8 @@
 //! - `test-job <area…>`: the per-job tier (§2.1): the unit tests, the integration binaries of each named area ([`AREAS`],
 //!   the area map of §3), and for the area `shared` the shared-code guard set (the NO_IDLE hero digest compared with
 //!   the baseline, and the all-levels smoke).
-//! - `test-full`: the full suite (§2.2), then the digest compared with the baseline (never rewritten).
+//! - `test-full`: the full suite (§2.2), then the digest compared with the baseline (never rewritten), then
+//!   `cargo xtask sweep` (a failure there only warns).
 //! - `digest-baseline`: the only command that writes the baseline, for a human who has decided a digest change is
 //!   intended (or a job with none, before its first edit); it prints what changed.
 //!
@@ -301,12 +302,14 @@ fn line_diff(old: &str, new: &str) -> Vec<String> {
 }
 
 /// `cargo xtask test-full [--cargo-test] [-- <runner args>]`: the full suite, then the digest compared with the baseline
-/// (a mismatch fails; the baseline is never rewritten here).
+/// (a mismatch fails; the baseline is never rewritten here), then the target/ sweep (a failure only warns).
 pub fn full(argv: &[OsString]) -> ExitCode {
     let o = match opts(argv) { Ok(o) => o, Err(c) => return c };
     if !o.names.is_empty() { eprintln!("error: test-full takes no areas"); return ExitCode::from(2); }
     let ok = run_all(&full_steps(runner(&o)), &o.extra);
     let digest = digest_check();
+    // Keep target/ under the limit; a refused or failed sweep never fails the test run.
+    if !crate::sweep::run(&crate::sweep::Opts::default()) { eprintln!("xtask: warning: the target/ sweep did not run (above); the test result stands"); }
     done(ok && digest)
 }
 

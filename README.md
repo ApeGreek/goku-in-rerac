@@ -53,6 +53,7 @@ cargo xtask test-quick           # unit tests of every crate (about 5 s)
 cargo xtask test-job hero world  # a job's tier: unit tests + the areas' integration binaries (docs/workflows/testing.md)
 cargo xtask test-full            # the full suite (tests needing game data skip without extracted/)
 cargo xtask regen-data           # (re)build the dev game data extracted/ from your disc image (RC_ISO)
+cargo xtask sweep                # keep target/ under 30 GB (cargo-sweep; --dry-run, --limit 20G)
 cargo xtask package              # release packaging (tools/package/package.sh)
 cargo xtask help                 # the other dev chores
 cargo run --release -p rc-engine # release / profiling build
@@ -68,6 +69,11 @@ dev`, so the tests reuse the one Bevy build `cargo dev` made; plain `cargo test 
 static Bevy. For rc-engine alone use `cargo test -p rc-engine --features dev`; the other crates do not depend on Bevy,
 so `cargo test -p <crate>` needs no feature. Check and clippy share one Bevy check build (metadata only, which a test
 build cannot reuse). Release builds and `tools/package` stay static (never `--features dev`).
+
+`target/` stays under 30 GB through `cargo xtask sweep` (cargo-sweep, `cargo install cargo-sweep --locked`): it
+removes the least recently used build units, refuses while a build runs, and runs at the end of `cargo xtask
+test-full`. `cargo clean` is the manual full reset (the next build recompiles Bevy). Details:
+`docs/workflows/testing.md` §9.
 
 The integration tests are 11 binaries, one per area: rc-game's `hero`, `weapons`, `classes`, `world` and `ui`, and
 `formats`, `data`, `extract`, `movies`, `trace`, `guards` (`tests/<area>/main.rs`, one module per former test file:
