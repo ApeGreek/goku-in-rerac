@@ -37,6 +37,9 @@
 //! | U170 | 341 Hydrodisplacer pads (05, 07, 11, 12, 18) | level05 0x2f8080 | [`hydro_pad`] |
 //! | U204 | 367 sliders (06) | level06 0x2d9d10 | [`slider`] |
 //! | U82 | 1341 the Novalis help-hint director (01) | level01 0x30acb8 | [`help_director`] |
+//! | U36 | 1564 path gliders (00, 07, 10, 18) | level00 0x2e3a88 | [`path_glider`] |
+//! | U495 | 257 Kalebo rail cars (16) | level16 0x2c3d38 | [`rail_car`] |
+//! | U523 | 1667–1671 Kalebo air traffic (16) | level16 0x2e76b8 | [`kalebo_traffic`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -70,6 +73,9 @@ pub mod smoke_emitter;
 pub mod hydro_pad;
 pub mod slider;
 pub mod help_director;
+pub mod path_glider;
+pub mod rail_car;
+pub mod kalebo_traffic;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -120,6 +126,9 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U170", level: hydro_pad::REFERENCE_LEVEL, func: hydro_pad::UPDATE_FN, classes: &hydro_pad::CLASSES, update: hydro_pad::update, joints: &[] },
     UnitPort { unit: "U204", level: slider::REFERENCE_LEVEL, func: slider::UPDATE_FN, classes: &slider::CLASSES, update: slider::update, joints: &[] },
     UnitPort { unit: "U82", level: help_director::REFERENCE_LEVEL, func: help_director::UPDATE_FN, classes: &help_director::CLASSES, update: help_director::update, joints: &[] },
+    UnitPort { unit: "U36", level: path_glider::REFERENCE_LEVEL, func: path_glider::UPDATE_FN, classes: &path_glider::CLASSES, update: path_glider::update, joints: &[] },
+    UnitPort { unit: "U495", level: rail_car::REFERENCE_LEVEL, func: rail_car::UPDATE_FN, classes: &rail_car::CLASSES, update: rail_car::update, joints: &[] },
+    UnitPort { unit: "U523", level: kalebo_traffic::REFERENCE_LEVEL, func: kalebo_traffic::UPDATE_FN, classes: &kalebo_traffic::CLASSES, update: kalebo_traffic::update, joints: &[] },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.

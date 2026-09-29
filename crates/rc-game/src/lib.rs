@@ -50,6 +50,7 @@ pub mod scene_player;
 pub mod movie_player;
 pub mod cinematic;
 pub mod spline;
+pub mod path;
 pub mod shadows;
 pub mod targeting;
 pub mod afterimage;

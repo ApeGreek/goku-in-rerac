@@ -264,18 +264,10 @@ fn arc_lengths(w: &mut World, path: &Path, tension: f32, bias: f32) {
     }
 }
 
-/// `FUN_0028b510(0, pos, spline)`: the first point with the smallest distance to `pos`.
+/// `FUN_0028b510(0, pos, spline)`: the first point with the smallest distance to `pos` (the same function as the
+/// other overlays' `0x264558` / `0x2a0260`: `crate::path::nearest_at_distance`).
 fn nearest(w: &World, path: &Path, pos: [f32; 4]) -> i32 {
-    let mut best = 1e11f32;
-    let mut k = 0;
-    for i in 0..path.count.max(0) {
-        let d = dist(path.pt(path.pts(w), i as usize), pos).abs();
-        if d < best {
-            best = d;
-            k = i;
-        }
-    }
-    k
+    crate::path::nearest_at_distance(&path.pts(w)[..path.count.max(0) as usize], 0.0, pos)
 }
 
 /// `FUN_002f5040(m, v)`: the lateral / vertical offset: with `f` = row 0 of the moby's Euler rows,

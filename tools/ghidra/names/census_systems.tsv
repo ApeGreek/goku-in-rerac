@@ -362,14 +362,14 @@ L01:0028ba80	FUN_0028ba80	path	has	V
 L01:0028bb90	FUN_0028bb90	path	has	V	
 L01:0028b510	FUN_0028b510	path	has	V	
 L01:0028b7b0		path	has	V	
-L01:00277d40	FUN_00277d40	path	missing	L	position + heading at t along a path: no port citation
-C:c4c12687d93c	FUN_00262e40	path	missing	L	position + heading at t along a path (0x277d40's job), not on L01
-C:49a176c9f6de	FUN_00270d00	path	missing	L	nearest segment of a path within r (path table 0x1b04b0), not on L01
-C:aeb1c69a6e0e	FUN_00264558	path	missing	L	path point nearest a distance, not on L01
-C:a3bbdace838c	FUN_002a0260	path	missing	L	path point nearest a distance, other copy
+L01:00277d40	FUN_00277d40	path	has	V	position + rotation at t along a path: rc-game/src/path.rs pose (level10 0x2560c0 is this code)
+C:c4c12687d93c	FUN_00262e40	path	has	V	position + rotation at t along a path: the same source as 0x277d40 (path.rs pose); consumers path_glider, rail_car, kalebo_traffic
+C:49a176c9f6de	FUN_00270d00	path	has	V	position pushed r from the path walls (path table 0x1b04b0): path.rs push_from_walls (no class consumer ported yet)
+C:aeb1c69a6e0e	FUN_00264558	path	has	V	path point nearest a distance: the flyer driver's 0x28b510, path.rs nearest_at_distance
+C:a3bbdace838c	FUN_002a0260	path	has	V	path point nearest a distance, the same code: path.rs nearest_at_distance
 C:dc2339668382		path	missing	L	nearest path points to a pair, not on L01
-C:17a7139ba6a7	FUN_00263710	path	missing	L	segment crosses a path wall, not on L01 (0x276640-like)
-C:7c53e29c001b	FUN_00261b48	path	missing	L	segment crosses a path wall, other copy
+C:17a7139ba6a7	FUN_00263710	path	has	V	segment crosses a path wall: identical to ClampToPath 0x276820 (services.rs clamp_to_path_hit)
+C:7c53e29c001b	FUN_00261b48	path	has	V	segment crosses a path wall: identical to ClampToPath 0x276820 (services.rs clamp_to_path_hit)
 L01:00277260	FUN_00277260	path	missing	L	point at distance along a segment list
 L01:00252850	FreePointLight	light	has	V	FreePointLight
 L01:00252750	WritePointLight_B	light	has	V	WritePointLight_B

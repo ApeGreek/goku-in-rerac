@@ -37,6 +37,17 @@ are tagged; 30 of the 43 untagged functions are named. **480 shared keys, 467 ta
 | **partly**: calls a function the port has only in part, or **branches on a hero state / body the port lacks** | 40 | 251 | 40 / 204 |
 | **unknown**: nothing missing, but one untagged function | 6 | 8 | 19 / 48 |
 
+**Re-run 2026-09-29 (W1 lane 1, the path helpers: G-CLS-025).** The path helpers are ported (`rc-game/src/path.rs`;
+seven census keys re-tagged has: `0x262e40` / `0x277d40`, `0x261d78`, `0x264558` / `0x2a0260`, `0x263710` / `0x261b48`)
+and three of their units landed (below, "In the port: path units": 1564, 257, 1667–1671: 203 instances). **538**
+unported class-levels, 4,323 placed / **3,827 created** instances in **414 units**; verdicts cheap 219 units / 1,498,
+missing 147 / 2,030, partly 42 / 291, unknown 6 / 8. The `path` system blocks **1 unit / 2 instances** (947 on level
+10: `0x277260`, unported). A caution on the re-tag: the census counts a function as the unit's own when only that unit
+calls it, so a unit can turn "cheap" while its private code holds a whole system. Level 03's air-traffic family
+(75, 115–120, 132, 795: `0x29dba8`, 246 instances) is the case: its own code includes a level-03 explosion `0x24ce98`
+(3,136 words: the beam-explosion family compiled into the overlay; G-CLS-028) and the effect-moby spawner `0x2bad40`
+(class 235; G-CLS-026). It is not cheap.
+
 "Cheap" means the class needs **only its own code** ported: the shared systems are there. It is not free: the
 appendix gives each unit's private code size (functions / words).
 
@@ -117,7 +128,7 @@ marked; `C:` rows cite one level copy (the others: `clusters.tsv`).
 | system | status | gap row | classes | units | instances | example classes (instances) | key shared functions (× units calling) |
 |---|---|---|---|---|---|---|---|
 | Big-head cheat manipulator and flag [conditional] (`cheat`) | missing | G-SAV-006 | 57 | 48 | 1,497 | 827 (155); 1246 (126); 749 (106); 193 (93) | `L01:00278720` FUN_00278720×35; `C:ec9f80c602e5` FUN_00251d70×8; `G:0015edb7=00000000` cheat_bighead_flag×4; `C:606d87e75d7d` FUN_0025ea60×2 |
-| Path helpers not linked on Novalis (`path`) | partly | G-CLS-025 | 53 | 31 | 1,108 | 75/115/116 (246); 827 (155); 749 (106); 1564 (92) | `C:c4c12687d93c` FUN_00262e40×12; `C:49a176c9f6de` FUN_00270d00×8; `C:17a7139ba6a7` FUN_00263710×3; `C:aeb1c69a6e0e` FUN_00264558×3; `L01:00277d40` FUN_00277d40×3; `C:a3bbdace838c` FUN_002a0260×2 |
+| Path helpers not linked on Novalis (`path`) | partly | G-CLS-025 | 1 (was 53) | 1 (was 31) | 2 (was 1,108) | 947 (2) (was 75/115/116 (246); 827 (155); 749 (106); 1564 (92)) | `L01:00277260` FUN_00277260×1 (2026-09-29 W1: `C:c4c12687d93c` FUN_00262e40, `C:49a176c9f6de` FUN_00270d00, `C:17a7139ba6a7` FUN_00263710, `C:aeb1c69a6e0e` FUN_00264558, `L01:00277d40`, `C:a3bbdace838c` FUN_002a0260 are has: `rc_game::path`) |
 | Hero scripted states, bodies and the branches on them (`herostate`) | partly | G-HERO-002, G-HERO-005, G-LVL-002 (H2) | 96 | 68 | 880 | 827 (155); 193 (93); 638 (64); 1843 (60) | `G:001413d4=00000032` hero_state_0x32×14; `G:001413f4=00000002` body_giant_clank×13; `G:001413f4=00000001` body_clank×12; `C:8a18636e69bd` FUN_002223f8×11; `C:ea215dba76e7` FUN_002356a0×5; `C:2f2e9be4c73e` FUN_00230b38×4 |
 | NPC look-at manipulators and animation leftovers (`anim`) | partly | G-HERO-009 | 47 | 42 | 422 | 638 (64); 238 (54); 623 (51); 294 (40) | `L01:002777d8` FUN_002777d8×40; `C:94cf214dfe7f` FUN_0027b9c0×2; `L01:0026c7a8` MobyAnimBlendEx×2; `L01:002b52a8` FUN_002b52a8×1 |
 | Creature-layer copies not linked on Novalis (`creature`) | partly | G-ENM-009 | 23 | 22 | 363 | 238 (54); 294 (40); 1023 (40); 1112 (31) | `C:d001715051e4` FUN_0024e830×18; `C:ad33de15cdab` FUN_00247c10×7; `C:a8d6490c966c` FUN_0025b710×1 |
@@ -141,7 +152,7 @@ marked; `C:` rows cite one level copy (the others: `clusters.tsv`).
 | Leaving the level (`levelexit`) | missing | G-LVL-001 | 2 | 2 | 2 | 436 (1); 834 (1) | `L01:002a29a0` FUN_002a29a0×2 |
 | An angle spring variant (`math`) | partly | — | 1 | 1 | 1 | 1106 (1) | `L01:0020cf28` FUN_0020cf28×1 |
 
-Sole blockers (the one system a unit still needs, cheats and saves aside): path 648 (17 units), herostate 297 (31 units), fxmoby 114 (12 units), creature 84 (5 units), lsound 38 (1 units), ptype 38 (8 units), platform 36 (3 units), voicehand 33 (2 units), anim 23 (18 units), fxdraw 20 (8 units), camera 17 (8 units), light 14 (2 units), death 7 (1 units), shadow 4 (1 units), particles 2 (1 units), levelexit 2 (2 units), cine 1 (1 units).
+Sole blockers (the one system a unit still needs, cheats and saves aside; the W0 run — after W1 the path entry is 2 (1 unit)): path 648 (17 units), herostate 297 (31 units), fxmoby 114 (12 units), creature 84 (5 units), lsound 38 (1 units), ptype 38 (8 units), platform 36 (3 units), voicehand 33 (2 units), anim 23 (18 units), fxdraw 20 (8 units), camera 17 (8 units), light 14 (2 units), death 7 (1 units), shadow 4 (1 units), particles 2 (1 units), levelexit 2 (2 units), cine 1 (1 units).
 
 **What the port already has** (and the unported classes lean on most): math, timers and RNG (VecAdd, `ticks`, the
 `rand` stream: called by most units), moby create / delete / matrix, animation (`MobyAnimBlend`, joints, manipulators), class
@@ -282,6 +293,29 @@ callback) and the rest of the part B appendix (117 units / 959 instances after t
 
 **Re-run after both halves (2026-09-28):** 548 unported class-levels, 4,526 placed / **4,030 created** instances, 417
 units; verdicts: cheap 197 units / 1,308, missing 161 / 2,470, partly 40 / 204, unknown 19 / 48.
+
+### In the port: path units (2026-09-29, W1 lane 1, G-CLS-025)
+
+The path helpers first (`rc-game/src/path.rs`: the system-or-not table of every copy is its module doc; `pose`
+`0x262e40` / `0x277d40`, `push_from_walls` `0x261d78`, `nearest_at_distance` `0x264558` / `0x2a0260` = the flyer
+driver's `0x28b510`, which now calls it; `0x263710` / `0x261b48` are `ClampToPath`, `World::clamp_to_path_hit`), then
+the units the helpers alone blocked, in `units::PORTS`; coverage tables in the module docs, tests
+`rc-game/tests/path_classes.rs` (an owned-slot sound sink, so `SoundIsAlive` is the game's check).
+
+| unit | classes (levels) | created | reference | port | notes |
+|---|---|---|---|---|---|
+| U36 | 1564 path gliders (00, 07, 10, 18) | 92 | level00 0x2e3a88 | `units::path_glider` | 6 units/s on the first segment, pitch halved, flap / glide blends on the animation wrap; the data words are the same on the four levels |
+| U523 | 1667–1671 air traffic (16) | 90 | level16 0x2e76b8 | `units::kalebo_traffic` | one member's init places the group (shuffled, even t); spacing by target-speed swaps; unseen vehicles jump ahead; type-22 exhaust (odd classes), loop sound (even) |
+| U495 | 257 rail cars (16) | 21 | level16 0x2c3d38 | `units::rail_car` | runs when Ratchet grinds (state group 0xf) in its cuboid; loop sound 0, sound 1 within 7; hidden at the end, reset out of view |
+
+**Not path-blocked after all**: U127 (level 03's 75, 115–120, 132, 795: 246) is a flyer-driver variant (the level-01
+driver's tangent / Hermite / arc-length helpers, `classes::flyer`) whose own code is a level-03 explosion `0x24ce98`
+(3,136 words; G-CLS-028), the class-235 exhaust moby `0x2bad40` (G-CLS-026), `BreakFxB` wrecks per class, `BoltBurst`
+`0x24f1b8`, a skill point / banner for 795, class sounds and type-22 sparks. U572 (1906, 18: 18) calls the path
+helper from its own walk code but is a creature (hit handler `0x25e9d8`, death explosion `0x260790`, react
+`0x25bd28`: G-ENM-009). U326 (947, 10: 2) needs `0x277260` (left in G-CLS-025). The other former path units (827,
+749, 580, 1262, 238, 294, 857, 1213 / 1212 …) wait on the cheat, the light flicker, the creature copies, the hero
+states or their own draw callbacks (unit_systems.tsv).
 
 ## Unique classes: the ones that need something no other class needs
 

@@ -1580,8 +1580,13 @@ impl<'a> World<'a> {
     /// `ClampToPath(idx, a, b, out)` 0x276820: where the segment a → b (flattened) first crosses spline `idx`
     /// (as a 2-D polyline in the segment's frame), `lerp(a, b, t)` with the smallest crossing `t` in (0, 1),
     /// else `b`.
-    pub fn clamp_to_path(&self, idx: i32, a: V4, b: V4) -> V4 {
-        let Some(pts) = usize::try_from(idx).ok().and_then(|i| self.svc.splines.get(i)) else { return b };
+    pub fn clamp_to_path(&self, idx: i32, a: V4, b: V4) -> V4 { self.clamp_to_path_hit(idx, a, b).0 }
+
+    /// [`World::clamp_to_path`] with the function's return value: whether a wall was crossed. The other
+    /// overlays link the same function as their own copy (level00 `0x261b48`, level02 `0x263710`: identical
+    /// code over their path table; `crate::path`), and its callers there read the flag.
+    pub fn clamp_to_path_hit(&self, idx: i32, a: V4, b: V4) -> (V4, bool) {
+        let Some(pts) = usize::try_from(idx).ok().and_then(|i| self.svc.splines.get(i)) else { return (b, false) };
         let mut d = ph::vsub(b, a);
         d[2] = Pf::ZERO;
         let l = ph::len3(d);
@@ -1590,17 +1595,21 @@ impl<'a> World<'a> {
         let m = [d, [d[1], -d[0], z, z], [z, z, Pf::ONE, z]];
         let xf = |p: [u32; 4]| ph::mul_rows3(&m, ph::vsub(p.map(Pf), a));
         let mut best = Pf::ONE;
-        let Some(&first) = pts.first() else { return b };
+        let mut hit = false;
+        let Some(&first) = pts.first() else { return (b, false) };
         let mut p0 = xf(first);
         for &pt in pts.iter().skip(1) {
             let p1 = xf(pt);
             if !(p0[3].is_zero() && p1[3].is_zero()) && (p1[1] * p0[1]) < Pf::ZERO {
                 let t = ((p0[0] - p1[0]) / (p0[1] - p1[1])) * (-p1[1]) + p1[0];
-                if Pf::ZERO < t && t < best { best = t; }
+                if Pf::ZERO < t && t < best {
+                    best = t;
+                    hit = true;
+                }
             }
             p0 = p1;
         }
-        lerp3(a, b, best)
+        (lerp3(a, b, best), hit)
     }
 
     /// The landing correction of `BoltBurst` 0x275988 / `CrateDropBolts` 0x2eb498 for a dropper with a path
