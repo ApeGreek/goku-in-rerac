@@ -1,7 +1,7 @@
 //! Runtime entry point: loads one level from the game data folder and runs it.
 //!
 //! Arguments (launcher contract, docs/plan/launcher_contract.md; crate::disc_source):
-//! - `--data-dir <dir>` the game data folder (`randcrw-extract` output); `--version-json` print the version and exit
+//! - `--data-dir <dir>` the game data folder (`rerac-extract` output); `--version-json` print the version and exit
 //!
 //! Environment:
 //! - `RC_DATA_DIR`   the game data folder when `--data-dir` is absent; else `RC_EXTRACTED`, else `<workspace>/extracted`
@@ -124,7 +124,7 @@ fn main() -> anyhow::Result<()> {
         DefaultPlugins
             .set(WindowPlugin {
                 // 2x the NTSC 512x416 GS draw buffer (docs/plan/render_pipeline.md).
-                primary_window: Some(Window { title: "randcrw".into(), resolution: (1024u32, 832u32).into(), ..default() }),
+                primary_window: Some(Window { title: "ReRAC".into(), resolution: (1024u32, 832u32).into(), ..default() }),
                 ..default()
             })
             .set(AssetPlugin { file_path: asset_dir(), ..default() }),
@@ -194,7 +194,7 @@ fn ms(d: Duration) -> f64 { d.as_secs_f64() * 1e3 }
 
 /// The shader folder: `assets/` next to the executable (a packaged version, `tools/package`), or
 /// `../Resources/assets` inside a macOS `.app`; otherwise the repo's `crates/rc-engine/assets` (`cargo dev`,
-/// `target/*/randcrw`). The executable path is resolved through symlinks first, so a symlinked binary finds the
+/// `target/*/rerac`). The executable path is resolved through symlinks first, so a symlinked binary finds the
 /// folder beside its real file.
 fn asset_dir() -> String {
     let exe = std::env::current_exe().and_then(std::fs::canonicalize).ok();

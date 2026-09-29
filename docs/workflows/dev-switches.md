@@ -1,20 +1,21 @@
 # Workflow: engine switches (command line, settings file, environment)
 
-How to steer a `randcrw` run: its two command-line options, the settings file, and the `RC_*` environment switches.
-All of them work the same under `cargo dev` (`cargo dev -- <options>`) and on a built `randcrw`.
+How to steer a `rerac` run: its two command-line options, the settings file, and the `RC_*` environment switches.
+All of them work the same under `cargo dev` (`cargo dev -- <options>`) and on a built `rerac`.
 
 ## Command line
 
 | Option | Effect |
 |---|---|
 | `--data-dir <folder>` (also `--data-dir=<folder>`) | The game data folder; how the launcher starts the game. Selection order and exit codes: `docs/workflows/game-data.md` "How the engine finds its data" |
-| `--version-json` | Prints the launcher contract line (`{"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}`) and exits without touching any data |
+| `--version-json` | Prints the launcher contract line (`{"name":"rerac","version":"0.1.0","game":"rac1","data_format":1}`) and exits without touching any data |
 
 ## Settings file
 
-Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/randcrw/settings.toml` (macOS),
-`$XDG_CONFIG_HOME/randcrw/settings.toml` (else `~/.config/randcrw/`, Linux) or `%APPDATA%\randcrw\settings.toml`
-(Windows). An older `randcre/settings.toml` there is copied over once on the first start. `RC_SETTINGS_FILE=<path>`
+Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/rerac/settings.toml` (macOS),
+`$XDG_CONFIG_HOME/rerac/settings.toml` (else `~/.config/rerac/`, Linux) or `%APPDATA%\rerac\settings.toml`
+(Windows). When that file is missing, a pre-rename `randcrw/settings.toml` there is copied over once on the first start
+(the old one is kept). `RC_SETTINGS_FILE=<path>`
 picks another file; `RC_SETTINGS_FILE=0` (or empty) disables it. Frame-exact runs (`RC_DETERMINISTIC=1`,
 `RC_SCREENSHOT_FRAME`, `RC_DUMP_FRAMES`) neither read nor write the default file; an explicit `RC_SETTINGS_FILE` still
 applies to them (`crates/rc-engine/src/render_settings.rs`).

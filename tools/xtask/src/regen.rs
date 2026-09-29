@@ -1,5 +1,5 @@
 //! `cargo xtask regen-data`: rebuild the dev game data folder from the user's disc image with the dev build of
-//! `randcrw-extract`, without ever leaving the user without data.
+//! `rerac-extract`, without ever leaving the user without data.
 //!
 //! 1. The disc: `--iso` or `RC_ISO`; when missing, print how to set `RC_ISO` once (fish, bash/zsh).
 //! 2. The folder (`--data-dir`, else `RC_EXTRACTED`, else `<repo>/extracted`) may hold only what the extractor writes
@@ -134,7 +134,7 @@ fn print_missing_iso() {
 
 fn print_report(d: &Path, r: &Report) {
     println!("regen-data: data folder {}", d.display());
-    println!("  written by randcrw-extract:          {:>7} files  {:>10}", count(r.extractor.files), gib(r.extractor.bytes));
+    println!("  written by rerac-extract:            {:>7} files  {:>10}", count(r.extractor.files), gib(r.extractor.bytes));
     let lt = r.leftover_total();
     if lt.files > 0 {
         println!("  known C++ extractor leftovers:       {:>7} files  {:>10}  (stale; deleted with the old folder)", count(lt.files), gib(lt.bytes));
@@ -234,7 +234,7 @@ pub fn run(argv: &[OsString]) -> ExitCode {
         eprintln!("error: {what}; {} is unchanged (the staging folder was deleted)", d.display());
         ExitCode::FAILURE
     };
-    println!("regen-data: building randcrw-extract (dev profile)");
+    println!("regen-data: building rerac-extract (dev profile)");
     let t = Instant::now();
     match cargo().args(["build", "-q", "-p", "rc-extract"]).current_dir(&repo).status() {
         Ok(s) if s.success() => {}
@@ -248,7 +248,7 @@ pub fn run(argv: &[OsString]) -> ExitCode {
     let t = Instant::now();
     match extractor(&["extract".as_ref(), "--iso".as_ref(), iso.as_os_str(), "--out".as_ref(), staging.as_os_str()]) {
         Ok(s) if s.success() => {}
-        Ok(s) => return fail(&format!("randcrw-extract extract failed ({s})")),
+        Ok(s) => return fail(&format!("rerac-extract extract failed ({s})")),
         Err(e) => return fail(&format!("cannot run cargo: {e}")),
     }
     let t_extract = t.elapsed().as_secs_f64();
@@ -257,7 +257,7 @@ pub fn run(argv: &[OsString]) -> ExitCode {
     let t = Instant::now();
     match extractor(&["verify".as_ref(), "--out".as_ref(), staging.as_os_str()]) {
         Ok(s) if s.success() => {}
-        Ok(s) => return fail(&format!("randcrw-extract verify failed ({s})")),
+        Ok(s) => return fail(&format!("rerac-extract verify failed ({s})")),
         Err(e) => return fail(&format!("cannot run cargo: {e}")),
     }
     let t_verify = t.elapsed().as_secs_f64();
@@ -320,12 +320,12 @@ mod tests {
 
     #[test]
     fn never_replaces_the_repo_home_or_root() {
-        let repo = Path::new("/u/me/Repos/randcre");
+        let repo = Path::new("/u/me/Repos/checkout");
         let home = Some(Path::new("/u/me"));
         assert_eq!(unsafe_target(&repo.join("extracted"), repo, home), None);
         assert_eq!(unsafe_target(&repo.join("work/scratch-data"), repo, home), None);
         assert_eq!(unsafe_target(Path::new("/u/me/data/rc"), repo, home), None);
-        for bad in ["/", "/u", "/u/me", "/u/me/Repos", "/u/me/Repos/randcre", "/u/me/Repos/randcre/docs", "/u/me/Repos/randcre/crates/rc-extract"] {
+        for bad in ["/", "/u", "/u/me", "/u/me/Repos", "/u/me/Repos/checkout", "/u/me/Repos/checkout/docs", "/u/me/Repos/checkout/crates/rc-extract"] {
             assert!(unsafe_target(Path::new(bad), repo, home).is_some(), "{bad}");
         }
     }

@@ -21,7 +21,7 @@ lists what was seen.
   12:57:49, after the last run. Every `cargo dev` built without errors, so no build-failure retries were
   needed.
 - Artefacts (logs, PNGs, crops, contact sheets):
-  `/private/tmp/claude-501/-Users-aslanhud-Repos-randcre/98486f1a-f04e-4cb0-b49d-4807e1ebddef/scratchpad/sweep/`
+  the sweep session's scratchpad folder `sweep/`
   (`NN.log`, `NN_default.png`, `NN_low.png`, `NN_low2.png`, `NN_fps.log`, `diag/`). They are outside the repo and
   are not kept.
 

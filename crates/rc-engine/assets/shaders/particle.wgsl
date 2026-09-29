@@ -15,7 +15,7 @@
 
 #import bevy_pbr::view_transformations::position_world_to_clip
 #import bevy_pbr::mesh_view_bindings::view
-#import randcrw::display_blend::{gs_add, gs_mix}
+#import rerac::display_blend::{gs_add, gs_mix}
 
 struct ParticleParams {
     // x = draw (0 = A >= AREF with Z, 1 = the rest), y = AREF.

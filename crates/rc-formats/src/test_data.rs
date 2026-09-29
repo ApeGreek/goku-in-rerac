@@ -1,5 +1,5 @@
 //! Where tests and dev tools find the development data tree: `RC_EXTRACTED`, else `<workspace>/extracted`
-//! (a Tier 0 archive as `randcrw-extract extract` writes it; git-ignored, never shipped), plus the decompressed
+//! (a Tier 0 archive as `rerac-extract extract` writes it; git-ignored, never shipped), plus the decompressed
 //! lumps and the named core blocks / gameplay sections the tests use, produced by the Rust loaders.
 //!
 //! Tests skip when a file they need is absent. The game runtime resolves its own data folder (`rc-engine`

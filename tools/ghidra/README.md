@@ -27,7 +27,7 @@ should be a `--dry-run` where a script has one.
 * **Inputs:** the open Ghidra project (today `~/ratchet1.gpr` + `~/ratchet1.rep`; target home
   `~/PS2/ratchet1/ghidra/`), `names/`, `extracted/boot/SCUS_971.99` and `extracted/levels/NN/overlay.bin` (game data),
   `work/ghidra-import/levelNN.elf` (level ELFs with their original load addresses; today copies of the retired C++
-  extractor's `overlay.elf`, later `randcrw-extract export --what code`, a follow-up), Lombyte's names under
+  extractor's `overlay.elf`, later `rerac-extract export --what code`, a follow-up), Lombyte's names under
   `~/Globals/Lombyte`.
 * **Outputs:** renames and comments in the Ghidra project, `names/clusters.tsv` + `names/overlay_names.csv`
   (`overlay_diff.py`, committed), the decompiler export in `work/decomp/` (git-ignored: it is the game's code).

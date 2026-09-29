@@ -2,7 +2,7 @@
 
 > **Order of work:** `docs/plan/priority_order.md` ranks every row below (and the memory-only items) by importance and dependency, in waves of at most 3 parallel lanes (2026-09-29).
 
-One list of every known gap in randcrw, **by missing shared system**: what agents left as "not ported", "later",
+One list of every known gap in ReRAC, **by missing shared system**: what agents left as "not ported", "later",
 "left", "still not drawn", "not modelled" or "inferred", plus the open items of the plan docs. The plan docs
 (`roadmap.md`, one doc per system) stay the detailed record; this page is the index of what is missing and where each
 piece is described.
@@ -227,7 +227,7 @@ needs.
 
 ## Launcher (LCH)
 
-The launcher is the separate `randcrw-launcher` repo (Tauri); these rows are what the game repo's docs and the
+The launcher is the separate `rerac-launcher` repo (Tauri); these rows are what the game repo's docs and the
 orchestrator's log record for it.
 
 | ID | Gap | Source | Seen | Depends on | Batch |
@@ -249,7 +249,7 @@ orchestrator's log record for it.
 | G-EXT-003 | Tier 1 v2+ baked products (only when profiling shows a load or parse cost); ELF / overlay tables lifted into typed data | launcher_extractor.md §5 | no | G-TOOL-001 | Extractor |
 | G-EXT-004 | Lumps kept only as archive until understood: `bindata` (level 06, 5.4 MB), `stuff2`, `anim_looking_thing_2`, `wad_14e0`, `things` (caller `FUN_002594e0`), `wad_things` (some are space scenes) | launcher_extractor.md §3 table; cutscenes_transitions.md §8 | no | G-LVL-001 | Extractor |
 | G-EXT-005 | Stage-1 leftovers: the 19-level smoke run and the before / after deterministic capture; `rc_formats::disc` still public in `rc-formats` | launcher_extractor.md §8 "Not done from the plan" | no | — | Extractor |
-| G-EXT-006 | `randcrw-extract export --what code [--level NN]` (overlays as ELF for Ghidra) and `verify --strict` (report files the archive does not have) | repo_reorg.md §6 items 1, 2; memory `project-dev-tooling-reorg` | no | — | Repo follow-ups |
+| G-EXT-006 | `rerac-extract export --what code [--level NN]` (overlays as ELF for Ghidra) and `verify --strict` (report files the archive does not have) | repo_reorg.md §6 items 1, 2; memory `project-dev-tooling-reorg` | no | — | Repo follow-ups |
 
 ## Mods (MOD)
 

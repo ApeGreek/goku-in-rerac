@@ -1,6 +1,6 @@
 //! Reads one level's disc-derived lumps from the game data folder and parses what the renderer needs.
 //!
-//! Inputs (the Tier 0 archive `randcrw-extract` writes, never shipped with the repo):
+//! Inputs (the Tier 0 archive `rerac-extract` writes, never shipped with the repo):
 //! `levels/NN/core_index.bin`, `levels/NN/core_data.bin` (WAD-compressed), `levels/NN/gs_ram.bin`.
 //! The call chain is the one `crates/rc-formats/tests/formats/golden.rs` checks against the committed snapshot hashes.
 

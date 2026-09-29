@@ -1,4 +1,4 @@
-//! The build DB: which disc is which, and which builds randcrw supports.
+//! The build DB: which disc is which, and which builds ReRAC supports.
 //!
 //! Two tables, like OpenGOAL's serial → ELF-hash DB (`docs/plan/launcher_extractor.md` §2.1):
 //! - [`TITLES`]: every known Ratchet & Clank boot-ELF name (= product serial) of RC1 and the sequels
@@ -6,9 +6,9 @@
 //! - [`BUILDS`]: exact builds pinned by serial + boot-ELF SHA-1. Only these can be supported; each supported build
 //!   carries its Tier 0 size/SHA-1 table (`data/<serial>.tsv`, hashes and sizes only, no disc bytes).
 //!
-//! Adding a build: run `randcrw-extract identify --iso <image>` on it. For an unknown build it prints an info line
+//! Adding a build: run `rerac-extract identify --iso <image>` on it. For an unknown build it prints an info line
 //! `new build DB row: Build { … }`; paste that row into [`BUILDS`]. Supporting it additionally needs its table
-//! (`randcrw-extract table --iso <image> --output data/<serial>.tsv`), `supported: true` and, for a new region, the
+//! (`rerac-extract table --iso <image> --output data/<serial>.tsv`), `supported: true` and, for a new region, the
 //! runtime's address maps.
 
 /// Which game a disc is.
@@ -164,9 +164,9 @@ pub fn parse_table(text: &str) -> Result<Vec<TableEntry>, String> {
 pub fn format_table(serial: &str, version: &str, entries: &[TableEntry]) -> String {
     let total: u64 = entries.iter().map(|e| e.size).sum();
     let mut s = format!(
-        "# randcrw Tier 0 table: {serial} v{version}. {} files, {total} bytes.\n\
+        "# ReRAC Tier 0 table: {serial} v{version}. {} files, {total} bytes.\n\
          # Sizes and SHA-1 hashes only (no disc bytes). Columns: path<TAB>size<TAB>sha1.\n\
-         # Regenerate: randcrw-extract table --iso <image> --output crates/rc-extract/data/<serial>.tsv\n",
+         # Regenerate: rerac-extract table --iso <image> --output crates/rc-extract/data/<serial>.tsv\n",
         entries.len()
     );
     for e in entries { s += &format!("{}\t{}\t{}\n", e.path, e.size, crate::sha1::hex(&e.sha1)); }

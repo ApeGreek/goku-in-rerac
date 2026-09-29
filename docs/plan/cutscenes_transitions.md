@@ -281,7 +281,7 @@ page-menu post-action (`FUN_00276bd0`). What opens that page on Veldin is **not 
 **Formats (`rc-formats::scene`)**
 1. `SceneTable::parse(level_header)` → 15 × {sounds[6], ntsc[71], pal[71]} with sector-difference sizes. Fix
    `disc.rs` `level_stream_lumps` naming to `sceneK/{sound/L, ntsc/N, pal/N}`. This renames extractor output, so
-   update the extractor and its verify step together (then `tools/extract`, now `randcrw-extract` and its SHA-1 table).
+   update the extractor and its verify step together (then `tools/extract`, now `rerac-extract` and its SHA-1 table).
 2. `SceneChunk::parse(decompressed)` → header, camera records, actors (class, sequence as a `MobySequence` with
    sequence-relative frame offsets, position track), subtitles.
 3. `SpaceSceneLump` (0x800 table) for `anim_looking_thing_2`, `things` and `transition`[0x14+v].

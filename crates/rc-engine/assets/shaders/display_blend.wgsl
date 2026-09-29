@@ -8,7 +8,7 @@
 // `cs` is the fragment colour in bytes (after MODULATE: it may reach 255 from a 0x80 texel and a 0xff vertex colour),
 // `as_` its GS alpha (0x80 = 1.0, up to 0xff).
 
-#define_import_path randcrw::display_blend
+#define_import_path rerac::display_blend
 
 // ALPHA 0x48 (`Cs·As + Cd`).
 fn gs_add(cs: vec3<f32>, as_: f32) -> vec4<f32> {

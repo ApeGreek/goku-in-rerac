@@ -162,7 +162,7 @@ pub fn extract(iso_path: &Path, out: &Path, builds: &[Build], opts: &Options, em
     if let Err(e) = crate::prepare::prepare(out, opts.threads, opts.cancel, emit) {
         if opts.cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) { return Err(e); }
         emit(Event::Info(format!(
-            "the engine cache was not built ({}); the game builds it on first start, or run `randcrw-extract prepare --out {}`",
+            "the engine cache was not built ({}); the game builds it on first start, or run `rerac-extract prepare --out {}`",
             e.message, out.display())));
     }
     Ok((id, summary))

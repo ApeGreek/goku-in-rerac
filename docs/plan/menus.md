@@ -534,7 +534,7 @@ sub-pages (`crates/rc-game/src/menus/pause/port.rs`, `PageMenu::install_port_pag
   `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`); ✕ skips the others (`PageMenu::set_port_choices`; Apple M-series: off /
   2x / 4x, no 8x). A stored or `RC_MSAA` / `RC_MSAA_SWITCH` value outside the set becomes the highest supported count
   below it with one warning line (8 → 4 on M-series); the file is not rewritten at start, only by a change on the page.
-* **Persistence** (`render_settings.rs`): plain `key = value` text, `~/Library/Application Support/randcre/settings.toml` on
+* **Persistence** (`render_settings.rs`): plain `key = value` text, `~/Library/Application Support/rerac/settings.toml` on
   macOS (`$XDG_CONFIG_HOME`/`~/.config` elsewhere, `%APPDATA%` on Windows), read at start, rewritten on change (unknown
   keys / comments kept). `RC_MSAA` overrides the file at start; `RC_SETTINGS_FILE=<path>` picks another file, `=0` disables
   it; frame-exact runs (`RC_SCREENSHOT_FRAME` / `RC_DETERMINISTIC=1`) ignore the default file.

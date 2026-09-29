@@ -228,7 +228,7 @@ fn run_job(data: &Path, out: &Out, kinds: Kinds, j: &Job) -> Result<(), Error> {
 /// Exports from the Tier 0 archive in `data` into `opts.to`.
 pub fn export(data: &Path, opts: &Options, emit: Emit) -> Result<Exported, Error> {
     if !data.join("toc.bin").is_file() {
-        return Err(Error::new(Code::CannotRead, format!("{} is not a randcrw data folder (no toc.bin); extract the disc first", data.display())));
+        return Err(Error::new(Code::CannotRead, format!("{} is not a ReRAC data folder (no toc.bin); extract the disc first", data.display())));
     }
     let all_levels = archive_levels(data);
     let levels: Vec<u32> = match opts.level {

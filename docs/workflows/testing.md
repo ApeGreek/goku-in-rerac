@@ -17,7 +17,7 @@ Cargo test alias, and the xtask commands pass the one flag set that shares the d
 
 | What | Command |
 |---|---|
-| All unit tests (every crate's `src/` tests; rc-engine's live in the `randcrw` bin) | `cargo xtask test-quick` |
+| All unit tests (every crate's `src/` tests; rc-engine's live in the `rerac` bin) | `cargo xtask test-quick` |
 | One crate's unit tests | `cargo xtask test-quick <crate>` (e.g. `rc-formats`) |
 | A job's tier (§2.1) | `cargo xtask test-job <area…> [shared]` |
 | One or more integration binaries alone (the binaries of §3) | `cargo xtask test-job --test <binary> [--test <binary> …]` |
@@ -114,7 +114,7 @@ the merged binary under `cargo test` (per-binary caches, §5).
 | data | `lifecycle` `roundtrip` (rc-data) | `data` | rc-data lib | ~3 s |
 | extract (extractor, launcher side) | `synthetic` (rc-extract; the checks against a real disc are `rc-trace disc-check`, §10) | `extract` | rc-extract lib and bin | <1 s |
 | video | `movies` (rc-video) | `movies` | rc-video lib | <1 s |
-| engine (render, input, engine glue) | none | — | the `randcrw` bin's tests | — |
+| engine (render, input, engine glue) | none | — | the `rerac` bin's tests | — |
 | particles (alias fx; added 2026-09-29) | `particle_consumers` (in `classes`: the ported classes' particle types living their lives) | in `classes`: `--test classes --filter particle_consumers::` | `particles::*` (listed under world; every job runs the unit tests) | ~5 s |
 | trace tools | `hero_replay_selfcheck` `novalis_spawn` `synthetic` (tools/trace) | `trace` | rc-trace lib | ~2 s |
 | repo layout (new crates, dependencies, top-level files) | `guards` (tools/repo-checks) | `guards` | — | <1 s |
@@ -1622,7 +1622,7 @@ finds it there).
   first: a unit is one `.fingerprint/<name>-<hash>` with its `deps/` and `build/` files, and "used" is the newest access
   time of its fingerprint files (cargo reads them on every build that includes the unit). What the dev loop and the
   tests used last stays, so `cargo dev` does not rebuild Bevy. It never touches `incremental/` (not tracked by
-  fingerprints; about half of `target/`) or unhashed outputs such as `target/debug/randcrw`.
+  fingerprints; about half of `target/`) or unhashed outputs such as `target/debug/rerac`.
 * **Safety:** it refuses (exit 1) while another `cargo`, `rustc` or `cargo-nextest` runs, so it never deletes files
   under a running build; the `cargo` running the xtask itself does not count. Without cargo-sweep it prints the install
   line and exits 0.
@@ -1659,7 +1659,7 @@ cargo run --release -p rc-trace -- disc-check [--iso IMAGE] [--extracted DIR] [-
    TOC, the boot ELF), with per-level read times;
 2. the disc's `save_game` lump against `extracted/global/save_game.bin`, and the card folder `SYSTEM.CNF` names;
 3. the extractor's size/SHA-1 table hashed from the image against `crates/rc-extract/data/scus_971_99.tsv` (run it after
-   regenerating the table with `randcrw-extract table`);
+   regenerating the table with `rerac-extract table`);
 4. with `--extract-into`: a full and an `--ntsc-only` extraction (~7 GiB; delete afterwards) hold exactly the table's
    files and verify.
 

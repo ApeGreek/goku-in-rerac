@@ -4,7 +4,7 @@
 //! `Disc::level` produces exactly the raw lumps of the Tier 0 archive under `extracted/levels/NN/` (same lump
 //! selection, same byte sizes as the retired C++ extractor's `unpack`), so the engine can load straight from the
 //! user's disc image and the extracted tree stays a byte-for-byte check (by hand:
-//! `cargo run --release -p rc-trace -- disc-check`; `randcrw-extract` checks every file against its SHA-1 table).
+//! `cargo run --release -p rc-trace -- disc-check`; `rerac-extract` checks every file against its SHA-1 table).
 
 use crate::iso9660::{bad, IsoImage, Result, SECTOR_SIZE};
 use crate::level::{parse_level_data_header, ByteRange};

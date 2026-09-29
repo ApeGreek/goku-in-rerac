@@ -1,6 +1,6 @@
 # Launcher ↔ game contract v0
 
-Status: **in force** (2026-09-26). The launcher (`randcrw-launcher`, a separate Tauri repo) and this game repo both
+Status: **in force** (2026-09-26). The launcher (`rerac-launcher`, a separate Tauri repo) and this game repo both
 implement exactly the text in "Contract (verbatim)". The section after it, "Clarifications", records how the game
 side implements the points the contract leaves open. Nothing in it changes a field, a command or a code; where it adds
 something, the addition is optional for the launcher to use.
@@ -10,13 +10,13 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
 ## Contract (verbatim)
 
 ## Launcher ↔ game contract v0 (the orchestrator's spec; the launcher and the game repo both implement exactly this)
-- A **version** (one downloadable game build, official or a mod) is a folder `versions/<source>/<version>/` containing `randcrw-manifest.json`:
-  `{"schema":1,"name":"randcrw","version":"0.1.0","game":"rac1","runtime":"<relative path to game binary>","extractor":"<relative path to extractor binary>","supported_discs":["SCUS_971.99"],"data_format":1}`
+- A **version** (one downloadable game build, official or a mod) is a folder `versions/<source>/<version>/` containing `rerac-manifest.json`:
+  `{"schema":1,"name":"rerac","version":"0.1.0","game":"rac1","runtime":"<relative path to game binary>","extractor":"<relative path to extractor binary>","supported_discs":["SCUS_971.99"],"data_format":1}`
   The launcher's Development source points at a local folder with this manifest (e.g. a dev build folder).
-- **Extractor CLI** (`randcrw-extract`):
-  - `randcrw-extract identify --iso <path> --json` → identifies the disc only.
-  - `randcrw-extract extract --iso <path> --out <game_data_dir> [--ntsc-only] --json` → full extraction.
-  - `randcrw-extract verify --out <game_data_dir> --json` → re-hashes against the built-in size/SHA-1 table.
+- **Extractor CLI** (`rerac-extract`):
+  - `rerac-extract identify --iso <path> --json` → identifies the disc only.
+  - `rerac-extract extract --iso <path> --out <game_data_dir> [--ntsc-only] --json` → full extraction.
+  - `rerac-extract verify --out <game_data_dir> --json` → re-hashes against the built-in size/SHA-1 table.
   - With `--json`, stdout is JSON lines, one object per line:
     - `{"type":"progress","stage":"identify|copy|verify","done":<bytes>,"total":<bytes>,"file":"<path>"}`
     - `{"type":"info","message":"..."}`
@@ -36,15 +36,15 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
     - 99 internal error
   - On success the extractor writes `<game_data_dir>/extract-info.json`: `{"disc":"SCUS_971.99","data_format":1,"extractor_version":"...","ntsc_only":false,"files":<n>,"bytes":<n>}`.
 - **Runtime:**
-  - `<runtime> --version-json` prints `{"name":"randcrw","version":"...","game":"rac1","data_format":1}` and exits.
+  - `<runtime> --version-json` prints `{"name":"rerac","version":"...","game":"rac1","data_format":1}` and exits.
   - The launcher starts the game with `<runtime> --data-dir <game_data_dir>`; the env var `RC_DATA_DIR` is equivalent.
-- **Folders:** per-OS app data root named `randcrw`, e.g. macOS `~/Library/Application Support/randcrw/`. Under it:
+- **Folders:** per-OS app data root named `rerac`, e.g. macOS `~/Library/Application Support/rerac/`. Under it:
   - `versions/`
   - `games/rac1/data/` (the extracted game data)
   - `logs/`
   - `settings/`
 
-  The user can move the data root. Never use the name "randcre" anywhere user-facing.
+  The user can move the data root. User-facing text says **ReRAC** (technical identifier `rerac`); no other project name appears anywhere user-facing.
 
 ## Clarifications (game side, `crates/rc-extract`)
 
@@ -104,7 +104,7 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
    052–062, 075–079, 084–087. `extract-info.json` records `"ntsc_only":true` and `verify` then skips those files.
    Files already present from an earlier full extraction are left alone.
 9. **`extract-info.json`** has exactly the contract's keys. `files`/`bytes` count the archive files written by this run
-   (not `extract-info.json` itself). `extractor_version` is the `randcrw-extract` crate version.
+   (not `extract-info.json` itself). `extractor_version` is the `rerac-extract` crate version.
 10. **Paths.** `--out` is created if missing. `--iso` may be omitted when the environment variable `RC_ISO` is set
     (developer convenience; the launcher always passes `--iso`). `--flag=value` is accepted as well as `--flag value`.
 11. **Verify** reads `extract-info.json` to learn the disc and `ntsc_only`, then checks exactly the table's files.
@@ -123,23 +123,23 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
     | Exit | Raised when | Launcher |
     |---|---|---|
     | 0 | Normal quit (also after `--version-json`) | |
-    | 2 | `--data-dir` given without a value | "randcrw couldn't start." (a launcher/game mismatch) |
+    | 2 | `--data-dir` given without a value | "ReRAC couldn't start." (a launcher/game mismatch) |
     | 3 | The data folder is missing, is not a data folder (no `toc.bin`), or the extraction is incomplete (no `extract-info.json`) | "The game data is missing or incomplete." + Re-extract |
-    | 4 | `extract-info.json` has another `data_format`, or cannot be read | "The game data doesn't match this randcrw version." + Re-extract |
+    | 4 | `extract-info.json` has another `data_format`, or cannot be read | "The game data doesn't match this ReRAC version." + Re-extract |
 
     Any other non-zero exit (a panic is 101; a signal has no code) is a crash; point at the log. Unknown arguments are
     ignored with a warning, so a newer launcher's extra flags do not stop an older runtime. `--data-dir` wins over
     `RC_DATA_DIR`, and `--data-dir=<dir>` is accepted.
-15. **Packaged version folder** (`tools/package/package.sh`, `docs/workflows/release.md`): `randcrw` (`randcrw.exe` on
-    Windows), `randcrw-extract`, `assets/shaders/*.wgsl`, `randcrw-manifest.json`, `README.txt`. The manifest names
+15. **Packaged version folder** (`tools/package/package.sh`, `docs/workflows/release.md`): `rerac` (`rerac.exe` on
+    Windows), `rerac-extract`, `assets/shaders/*.wgsl`, `rerac-manifest.json`, `README.txt`. The manifest names
     the binaries by these relative paths. The runtime finds `assets/` next to its real (symlink-resolved) executable,
-    so the folder can be copied or moved as a whole, but `randcrw` must not be copied out of it alone.
+    so the folder can be copied or moved as a whole, but `rerac` must not be copied out of it alone.
 16. `<game_data_dir>` (`games/rac1/data/`) holds the Tier 0 archive directly, in the same layout as the development
     `extracted/` tree: `boot/`, `toc.bin`, `global/`, `levels/NN/`, plus `extract-info.json`. See
     `docs/plan/launcher_extractor.md` §4.1. `extract` adds `cache/v1/` (clarification 17); `verify` ignores it.
 
 ### Engine cache (Tier 1)
-17. **`randcrw-extract prepare --out <game_data_dir> [--json]`** builds `<game_data_dir>/cache/v1/` from the Tier 0
+17. **`rerac-extract prepare --out <game_data_dir> [--json]`** builds `<game_data_dir>/cache/v1/` from the Tier 0
     archive in that folder. It never reads the disc image, so it is how the launcher rebuilds the cache after a game
     update ("Rebuild cache"). Output: `progress` lines with `"stage":"prepare"`, `info` lines, one `done` or `error`
     line, as for every command.
@@ -160,7 +160,7 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
       runtime exit codes (clarification 14) are unchanged.
 
 ### Exports (Tier 2)
-18. **`randcrw-extract export --out <game_data_dir> [--to <dir>] [--what <kinds>] [--level NN] [--json]`** writes
+18. **`rerac-extract export --out <game_data_dir> [--to <dir>] [--what <kinds>] [--level NN] [--json]`** writes
     the optional "usable formats" from the Tier 0 archive in `<game_data_dir>` (never the disc image, never the
     Tier 1 cache). Output: `progress` lines with `"stage":"export"`, `info` lines, one `done` or `error` line, as
     for every command. The game never reads the exports.

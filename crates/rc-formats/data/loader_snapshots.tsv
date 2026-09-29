@@ -1,4 +1,4 @@
-# randcrw loader snapshots: SCUS_971.99 v1.00 (NTSC-U), all 19 levels. Hashes, sizes and counts only (no disc bytes).
+# ReRAC loader snapshots: SCUS_971.99 v1.00 (NTSC-U), all 19 levels. Hashes, sizes and counts only (no disc bytes).
 # Columns: test<TAB>scope<TAB>key<TAB>items<TAB>bytes<TAB>sha1. scope = level (00..18) or global; items = byte
 # strings hashed; bytes = their total size; sha1 over the strings in order, each prefixed by its length (u64 LE).
 # Generated 2026-09-27 by crates/rc-formats/tests/formats/golden.rs while the Rust output was byte-identical to the retired

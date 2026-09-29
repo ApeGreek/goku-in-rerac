@@ -22,10 +22,10 @@
     view_transformations::{position_world_to_clip, position_world_to_view},
 }
 #ifdef DISPLAY_BLEND_MIX
-#import randcrw::display_blend::gs_mix
+#import rerac::display_blend::gs_mix
 #endif
 #ifdef DISPLAY_BLEND_ADD
-#import randcrw::display_blend::gs_add
+#import rerac::display_blend::gs_add
 #endif
 
 struct MobyFog {

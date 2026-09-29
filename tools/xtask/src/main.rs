@@ -16,14 +16,14 @@ cargo xtask <command> [options]    dev chores, one command each (tools/xtask/REA
 commands:
   regen-data [--iso <image>] [--data-dir <dir>] [--force] [--check]
       Rebuild the dev game data folder (extracted/, or RC_EXTRACTED) from your disc image with the dev build of
-      randcrw-extract: extract into a staging folder, verify it, then swap it in and delete the old folder.
+      rerac-extract: extract into a staging folder, verify it, then swap it in and delete the old folder.
       The retired C++ extractor's leftovers are listed and removed; any unknown file stops it unless --force.
         --iso <image>     the disc image (default: RC_ISO)
         --data-dir <dir>  the folder to rebuild (default: RC_EXTRACTED, else <repo>/extracted)
         --force           also delete unknown files
         --check           only list what the folder holds; change nothing (no disc needed)
   package [--no-build]
-      Release packaging: runs tools/package/package.sh (dist/randcrw-<version>-<os>-<arch>/ and its .zip).
+      Release packaging: runs tools/package/package.sh (dist/rerac-<version>-<os>-<arch>/ and its .zip).
   sweep [--limit <size>] [--dry-run]
       Keep target/ under a size limit (default 30GB; sizes like 30GB, 20G, 500MB, 2GiB) with cargo-sweep: the
       least recently used build units go first (never incremental/; `cargo clean` is the full reset). Refuses while

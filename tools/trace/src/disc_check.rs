@@ -110,7 +110,7 @@ fn save_game_lump_matches_extracted(iso: &Path, root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Check 3. After regenerating the committed table (`randcrw-extract table --iso <image> --output
+/// Check 3. After regenerating the committed table (`rerac-extract table --iso <image> --output
 /// crates/rc-extract/data/scus_971_99.tsv`) this is how it is checked.
 fn builtin_table_matches_the_disc(iso: &Path) -> Result<()> {
     let t = Instant::now();

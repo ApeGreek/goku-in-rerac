@@ -1,6 +1,6 @@
 # Hardware fidelity layers (and how to go native later)
 
-randcrw is a rewrite, not an emulator: no MIPS/VU interpreter, no DMA/VIF/GS/IOP model, no BIOS, and none of the game's original code runs. To make
+ReRAC is a rewrite, not an emulator: no MIPS/VU interpreter, no DMA/VIF/GS/IOP model, no BIOS, and none of the game's original code runs. To make
 output identical to the PS2, some parts of the port still reproduce PS2 hardware or Sony-library behaviour on purpose. This file lists those
 **fidelity layers**: what each one reproduces, what it buys, what a native replacement would be, and what switching would cost. It covers (A)
 hardware-like models, (B) SDK/library reproductions, (D) timing and resolution conventions, and lists (C) format decoding separately, because reading

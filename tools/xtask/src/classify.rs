@@ -1,4 +1,4 @@
-//! Sorts the files of a data folder into what `randcrw-extract` writes, the retired C++ extractor's known leftovers,
+//! Sorts the files of a data folder into what `rerac-extract` writes, the retired C++ extractor's known leftovers,
 //! and unknown files (which `regen-data` refuses to delete without `--force`). Names only; nothing is read or written.
 
 use std::collections::HashSet;

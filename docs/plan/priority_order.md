@@ -258,7 +258,7 @@ Each wave is ≤ 3 lanes; lanes are queues and don't share files. After W2, W3 a
 | | 3: `classes/`, `audio/**`, scenes, vendor | G-CLS-015 + the Summoner part of G-ENM-001 (need W6's particles) → G-AUD-005 → G-UI-006 → G-AUD-009 → G-AUD-007 rest → G-CUT-005 → G-CLS-011 → G-CLS-013 | |
 | **W8** tooling and launcher | 1: `crates/rc-extract`, `tools/**` | G-EXT-006 → G-TOOL-008 rest → G-TOOL-009 → G-TOOL-011 → G-TOOL-015 | G-EXT-006 before the user's `extracted/` regenerate |
 | | 2: `rc-data` / loaders | G-EXT-002 → G-EXT-005 | |
-| | 3: `randcrw-launcher` repo | G-LCH-002 → G-LCH-007 → G-LCH-006 → G-LCH-003 | A separate repo: no file overlap, so it can fill a free slot in any wave |
+| | 3: `rerac-launcher` repo | G-LCH-002 → G-LCH-007 → G-LCH-006 → G-LCH-003 | A separate repo: no file overlap, so it can fill a free slot in any wave |
 
 ## 5. Deferred items (not scheduled)
 

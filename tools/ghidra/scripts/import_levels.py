@@ -12,7 +12,7 @@ to the levels, and saves. Idempotent: skips programs that already exist.
 Programs are named levelNN.elf under /levels. Overlay addresses overlap the
 boot ELF by design, so each overlay is its own program. The level ELFs are the
 level overlays with their original load addresses: today copies of the retired
-C++ extractor's overlay.elf files; later `randcrw-extract export --what code`
+C++ extractor's overlay.elf files; later `rerac-extract export --what code`
 (a follow-up, docs/plan/repo_reorg.md).
 """
 import json, os, sys, time

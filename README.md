@@ -1,11 +1,23 @@
-# Ratchet & Clank: ReWrite (randcrw)
+<p align="center">
+  <img src="docs/assets/rerac-logo.png" alt="ReRAC" width="480">
+</p>
+
+<h1 align="center">ReRAC</h1>
+
+<p align="center"><b>An unofficial native PC port of Ratchet & Clank (2002)</b></p>
+
+<p align="center">
+  <a href="https://re-rac.github.io">Website</a> ·
+  <a href="https://github.com/re-rac/rerac">Game and engine (this repository)</a> ·
+  <a href="https://github.com/re-rac/rerac-launcher">Launcher</a>
+</p>
 
 ## Please read first
 
 > [!IMPORTANT]
-> This repository is for developing randcrw. It is not how you play it. Players will install and run the game
-> through the randcrw launcher, a separate project. Neither the game nor the launcher has been released yet, so there
-> are no downloads (coming later).
+> This repository is for developing ReRAC. It is not how you play it. Players will install and run the game
+> through the [ReRAC launcher](https://github.com/re-rac/rerac-launcher), a separate project. Neither the game nor the
+> launcher has been released yet, so there are no downloads (coming later).
 
 > [!WARNING]
 > **You need your own, legally obtained PlayStation 2 disc of Ratchet & Clank (2002).** This project contains no game
@@ -19,7 +31,7 @@
 > - the later releases: the PS3 HD collection, the PS4 and PS Now versions, and the 2016 game;
 > - the sequels (they are recognised by name and refused).
 >
-> randcrw is an unofficial fan project. It is not affiliated with or endorsed by Sony Interactive Entertainment or
+> ReRAC is an unofficial fan project. It is not affiliated with or endorsed by Sony Interactive Entertainment or
 > Insomniac Games. Ratchet & Clank and all related names are trademarks of their respective owners.
 
 ## Table of contents
@@ -42,7 +54,7 @@
 
 ## Project description
 
-randcrw is a native rewrite of Ratchet & Clank (2002, PlayStation 2) in Rust, on the Bevy engine. The game's systems
+ReRAC is a native rewrite of Ratchet & Clank (2002, PlayStation 2) in Rust, on the Bevy engine. The game's systems
 are rebuilt from a decompilation of the original code and run as native code. It is not an emulator, not a static
 recompiler, and it does not model the PS2 hardware.
 
@@ -52,7 +64,7 @@ recompiler, and it does not model the PS2 hardware.
    committed tables.
 2. Port the game's shared systems natively, matching the original's behaviour and values. Every port cites the
    addresses of the functions it reproduces.
-3. Write our own extractor, `randcrw-extract`, that turns an image of your disc into a data folder the engine reads
+3. Write our own extractor, `rerac-extract`, that turns an image of your disc into a data folder the engine reads
    directly. The engine never reads the disc image itself.
 4. Build a launcher (Tauri, separate repository) that installs game versions, runs the extractor once and starts the
    game. Mod support is planned on top of it.
@@ -161,7 +173,7 @@ Run everything from the repository root.
    cargo xtask regen-data
    ```
 
-   This builds `randcrw-extract`, extracts into a staging folder, verifies every file's size and SHA-1, and only then
+   This builds `rerac-extract`, extracts into a staging folder, verifies every file's size and SHA-1, and only then
    swaps the result in. It takes about 8 seconds on the development machine. `--iso <image>` works instead of
    `RC_ISO`. To extract into another folder with the extractor directly:
 
@@ -183,7 +195,7 @@ Run everything from the repository root.
    `RC_LEVEL=<n> cargo dev` picks another level. For another data folder: `cargo dev -- --data-dir <data folder>`.
 
    A release or profiling build: `cargo run --release -p rc-engine`. The crate is `rc-engine`; its executable is
-   `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
+   `rerac` (`target/debug/rerac`, `target/release/rerac`).
 
 ### Testing
 
@@ -224,7 +236,7 @@ The full table, the command-line options and the settings file are in
 ```sh
 cargo xtask help                      # list the dev chores
 cargo xtask sweep                     # keep target/ under 30 GB (needs cargo-sweep; --dry-run, --limit 20G)
-cargo xtask package                   # release build of randcrw + randcrw-extract, packaged for the launcher
+cargo xtask package                   # release build of rerac + rerac-extract, packaged for the launcher
 ```
 
 Packaging: [`docs/workflows/release.md`](docs/workflows/release.md). Running a local build from the launcher:
@@ -237,8 +249,8 @@ crates/          the product; it ships, and never depends on tools/
   rc-formats       readers for the disc and level formats, golden-tested against committed hashes
   rc-data          the engine cache: decompressed game data on disk, served once per process
   rc-game          the game logic ports (plain Rust, no Bevy)
-  rc-engine        the Bevy app; executable `randcrw`
-  rc-extract       the extractor; executable `randcrw-extract` (identify, extract, verify, prepare, export)
+  rc-engine        the Bevy app; executable `rerac`
+  rc-extract       the extractor; executable `rerac-extract` (identify, extract, verify, prepare, export)
   rc-video         our own MPEG-2 decoder and PSS movie player core
 tools/           dev only, never ships; one README each
   trace            `rc-trace`: the PCSX2 harness and the overlay diff
@@ -250,7 +262,7 @@ docs/
   formats/         format specs
   plan/            investigations, decisions, roadmap, gaps
   workflows/       one page per dev workflow
-extracted/       (git-ignored) game data only, as randcrw-extract writes it
+extracted/       (git-ignored) game data only, as rerac-extract writes it
 work/            (git-ignored) generated dev output: decompiler export, traces, captures, exports
 dist/, target/   (git-ignored) release packages, build output
 ```

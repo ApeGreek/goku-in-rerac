@@ -54,7 +54,7 @@ pub fn bank_bytes(bank: &PointLights) -> Vec<u8> {
 /// which reorders equal-distance blended draws (determinism.rs `stable_transparent_order`) and so changes frames
 /// that have no light at all.
 struct WorldLights {
-    /// Keeps the import module (`#import randcrw::world_lights::…`) loaded.
+    /// Keeps the import module (`#import rerac::world_lights::…`) loaded.
     _shader: Handle<bevy::shader::Shader>,
     enabled: bool,
     trace: bool,
@@ -65,7 +65,7 @@ struct WorldLights {
     bank: Vec<u8>,
 }
 
-/// The WGSL module the world shaders import (`#import randcrw::world_lights::…`).
+/// The WGSL module the world shaders import (`#import rerac::world_lights::…`).
 const IMPORT_PATH: &str = "shaders/world_lights.wgsl";
 
 pub struct WorldLightsPlugin;

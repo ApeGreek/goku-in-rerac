@@ -81,7 +81,7 @@ pub struct DisplayEffect;
 const IMPORT_PATH: &str = "shaders/display_blend.wgsl";
 const BLIT_SHADER: &str = "shaders/effect_blit.wgsl";
 
-/// Keeps the `randcrw::display_blend` WGSL module loaded (the effect shaders import it by its path).
+/// Keeps the `rerac::display_blend` WGSL module loaded (the effect shaders import it by its path).
 #[derive(Resource)]
 struct DisplayBlendShader(#[allow(dead_code)] Handle<Shader>);
 

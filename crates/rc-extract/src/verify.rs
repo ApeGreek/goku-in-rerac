@@ -23,7 +23,7 @@ pub struct ExtractInfo {
 
 pub fn read_info(out: &Path) -> Result<ExtractInfo, Error> {
     let p = out.join(INFO_FILE);
-    let bad = |why: &str| Error::new(Code::VerifyFailed, format!("{}: {why}; the extraction is incomplete or this is not a randcrw data folder", p.display()));
+    let bad = |why: &str| Error::new(Code::VerifyFailed, format!("{}: {why}; the extraction is incomplete or this is not a ReRAC data folder", p.display()));
     let text = std::fs::read_to_string(&p).map_err(|e| bad(&e.to_string()))?;
     let obj = json::parse_object(&text).ok_or_else(|| bad("not a JSON object"))?;
     let s = |k: &str| match json::get(&obj, k) { Some(Value::Str(s)) => Ok(s.clone()), _ => Err(bad(&format!("no \"{k}\""))) };

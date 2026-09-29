@@ -20,10 +20,10 @@
 //!
 //! **Persistence** (port-only; the "Port Options" page, `rc_game::menus::pause::port`): the start value comes
 //! from the port settings file, then `RC_MSAA` overrides it; a change made on that page is written back
-//! ([`save`]). The file is plain `key = value` text (std only): `~/Library/Application Support/randcrw/
-//! settings.toml` on macOS, `$XDG_CONFIG_HOME` (or `~/.config`) `/randcrw/settings.toml` elsewhere,
-//! `%APPDATA%\randcrw\settings.toml` on Windows. When that file is missing and the pre-rename `randcre` one
-//! exists, the old one is copied over once and kept ([`migrate_legacy`]). `RC_SETTINGS_FILE=<path>` picks another
+//! ([`save`]). The file is plain `key = value` text (std only): `~/Library/Application Support/rerac/
+//! settings.toml` on macOS, `$XDG_CONFIG_HOME` (or `~/.config`) `/rerac/settings.toml` elsewhere,
+//! `%APPDATA%\rerac\settings.toml` on Windows. When that file is missing and the pre-rename `randcrw/settings.toml`
+//! exists, the old file is copied over once and kept ([`migrate_legacy`]). `RC_SETTINGS_FILE=<path>` picks another
 //! file and `RC_SETTINGS_FILE=0` (or empty) disables it. Frame-exact / deterministic runs neither read nor write the
 //! default file (their output must be a function of the environment only); an explicit `RC_SETTINGS_FILE`
 //! still applies to them. Unknown keys and comments are kept when the file is rewritten.
@@ -162,13 +162,22 @@ pub fn settings_path() -> Option<std::path::PathBuf> {
     Some(settings_file_in(&base))
 }
 
-/// The settings file under a per-OS config base dir (`<base>/randcrw/settings.toml`).
-fn settings_file_in(base: &std::path::Path) -> std::path::PathBuf { base.join("randcrw").join("settings.toml") }
+/// The engine's own settings folder name under the per-OS config base dir.
+const SETTINGS_DIR: &str = "rerac";
+/// The folder name before the rename to ReRAC (read once by [`migrate_legacy`], never written).
+const LEGACY_SETTINGS_DIR: &str = "randcrw";
+/// The files the engine itself keeps in that folder.
+const SETTINGS_FILE: &str = "settings.toml";
 
-/// The rename to randcrw: when `<base>/randcrw/settings.toml` is missing and `<base>/randcre/settings.toml`
-/// exists, copies it (never moves or deletes the old one). Returns `(old, new)` when it copied.
+/// The settings file under a per-OS config base dir (`<base>/rerac/settings.toml`).
+fn settings_file_in(base: &std::path::Path) -> std::path::PathBuf { base.join(SETTINGS_DIR).join(SETTINGS_FILE) }
+
+/// The rename to ReRAC: when `<base>/rerac/settings.toml` is missing and `<base>/randcrw/settings.toml` exists,
+/// copies it (never moves, modifies or deletes the old one). Returns `(old, new)` when it copied. Only the engine's
+/// own file is copied, not the whole folder: on macOS the same `Application Support/<name>/` folder is also the
+/// launcher's data root (game data, versions), which is the launcher's to migrate.
 pub fn migrate_legacy(base: &std::path::Path) -> std::io::Result<Option<(std::path::PathBuf, std::path::PathBuf)>> {
-    let (old, new) = (base.join("randcre").join("settings.toml"), settings_file_in(base));
+    let (old, new) = (base.join(LEGACY_SETTINGS_DIR).join(SETTINGS_FILE), settings_file_in(base));
     if new.exists() || !old.is_file() { return Ok(None); }
     if let Some(dir) = new.parent() { std::fs::create_dir_all(dir)?; }
     std::fs::copy(&old, &new)?;
@@ -197,7 +206,7 @@ fn write_key(text: &str, key: &str, value: &str) -> String {
             _ => l.to_string(),
         })
         .collect();
-    if out.is_empty() { out.push("# randcrw port settings (Port Options page; RC_MSAA overrides msaa at start)".into()); }
+    if out.is_empty() { out.push("# ReRAC port settings (Port Options page; RC_MSAA overrides msaa at start)".into()); }
     if !found { out.push(format!("{key} = {value}")); }
     out.join("\n") + "\n"
 }
@@ -316,21 +325,27 @@ mod tests {
 
     #[test]
     fn legacy_settings_are_copied_once() {
-        let base = std::env::temp_dir().join(format!("randcrw-settings-migration-{}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("rerac-settings-migration-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        let (old, new) = (base.join("randcre/settings.toml"), base.join("randcrw/settings.toml"));
+        let (old_dir, new_dir) = (base.join("randcrw"), base.join("rerac"));
+        let (old, new) = (old_dir.join("settings.toml"), new_dir.join("settings.toml"));
         // Nothing to copy: no files are created.
         assert!(migrate_legacy(&base).unwrap().is_none());
-        assert!(!new.exists());
-        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        assert!(!new_dir.exists());
+        std::fs::create_dir_all(old_dir.join("games")).unwrap();
         std::fs::write(&old, "msaa = 4\n").unwrap();
+        std::fs::write(old_dir.join("games/big.bin"), "launcher data").unwrap();
+        // The new folder may already exist (the launcher's data root on macOS): the file is still copied.
+        std::fs::create_dir_all(&new_dir).unwrap();
         assert_eq!(migrate_legacy(&base).unwrap(), Some((old.clone(), new.clone())));
         assert_eq!(std::fs::read_to_string(&new).unwrap(), "msaa = 4\n");
+        assert!(!new_dir.join("games").exists(), "only the engine's own file is copied");
         assert_eq!(std::fs::read_to_string(&old).unwrap(), "msaa = 4\n", "the old file is kept");
         // The new file exists now: it is never overwritten from the old one.
         std::fs::write(&new, "msaa = 8\n").unwrap();
         assert!(migrate_legacy(&base).unwrap().is_none());
         assert_eq!(std::fs::read_to_string(&new).unwrap(), "msaa = 8\n");
+        assert_eq!(std::fs::read_to_string(&old).unwrap(), "msaa = 4\n", "the old file is never modified");
         assert_eq!(settings_file_in(&base), new);
         std::fs::remove_dir_all(&base).unwrap();
     }

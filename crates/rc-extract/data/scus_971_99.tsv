@@ -1,6 +1,6 @@
-# randcrw Tier 0 table: SCUS_971.99 v1.00. 2937 files, 4209359410 bytes.
+# ReRAC Tier 0 table: SCUS_971.99 v1.00. 2937 files, 4209359410 bytes.
 # Sizes and SHA-1 hashes only (no disc bytes). Columns: path<TAB>size<TAB>sha1.
-# Regenerate: randcrw-extract table --iso <image> --output crates/rc-extract/data/<serial>.tsv
+# Regenerate: rerac-extract table --iso <image> --output crates/rc-extract/data/<serial>.tsv
 boot/IOPRP243.IMG	264449	cb4a7d978405fe26a4752155c8cb8929ba96117d
 boot/SCUS_971.99	1383028	72fd1de379dafd8f243dceeb3be50980f3fd3cd5
 boot/SYSTEM.CNF	59	189cce8d9e926ab4b1c8273c2cc9b13ac4f0494e

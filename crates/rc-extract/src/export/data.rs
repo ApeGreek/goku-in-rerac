@@ -18,7 +18,7 @@ pub(crate) fn wad(data: &Path, rel: &str) -> Result<Vec<u8>, Error> {
 
 /// A Tier 0 lump that the golden-tested loaders reject: the archive is damaged (40), as for `prepare`.
 pub(crate) fn damaged(rel: &str, e: FormatError) -> Error {
-    Error::new(Code::VerifyFailed, format!("{rel}: {e}; run `randcrw-extract verify` and re-extract"))
+    Error::new(Code::VerifyFailed, format!("{rel}: {e}; run `rerac-extract verify` and re-extract"))
 }
 
 pub(crate) fn lvl(id: u32, file: &str) -> String { format!("levels/{id:02}/{file}") }

@@ -50,7 +50,7 @@
 // last word. (No bindings of their own: a changed material layout reorders draws and changes lightless frames.)
 
 #import bevy_pbr::view_transformations::{position_world_to_clip, position_world_to_view}
-#import randcrw::world_lights::{WorldLight, NO_LIGHTS, tfrag_lit}
+#import rerac::world_lights::{WorldLight, NO_LIGHTS, tfrag_lit}
 
 struct TfragFog {
     // rgb = FOGCOL (display-encoded 0..1), w = 1 when fog is enabled.

@@ -33,7 +33,7 @@
     mesh_functions,
     view_transformations::{position_world_to_clip, position_world_to_view},
 }
-#import randcrw::world_lights::{WorldLight, NO_LIGHTS, instance_light, instance_lit_packed}
+#import rerac::world_lights::{WorldLight, NO_LIGHTS, instance_light, instance_lit_packed}
 
 struct ShrubFog {
     color: vec4<f32>,

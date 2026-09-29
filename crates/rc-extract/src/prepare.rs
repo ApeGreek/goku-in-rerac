@@ -40,14 +40,14 @@ fn cache_error(e: rc_data::Error) -> Error {
     match e {
         rc_data::Error::Write { path, err } => workers::write_error(&path, err),
         e @ rc_data::Error::Source { .. } => Error::new(Code::CannotRead, e.to_string()),
-        e @ rc_data::Error::Wad { .. } => Error::new(Code::VerifyFailed, format!("{e}; run `randcrw-extract verify` and re-extract")),
+        e @ rc_data::Error::Wad { .. } => Error::new(Code::VerifyFailed, format!("{e}; run `rerac-extract verify` and re-extract")),
     }
 }
 
 /// Builds or refreshes `<out>/cache/v1/` from the Tier 0 archive in `out`.
 pub fn prepare(out: &Path, threads: usize, cancel: Option<&AtomicBool>, emit: Emit) -> Result<Prepared, Error> {
     if !out.join("toc.bin").is_file() {
-        return Err(Error::new(Code::CannotRead, format!("{} is not a randcrw data folder (no toc.bin); extract the disc first", out.display())));
+        return Err(Error::new(Code::CannotRead, format!("{} is not a ReRAC data folder (no toc.bin); extract the disc first", out.display())));
     }
     let sources = match cache::v1_sources(out) {
         Ok(s) => s,
@@ -66,7 +66,7 @@ pub fn prepare(out: &Path, threads: usize, cancel: Option<&AtomicBool>, emit: Em
         emit(Event::Info(format!("removed the engine cache of another version ({})", old.display())));
     }
     let c = Cache::new(out);
-    let writer = format!("randcrw-extract {}", crate::EXTRACTOR_VERSION);
+    let writer = format!("rerac-extract {}", crate::EXTRACTOR_VERSION);
     match c.status().map_err(cache_error)? {
         Status::Fresh => emit(Event::Info(format!("checking the engine cache in {} ({} lumps)", c.dir().display(), sources.len()))),
         Status::Missing => {

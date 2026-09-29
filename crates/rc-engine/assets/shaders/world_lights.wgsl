@@ -6,7 +6,7 @@
 // term on the float grid 65536 + c/128, i.e. `c + floor(128 · colour · d)`, and clamps the rgb lanes (255 for
 // tfrags, 243 for ties and shrubs). A nibble list names up to four bank slots, low nibble first, 0xf ends it.
 
-#define_import_path randcrw::world_lights
+#define_import_path rerac::world_lights
 
 // pos.xyz = position (Bevy world), pos.w = radius; col.rgb = colour, col.w = intensity (the back factor w:
 // d -> max(d, d·w)).

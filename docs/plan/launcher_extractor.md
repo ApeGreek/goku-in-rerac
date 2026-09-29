@@ -1,14 +1,15 @@
 # Launcher and full asset extractor (design plan)
 
 Status: **decided 2026-09-26** (user's picks in §9; they override the original recommendations where they differ).
-**Built:** Stage 1a, the Rust extractor `randcrw-extract` (`crates/rc-extract`, §4.1), and Stage 1b, the engine
+**Built:** Stage 1a, the Rust extractor `rerac-extract` (`crates/rc-extract`, §4.1), and Stage 1b, the engine
 cut-over (§7: the engine reads only the data folder; `--data-dir`, `RC_DATA_DIR`, `--version-json`; settings under
-`randcrw`). **P1.5, the Tier 1 engine cache v1** (§5.4: `randcrw-extract prepare`, `crates/rc-data`), is built too,
-and so is **P1.7, the Tier 2 exports** (§5.5: `randcrw-extract export`, PNG / WAV / glTF / JSON).
+`rerac`). **P1.5, the Tier 1 engine cache v1** (§5.4: `rerac-extract prepare`, `crates/rc-data`), is built too,
+and so is **P1.7, the Tier 2 exports** (§5.5: `rerac-extract export`, PNG / WAV / glTF / JSON).
 The launcher ↔ game interface is `docs/plan/launcher_contract.md`. Mods get a separate, shorter doc: `docs/plan/mods.md`.
 
-**Names.** The project is **randcrw**. Everything user-facing uses `randcrw` (binaries, data folders, window titles);
-only the repository folder keeps the old name `randcre`.
+**Names.** The project is **ReRAC** (renamed from randcrw on 2026-09-29). Everything user-facing says ReRAC, and the
+technical identifier is `rerac` (binaries, data folders); the window title is "ReRAC". Nothing depends on the name of
+the folder the repository is checked out in.
 
 The requirement (user, verbatim): *"we need a system, just like openGOAL, where we have a launcher. In that launcher
 we will have rc1 (and rc2 and 3 eventually). In the menu for rc1, the user needs to be prompted to browse to their
@@ -27,7 +28,7 @@ Follow-up: the launcher and a full asset extractor come first. Engine-ready asse
     engine never reads them.
 - **The engine reads only a data directory.** The disc reader (`rc_formats::disc`, `iso9660`) becomes
   extractor-only. Today the engine opens the ISO itself (`crates/rc-engine/src/disc_source.rs`).
-- **Launcher (decided: U3/U4).** A **Tauri** app in a **separate repo**, `randcrw-launcher`, OpenGOAL-style: launcher
+- **Launcher (decided: U3/U4).** A **Tauri** app in a **separate repo**, `rerac-launcher`, OpenGOAL-style: launcher
   and game builds are versioned separately, mods are separate game builds (forks), and every game build ships its own
   extractor. The launcher drives the game build only through `docs/plan/launcher_contract.md` (manifest, extractor CLI
   with JSON lines, runtime flags, folders). Official downloads stay off until the repo is public; a Development source
@@ -161,7 +162,7 @@ copied.**
 - The C++ `tools/extract` (`rc_extract info|ls|toc|unpack|<dump cmds>`) was the oracle until it was retired on
   2026-09-27 (decisions.md). Its `unpack` wrote the `extracted/` raw layout that Tier 0 keeps, plus a `.dec` next to
   every WAD lump; the golden tests now check committed snapshot hashes (`crates/rc-formats/data/loader_snapshots.tsv`)
-  and `randcrw-extract` the committed SHA-1 table.
+  and `rerac-extract` the committed SHA-1 table.
 
 ### 3.2 Engine data access
 *(As before Stage 1b; the cut-over is described in §7.)*
@@ -177,8 +178,8 @@ copied.**
   `moby_render`/`moby_lod` (tests), `hud_render`, `gameplay` (boot ELF, overlays of every level for the item tables,
   `global/save_game`), `shrub_render`.
 - Settings: `render_settings::settings_path()`. It uses `RC_SETTINGS_FILE`, else
-  `~/Library/Application Support/randcre/settings.toml` on macOS, `%APPDATA%\randcre\settings.toml` on Windows,
-  and `$XDG_CONFIG_HOME/randcre/settings.toml` on Linux. It is disabled in deterministic mode.
+  `~/Library/Application Support/rerac/settings.toml` on macOS, `%APPDATA%\rerac\settings.toml` on Windows,
+  and `$XDG_CONFIG_HOME/rerac/settings.toml` on Linux. It is disabled in deterministic mode.
 - `rc-trace` resolves `RC_EXTRACTED`, else `<workspace>/extracted` (`tools/trace/src/lib.rs`), and reads
   files directly. The `rc-game` tests read `../../extracted/levels/01/...` directly and skip when absent.
 - Other `RC_*` variables used by the engine are debug switches (see `docs/workflows/dev-switches.md`). Only `RC_ISO`,
@@ -232,7 +233,7 @@ includes a coverage audit that reports unreferenced non-zero sector runs.
 
 ### 4.1 Tier 0 archive as built (Stage 1a, `crates/rc-extract`)
 
-`randcrw-extract` (binary of `crates/rc-extract`; CLI and codes in `docs/plan/launcher_contract.md`) writes the
+`rerac-extract` (binary of `crates/rc-extract`; CLI and codes in `docs/plan/launcher_contract.md`) writes the
 Tier 0 archive **directly into the data folder** it is given (`--out`, the launcher's `games/rac1/data/`), in exactly
 the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
 
@@ -263,7 +264,7 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
   reference sector count + supported flag + Tier 0 table). Unknown serials fall back to the ELF string search
   (§2.6). An unknown RC1 build prints `new build DB row: Build { … }` to paste in.
 - **Size/SHA-1 table** (U7): `crates/rc-extract/data/scus_971_99.tsv`, 2,937 rows `path<TAB>size<TAB>sha1`, hashes
-  and sizes only (a unit test checks every line has that shape). Regenerate with `randcrw-extract table --iso <image>
+  and sizes only (a unit test checks every line has that shape). Regenerate with `rerac-extract table --iso <image>
   --output crates/rc-extract/data/scus_971_99.tsv`; `cargo run --release -p rc-trace -- disc-check`
   (check 3) checks it. Cross-checked against `extracted/` with the system `shasum`.
 - **Speed** (M-series, release build, 4 workers, std threads only): identify 3 ms; full extract 3.1–4.2 s warm
@@ -329,7 +330,7 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
 
 ### 5.4 Tier 1 as built (v1, P1.5, 2026-09-26)
 - **Code.** `crates/rc-data` (no Bevy, no external crates; depends on `rc-formats` only) holds the cache format and
-  the engine-side store. `randcrw-extract prepare` (`crates/rc-extract/src/prepare.rs`) builds the cache with the
+  the engine-side store. `rerac-extract prepare` (`crates/rc-extract/src/prepare.rs`) builds the cache with the
   same code. A crate rather than an engine module, so the extractor does not link the engine and the cache tests
   build in seconds.
 - **Content.** Every WAD lump the engine used to decompress on each load: per level `core_data`, `gameplay_ntsc`,
@@ -388,7 +389,7 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
   Tier 0 paths as the key, and add its round-trip test. Tier 2 exports are a separate tree (not under `cache/`).
 
 ### 5.5 Tier 2 as built (P1.7 / E2, 2026-09-26)
-- **Command.** `randcrw-extract export --out <data> [--to <dir>] [--what textures,audio,models,levels,collision,text|all]
+- **Command.** `rerac-extract export --out <data> [--to <dir>] [--what textures,audio,models,levels,collision,text|all]
   [--level NN] [--json]` (contract clarification 18). Reads only the Tier 0 archive, through the same golden-tested
   `rc-formats` loaders the engine uses; never the disc, never the Tier 1 cache. Default output `<data>/exports/`
   (kept outside `cache/`). The launcher's "Export assets…" runs it with a folder the user picks.
@@ -484,14 +485,14 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
 | Mod management, restarts | Natural (spawns the game) | The game must restart itself | Natural |
 | Licence | MIT/Apache | — | egui/eframe/rfd/iced MIT or Apache; **Slint GPLv3 / royalty-free with attribution / commercial** |
 
-**Decided (user, 2026-09-26): A, Tauri, in a separate repo `randcrw-launcher`** (overrides the original
+**Decided (user, 2026-09-26): A, Tauri, in a separate repo `rerac-launcher`** (overrides the original
 recommendation C, egui in this repo).
 - The launcher never links game code. It talks to a game build only through `docs/plan/launcher_contract.md`:
-  `randcrw-manifest.json`, the `randcrw-extract` CLI (JSON lines, exit codes) and the runtime flags
+  `rerac-manifest.json`, the `rerac-extract` CLI (JSON lines, exit codes) and the runtime flags
   (`--version-json`, `--data-dir`/`RC_DATA_DIR`).
 - Each downloadable game build (official or a mod fork) carries its runtime and its extractor, OpenGOAL-style, so a
   mod can change its own data format.
-- The engine keeps a minimal "no game data found: run the launcher or `randcrw-extract`" message and exit code.
+- The engine keeps a minimal "no game data found: run the launcher or `rerac-extract`" message and exit code.
 
 ### 6.1 Launcher behaviour
 - **Library:** RC1, plus RC2/RC3 shown as "not yet supported". The picker still identifies an RC2/RC3 disc and
@@ -502,7 +503,7 @@ recommendation C, egui in this repo).
   - Other RC1 builds (PAL SCES-50916, JP SCPS-15037, demos, Greatest Hits with a different ELF hash): "recognised,
     not supported yet", with serial and hash shown for a report.
   - Unknown build: refused, with the DB-row text to copy (OpenGOAL's pattern).
-- **Extraction (as built):** `randcrw-extract extract --iso <image> --out <root>/games/rac1/data --json`, with progress
+- **Extraction (as built):** `rerac-extract extract --iso <image> --out <root>/games/rac1/data --json`, with progress
   by bytes (`identify`, `copy`, `prepare`), an ETA and Cancel (= kill the process). There is no staging folder: the
   extractor is crash-safe in place (`*.partial` files, `extract-info.json` after the archive; contract clarification
   7). The last stage, `prepare`, builds Tier 1 (§5.4; contract clarification 17).
@@ -519,18 +520,18 @@ recommendation C, egui in this repo).
 ### 6.2 Data locations (per OS)
 | | Game data (large) | Config (small) | Saves | Logs |
 |---|---|---|---|---|
-**Decided (contract):** one per-OS app data root named `randcrw` (macOS `~/Library/Application Support/randcrw/`;
+**Decided (contract):** one per-OS app data root named `rerac` (macOS `~/Library/Application Support/rerac/`;
 the launcher picks the Windows/Linux equivalents), user-movable, owned by the launcher. The extractor and the
 runtime never compute it; they receive paths (`--out`, `--data-dir`/`RC_DATA_DIR`).
 
 ```
-<root>/versions/<source>/<version>/   one game build: randcrw-manifest.json, runtime, extractor
+<root>/versions/<source>/<version>/   one game build: rerac-manifest.json, runtime, extractor
 <root>/games/rac1/data/               Tier 0 archive (§4.1) + extract-info.json
 <root>/games/rac1/data/cache/v1/      Tier 1 engine cache (§5.4): stamp.toml, wad/levels/NN/*.lump
 <root>/logs/, <root>/settings/
 ```
-The engine's current settings path still says `randcre` (`render_settings::settings_path`); the engine cut-over
-(P1.4) moves it under the data root's `settings/` and renames it.
+The engine's settings folder is still its own per-OS config folder `rerac/` (`render_settings::settings_path`); the
+engine cut-over (P1.4) moves it under the data root's `settings/`.
 **Dev:** `RC_DATA_DIR` or `--data` may point at a data root *or directly at an archive* (a directory containing
 `toc.bin`). The workspace `extracted/` therefore stays the dev default, and its cache goes to
 `extracted/cache/v<N>/`. `RC_EXTRACTED` stays as an alias for one transition period.
@@ -547,23 +548,23 @@ The engine's current settings path still says `randcre` (`render_settings::setti
 - **v1:** manual download.
 - **v2:** a release feed check like OpenGOAL's GitHub releases. The repo is private, so this is decision U12.
 - **Packaging:**
-  - The launcher is packaged by its own repo (Tauri bundler). A game build is a folder with `randcrw-manifest.json`,
-    the runtime and `randcrw-extract`; signing and notarisation need the user's Apple Developer ID (later, U13).
+  - The launcher is packaged by its own repo (Tauri bundler). A game build is a folder with `rerac-manifest.json`,
+    the runtime and `rerac-extract`; signing and notarisation need the user's Apple Developer ID (later, U13).
   - Windows zip or MSI; Linux tarball or AppImage.
   - Release builds only. No `[profile.*]` changes are proposed. LTO or strip for release would need user approval.
 
 ### 6.5 Packaging as built (D1, 2026-09-26)
-- The runtime executable is `randcrw` (`[[bin]]` in `crates/rc-engine/Cargo.toml`; the crate keeps its name, so
+- The runtime executable is `rerac` (`[[bin]]` in `crates/rc-engine/Cargo.toml`; the crate keeps its name, so
   `cargo dev`, `cargo dev-build` and `-p rc-engine` are unchanged).
 - Shaders: `main.rs` `asset_dir()` uses `assets/` next to the symlink-resolved executable, then `../Resources/assets`
   (a macOS `.app`), else the compile-time repo path `crates/rc-engine/assets`. The dev loop is unchanged: there is no
   `assets/` in `target/*/`, so `cargo dev` still reads the repo's shaders directly (edits apply on restart, no
   rebuild). Embedding was rejected: it would rebuild the engine on every shader edit.
 - `tools/package/package.sh [--no-build]`: one `cargo build --release --locked -p rc-engine -p rc-extract --bins`
-  (no `--features dev`), then `dist/randcrw-<version>-<os>-<arch>/` with `randcrw`, `randcrw-extract`,
-  `assets/shaders/*.wgsl`, `randcrw-manifest.json` (version from `crates/rc-engine/Cargo.toml`) and `README.txt`,
+  (no `--features dev`), then `dist/rerac-<version>-<os>-<arch>/` with `rerac`, `rerac-extract`,
+  `assets/shaders/*.wgsl`, `rerac-manifest.json` (version from `crates/rc-engine/Cargo.toml`) and `README.txt`,
   zipped with `ditto` (macOS). An allow-list fails the package on any other file; the packaged
-  `randcrw --version-json` is checked against the manifest version. `dist/` is git-ignored.
+  `rerac --version-json` is checked against the manifest version. `dist/` is git-ignored.
 - No `.app` for the runtime: the launcher starts it directly like OpenGOAL's `gk`, and a bundle would add an
   `Info.plist`, a second path layout and signing questions for no gain. The `../Resources/assets` lookup keeps the
   option open.
@@ -581,15 +582,16 @@ The engine's current settings path still says `randcre` (`render_settings::setti
   and carry `data_format` 1 (the development tree may lack it: one warning). Failures print one `error:` line and
   exit before any window: 3 = missing / not a data folder / incomplete extraction, 4 = `data_format` mismatch or
   unreadable `extract-info.json`, 2 = `--data-dir` without a value. Unknown arguments are ignored with a warning.
-- `--version-json` prints `{"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}` and exits first
+- `--version-json` prints `{"name":"rerac","version":"0.1.0","game":"rac1","data_format":1}` and exits first
   (about 10 ms, no window, no data access).
-- Settings: `<per-OS config dir>/randcrw/settings.toml`; when it is missing and `…/randcre/settings.toml` exists, the
-  old file is copied once (and kept). `RC_SETTINGS_FILE` still overrides; deterministic runs still skip the file.
+- Settings: `<per-OS config dir>/rerac/settings.toml`; when that file is missing and the pre-rename
+  `…/randcrw/settings.toml` exists, the old file is copied once (and kept, never modified). Only the engine's own file is
+  copied: on macOS the same folder is the launcher's data root, which the launcher migrates. `RC_SETTINGS_FILE` still overrides; deterministic runs still skip the file.
 - Tests and tools: `rc_formats::test_data::root()` (`RC_EXTRACTED`, else `<workspace>/extracted`) replaces every
   hard-coded `../../extracted` in `rc-formats`, `rc-game` and `rc-trace` (`default_extracted`). Since 2026-09-27 the
   tests read only Tier 0 files (decompressed lumps, core blocks and gameplay sections come from the Rust loaders,
-  `rc_formats::test_data`), so any `randcrw-extract` data folder works as `RC_EXTRACTED`.
-- Verified: a fresh `randcrw-extract extract` (2,937 files, 4.2 s) then the engine with `--data-dir` on it,
+  `rc_formats::test_data`), so any `rerac-extract` data folder works as `RC_EXTRACTED`.
+- Verified: a fresh `rerac-extract extract` (2,937 files, 4.2 s) then the engine with `--data-dir` on it,
   `RC_EXTRACTED` pointed at a bogus path and `RC_ISO` unset: Novalis renders (`RC_SCENE=0`), and the arrival scene
   plays with speech (0–25 s) and the level music after it (WAV capture + `RC_AUDIO_TRACE`).
 - Not done from the plan below: the 19-level smoke run and the before/after deterministic capture; `rc_formats::disc`
@@ -629,7 +631,7 @@ deleting the ISO everything the engine currently plays still works. The C++ `too
 the loaders were all ported; it was retired on 2026-09-27 (decisions.md) in favour of committed snapshot hashes.
 
 ### Stage 2: Launcher
-Superseded in part by the Tauri decision: P2.1/P2.2/P2.4/P2.5 happen in the separate `randcrw-launcher` repo against
+Superseded in part by the Tauri decision: P2.1/P2.2/P2.4/P2.5 happen in the separate `rerac-launcher` repo against
 `docs/plan/launcher_contract.md`; P2.3 (runtime `--data-dir`, `--version-json`, exit codes) stays here. The rows
 below are the original plan.
 
@@ -653,18 +655,18 @@ tab → P3.3 importers (PNG → texture with an RGBA renderer path, WAV → PCM 
 | U1 | Three tiers: **accepted**. |
 | U2 | Extract everything, including the PAL copies; `--ntsc-only` optional: **accepted**. |
 | U3 | Launcher: **Tauri** (overrides the egui recommendation). |
-| U4 | **Separate repo** `randcrw-launcher` (overrides "own workspace in this repo"). OpenGOAL structure: launcher and game builds versioned separately, mods are separate game builds (forks), the extractor ships in every game build. |
+| U4 | **Separate repo** `rerac-launcher` (overrides "own workspace in this repo"). OpenGOAL structure: launcher and game builds versioned separately, mods are separate game builds (forks), the extractor ships in every game build. |
 | U5 | Launcher dependencies are the launcher repo's business; **the extractor stays dependency-free**: accepted. |
 | U6 | **SCUS_971.99 v1.00 only for now**; other builds recognised and refused; the build DB stays extensible (deferred, not dropped). |
 | U7 | Committed size + SHA-1 table (hashes only): **accepted** (`crates/rc-extract/data/scus_971_99.tsv`). |
-| U8 | Per-OS data folders named `randcrw`, user-movable: **accepted** (contract "Folders"). |
+| U8 | Per-OS data folders named `rerac`, user-movable: **accepted** (contract "Folders"). |
 | U9 | Engine loses ISO reading: **accepted** (later package, P1.4). |
 | U10 | Movies archived losslessly as on disc: **accepted**. Decoder **decided 2026-09-27**: played natively from the original files at runtime (`rc-video` MPEG-2 decoder + `rc_formats::pss` + the VAG ADPCM decoder); no conversion at extraction, no ffmpeg in the product (decisions.md; docs/formats/pss.md). |
 | U11 | **`.iso` only for now** (no `.bin`, CHD, CSO). |
 | U12 | Manual updates: **accepted**. Official downloads stay off until the repo is public; a Development source uses local builds. |
 | U13 | Signing later: **accepted**. |
 | U14 | C++ extractor kept as the test oracle: **accepted**; **retired 2026-09-27** (decisions.md): replaced by committed Rust snapshot hashes. |
-| — | Everything user-facing is named **randcrw**, never "randcre". |
+| — | Everything user-facing is named **ReRAC** (identifier `rerac`; renamed from randcrw on 2026-09-29). |
 
 The original options and recommendations follow for reference.
 

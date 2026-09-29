@@ -7,7 +7,7 @@
 // an opaque world surface in the main pass, no blend, Z written.
 
 #import bevy_pbr::view_transformations::{position_world_to_clip, position_world_to_view}
-#import randcrw::display_blend::{gs_add, gs_mix}
+#import rerac::display_blend::{gs_add, gs_mix}
 
 struct FxFog {
     color: vec4<f32>,

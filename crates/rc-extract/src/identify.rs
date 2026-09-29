@@ -149,7 +149,7 @@ pub fn require_supported(id: &Identified, builds: &[Build], emit: Emit) -> Resul
         }
         return Ok(());
     }
-    let only = "randcrw supports Ratchet & Clank NTSC-U SCUS_971.99 v1.00 only for now";
+    let only = "ReRAC supports Ratchet & Clank NTSC-U SCUS_971.99 v1.00 only for now";
     let msg = match (id.game, id.build) {
         (Game::Rac1, Some(_)) => format!("Ratchet & Clank {} v{} ({}, {}) is recognised but not supported yet; {only}", id.serial, id.version, id.region, id.edition),
         (Game::Rac1, None) => {

@@ -2,7 +2,7 @@
 //! back with the test decoders (PNG, WAV, JSON) and the glTF validator, and cross-check against the loaders.
 //!
 //! Run: `RC_EXPORT_TEST_DIR=<dir> cargo xtask test-quick rc-extract --filter export_level_01 --ignored --nocapture`
-//! (default dir: `<tmp>/randcrw-export-test`; removed afterwards unless `RC_EXPORT_KEEP=1`). `RC_EXPORT_TEST_ALL=1`
+//! (default dir: `<tmp>/rerac-export-test`; removed afterwards unless `RC_EXPORT_KEEP=1`). `RC_EXPORT_TEST_ALL=1`
 //! exports and checks every level and the global data instead (about 60,000 files, 3.5 GiB).
 
 use super::{export, gltf, jsonv, png, wav, Kinds, Options};
@@ -22,7 +22,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 fn export_level_01_fully() {
     let data = rc_formats::test_data::root();
     if !data.join("toc.bin").exists() { eprintln!("skipped: no extracted/"); return; }
-    let to = std::env::var_os("RC_EXPORT_TEST_DIR").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("randcrw-export-test"));
+    let to = std::env::var_os("RC_EXPORT_TEST_DIR").map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("rerac-export-test"));
     let _ = std::fs::remove_dir_all(&to);
     let t0 = std::time::Instant::now();
     let mut lines = Vec::new();

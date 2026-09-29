@@ -13,7 +13,7 @@
 //!
 //! `RC_PERF_LOG=1` prints one line per request (where it came from, bytes, ms); [`stats`] counts them.
 //!
-//! Why a crate and not an engine module: `randcrw-extract prepare` builds the same cache with the same code (layout,
+//! Why a crate and not an engine module: `rerac-extract prepare` builds the same cache with the same code (layout,
 //! stamp, lump checks), and a crate without Bevy keeps the extractor free of the engine and its tests fast.
 
 pub mod cache;
@@ -119,7 +119,7 @@ impl Lumps {
         };
         match c.reset(&self.writer) {
             Ok(()) => {
-                println!("rc-data: {why}; building it as lumps are first used (randcrw-extract prepare builds it all at once)");
+                println!("rc-data: {why}; building it as lumps are first used (rerac-extract prepare builds it all at once)");
                 Backing::Cache(c)
             }
             Err(e) => {

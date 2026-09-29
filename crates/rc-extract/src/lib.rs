@@ -1,4 +1,4 @@
-//! `randcrw-extract`: identifies the user's own Ratchet & Clank disc image and writes the Tier 0 archive
+//! `rerac-extract`: identifies the user's own Ratchet & Clank disc image and writes the Tier 0 archive
 //! (every lump the ToC and the filesystem reference, byte-identical to the disc, in the `extracted/` layout; every file
 //! is checked against the committed size/SHA-1 table `data/<serial>.tsv`), so the disc image is never needed again. `prepare` then builds the Tier 1 engine cache
 //! from that archive (`rc_data::cache`), and `extract` runs it as its last stage. `export` writes the optional
@@ -23,7 +23,7 @@ mod workers;
 use json::Value;
 use std::fmt;
 
-/// `randcrw-extract` version, recorded as `extractor_version` in `extract-info.json`.
+/// `rerac-extract` version, recorded as `extractor_version` in `extract-info.json`.
 pub const EXTRACTOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Version of the data folder layout (`data_format` in the manifest and `extract-info.json`).
 pub const DATA_FORMAT: u32 = 1;

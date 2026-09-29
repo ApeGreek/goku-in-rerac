@@ -20,7 +20,7 @@
 //! **Stamp** (`stamp.toml`, `key = value` lines): `cache_version`, `game`, `tier0_manifest` (XXH64 of
 //! `extract-info.json`, or `none` in a development tree without one), one `kind.<name> = <version>` line per kind,
 //! and the informational `written_by`. The cache is stale when any of the first four differ from this build's;
-//! a stale cache is emptied and rebuilt (eagerly by `randcrw-extract prepare`, lazily by the engine).
+//! a stale cache is emptied and rebuilt (eagerly by `rerac-extract prepare`, lazily by the engine).
 //!
 //! Writes are atomic: `<file>.<pid>.partial`, then a rename. A killed writer leaves at most a `.partial` file
 //! (removed by the next `prepare`) and never a complete-looking wrong lump.
@@ -88,7 +88,7 @@ pub fn v1_sources(root: &Path) -> io::Result<Vec<String>> {
 pub enum Error {
     /// A Tier 0 file (or `extract-info.json`) exists but cannot be read, or a source is missing.
     Source { path: PathBuf, err: io::Error },
-    /// A Tier 0 source is not a valid WAD stream: the archive is damaged (`randcrw-extract verify` names it).
+    /// A Tier 0 source is not a valid WAD stream: the archive is damaged (`rerac-extract verify` names it).
     Wad { path: PathBuf, err: rc_formats::buf::FormatError },
     /// Creating, writing, renaming or deleting a cache file failed.
     Write { path: PathBuf, err: io::Error },
@@ -162,7 +162,7 @@ impl Stamp {
 
     pub fn to_text(&self) -> String {
         let mut s = String::from(
-            "# randcrw Tier 1 engine cache (docs/plan/launcher_extractor.md). Rebuilt from the Tier 0 archive when stale;\n\
+            "# ReRAC Tier 1 engine cache (docs/plan/launcher_extractor.md). Rebuilt from the Tier 0 archive when stale;\n\
              # delete this folder at any time.\n",
         );
         s += &format!("cache_version = {}\ngame = \"{}\"\ntier0_manifest = \"{}\"\n", self.cache_version, self.game, self.tier0_manifest);
@@ -519,7 +519,7 @@ mod tests {
             game: "rac1".into(),
             tier0_manifest: "extract-info.json:xxh64:0123456789abcdef".into(),
             kinds: vec![("wad".into(), 1)],
-            written_by: "randcrw-extract 0.1.0".into(),
+            written_by: "rerac-extract 0.1.0".into(),
         };
         let text = s.to_text();
         assert!(text.contains("kind.wad = 1\n") && text.contains("cache_version = 1\n"), "{text}");

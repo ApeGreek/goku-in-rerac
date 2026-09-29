@@ -24,7 +24,7 @@ Only source and game data may feed tests. Personal material never does.
 ## 3. Layout
 
 ```
-crates/                 PRODUCT: rc-formats rc-data rc-game rc-engine (randcrw) rc-extract (randcrw-extract)
+crates/                 PRODUCT: rc-formats rc-data rc-game rc-engine (rerac) rc-extract (rerac-extract)
 tools/                  DEV ONLY, each subfolder has a README (purpose, commands, inputs, outputs)
   ghidra/scripts/         Ghidra scripts (from decomp/scripts/; import_overlays.py renamed import_levels.py)
   ghidra/names/           name tables (from decomp/names/)
@@ -33,13 +33,13 @@ tools/                  DEV ONLY, each subfolder has a README (purpose, commands
   repo-checks/            guard tests for this layout (no dependencies)
   xtask/                  `cargo xtask <command>` dev chores: regen-data, package (std only; added 2026-09-27)
 docs/formats/ docs/plan/ docs/workflows/
-extracted/   (ignored)  game data only (what randcrw-extract writes)
+extracted/   (ignored)  game data only (what rerac-extract writes)
 work/        (ignored)  generated dev output:
   decomp/                 decompiler export (from decomp/export/, moved by hand, not regenerated)
   ghidra-import/          level ELFs for a from-scratch Ghidra import (levelNN.elf, 19 files)
   trace/                  EE / scratchpad dumps, reports, CSVs, replay output of rc-trace
   vu/                     VU microprogram listings the format docs cite by line number
-  exports/ captures/      conventions: randcrw-extract exports for dev work; screenshots and debug captures
+  exports/ captures/      conventions: rerac-extract exports for dev work; screenshots and debug captures
   data-staging/ data-old/ transient: `cargo xtask regen-data` extracts into the first and swaps the old extracted/
                           through the second (both gone after a successful run)
 dist/ target/ (ignored)
@@ -53,7 +53,7 @@ No other top-level folders (`tools/repo-checks` checks it). The Ghidra project s
 
 1. **Product vs tooling.** `crates/` ships and never depends on anything under `tools/` (`tools/repo-checks` parses
    every `crates/*/Cargo.toml`). `tools/` never ships (`tools/package/package.sh`'s allow-list).
-2. **Data goes to its one home.** `extracted/` holds only what `randcrw-extract` writes. Tools write generated output
+2. **Data goes to its one home.** `extracted/` holds only what `rerac-extract` writes. Tools write generated output
    only to `work/` (`rc-trace` refuses paths inside `extracted/`); the one deliberate exception is a committed
    fixture (`rc-trace distill-spawn`). Personal material stays in `~/PS2/ratchet1/`.
 3. **No test depends on personal files.** PCSX2 findings reach tests only as distilled, numbers-only fixtures
@@ -105,10 +105,10 @@ the orchestration handbook's rules, and every reference to the old paths.
 
 Deferred because they need product changes (hard limit of the reorg) or a Ghidra run:
 
-1. **`randcrw-extract export --what code [--level NN]`** (product, `crates/rc-extract`): each level's overlay as an
+1. **`rerac-extract export --what code [--level NN]`** (product, `crates/rc-extract`): each level's overlay as an
    ELF with the original load addresses, for `work/ghidra-import/`. Check: byte-identical to the 19 saved
    `work/ghidra-import/levelNN.elf`. Then `docs/workflows/ghidra.md` step 2 uses it.
-2. **`randcrw-extract verify --strict`** (product): also report files in a data folder the archive does not have
+2. **`rerac-extract verify --strict`** (product): also report files in a data folder the archive does not have
    (e.g. C++-era leftovers in a dev `extracted/`).
 3. **`RC_REQUIRE_DATA=1`** (product, `rc_formats::test_data` and the test helpers): tests fail instead of skipping
    when `extracted/` is missing, for CI-style runs.

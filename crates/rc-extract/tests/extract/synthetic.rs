@@ -92,7 +92,7 @@ fn rc1_disc(elf_tag: &str) -> Vec<u8> {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("randcrw-extract-test-{}-{name}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("rerac-extract-test-{}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -264,7 +264,7 @@ fn walk(d: &Path) -> Vec<String> {
 #[test]
 fn binary_json_lines_and_exit_codes() {
     let dir = scratch("bin");
-    let exe = env!("CARGO_BIN_EXE_randcrw-extract");
+    let exe = env!("CARGO_BIN_EXE_rerac-extract");
     let run = |args: &[&str]| {
         let o = std::process::Command::new(exe).args(args).env_remove("RC_ISO").output().unwrap();
         let lines: Vec<Vec<(String, Value)>> = String::from_utf8(o.stdout).unwrap().lines().map(|l| json::parse_object(l).unwrap_or_else(|| panic!("not JSON: {l}"))).collect();
@@ -304,6 +304,6 @@ fn binary_json_lines_and_exit_codes() {
     assert!(lines.iter().any(|l| ty(l) == "progress" && json::get(l, "stage") == Some(&Value::Str("identify".into()))));
     assert!(lines.iter().any(|l| matches!(json::get(l, "message"), Some(Value::Str(m)) if m.starts_with("new build DB row: "))));
     let v = std::process::Command::new(exe).arg("--version").output().unwrap();
-    assert_eq!((v.status.code(), String::from_utf8(v.stdout).unwrap().trim()), (Some(0), format!("randcrw-extract {}", rc_extract::EXTRACTOR_VERSION).as_str()));
+    assert_eq!((v.status.code(), String::from_utf8(v.stdout).unwrap().trim()), (Some(0), format!("rerac-extract {}", rc_extract::EXTRACTOR_VERSION).as_str()));
     std::fs::remove_dir_all(&dir).unwrap();
 }

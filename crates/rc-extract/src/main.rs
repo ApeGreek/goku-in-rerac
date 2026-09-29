@@ -1,4 +1,4 @@
-//! `randcrw-extract`: the command-line front end. Interface: docs/plan/launcher_contract.md.
+//! `rerac-extract`: the command-line front end. Interface: docs/plan/launcher_contract.md.
 
 use rc_extract::build_db::{self, BUILDS};
 use rc_extract::export::{self as tier2, Kinds};
@@ -11,13 +11,13 @@ use std::time::Instant;
 
 const USAGE: &str = "\
 usage:
-  randcrw-extract identify --iso <image> [--json]
-  randcrw-extract extract  --iso <image> --out <data dir> [--ntsc-only] [--json]   (ends with prepare)
-  randcrw-extract verify   --out <data dir> [--json]
-  randcrw-extract prepare  --out <data dir> [--json]   (build the engine cache <data dir>/cache/v1 from the archive)
-  randcrw-extract export   --out <data dir> [--to <dir>] [--what <kinds>] [--level NN] [--json]
+  rerac-extract identify --iso <image> [--json]
+  rerac-extract extract  --iso <image> --out <data dir> [--ntsc-only] [--json]   (ends with prepare)
+  rerac-extract verify   --out <data dir> [--json]
+  rerac-extract prepare  --out <data dir> [--json]   (build the engine cache <data dir>/cache/v1 from the archive)
+  rerac-extract export   --out <data dir> [--to <dir>] [--what <kinds>] [--level NN] [--json]
                            (usable formats: PNG, WAV, glTF, JSON; default --to <data dir>/exports, --what all)
-  randcrw-extract table    --iso <image> --output <file.tsv> [--json]   (developer: regenerate the size/SHA-1 table)
+  rerac-extract table    --iso <image> --output <file.tsv> [--json]   (developer: regenerate the size/SHA-1 table)
 options:
   --json          JSON lines on stdout (launcher mode; docs/plan/launcher_contract.md)
   --ntsc-only     skip the PAL copies (PAL FMVs, PAL scenes, gameplay_pal, PAL credits)
@@ -25,7 +25,7 @@ options:
   --what <kinds>  export: comma list of textures, audio, models, levels, collision, text, or all
   --level NN      export: only this level (no global data)
   --iso may be omitted when RC_ISO is set. --flag=value also works.
-  randcrw-extract --help | --version";
+  rerac-extract --help | --version";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Cmd { Identify, Extract, Verify, Prepare, Export, Table, Help, Version }
@@ -174,13 +174,13 @@ fn main() {
     let args = match parse_args(&argv, std::env::var_os("RC_ISO")) {
         Ok(a) => a,
         Err(m) => {
-            let code = out.finish(Err(Error::new(Code::Internal, format!("usage: {m} (see randcrw-extract --help)"))), t0);
+            let code = out.finish(Err(Error::new(Code::Internal, format!("usage: {m} (see rerac-extract --help)"))), t0);
             std::process::exit(code);
         }
     };
     match args.cmd {
         Cmd::Help => { println!("{USAGE}"); return; }
-        Cmd::Version => { println!("randcrw-extract {EXTRACTOR_VERSION}"); return; }
+        Cmd::Version => { println!("rerac-extract {EXTRACTOR_VERSION}"); return; }
         _ => {}
     }
     let r = {

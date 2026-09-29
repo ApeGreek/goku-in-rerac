@@ -15,14 +15,14 @@ How this project has been run since 2026-09-26, written so another model (Opus 5
 - `crates/rc-formats`: all loaders, golden-tested on all 19 levels against committed snapshot hashes (`data/loader_snapshots.tsv`, generated while byte-identical to the retired C++ oracle) (wad, toc, level core, textures, tfrag, tie, shrub, sky, moby, gadget, collision, occlusion, particle/FX textures, moby animation, lighting passes, disc/ISO reader, gameplay sections, fog zones, hud/strings/sound-bank/scene in flight). PS2 float model in `tfrag_light::ps2`.
 - `crates/rc-game`: pure gameplay logic, no Bevy: collision kernels, rng, particles, hero controller + pad + follow camera + tick, fog zones, sky stars, water sim, moby runtime; scheduler/menus/game-state/audio/scene player in flight.
 - `crates/rc-engine`: Bevy app. One module per renderer (`tfrag_*`, `tie_*`, `shrub_*`, `moby_*`, `sky_*`, `particle_render`, `water_render`, `hud_*`, …), `gs_state.rs` (GS alpha/depth rules), `determinism.rs` (frame-exact capture), `occlusion.rs`, `fog_state.rs`, `disc_source.rs`. Env switches are listed in `docs/workflows/dev-switches.md`.
-- `crates/rc-extract`: `randcrw-extract` (Tier 0 archive checked against `data/scus_971_99.tsv`, Tier 1 cache, Tier 2 exports). The C++ oracle (`src/core`, `tools/extract`) was retired on 2026-09-27; a new loader gets a golden test in `crates/rc-formats/tests/formats/golden.rs` that records snapshot rows (`tests/formats/snapshot/mod.rs`).
+- `crates/rc-extract`: `rerac-extract` (Tier 0 archive checked against `data/scus_971_99.tsv`, Tier 1 cache, Tier 2 exports). The C++ oracle (`src/core`, `tools/extract`) was retired on 2026-09-27; a new loader gets a golden test in `crates/rc-formats/tests/formats/golden.rs` that records snapshot rows (`tests/formats/snapshot/mod.rs`).
 - `docs/formats/*`: verified format docs. `docs/plan/*`: one investigation doc per system (player_controller, moby_update_catalogue, particles, hud_text, audio, world_animation, occlusion_culling, collision_queries, game_state, menus, cutscenes_transitions, moby_animation, moby_skinning_lighting, tfrag_lighting, tie_lighting, shrub_lighting, sky_render_notes, game_camera_fog, level_sweep, trace_harness). `docs/plan/roadmap.md` has a dated status block at the top.
 - `tools/` (dev only, never ships; each tool has a README): `tools/trace` (package `rc-trace`: PCSX2 savestate/PINE
   comparison harness, `docs/plan/trace_harness.md`), `tools/ghidra/scripts` + `tools/ghidra/names` (Ghidra scripts and
   name tables, `names/*.csv`, `clusters.tsv`), `tools/package` (release packaging), `tools/repo-checks` (layout guard
   tests), `tools/xtask` (`cargo xtask <command>`: `regen-data` rebuilds `extracted/` from `RC_ISO`, `package`).
 - `docs/workflows/`: one page per dev workflow, one command per task (ghidra, pcsx2, game-data, release, launcher).
-- `extracted/` (git-ignored): game data only, what `randcrw-extract` writes. `work/` (git-ignored): generated dev output
+- `extracted/` (git-ignored): game data only, what `rerac-extract` writes. `work/` (git-ignored): generated dev output
   (`work/decomp/<program>/` decompiler export, `work/trace/`, `work/ghidra-import/`, `work/vu/`, `work/exports/`,
   `work/captures/`). `~/PS2/ratchet1/` (outside the repo): the user's ISO, `savestates/`, `traces/` (recordings); the
   Ghidra project is `~/ratchet1.gpr` + `~/ratchet1.rep` (target home `~/PS2/ratchet1/ghidra/`). Full layout:
@@ -164,4 +164,4 @@ These apply to every dispatch from now on (the brief lines are in §3.2):
 - Keep the user's machine awake for long overnight runs (`request_keep_awake` with `session_idle`).
 
 ## 6. Memory
-The orchestrator's memory lives in `~/.claude/projects/-Users-aslanhud-Repos-randcre/memory/` (index `MEMORY.md`): the orchestrator-only rule, build-time sensitivity, Ghidra gotchas, user preferences, and a dated status note. Update the status note at hand-over points.
+The orchestrator's memory lives in the Claude Code project memory folder for this checkout (`~/.claude/projects/<checkout path with each "/" as "-">/memory/`) (index `MEMORY.md`): the orchestrator-only rule, build-time sensitivity, Ghidra gotchas, user preferences, and a dated status note. Update the status note at hand-over points.

@@ -1,6 +1,6 @@
 # Workflow: game data (extract, verify, prepare, export)
 
-Tool: `randcrw-extract` (product crate `crates/rc-extract`; the launcher runs the same binary). Layout of a data
+Tool: `rerac-extract` (product crate `crates/rc-extract`; the launcher runs the same binary). Layout of a data
 folder: `docs/plan/launcher_extractor.md` §4.1. All commands run from the repo root with
 `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`; `RC_ISO` can stand in for `--iso`.
 
@@ -28,7 +28,7 @@ cargo xtask regen-data
 
 It needs the disc image: set `RC_ISO` once (fish: `set -Ux RC_ISO "<disc>.iso"`; zsh / bash: an
 `export RC_ISO="<disc>.iso"` line in `~/.zshrc` / `~/.bashrc`; without it the command prints these lines with your
-disc's path), or pass `--iso <disc>.iso`. It lists what `extracted/` holds, builds the dev `randcrw-extract`, extracts
+disc's path), or pass `--iso <disc>.iso`. It lists what `extracted/` holds, builds the dev `rerac-extract`, extracts
 into `work/data-staging`, verifies it, and only then swaps it in and deletes the old folder, so a failure never
 leaves you without data. About 8 s; the new data is about 4.4 GiB (3,072 files: 2,937 Tier 0 files,
 `extract-info.json`, a 438 MiB engine cache). `cargo xtask regen-data --check` only lists what the folder holds.
@@ -40,26 +40,26 @@ copied to `work/ghidra-import/` and `work/vu/` on 2026-09-27. `regen-data` recog
 deletes them with the old folder. Any other file stops it (move it to `work/` or `~/PS2/ratchet1/`, or pass
 `--force` to delete it).
 
-**What may live in `extracted/`:** only what `randcrw-extract` writes: the Tier 0 archive (`toc.bin`, `boot/`,
+**What may live in `extracted/`:** only what `rerac-extract` writes: the Tier 0 archive (`toc.bin`, `boot/`,
 `global/`, `levels/NN/*.bin` and their `bindata/ music/ speech/ scene/` folders, `extract-info.json`) and the engine
 cache `cache/`. **What may not:** trace dumps, savestates, reports, captures, exports, Ghidra material, anything a dev
 tool writes. Those go to `work/` (generated) or `~/PS2/ratchet1/` (personal).
 
 ## How the engine finds its data
 
-The engine never reads the disc image; it reads only a data folder that `randcrw-extract` wrote (layout:
+The engine never reads the disc image; it reads only a data folder that `rerac-extract` wrote (layout:
 `docs/plan/launcher_extractor.md` §4.1; contract: `docs/plan/launcher_contract.md`).
 
 ```
 cargo dev -- --data-dir <data folder>     # or RC_DATA_DIR=<data folder> cargo dev
-cargo dev -- --version-json               # {"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}
+cargo dev -- --version-json               # {"name":"rerac","version":"0.1.0","game":"rac1","data_format":1}
 ```
 
 The data folder is chosen in this order:
 
 1. `--data-dir <folder>` (also `--data-dir=<folder>`), how the launcher starts the game;
 2. `RC_DATA_DIR`;
-3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (a `randcrw-extract` data folder, same layout).
+3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (a `rerac-extract` data folder, same layout).
 
 The folder must exist and hold `toc.bin`, and for 1 and 2 also the extractor's `extract-info.json` with a matching
 `data_format` (the development tree may lack it: one warning). Otherwise the engine prints one `error:` line saying
@@ -70,7 +70,7 @@ without a value). `--version-json` prints the contract line and exits without to
 ## The engine cache (Tier 1)
 
 `extract` ends by building `<data folder>/cache/v1/` (stage `prepare`, about 0.2 s, 440 MiB): every level's core
-data, gameplay file and HUD banks, WAD-decompressed once, plus `stamp.toml`. `randcrw-extract prepare --out <data
+data, gameplay file and HUD banks, WAD-decompressed once, plus `stamp.toml`. `rerac-extract prepare --out <data
 folder>` rebuilds or refreshes it from the archive alone (no disc). The engine reads lumps through `rc-data` (once per
 process each); when the cache is missing, stale (stamp: cache version, converter versions, `extract-info.json` hash)
 or a lump is corrupt (XXH64 trailer), it rebuilds what it needs on the fly with one log line per lump, and falls back
@@ -80,7 +80,7 @@ to in-memory decompression when the folder cannot be written. The development `e
 
 ## Exports (Tier 2, optional)
 
-`randcrw-extract export --out <data folder> [--to <dir>] [--what textures,audio,models,levels,collision,text|all]
+`rerac-extract export --out <data folder> [--to <dir>] [--what textures,audio,models,levels,collision,text|all]
 [--level NN]` writes usable formats from the archive (no disc): indexed PNG textures with JSON sidecars (original CLUT
 and GS format), WAV audio with loop points, glTF 2.0 levels, collision and skinned, animated moby models, and JSON
 tables and text. Default folder `<data folder>/exports/`; the full disc is about 60,000 files and 3.5 GiB in about
@@ -90,7 +90,7 @@ tables and text. Default folder `<data folder>/exports/`; the full disc is about
 ## What tests read
 
 Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
-`rc_formats::test_data::root()`); they read only Tier 0 files, so any `randcrw-extract` data folder works, and they
+`rc_formats::test_data::root()`); they read only Tier 0 files, so any `rerac-extract` data folder works, and they
 skip when it is absent. Decompressed lumps, core blocks (`moby_class/NNNN`, `ratchet_seq/NNN`, …) and gameplay
 sections (`level_settings`, …) come from the Rust loaders (`rc_formats::test_data`). An `extracted/` tree written by
 the retired C++ extractor still works; its extra files are no longer read, and `cargo xtask regen-data` regenerates a

@@ -88,7 +88,7 @@ One step per row, in order:
 | 8. Export the levels | `python3 tools/ghidra/scripts/export_overlays.py` |
 
 Step 2 reads the level ELFs from `work/ghidra-import/levelNN.elf`. **Follow-up:** they should come from
-`randcrw-extract export --what code` (not built yet; docs/plan/repo_reorg.md). Until then the 19 files in
+`rerac-extract export --what code` (not built yet; docs/plan/repo_reorg.md). Until then the 19 files in
 `work/ghidra-import/` are copies of the retired C++ extractor's `overlay.elf` files, made on 2026-09-27; keep them
 (they are in the backup below).
 

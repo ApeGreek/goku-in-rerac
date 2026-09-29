@@ -1,4 +1,4 @@
-//! Where the engine's game data comes from: one **data folder**, the Tier 0 archive `randcrw-extract` writes
+//! Where the engine's game data comes from: one **data folder**, the Tier 0 archive `rerac-extract` writes
 //! (`docs/plan/launcher_extractor.md` §4.1; the development `extracted/` tree has the same layout). The engine
 //! never opens a disc image: the disc reader (`rc_formats::disc`) is the extractor's alone.
 //!
@@ -33,7 +33,7 @@ pub const EXIT_DATA_FORMAT: i32 = 4;
 
 /// The launcher contract's `--version-json` line.
 pub fn version_json() -> String {
-    format!(r#"{{"name":"randcrw","version":"{}","game":"rac1","data_format":{DATA_FORMAT}}}"#, env!("CARGO_PKG_VERSION"))
+    format!(r#"{{"name":"rerac","version":"{}","game":"rac1","data_format":{DATA_FORMAT}}}"#, env!("CARGO_PKG_VERSION"))
 }
 
 /// Which rule chose the data root.
@@ -104,14 +104,14 @@ fn json_str<'a>(text: &'a str, key: &str) -> Option<&'a str> {
 
 /// Checks the data folder; `Ok` carries the one line to print (a summary, or the development-tree warning).
 fn check(root: &Path, origin: Origin) -> std::result::Result<String, DataError> {
-    let fix = "Extract your disc with the randcrw launcher (or `randcrw-extract extract --iso <image> --out <folder>`) \
+    let fix = "Extract your disc with the ReRAC launcher (or `rerac-extract extract --iso <image> --out <folder>`) \
                and start the game from it, or pass --data-dir <folder>.";
     let no_data = |what: String| DataError { code: EXIT_NO_DATA, message: format!("{what} {fix}") };
     if !root.is_dir() {
         return Err(no_data(format!("the game data folder {} ({}) does not exist.", root.display(), origin.describe())));
     }
     if !root.join("toc.bin").is_file() {
-        return Err(no_data(format!("{} ({}) is not a randcrw game data folder (no toc.bin).", root.display(), origin.describe())));
+        return Err(no_data(format!("{} ({}) is not a ReRAC game data folder (no toc.bin).", root.display(), origin.describe())));
     }
     let info_path = root.join("extract-info.json");
     let info = match std::fs::read_to_string(&info_path) {
@@ -135,8 +135,8 @@ fn check(root: &Path, origin: Origin) -> std::result::Result<String, DataError> 
         found => Err(DataError {
             code: EXIT_DATA_FORMAT,
             message: format!(
-                "the game data in {} has data format {}, but this randcrw build needs data format {DATA_FORMAT}. \
-                 Re-extract your disc via the randcrw launcher (or randcrw-extract from this build).",
+                "the game data in {} has data format {}, but this ReRAC build needs data format {DATA_FORMAT}. \
+                 Re-extract your disc via the ReRAC launcher (or rerac-extract from this build).",
                 root.display(), found.map_or("<unreadable>".into(), |n| n.to_string())
             ),
         }),
@@ -159,7 +159,7 @@ pub fn startup() -> PathBuf {
     if !ignored.is_empty() { eprintln!("warning: ignoring unknown arguments {ignored:?}"); }
     for var in ["RC_ISO", "RC_SOURCE"] {
         if std::env::var_os(var).is_some_and(|v| !v.is_empty()) {
-            println!("note: {var} is ignored; the engine reads only the game data folder (disc images: randcrw-extract)");
+            println!("note: {var} is ignored; the engine reads only the game data folder (disc images: rerac-extract)");
         }
     }
     let (root, origin) = resolve(arg, std::env::var_os("RC_DATA_DIR"), std::env::var_os("RC_EXTRACTED"));
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn version_json_is_the_contract_line() {
         let v = version_json();
-        assert_eq!(v, format!(r#"{{"name":"randcrw","version":"{}","game":"rac1","data_format":1}}"#, env!("CARGO_PKG_VERSION")));
+        assert_eq!(v, format!(r#"{{"name":"rerac","version":"{}","game":"rac1","data_format":1}}"#, env!("CARGO_PKG_VERSION")));
         assert_eq!(json_uint(&v, "data_format"), Some(1));
         assert_eq!(json_str(&v, "game"), Some("rac1"));
     }
@@ -228,7 +228,7 @@ mod tests {
 
     /// A fresh empty folder under the system temp dir.
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("randcrw-disc-source-{}-{name}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("rerac-disc-source-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

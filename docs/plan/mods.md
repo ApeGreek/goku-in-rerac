@@ -57,7 +57,7 @@ Takeaways:
     replacements: skins, LODs and GS state must be synthesised.
 
 ### 2.1a From Tier 2 exports to overrides (the exports are built, 2026-09-26)
-`randcrw-extract export` (docs/plan/launcher_extractor.md §5.5) writes the formats and the paths an asset mod
+`rerac-extract export` (docs/plan/launcher_extractor.md §5.5) writes the formats and the paths an asset mod
 will ship. The rule: **a mod overrides an asset by shipping a file at the same relative path as its export**, and
 the importer uses the export's sidecar (or extras) to rebuild what the standard format cannot hold.
 
