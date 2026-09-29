@@ -50,11 +50,14 @@ Every brief carries, in this order:
   - "Run the engine with `RC_SCENE=0`."
   - "Every port-only option (one the original game does not have) goes on the native-looking 'Port Options' page under Options."
   - "Add every item you leave unfinished to `docs/plan/gaps.md` (new IDs in the right section) and mark the gaps you close there (struck through, with the date and your doc § or file); your report lists both."
-  - "Tests: run the targeted tests for what you touched (rc-engine: `cargo test -p rc-engine --features dev`), clippy on your files (rc-engine: `cargo clippy -p rc-engine --all-targets --features dev`), and `cargo check-all` once at the end. Never run `cargo test --workspace` or `cargo test-all`."
-- **Test policy (2026-09-28).** Working agents run only the targeted tests, clippy on their files and one final
-  `cargo check-all`. The coordinator runs the full workspace suite (`cargo test-all`) once per batch, through the
-  commit agent before committing, and writes the result to `work/test-results/latest.txt` (git-ignored) with the time,
-  HEAD and `git status --short`. Failures go back to the agent that owns the files.
+  - "Tests (docs/workflows/testing.md §2.1): the unit tests (`cargo test-all --lib --bins`), the integration groups of your areas (`cargo test-all --test …`, areas: <named in the brief>), the shared-code guard set (NO_IDLE digest and `all_levels_smoke`) if you touched shared code, clippy on your files (`cargo clippy-all`), and `cargo check-all` once at the end. Never run `cargo test -p …`, `cargo test --workspace`, or `cargo test-all` without `--lib`/`--bins`/`--test`."
+- **Test policy (2026-09-29): see `docs/workflows/testing.md`** (tiers, the area → tests map, the test audit). Two
+  tiers. Per job: the unit tests, the integration groups of the areas the brief names ("areas: weapons, classes"),
+  the shared-code guard set (NO_IDLE hero digest and `all_levels_smoke`) when the job touched shared code, and one
+  final `cargo check-all`. Full suite (`RC_AUDIO=0 cargo test-all --no-fail-fast`): only on merge to main, or for a big
+  shared-code commit; the coordinator runs it through the commit agent and writes the result to
+  `work/test-results/latest.txt` (git-ignored) with the time, HEAD and `git status --short`, and refreshes the digest
+  baseline there. Failures go back to the agent that owns the files.
 - **Gap register.** `docs/plan/gaps.md` is the one list of known gaps. Every report and doc update adds the agent's
   unfinished items there (new IDs) and strikes the ones it closes.
   File gaps at the system level: name the missing shared system, and list the specific object or level only as a

@@ -3,13 +3,14 @@
 //!
 //! * Menus (M1–M7): the page tree, callbacks, planet tables, quick-select block and d-pad defaults, the frame's
 //!   corner lists and the Port Options page, through `menus::Overlay::relocated` against level 01.
-//! * Class ports (C1): Gemlik's body pieces run `FxGroupUpdate` (its class table names classes Novalis does not use).
+//! * Class ports (C1): Gemlik's body pieces run `FxGroupUpdate` (its class table names classes Novalis does not use);
+//!   asserted in `level_ports.rs::every_level_runs_the_ports_its_class_table_names`.
 
 use rc_formats::level_overlay::LevelOverlay;
 use rc_game::menus::pause::{frame, PageMenu};
 use rc_game::menus::quick_select::{QsConsts, QsTables};
 use rc_game::menus::Overlay;
-use rc_game::moby_update::classes::{ClassUpdate, LevelPorts};
+use rc_game::moby_update::classes::LevelPorts;
 use std::sync::Arc;
 
 fn bytes(level: u32) -> Option<Vec<u8>> { std::fs::read(rc_formats::test_data::level_dir(level).join("overlay.bin")).ok() }
@@ -55,14 +56,6 @@ fn every_level_loads_the_pause_menu() {
         assert!(m2.install_port_page(&ov), "level {level:02}: Port Options page");
         assert!(QsTables::load(&ov).is_some() && QsConsts::load(&ov).is_some(), "level {level:02}: quick select");
     }
-}
-
-#[test]
-fn gemlik_class_table_runs_the_body_pieces() {
-    let Some(b) = bytes(13) else { eprintln!("skipped: no extracted/"); return };
-    let ov = |l: u32| bytes(l).map(|b| Arc::new(LevelOverlay::parse(&b).unwrap()));
-    let p = LevelPorts::from_overlays(&LevelOverlay::parse(&b).unwrap(), &ov, &[]);
-    for oc in [1733, 1734, 1735, 1801, 1802, 1803, 1804] { assert_eq!(p.get(oc), Some(ClassUpdate::FxPiece), "class {oc}"); }
 }
 
 /// Gemlik's content gap (a queue for later, not a check): the placed classes whose update is not ported, with

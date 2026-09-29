@@ -36,14 +36,6 @@ fn surfaces(n: usize) -> Option<Uses> {
     Some((world, mobys))
 }
 
-#[test]
-fn surface_ids_per_level() {
-    for n in 0..19 {
-        let Some((world, mobys)) = surfaces(n) else { eprintln!("level {n:02}: skipped (no extracted data)"); continue };
-        eprintln!("level {n:02}: world {world:?} mobys {mobys:?}");
-    }
-}
-
 
 /// Every surface id a level's collision uses is handled by that level's own reaction, or by no level's (0xa,
 /// 0x1f: no rule anywhere): the superset reaction cannot change a level through data it does not have.

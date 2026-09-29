@@ -22,7 +22,7 @@ tools/                  DEV ONLY (never ships; one README each)
   repo-checks             guard tests for this layout
   xtask                   `cargo xtask <command>`: dev chores, one short command each (regen-data, package)
 docs/                   formats/ (format specs), plan/ (investigations, roadmap, decisions),
-                        workflows/ (one page per dev workflow: ghidra, pcsx2, game-data, release, launcher)
+                        workflows/ (one page per dev workflow: ghidra, pcsx2, game-data, release, launcher, testing)
 extracted/   (ignored)  game data only, as randcrw-extract writes it
 work/        (ignored)  generated dev output: decomp/, trace/, ghidra-import/, vu/, exports/, captures/
 dist/, target/ (ignored) release packages, build output
@@ -200,7 +200,8 @@ Boolean switches are on with `1` (or off with `0` where the default is on).
 
 One page each in `docs/workflows/`: `ghidra.md` (the Ghidra project: set-up, naming, decompiler export),
 `pcsx2.md` (savestates, PINE, recording and comparing with `rc-trace`), `game-data.md` (extract / verify / prepare /
-export, regenerating the dev `extracted/`), `release.md` (packaging) and `launcher.md` (the launcher's dev setup).
+export, regenerating the dev `extracted/`), `release.md` (packaging), `launcher.md` (the launcher's dev setup) and
+`testing.md` (test tiers, the area → tests map, the test audit).
 For example, with a savestate taken on Novalis:
 
 ```
