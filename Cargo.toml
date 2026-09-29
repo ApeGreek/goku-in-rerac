@@ -16,6 +16,8 @@ bytemuck = { version = "1", features = ["derive", "min_const_generics", "extern_
 # Fast iteration: optimise dependencies (Bevy) fully, our crates lightly.
 [profile.dev]
 opt-level = 1
+# macOS: bundle debug info into .dSYM so per-codegen-unit .o files don't pile up in target/
+split-debuginfo = "packed"
 [profile.dev.package."*"]
 opt-level = 3
 # No debug info for external crates (Bevy, wgpu, ...): macOS unpacked debug objects grew target/ to 132 GB.
