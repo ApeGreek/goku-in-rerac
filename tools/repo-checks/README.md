@@ -2,7 +2,7 @@
 
 Dev only, never ships. No dependencies; it exists for its tests. Rules: `docs/plan/repo_reorg.md`.
 
-* **Command:** `cargo test -p repo-checks` (also part of `cargo test --workspace`).
+* **Command:** `cargo test -p repo-checks` (also part of `cargo test-all`).
 * **Inputs:** the repository tree, read as text. **Outputs:** none.
 * **Checks:**
   1. No product crate (`crates/*/Cargo.toml`) depends on anything under `tools/` (every `path = "..."` is resolved,

@@ -49,7 +49,7 @@ Rust comes from Homebrew's rustup; put it on `PATH` first:
 ```
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 cargo dev                        # run the engine (Bevy dynamically linked, fast relink)
-cargo test --workspace           # all tests (the ones that need game data skip without extracted/)
+cargo test-all                   # all tests (the ones that need game data skip without extracted/)
 cargo xtask regen-data           # (re)build the dev game data extracted/ from your disc image (RC_ISO)
 cargo xtask package              # release packaging (tools/package/package.sh)
 cargo xtask help                 # the other dev chores
@@ -59,6 +59,13 @@ cargo run --release -p rc-engine # release / profiling build
 `cargo dev` and `cargo dev-build` are aliases in `.cargo/config.toml` (`-p rc-engine --features dev`); so is
 `cargo xtask` (`run -q -p xtask --`, the dev-chore runner in `tools/xtask`, std only).
 The crate is `rc-engine`; its executable is `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
+
+Testing: `cargo test-all`, `cargo check-all` and `cargo clippy-all` are the workspace commands (`--workspace
+--features rc-engine/dev`, plus `--all-targets` for check/clippy). They enable Bevy's `dynamic_linking` like `cargo
+dev`, so the tests reuse the one Bevy build `cargo dev` made; plain `cargo test --workspace` would compile a second,
+static Bevy. For rc-engine alone use `cargo test -p rc-engine --features dev`; the other crates do not depend on Bevy,
+so `cargo test -p <crate>` needs no feature. Check and clippy share one Bevy check build (metadata only, which a test
+build cannot reuse). Release builds and `tools/package` stay static (never `--features dev`).
 
 The loaders' golden tests (`crates/rc-formats/tests/golden.rs`) compare what the Rust loaders produce for all 19
 levels with `crates/rc-formats/data/loader_snapshots.tsv` (per test, level and section: item count, byte count,

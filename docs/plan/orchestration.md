@@ -50,9 +50,9 @@ Every brief carries, in this order:
   - "Run the engine with `RC_SCENE=0`."
   - "Every port-only option (one the original game does not have) goes on the native-looking 'Port Options' page under Options."
   - "Add every item you leave unfinished to `docs/plan/gaps.md` (new IDs in the right section) and mark the gaps you close there (struck through, with the date and your doc § or file); your report lists both."
-  - "Tests: run the targeted tests for what you touched, clippy on your files, and `cargo check --workspace --all-targets` once at the end. Never run `cargo test --workspace`."
+  - "Tests: run the targeted tests for what you touched (rc-engine: `cargo test -p rc-engine --features dev`), clippy on your files (rc-engine: `cargo clippy -p rc-engine --all-targets --features dev`), and `cargo check-all` once at the end. Never run `cargo test --workspace` or `cargo test-all`."
 - **Test policy (2026-09-28).** Working agents run only the targeted tests, clippy on their files and one final
-  `cargo check --workspace --all-targets`. The coordinator runs the full workspace suite once per batch, through the
+  `cargo check-all`. The coordinator runs the full workspace suite (`cargo test-all`) once per batch, through the
   commit agent before committing, and writes the result to `work/test-results/latest.txt` (git-ignored) with the time,
   HEAD and `git status --short`. Failures go back to the agent that owns the files.
 - **Gap register.** `docs/plan/gaps.md` is the one list of known gaps. Every report and doc update adds the agent's
