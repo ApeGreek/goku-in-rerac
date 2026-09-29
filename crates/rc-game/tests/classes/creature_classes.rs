@@ -2,7 +2,7 @@
 //! its levels and runs headless on one of them (movement, its attack on Ratchet, a weapon hit, the side effects its
 //! coverage table marks ported). Skipped when `extracted/` is absent.
 //!
-//! `cargo test-all --test classes -- creature_classes:: --nocapture` prints the per-unit survey.
+//! `cargo xtask test-job --test classes --filter creature_classes:: --nocapture` prints the per-unit survey.
 
 use rc_formats::level_overlay::LevelOverlay;
 use rc_formats::moby_anim::{parse_sequences, MobyAnimClass};

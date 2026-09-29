@@ -63,12 +63,14 @@ cargo run --release -p rc-engine # release / profiling build
 `cargo xtask` (`run -q -p xtask --`, the dev-chore runner in `tools/xtask`, std only).
 The crate is `rc-engine`; its executable is `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
 
-Testing: `cargo test-all`, `cargo check-all` and `cargo clippy-all` are the workspace commands (`--workspace
---features rc-engine/dev`, plus `--all-targets` for check/clippy). They enable Bevy's `dynamic_linking` like `cargo
-dev`, so the tests reuse the one Bevy build `cargo dev` made; plain `cargo test --workspace` would compile a second,
-static Bevy. For rc-engine alone use `cargo test -p rc-engine --features dev`; the other crates do not depend on Bevy,
-so `cargo test -p <crate>` needs no feature. Check and clippy share one Bevy check build (metadata only, which a test
-build cannot reuse). Release builds and `tools/package` stay static (never `--features dev`).
+Testing: tests run only through `cargo xtask test-quick [crate]`, `cargo xtask test-job <area…>` (or
+`--test <binary>`, with `--filter <name>` for one module or test), `cargo xtask test-full` and `cargo xtask
+digest-baseline`; never `cargo test` or `cargo nextest` by hand (`docs/workflows/testing.md` §1). They pass
+`--workspace --features rc-engine/dev`, which enables Bevy's `dynamic_linking` like `cargo dev`, so the tests reuse
+the one Bevy build `cargo dev` made (plain `cargo test --workspace` would compile a second, static Bevy). Compile
+checks: `cargo check-all` and `cargo clippy-all` (aliases with the same features plus `--all-targets`); they share one
+Bevy check build (metadata only, which a test build cannot reuse). Release builds and `tools/package` stay static
+(never `--features dev`).
 
 `target/` stays under 30 GB through `cargo xtask sweep` (cargo-sweep, `cargo install cargo-sweep --locked`): it
 removes the least recently used build units, refuses while a build runs, and runs at the end of `cargo xtask
@@ -77,15 +79,15 @@ test-full`. `cargo clean` is the manual full reset (the next build recompiles Be
 
 The integration tests are 11 binaries, one per area: rc-game's `hero`, `weapons`, `classes`, `world` and `ui`, and
 `formats`, `data`, `extract`, `movies`, `trace`, `guards` (`tests/<area>/main.rs`, one module per former test file:
-`cargo test-all --test hero -- --exact hero_novalis::novalis_hero_digest`). The `cargo xtask test-*` commands run the
-tiers of `docs/workflows/testing.md` with `RC_AUDIO=0`, through cargo-nextest when it is installed
-(`cargo install cargo-nextest --locked`; settings in `.config/nextest.toml`), else through `cargo test-all`.
+`cargo xtask test-job --test hero --filter hero_novalis::novalis_hero_digest --exact`). The `cargo xtask test-*`
+commands run the tiers of `docs/workflows/testing.md` with `RC_AUDIO=0`, through cargo-nextest when it is installed
+(`cargo install cargo-nextest --locked`; settings in `.config/nextest.toml`), else through `cargo test`.
 
 The loaders' golden tests (`crates/rc-formats/tests/formats/golden.rs`) compare what the Rust loaders produce for all 19
 levels with `crates/rc-formats/data/loader_snapshots.tsv` (per test, level and section: item count, byte count,
 SHA-1). The table was generated while the output was byte-identical to the C++ reference extractor, retired on
-2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo test-all
---test formats -- golden::` rewrites the rows of the tests that ran.
+2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo xtask
+test-job --test formats --filter golden::` rewrites the rows of the tests that ran.
 
 ## Game data
 

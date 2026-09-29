@@ -1,5 +1,5 @@
 //! Integration tests: Ratchet's movement core on real levels: walk, jump, ledges, packs, boots, the swingshot, surfaces, damage and the NO_IDLE hero digest (docs/workflows/testing.md §3).
-//! One module per former test file; run one with `cargo test-all --test hero -- <module>::`.
+//! One module per former test file; run one with `cargo xtask test-job --test hero --filter <module>::`.
 
 mod hero_boots_grind;
 mod hero_boots_magnet;

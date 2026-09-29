@@ -1,5 +1,5 @@
 //! Integration tests: the levels as a whole: the all-levels smoke, the per-level class tables, collision, water, the sea, shadows and cutscenes (docs/workflows/testing.md §3).
-//! One module per former test file; run one with `cargo test-all --test world -- <module>::`.
+//! One module per former test file; run one with `cargo xtask test-job --test world --filter <module>::`.
 
 #[path = "../common/mod.rs"]
 mod common;

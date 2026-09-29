@@ -47,7 +47,7 @@ proxies are not created by this install method):
 
 ```
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
-cargo test -p rc-formats     # unit + golden tests (golden tests need extracted/)
+cargo xtask test-job formats # unit + golden tests (golden tests need extracted/)
 cargo run -p rc-engine       # Bevy app
 ```
 

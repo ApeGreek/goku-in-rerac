@@ -152,7 +152,7 @@ fn infobot_hint_box_on_the_level_text() {
     assert_eq!(strings::find_index(&n.messages, 1000).map(|i| n.messages[i].help_audio), Some(4));
 }
 
-/// Prints the director's cuboid centres (`cargo test-all --test ui help_novalis::print_cuboids -- --ignored --nocapture`).
+/// Prints the director's cuboid centres (`cargo xtask test-job --test ui --filter help_novalis::print_cuboids --ignored --nocapture`).
 #[test]
 #[ignore]
 fn print_cuboids() {

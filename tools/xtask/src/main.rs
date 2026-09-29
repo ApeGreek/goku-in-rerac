@@ -31,25 +31,35 @@ commands:
       it prints `cargo install cargo-sweep --locked` and exits 0. test-full runs it at the end (a failure only warns).
         --dry-run         only show what it would remove
 
-test tiers (docs/workflows/testing.md §2; RC_AUDIO=0; cargo-nextest when installed, else `cargo test-all`):
+test tiers (docs/workflows/testing.md §1-2): the only way to run tests; never `cargo test` / `cargo nextest` by hand.
+RC_AUDIO=0; cargo-nextest when installed, else `cargo test --workspace --features rc-engine/dev`.
   test-quick [crate]
-      Unit tests only: every crate's lib and bin tests (`cargo test-all --lib --bins`, about 5 s). With nextest a
-      crate name runs just that crate's (without nextest every crate runs: a single one would rebuild).
-  test-job <area>...
+      Unit tests only: every crate's lib and bin tests (`--lib --bins`, about 5 s). With nextest a crate name runs
+      just that crate's (without nextest every crate runs: a single one would rebuild).
+  test-job <area>... [--test <binary>]...
       The per-job tier: the unit tests plus the integration binaries of each area. Areas (aliases):
         hero, weapons, classes (creatures, mobys), world (levels, collision, water), ui (menus, hud, map, save,
         vendor), audio, formats, data, extract, video (movies), engine (render, input: unit tests only), trace,
         repo (guards, layout), shared (for shared code: the all-levels smoke, and the NO_IDLE hero digest
         compared with work/test-results/hero_digest_no_idle.txt).
+      --test <binary>     also run this integration binary whole (repeatable); with no area, only the binaries
+                          (no unit tests, no digest). Binaries: hero weapons classes world ui formats data extract
+                          movies trace guards.
   test-full
       The full suite (on merge to main, or when the coordinator asks), then the NO_IDLE hero digest compared
       with the baseline; a mismatch fails. It never rewrites the baseline. Then `sweep` (a failure only warns).
   digest-baseline
       The only command that writes the NO_IDLE hero digest baseline, and prints what changed: for a human who
       has decided a digest change is intended, or before a job's first edit when there is none.
+    Targeting options of test-quick and test-job (the same meaning under both runners):
+      --filter <name>     only tests whose path contains <name> (repeatable: any), e.g. hero_novalis:: or a fn name;
+                          a filtered test-job skips the digest
+      --exact             the filters are full paths, <module>::<test_fn>
+      --ignored           only the ignored tests (surveys, printers); a filtered test-job skips the digest
+      --nocapture         show the tests' output
     Options of the test commands:
-      --cargo-test        use `cargo test-all` even when nextest is installed
-      -- <args>           passed on: to nextest (e.g. --no-capture), or to the test binaries under cargo test
+      --cargo-test        use `cargo test --workspace --features rc-engine/dev` even when nextest is installed
+      -- <args>           passed on as is: to nextest, or to the test binaries under cargo test
   help
       This list.";
 

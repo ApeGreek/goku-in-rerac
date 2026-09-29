@@ -49,6 +49,12 @@ Commands:
       Only the tie/shrub lit-colour part (level 01).
   save-state NAME [--from FILE.p2s | latest] [--force]
       Keeps a PCSX2 savestate: copies the newest one (or --from) to ~/PS2/ratchet1/savestates/NAME.p2s.
+  disc-check [--iso IMAGE] [--extracted DIR] [--extract-into DIR]
+      The checks that need your disc image (no test reads it; docs/workflows/testing.md §10): the
+      disc reader against extracted/ on every level, the save_game lump and SYSTEM.CNF, and the extractor's
+      size/SHA-1 table against the committed one. --extract-into also extracts twice (full, --ntsc-only; ~7 GiB)
+      into that scratch folder and checks the file set and hashes. Default image: RC_ISO, else the ISO in the
+      personal folder. Use --release. Exit status 0 = all checks pass, 1 = a check failed.
   class-census [--out DIR] [--tags FILE] [--extracted DIR]
       Static census of the unported moby classes on levels 00-18 (docs/plan/class_census.md): per class the
       placed / created instances, its class-port unit (update + private callees, grouped across levels by
@@ -145,6 +151,19 @@ fn run() -> Result<i32> {
                 "class census: {} unported class-levels ({} placed, {} created instances), {} class-port units, {} shared functions -> {}",
                 s.classes, s.placed, s.created, s.units, s.shared, s.out.display()
             );
+            Ok(0)
+        }
+        "disc-check" => {
+            let iso = match a.opt("--iso")? {
+                Some(p) => PathBuf::from(p),
+                None => std::env::var_os("RC_ISO").filter(|v| !v.is_empty()).map(PathBuf::from)
+                    .unwrap_or_else(|| rc_trace::personal_dir().join("Ratchet & Clank (USA) (En,Fr,De,Es,It).iso")),
+            };
+            let extracted = a.extracted()?;
+            let into = a.opt("--extract-into")?.map(PathBuf::from);
+            a.done()?;
+            rc_trace::disc_check::run(&iso, &extracted, into.as_deref())?;
+            println!("disc-check: all checks passed");
             Ok(0)
         }
         "compare-tfrag-light" => compare_tfrag_light(a),

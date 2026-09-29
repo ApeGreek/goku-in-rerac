@@ -1,5 +1,5 @@
-//! Integration tests: the extractor: synthetic discs, and the by-hand golden run against a real disc (docs/workflows/testing.md §3).
-//! One module per former test file; run one with `cargo test-all --test extract -- <module>::`.
+//! Integration tests: the extractor on synthetic discs (docs/workflows/testing.md §3). The checks against the real
+//! disc image are a dev command, not tests (no test reads personal files): `cargo run --release -p rc-trace --
+//! disc-check`. One module per former test file; run one with `cargo xtask test-job --test extract --filter <module>::`.
 
-mod golden;
 mod synthetic;

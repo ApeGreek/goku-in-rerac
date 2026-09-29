@@ -1,17 +1,20 @@
 //! The test tiers of docs/workflows/testing.md §2, one command each:
 //!
-//! - `test-quick [crate]`: every crate's unit tests (`cargo test-all --lib --bins`, about 5 s).
+//! - `test-quick [crate]`: every crate's unit tests (`--lib --bins`, about 5 s), or one crate's.
 //! - `test-job <area…>`: the per-job tier (§2.1): the unit tests, the integration binaries of each named area ([`AREAS`],
 //!   the area map of §3), and for the area `shared` the shared-code guard set (the NO_IDLE hero digest compared with
-//!   the baseline, and the all-levels smoke).
+//!   the baseline, and the all-levels smoke). `test-job --test <binary>` runs one integration binary alone.
+//! - Targeting options of `test-quick` and `test-job` ([`Sel`]): `--filter <name>` (a test-name substring; `--exact`
+//!   for a full path), `--ignored` (only the ignored tests), `--nocapture`; each is translated for the runner.
 //! - `test-full`: the full suite (§2.2), then the digest compared with the baseline (never rewritten), then
 //!   `cargo xtask sweep` (a failure there only warns).
 //! - `digest-baseline`: the only command that writes the baseline, for a human who has decided a digest change is
 //!   intended (or a job with none, before its first edit); it prints what changed.
 //!
 //! All of them set `RC_AUDIO=0`, run from the repo root and use cargo-nextest when it is installed (`cargo nextest`
-//! answers), else the `cargo test-all` alias. The nextest runs pass the same flags as the alias
-//! (`--workspace --features rc-engine/dev`), so both share the dev (dynamic) Bevy build.
+//! answers), else `cargo test`. Both runners get `--workspace --features rc-engine/dev` spelled out ([`NEXTEST`],
+//! [`CARGO_TEST`]; there is no Cargo test alias), so they share the dev (dynamic) Bevy build. These commands are the
+//! only supported way to run tests (docs/workflows/testing.md §1).
 
 use crate::{cargo, repo_root};
 use std::ffi::OsString;
@@ -69,12 +72,55 @@ pub fn area(name: &str) -> Option<&'static Area> { AREAS.iter().find(|a| a.name 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Runner { Nextest, CargoTest }
 
+/// Which tests of the selected binaries run, and how: the same meaning under both runners.
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub struct Sel {
+    /// `--filter <name>` (repeatable, any matches): a test-name substring, e.g. `hero_novalis::` or `novalis_hero_digest`.
+    pub filters: Vec<String>,
+    /// `--exact`: the filters are full test paths (`<module>::<test_fn>`).
+    pub exact: bool,
+    /// `--ignored`: only the ignored tests (surveys, printers).
+    pub ignored: bool,
+    /// `--nocapture`: show the tests' output.
+    pub nocapture: bool,
+}
+
+impl Sel {
+    /// A nextest filterset for the name filters (`None` without any).
+    fn nextest_expr(&self) -> Option<String> {
+        if self.filters.is_empty() { return None; }
+        let eq = if self.exact { "=" } else { "" };
+        Some(self.filters.iter().map(|f| format!("test({eq}{f})")).collect::<Vec<_>>().join(" | "))
+    }
+    /// The nextest flags other than the filterset.
+    fn nextest_flags(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        if self.ignored { v.extend(["--run-ignored", "only"].map(String::from)); }
+        if self.nocapture { v.push("--no-capture".into()); }
+        v
+    }
+    /// The libtest arguments (after `--`) under `cargo test`; `prefixes` are a filtered part's own filters, replaced by
+    /// the name filters when there are any (libtest ORs its filters, so the two cannot be intersected).
+    fn libtest_args(&self, prefixes: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = if self.filters.is_empty() { prefixes.iter().map(|s| s.to_string()).collect() } else { self.filters.clone() };
+        if self.exact && !self.filters.is_empty() { v.push("--exact".into()); }
+        if self.ignored { v.push("--ignored".into()); }
+        if self.nocapture { v.push("--nocapture".into()); }
+        v
+    }
+    fn is_empty(&self) -> bool { *self == Sel::default() }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Opts {
-    /// `--cargo-test`: use `cargo test-all` even when nextest is installed.
+    /// `--cargo-test`: use `cargo test` even when nextest is installed.
     cargo_test: bool,
     /// The positional arguments (the crate of `test-quick`, the areas of `test-job`).
     names: Vec<String>,
+    /// `--test <binary>` (repeatable, `test-job` only): integration binaries to run on their own.
+    tests: Vec<String>,
+    /// The targeting options.
+    sel: Sel,
     /// After `--`: passed to the runner as is.
     extra: Vec<OsString>,
 }
@@ -83,15 +129,45 @@ fn parse(argv: &[OsString]) -> Result<Opts, String> {
     let mut o = Opts::default();
     let mut it = argv.iter();
     while let Some(a) = it.next() {
+        let mut value = |opt: &str| -> Result<String, String> {
+            match it.next().and_then(|v| v.to_str()) {
+                Some(v) if !v.is_empty() && !v.starts_with('-') => Ok(v.to_string()),
+                _ => Err(format!("{opt} needs a value")),
+            }
+        };
         match a.to_str() {
             Some("--") => { o.extra = it.cloned().collect(); break; }
             Some("--cargo-test") => o.cargo_test = true,
+            Some("--test") => o.tests.push(value("--test")?),
+            Some("--filter") => o.sel.filters.push(value("--filter")?),
+            Some("--exact") => o.sel.exact = true,
+            Some("--ignored") => o.sel.ignored = true,
+            Some("--nocapture" | "--no-capture") => o.sel.nocapture = true,
             Some(s) if s.starts_with('-') => return Err(format!("unknown option {s}")),
             Some(s) => o.names.push(s.to_string()),
             None => return Err(format!("unexpected argument {a:?}")),
         }
     }
+    if o.sel.exact && o.sel.filters.is_empty() { return Err("--exact needs --filter <module>::<test_fn>".into()); }
     Ok(o)
+}
+
+/// The integration binaries on disk: `crates/*/tests/<bin>/main.rs` or `…/tests/<bin>.rs` (also under `tools/`).
+pub fn integration_bins() -> Vec<String> {
+    let mut out = Vec::new();
+    for top in ["crates", "tools"] {
+        let Ok(pkgs) = std::fs::read_dir(repo_root().join(top)) else { continue };
+        for pkg in pkgs.flatten() {
+            let Ok(ents) = std::fs::read_dir(pkg.path().join("tests")) else { continue };
+            for e in ents.flatten() {
+                let (path, name) = (e.path(), e.file_name().to_string_lossy().into_owned());
+                if path.join("main.rs").is_file() { out.push(name); } else if let Some(stem) = name.strip_suffix(".rs") { if path.is_file() { out.push(stem.to_string()); } }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 fn runner(o: &Opts) -> Runner {
@@ -109,8 +185,28 @@ pub struct Step {
 
 fn step(args: &[&str]) -> Step { Step { args: args.iter().map(|s| s.to_string()).collect(), env: Vec::new() } }
 
-/// `cargo nextest run` with the flags of the `test-all` alias.
-const NEXTEST: &[&str] = &["nextest", "run", "--workspace", "--features", "rc-engine/dev"];
+/// `cargo nextest run` over the workspace with the dev Bevy features (shares the `cargo dev` build).
+pub const NEXTEST: &[&str] = &["nextest", "run", "--workspace", "--features", "rc-engine/dev"];
+/// `cargo test` with the same flags: the `--cargo-test` fallback (explicit flags, no Cargo alias).
+pub const CARGO_TEST: &[&str] = &["test", "--workspace", "--features", "rc-engine/dev"];
+
+/// `-E <base> & (<name filters>)`, or either alone; nothing when both are absent.
+fn push_expr(s: &mut Step, base: Option<String>, sel: &Sel) {
+    let e = match (base, sel.nextest_expr()) {
+        (Some(b), Some(n)) => format!("({b}) & ({n})"),
+        (Some(e), None) | (None, Some(e)) => e,
+        (None, None) => return,
+    };
+    s.args.extend(["-E".to_string(), e]);
+}
+
+/// A `cargo test` step: `CARGO_TEST`, the target flags, then `-- <libtest args>` when there are any.
+fn cargo_test_step(targets: &[String], libtest: Vec<String>) -> Step {
+    let mut s = step(CARGO_TEST);
+    s.args.extend(targets.iter().cloned());
+    if !libtest.is_empty() { s.args.push("--".into()); s.args.extend(libtest); }
+    s
+}
 
 /// A nextest filterset matching the parts.
 fn filterset(parts: &[Part]) -> String {
@@ -128,51 +224,61 @@ fn filterset(parts: &[Part]) -> String {
         .join(" | ")
 }
 
+const UNIT: [&str; 2] = ["--lib", "--bins"];
+
 /// The unit tests of every crate, or of one (`krate`: a package name, `-` or `_` alike).
-fn quick_steps(r: Runner, krate: Option<&str>) -> Vec<Step> {
+fn quick_steps(r: Runner, krate: Option<&str>, sel: &Sel) -> Vec<Step> {
     match r {
         Runner::Nextest => {
             let mut s = step(NEXTEST);
-            s.args.extend(["--lib", "--bins"].map(String::from));
-            if let Some(k) = krate { s.args.extend(["-E".to_string(), format!("package({})", k.replace('_', "-"))]); }
+            s.args.extend(UNIT.map(String::from));
+            push_expr(&mut s, krate.map(|k| format!("package({})", k.replace('_', "-"))), sel);
+            s.args.extend(sel.nextest_flags());
             vec![s]
         }
         // `cargo test -p <crate>` would resolve other features and rebuild (testing.md §1); the unit tests of every
         // crate take about 5 s, so without nextest they all run.
-        Runner::CargoTest => vec![step(&["test-all", "--lib", "--bins"])],
+        Runner::CargoTest => vec![cargo_test_step(&UNIT.map(String::from), sel.libtest_args(&[]))],
     }
 }
 
-/// The unit tests and the integration parts of the areas (duplicates dropped), without the digest.
-fn job_steps(r: Runner, areas: &[&Area]) -> Vec<Step> {
+/// The unit tests and the integration parts of the areas (duplicates dropped), without the digest, plus the whole
+/// binaries `only` (`--test`; with no areas, just those binaries and no unit tests).
+fn job_steps(r: Runner, areas: &[&Area], only: &[String], sel: &Sel) -> Vec<Step> {
     let mut parts: Vec<Part> = Vec::new();
     for a in areas { for p in a.parts { if !parts.contains(p) { parts.push(*p); } } }
-    // A whole binary covers any filtered part of it.
-    let whole: Vec<&str> = parts.iter().filter_map(|p| match p { Bin(_, b) => Some(*b), _ => None }).collect();
+    // The `--test` binaries not already a whole part of an area.
+    let mut extra_bins: Vec<&str> = Vec::new();
+    for b in only { if !extra_bins.contains(&b.as_str()) && !parts.iter().any(|p| matches!(p, Bin(_, x) if x == b)) { extra_bins.push(b); } }
+    // A whole binary (an area's or a `--test` one) covers any filtered part of it.
+    let whole: Vec<&str> = parts.iter().filter_map(|p| match p { Bin(_, b) => Some(*b), _ => None }).chain(extra_bins.iter().copied()).collect();
     parts.retain(|p| !matches!(p, Tests(_, b, _) if whole.contains(b)));
     let mut bins: Vec<&str> = Vec::new();
     for p in &parts { let b = match p { Bin(_, b) | Tests(_, b, _) => *b }; if !bins.contains(&b) { bins.push(b); } }
+    for b in &extra_bins { if !bins.contains(b) { bins.push(b); } }
+    let test = |b: &str| ["--test".to_string(), b.to_string()];
     match r {
         Runner::Nextest => {
             let mut s = step(NEXTEST);
-            s.args.extend(["--lib", "--bins"].map(String::from));
-            for b in &bins { s.args.extend(["--test".to_string(), b.to_string()]); }
-            let mut expr = "kind(lib) | kind(bin)".to_string();
-            if !parts.is_empty() { expr += &format!(" | {}", filterset(&parts)); }
-            s.args.extend(["-E".to_string(), expr]);
+            let mut base: Vec<String> = Vec::new();
+            if !areas.is_empty() {
+                s.args.extend(UNIT.map(String::from));
+                base.push("kind(lib) | kind(bin)".into());
+                if !parts.is_empty() { base.push(filterset(&parts)); }
+                // `--test` alone selects whole binaries; next to the areas' filterset they need their own term.
+                base.extend(extra_bins.iter().map(|b| format!("binary(={b})")));
+            }
+            for b in &bins { s.args.extend(test(b)); }
+            push_expr(&mut s, (!base.is_empty()).then(|| base.join(" | ")), sel);
+            s.args.extend(sel.nextest_flags());
             vec![s]
         }
         Runner::CargoTest => {
-            let mut out = quick_steps(r, None);
-            let mut s = step(&["test-all"]);
-            for p in &parts { if let Bin(_, b) = p { s.args.extend(["--test".to_string(), b.to_string()]); } }
-            if s.args.len() > 1 { out.push(s); }
+            let mut out = if areas.is_empty() { Vec::new() } else { quick_steps(r, None, sel) };
+            let targets: Vec<String> = whole.iter().flat_map(|b| test(b)).collect();
+            if !targets.is_empty() { out.push(cargo_test_step(&targets, sel.libtest_args(&[]))); }
             for p in &parts {
-                if let Tests(_, b, pre) = p {
-                    let mut s = step(&["test-all", "--test", b, "--"]);
-                    s.args.extend(pre.iter().map(|x| x.to_string()));
-                    out.push(s);
-                }
+                if let Tests(_, b, pre) = p { out.push(cargo_test_step(&test(b), sel.libtest_args(pre))); }
             }
             out
         }
@@ -180,11 +286,11 @@ fn job_steps(r: Runner, areas: &[&Area]) -> Vec<Step> {
 }
 
 /// The full suite. There are no doctests (checked 2026-09-29: every lib's `Doc-tests` runs 0), and nextest does not
-/// run doctests; add `cargo test-all --doc` here when the first one appears.
+/// run doctests; add a `cargo test --workspace --features rc-engine/dev --doc` step here when the first one appears.
 fn full_steps(r: Runner) -> Vec<Step> {
     match r {
         Runner::Nextest => vec![step(&[NEXTEST, &["--no-fail-fast"]].concat())],
-        Runner::CargoTest => vec![step(&["test-all", "--no-fail-fast"])],
+        Runner::CargoTest => vec![step(&[CARGO_TEST, &["--no-fail-fast"]].concat())],
     }
 }
 
@@ -195,7 +301,7 @@ fn job_digest_path() -> PathBuf { results_dir().join("digest_job.txt") }
 
 /// Ratchet's NO_IDLE digest into `out` (the test runs in the package folder, so the path is absolute).
 fn digest_step(out: &std::path::Path) -> Step {
-    let mut s = step(&["test-all", "-q", "--test", "hero", "--", "--exact", "hero_novalis::novalis_hero_digest"]);
+    let mut s = step(&[CARGO_TEST, &["-q", "--test", "hero", "--", "--exact", "hero_novalis::novalis_hero_digest"]].concat());
     s.env = vec![("RC_HERO_DIGEST", out.display().to_string()), ("RC_HERO_DIGEST_NO_IDLE", "1".to_string())];
     s
 }
@@ -230,19 +336,24 @@ fn opts(argv: &[OsString]) -> Result<Opts, ExitCode> {
     parse(argv).map_err(|e| { eprintln!("error: {e}\n\n{}", crate::HELP); ExitCode::from(2) })
 }
 
-/// `cargo xtask test-quick [crate] [--cargo-test] [-- <runner args>]`.
+/// `cargo xtask test-quick [crate] [targeting options] [--cargo-test] [-- <runner args>]`.
 pub fn quick(argv: &[OsString]) -> ExitCode {
     let o = match opts(argv) { Ok(o) => o, Err(c) => return c };
     if o.names.len() > 1 { eprintln!("error: test-quick takes at most one crate"); return ExitCode::from(2); }
+    if !o.tests.is_empty() { eprintln!("error: --test is an option of test-job (`cargo xtask test-job --test <binary>`)"); return ExitCode::from(2); }
     let r = runner(&o);
     if r == Runner::CargoTest && !o.names.is_empty() { eprintln!("xtask: no nextest: running every crate's unit tests (a single crate would rebuild)"); }
-    done(run_all(&quick_steps(r, o.names.first().map(String::as_str)), &o.extra))
+    done(run_all(&quick_steps(r, o.names.first().map(String::as_str), &o.sel), &o.extra))
 }
 
-/// `cargo xtask test-job <area…> [--cargo-test] [-- <runner args>]`.
+/// `cargo xtask test-job <area…> [--test <binary>]… [targeting options] [--cargo-test] [-- <runner args>]`.
 pub fn job(argv: &[OsString]) -> ExitCode {
     let o = match opts(argv) { Ok(o) => o, Err(c) => return c };
-    if o.names.is_empty() { eprintln!("error: test-job needs at least one area: {}", area_names()); return ExitCode::from(2); }
+    if o.names.is_empty() && o.tests.is_empty() { eprintln!("error: test-job needs an area ({}) or --test <binary>", area_names()); return ExitCode::from(2); }
+    let known = integration_bins();
+    for t in &o.tests {
+        if !known.contains(t) { eprintln!("error: unknown integration binary {t:?}; binaries: {}", known.join(", ")); return ExitCode::from(2); }
+    }
     let mut areas = Vec::new();
     for n in &o.names {
         match area(n) {
@@ -251,8 +362,9 @@ pub fn job(argv: &[OsString]) -> ExitCode {
         }
     }
     let r = runner(&o);
-    let mut ok = run_all(&job_steps(r, &areas), &o.extra);
-    if areas.iter().any(|a| a.name == "shared") { ok = digest_check() && ok; }
+    let mut ok = run_all(&job_steps(r, &areas, &o.tests, &o.sel), &o.extra);
+    // A targeted run (a name filter, only the ignored tests) is not the guard set: the digest runs only in a plain job.
+    if areas.iter().any(|a| a.name == "shared") && o.sel.filters.is_empty() && !o.sel.ignored { ok = digest_check() && ok; }
     done(ok)
 }
 
@@ -306,6 +418,7 @@ fn line_diff(old: &str, new: &str) -> Vec<String> {
 pub fn full(argv: &[OsString]) -> ExitCode {
     let o = match opts(argv) { Ok(o) => o, Err(c) => return c };
     if !o.names.is_empty() { eprintln!("error: test-full takes no areas"); return ExitCode::from(2); }
+    if !o.tests.is_empty() || !o.sel.is_empty() { eprintln!("error: test-full runs everything; for a targeted run use test-job / test-quick"); return ExitCode::from(2); }
     let ok = run_all(&full_steps(runner(&o)), &o.extra);
     let digest = digest_check();
     // Keep target/ under the limit; a refused or failed sweep never fails the test run.
@@ -324,7 +437,7 @@ mod tests {
     #[test]
     fn parses_names_flags_and_extra() {
         let o = parse(&os(&["hero", "--cargo-test", "ui", "--", "--nocapture", "x"])).unwrap();
-        assert_eq!(o, Opts { cargo_test: true, names: vec!["hero".into(), "ui".into()], extra: os(&["--nocapture", "x"]) });
+        assert_eq!(o, Opts { cargo_test: true, names: vec!["hero".into(), "ui".into()], extra: os(&["--nocapture", "x"]), ..Opts::default() });
         assert!(parse(&os(&["--bogus"])).is_err());
     }
 
@@ -361,26 +474,73 @@ mod tests {
         }
     }
 
+    fn sel(filters: &[&str], exact: bool, ignored: bool, nocapture: bool) -> Sel {
+        Sel { filters: filters.iter().map(|s| s.to_string()).collect(), exact, ignored, nocapture }
+    }
+    fn args(s: &[Step]) -> Vec<String> { s.iter().map(|s| s.args.join(" ")).collect() }
+    const N: &str = "nextest run --workspace --features rc-engine/dev";
+    const C: &str = "test --workspace --features rc-engine/dev";
+
+    #[test]
+    fn parses_test_filter_and_switches() {
+        let o = parse(&os(&["--test", "weapons", "--filter", "hero_doom::", "--exact", "--ignored", "--no-capture"])).unwrap();
+        assert_eq!(o.tests, ["weapons"]);
+        assert_eq!(o.sel, sel(&["hero_doom::"], true, true, true));
+        assert!(parse(&os(&["--test"])).is_err());
+        assert!(parse(&os(&["--filter", "--exact"])).is_err());
+        assert!(parse(&os(&["--exact"])).is_err(), "--exact without a filter");
+    }
+
+    /// `--test` accepts exactly the binaries on disk, and every area binary is one of them.
+    #[test]
+    fn integration_bins_are_found_on_disk() {
+        let b = integration_bins();
+        for x in ["hero", "weapons", "classes", "world", "ui", "formats", "data", "extract", "movies", "trace", "guards"] { assert!(b.contains(&x.to_string()), "{x}: {b:?}"); }
+        for x in ["common", "fixtures", "snapshot"] { assert!(!b.contains(&x.to_string()), "{x}"); }
+    }
+
     #[test]
     fn job_steps_nextest_one_run_with_a_filterset() {
-        let s = job_steps(Runner::Nextest, &[area("hero").unwrap(), area("audio").unwrap()]);
+        let s = job_steps(Runner::Nextest, &[area("hero").unwrap(), area("audio").unwrap()], &[], &Sel::default());
         assert_eq!(s.len(), 1);
         let a = s[0].args.join(" ");
-        assert!(a.starts_with("nextest run --workspace --features rc-engine/dev --lib --bins --test hero --test ui --test weapons -E "), "{a}");
+        assert!(a.starts_with(&format!("{N} --lib --bins --test hero --test ui --test weapons -E ")), "{a}");
         assert!(a.ends_with("kind(lib) | kind(bin) | binary_id(rc-game::hero) | (binary_id(rc-game::ui) & (test(/^reverb_conformance::/) | test(/^sound_conformance::/))) | (binary_id(rc-game::weapons) & (test(/^hero_guns_novalis::novalis_ryno_salvo_sounds_mix_without_overflow/)))"), "{a}");
     }
 
     #[test]
     fn job_steps_cargo_test_whole_binaries_then_filtered_runs() {
-        let s = job_steps(Runner::CargoTest, &[area("ui").unwrap(), area("audio").unwrap(), area("shared").unwrap()]);
-        let got: Vec<String> = s.iter().map(|s| s.args.join(" ")).collect();
+        let s = job_steps(Runner::CargoTest, &[area("ui").unwrap(), area("audio").unwrap(), area("shared").unwrap()], &[], &Sel::default());
         // `ui` covers audio's ui part; audio's weapons test and the smoke stay filtered runs.
-        assert_eq!(got, [
-            "test-all --lib --bins",
-            "test-all --test ui",
-            "test-all --test weapons -- hero_guns_novalis::novalis_ryno_salvo_sounds_mix_without_overflow",
-            "test-all --test world -- all_levels_smoke::",
+        assert_eq!(args(&s), [
+            format!("{C} --lib --bins"),
+            format!("{C} --test ui"),
+            format!("{C} --test weapons -- hero_guns_novalis::novalis_ryno_salvo_sounds_mix_without_overflow"),
+            format!("{C} --test world -- all_levels_smoke::"),
         ]);
+    }
+
+    /// `test-job --test <binary>`: that binary alone (no unit tests), with the targeting options per runner.
+    #[test]
+    fn job_steps_single_binary() {
+        let only = ["weapons".to_string()];
+        assert_eq!(args(&job_steps(Runner::Nextest, &[], &only, &Sel::default())), [format!("{N} --test weapons")]);
+        assert_eq!(args(&job_steps(Runner::CargoTest, &[], &only, &Sel::default())), [format!("{C} --test weapons")]);
+        let s = sel(&["hero_doom::a", "hero_doom::b"], true, true, true);
+        assert_eq!(args(&job_steps(Runner::Nextest, &[], &only, &s)), [format!("{N} --test weapons -E test(=hero_doom::a) | test(=hero_doom::b) --run-ignored only --no-capture")]);
+        assert_eq!(args(&job_steps(Runner::CargoTest, &[], &only, &s)), [format!("{C} --test weapons -- hero_doom::a hero_doom::b --exact --ignored --nocapture")]);
+    }
+
+    /// `--test` next to areas: its binary joins the filterset, and it swallows an area's filtered part of it.
+    #[test]
+    fn job_steps_areas_plus_binary() {
+        let only = ["ui".to_string(), "hero".to_string()];
+        let a = job_steps(Runner::Nextest, &[area("hero").unwrap(), area("audio").unwrap()], &only, &sel(&["novalis"], false, false, false))[0].args.join(" ");
+        assert!(a.starts_with(&format!("{N} --lib --bins --test hero --test weapons --test ui -E ")), "{a}");
+        assert!(a.contains("binary(=ui)") && !a.contains("binary(=hero)") && !a.contains("reverb_conformance"), "{a}");
+        assert!(a.ends_with(") & (test(novalis))"), "{a}");
+        let c = job_steps(Runner::CargoTest, &[area("audio").unwrap()], &["ui".to_string()], &sel(&["novalis"], false, false, false));
+        assert_eq!(args(&c), [format!("{C} --lib --bins -- novalis"), format!("{C} --test ui -- novalis"), format!("{C} --test weapons -- novalis")]);
     }
 
     #[test]
@@ -391,9 +551,27 @@ mod tests {
 
     #[test]
     fn quick_and_full_steps() {
-        assert_eq!(quick_steps(Runner::Nextest, Some("rc_game"))[0].args.join(" "), "nextest run --workspace --features rc-engine/dev --lib --bins -E package(rc-game)");
-        assert_eq!(quick_steps(Runner::CargoTest, Some("rc-game"))[0].args.join(" "), "test-all --lib --bins");
-        assert_eq!(full_steps(Runner::Nextest)[0].args.join(" "), "nextest run --workspace --features rc-engine/dev --no-fail-fast");
-        assert_eq!(full_steps(Runner::CargoTest)[0].args.join(" "), "test-all --no-fail-fast");
+        let none = Sel::default();
+        assert_eq!(args(&quick_steps(Runner::Nextest, Some("rc_game"), &none)), [format!("{N} --lib --bins -E package(rc-game)")]);
+        assert_eq!(args(&quick_steps(Runner::Nextest, None, &none)), [format!("{N} --lib --bins")]);
+        assert_eq!(args(&quick_steps(Runner::CargoTest, Some("rc-game"), &none)), [format!("{C} --lib --bins")]);
+        let f = sel(&["snapshot"], false, false, true);
+        assert_eq!(args(&quick_steps(Runner::Nextest, Some("rc-formats"), &f)), [format!("{N} --lib --bins -E (package(rc-formats)) & (test(snapshot)) --no-capture")]);
+        assert_eq!(args(&quick_steps(Runner::Nextest, None, &f)), [format!("{N} --lib --bins -E test(snapshot) --no-capture")]);
+        assert_eq!(args(&quick_steps(Runner::CargoTest, None, &f)), [format!("{C} --lib --bins -- snapshot --nocapture")]);
+        assert_eq!(args(&full_steps(Runner::Nextest)), [format!("{N} --no-fail-fast")]);
+        assert_eq!(args(&full_steps(Runner::CargoTest)), [format!("{C} --no-fail-fast")]);
+    }
+
+    /// No step calls a Cargo alias: the fallback spells out its flags (the `test-all` alias is gone).
+    #[test]
+    fn steps_use_explicit_cargo_flags() {
+        let all: Vec<&Area> = AREAS.iter().collect();
+        let mut steps = job_steps(Runner::CargoTest, &all, &[], &Sel::default());
+        steps.extend(full_steps(Runner::CargoTest));
+        steps.push(digest_step(std::path::Path::new("/x")));
+        for s in &steps { assert_eq!(&s.args[..4], CARGO_TEST, "{:?}", s.args); }
+        let cfg = std::fs::read_to_string(repo_root().join(".cargo/config.toml")).unwrap();
+        assert!(!cfg.lines().any(|l| l.trim_start().starts_with("test-all")), ".cargo/config.toml defines test-all again");
     }
 }

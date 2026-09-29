@@ -282,7 +282,7 @@ fn novalis_amoeboids_chase_strike_split_and_die() {
     assert_eq!(out.rows, again.rows);
 }
 
-/// Survey helper: the Novalis creature instances and their pvars (`cargo test-all --test classes -- creatures_novalis:: --ignored`).
+/// Survey helper: the Novalis creature instances and their pvars (`cargo xtask test-job --test classes --filter creatures_novalis:: --ignored`).
 #[test]
 #[ignore]
 fn creatures_survey() {

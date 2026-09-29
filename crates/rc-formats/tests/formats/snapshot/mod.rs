@@ -24,7 +24,7 @@ const HEADER: &str = "\
 # Columns: test<TAB>scope<TAB>key<TAB>items<TAB>bytes<TAB>sha1. scope = level (00..18) or global; items = byte
 # strings hashed; bytes = their total size; sha1 over the strings in order, each prefixed by its length (u64 LE).
 # Generated 2026-09-27 by crates/rc-formats/tests/formats/golden.rs while the Rust output was byte-identical to the retired
-# C++ reference extractor's dumps (git 2230812). Rewrite rows: RC_SNAPSHOT_WRITE=1 cargo test-all --test formats -- golden::
+# C++ reference extractor's dumps (git 2230812). Rewrite rows: RC_SNAPSHOT_WRITE=1 cargo xtask test-job --test formats --filter golden::
 ";
 
 /// The table's path.

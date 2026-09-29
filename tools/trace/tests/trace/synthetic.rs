@@ -72,7 +72,8 @@ fn compare_through_a_savestate_file() {
     let z = zip::build(&[(P2S_VERSION, &ver, METHOD_STORE), (P2S_EE_MEMORY, &img.ram, METHOD_ZSTD)]);
     let dir = std::env::temp_dir().join(format!("rc-trace-synth-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let p = dir.join("SCUS-97199 (00000000).01.p2s");
+    // A savestate is a zip; Savestate::open does not look at the name (synthetic, in the temp dir).
+    let p = dir.join("synthetic_savestate.zip");
     std::fs::write(&p, z).unwrap();
     let ee = Savestate::open(&p).unwrap().ee().unwrap();
     assert!(ee.ram == img.ram);

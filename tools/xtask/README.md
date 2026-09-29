@@ -9,21 +9,40 @@ dependencies: it shells out to `cargo` and to `tools/package/package.sh`, so bui
 | `cargo xtask help` | Lists the commands (also `cargo xtask` alone). |
 | `cargo xtask regen-data` | Rebuilds the dev game data folder `extracted/` from your disc image (below). |
 | `cargo xtask package [--no-build]` | Runs `tools/package/package.sh` with the same arguments (`docs/workflows/release.md`). |
-| `cargo xtask test-quick [crate]` | Unit tests of every crate (`cargo test-all --lib --bins`); with nextest, a crate name runs only its. |
+| `cargo xtask test-quick [crate]` | Unit tests of every crate (`--lib --bins`); with nextest, a crate name runs only its. |
 | `cargo xtask test-job <area…>` | A job's test tier: the unit tests plus each area's integration binaries (below). |
+| `cargo xtask test-job --test <binary>…` | One or more integration binaries alone (no unit tests, no digest). |
 | `cargo xtask test-full` | The full suite, then the NO_IDLE hero digest compared with the baseline (a mismatch fails; never rewritten), then `sweep` (a failure only warns). |
 | `cargo xtask digest-baseline` | The only writer of the digest baseline `work/test-results/hero_digest_no_idle.txt`; prints what changed. Only when a digest change is intended. |
 | `cargo xtask sweep [--limit <size>] [--dry-run]` | Keeps `target/` under a limit (default 30 GB) with cargo-sweep, least recently used build units first; refuses while a build runs; `test-full` runs it at the end (below). |
 
 ## The test commands
 
-The tiers of `docs/workflows/testing.md` §2 (the doc has the policy; this is the mechanics). Every test command:
-* sets `RC_AUDIO=0` and runs from the repo root;
-* uses cargo-nextest when `cargo nextest` answers (settings: `.config/nextest.toml`), passing the flags of the
-  `test-all` alias (`--workspace --features rc-engine/dev`) so the dev Bevy build is shared; else `cargo test-all`.
-  `--cargo-test` forces `cargo test-all`;
+The tiers of `docs/workflows/testing.md` §2 (the doc has the policy; this is the mechanics). They are the only way to
+run tests in this repo: there is no Cargo test alias, and `cargo test` / `cargo nextest` are never run by hand.
+Every test command:
+* sets `RC_AUDIO=0` and runs from the repo root (other variables, e.g. `RC_SNAPSHOT_WRITE=1`, pass through);
+* uses cargo-nextest when `cargo nextest` answers (settings: `.config/nextest.toml`), with
+  `--workspace --features rc-engine/dev` so the dev Bevy build is shared; else `cargo test` with the same flags
+  (`NEXTEST` and `CARGO_TEST` in `src/test.rs`). `--cargo-test` forces `cargo test`;
 * passes the arguments after `--` on: to nextest (e.g. `--no-capture`), or to the test binaries under `cargo test`;
 * runs every step even when one fails, and exits 1 if any failed.
+
+Targeting (`test-quick` and `test-job`; the same meaning under both runners):
+
+| Option | Nextest | `cargo test` |
+|---|---|---|
+| `test-quick <crate>` | `-E package(<crate>)` | every crate (a single one would rebuild) |
+| `test-job --test <binary>` (repeatable) | `--test <binary>` (next to areas also `binary(=<binary>)` in the filterset) | `--test <binary>` |
+| `--filter <name>` (repeatable) | `-E test(<name>)`, ANDed with the selection | libtest filter (replaces a partial area's own filters) |
+| `--exact` | `test(=<name>)` | `--exact` |
+| `--ignored` | `--run-ignored only` | `--ignored` |
+| `--nocapture` | `--no-capture` | `--nocapture` |
+
+Examples: `cargo xtask test-quick rc-formats`, `cargo xtask test-job --test weapons`, `cargo xtask test-job --test
+hero --filter hero_novalis::novalis_hero_digest --exact`, `cargo xtask test-job --test classes --filter
+creature_classes:: --ignored --nocapture`. A filtered or `--ignored` `test-job shared` skips the digest; `test-full`
+takes no targeting options.
 
 The areas of `test-job` are the table `AREAS` in `src/test.rs` (testing.md §3 documents it): `hero`, `weapons`,
 `classes` (`creatures`, `mobys`), `world` (`levels`, `collision`, `water`), `ui` (`menus`, `hud`, `map`, `save`,

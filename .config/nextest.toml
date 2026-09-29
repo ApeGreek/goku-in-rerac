@@ -1,7 +1,6 @@
 # cargo-nextest settings (docs/workflows/testing.md §8). `cargo xtask test-quick | test-job | test-full` use nextest
-# when it is installed; by hand: `RC_AUDIO=0 cargo nextest run --workspace --features rc-engine/dev ...` (the flags
-# of the `test-all` alias, so the dev Bevy build is shared). Nextest runs each test in its own process and does not
-# run doctests (the workspace has none).
+# when it is installed (`cargo nextest run --workspace --features rc-engine/dev ...`, so the dev Bevy build is shared);
+# never run nextest by hand. Nextest runs each test in its own process and does not run doctests (the workspace has none).
 
 [profile.default]
 # Run everything and report every failure (the whole suite is the point of a full run).

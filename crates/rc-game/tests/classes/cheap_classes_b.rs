@@ -3,7 +3,7 @@
 //! them, covering the behaviour and the side effects its coverage table marks ported. Skipped when `extracted/` is
 //! absent.
 //!
-//! `cargo test-all --test classes -- cheap_classes_b:: --nocapture` prints the per-unit survey.
+//! `cargo xtask test-job --test classes --filter cheap_classes_b:: --nocapture` prints the per-unit survey.
 
 use rc_formats::level_overlay::LevelOverlay;
 use rc_formats::moby_anim::{parse_sequences, MobyAnimClass};

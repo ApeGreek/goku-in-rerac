@@ -22,6 +22,7 @@ camera, fog, `rand` stream, moby table), and per-tick hero recordings replayed t
 | Rewrite the spawn test fixture | `cargo run -p rc-trace -- distill-spawn --state NAME` |
 | Record the hero over PINE | `cargo run --release -p rc-trace -- record --seconds 90` |
 | Replay a recording through the port | `cargo run --release -p rc-trace -- replay-hero --trace FILE` |
+| Check the disc reader and the extractor against your disc image (the checks no test may run; docs/workflows/testing.md §10) | `cargo run --release -p rc-trace -- disc-check [--extract-into DIR]` |
 | Census of the unported moby classes and the shared systems they call (no PCSX2; reads `extracted/`, tags `tools/ghidra/names/census_systems.tsv`; docs/plan/class_census.md) | `cargo run -p rc-trace -- class-census` → `work/census/` |
 
 ## Inputs and outputs
@@ -38,5 +39,5 @@ camera, fog, `rand` stream, moby table), and per-tick hero recordings replayed t
 
 ## Tests
 
-`cargo test -p rc-trace`. They need only `extracted/` (skipped without it) and the committed fixture; no savestate,
-dump or recording.
+`cargo xtask test-job trace` (the unit tests plus the `trace` binary). They need only `extracted/` (skipped without it) and the committed fixture; no savestate,
+dump, recording or disc image (no test relies on personal files; `tools/repo-checks` scans `tests/`).

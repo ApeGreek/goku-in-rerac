@@ -1,4 +1,4 @@
-//! Survey of the classes a Bomb Glove explosion creates on Novalis (`cargo test-all --test classes -- explosion_survey::
+//! Survey of the classes a Bomb Glove explosion creates on Novalis (`cargo xtask test-job --test classes --filter explosion_survey::
 //! --ignored --nocapture`): class header scale, mode bits, packet counts, textures, sequences. Skipped without
 //! `extracted/`.
 

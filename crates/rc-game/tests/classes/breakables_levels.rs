@@ -2,7 +2,7 @@
 //! (`moby_update::classes::breakables`) registered through each level's own class table, and headless breaks on
 //! Novalis and on every level that places one. Skipped when `extracted/` is absent.
 //!
-//! `cargo test-all --test classes -- breakables_levels:: --nocapture` prints the survey (classes, placed instances,
+//! `cargo xtask test-job --test classes --filter breakables_levels:: --nocapture` prints the survey (classes, placed instances,
 //! pieces, remains, collision volumes).
 
 use rc_formats::level_overlay::LevelOverlay;

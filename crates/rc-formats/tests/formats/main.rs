@@ -1,5 +1,5 @@
 //! Integration tests: rc-formats' loaders against the disc data: the committed loader snapshots and the per-format disc checks (docs/workflows/testing.md §3).
-//! One module per former test file; run one with `cargo test-all --test formats -- <module>::`.
+//! One module per former test file; run one with `cargo xtask test-job --test formats --filter <module>::`.
 
 mod golden;
 mod level_overlay_disc;

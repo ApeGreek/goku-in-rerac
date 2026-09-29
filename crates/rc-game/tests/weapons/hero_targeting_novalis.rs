@@ -227,7 +227,7 @@ fn dump(rows: &[Row]) {
 
 fn d2(a: [f32; 3], b: [f32; 3]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt() }
 
-/// Survey: the targetable mobys after a few ticks at the spawn (`cargo test-all --test weapons -- hero_targeting_novalis::
+/// Survey: the targetable mobys after a few ticks at the spawn (`cargo xtask test-job --test weapons --filter hero_targeting_novalis::
 /// --ignored --nocapture`).
 #[test]
 #[ignore]

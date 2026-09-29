@@ -116,11 +116,11 @@ Deferred because they need product changes (hard limit of the reorg) or a Ghidra
    data.
 5. **Engine captures default to `work/captures/`** (product, `rc-engine` `RC_SCREENSHOT`): a relative or bare name
    lands there instead of the working directory.
-6. **The disc golden tests' ISO fallback** (product tests): `crates/rc-formats/tests/formats/golden.rs`
-   (`disc_matches_extracted_for_every_level`, doc line and fallback line), `crates/rc-game/tests/ui/game_state_novalis.rs`
-   (`disc_save_game_lump_matches_extracted`) and the example command in `crates/rc-extract/tests/extract/golden.rs` name
-   `~/PS2/ratchet1/<disc>.iso`. Make them `RC_ISO`-only, then drop the four `KNOWN_OFFENDERS` entries in
-   `tools/repo-checks/src/lib.rs`.
+6. **Done (2026-09-29): the disc golden tests' ISO fallback.** No test reads the disc image any more: the four
+   tests that did (`formats golden::disc_matches_extracted_for_every_level`, `ui
+   game_state_novalis::disc_save_game_lump_matches_extracted`, the two ignored `extract golden::` tests) are the dev
+   command `cargo run --release -p rc-trace -- disc-check`, and `KNOWN_OFFENDERS` is gone (the guard has no
+   exceptions).
 7. **Merge the three apply scripts** (`apply_boot_names.py`, `apply_overlay_names.py`, `apply_doc_names.py`) into
    one; needs a Ghidra run to verify, so not done blind.
 8. **VU microprogram disassembler** as a dev tool (`tools/vu/`, OpenGOAL's ISC disassembler may be mirrored with

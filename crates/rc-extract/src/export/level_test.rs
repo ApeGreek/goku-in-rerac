@@ -1,7 +1,7 @@
 //! The ignored end-to-end test: export level 01 completely from the development archive, then read every file
 //! back with the test decoders (PNG, WAV, JSON) and the glTF validator, and cross-check against the loaders.
 //!
-//! Run: `RC_EXPORT_TEST_DIR=<dir> cargo test -p rc-extract --release --lib export_level_01 -- --ignored --nocapture`
+//! Run: `RC_EXPORT_TEST_DIR=<dir> cargo xtask test-quick rc-extract --filter export_level_01 --ignored --nocapture`
 //! (default dir: `<tmp>/randcrw-export-test`; removed afterwards unless `RC_EXPORT_KEEP=1`). `RC_EXPORT_TEST_ALL=1`
 //! exports and checks every level and the global data instead (about 60,000 files, 3.5 GiB).
 

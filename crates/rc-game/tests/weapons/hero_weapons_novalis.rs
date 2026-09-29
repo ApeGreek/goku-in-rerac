@@ -246,7 +246,7 @@ fn facing(lv: &Lv, inst: usize, d: f32, from: f32) -> ([f32; 3], f32) {
     (p, (c[1] - p[1]).atan2(c[0] - p[0]))
 }
 
-/// Survey helper: the crates near the spawn (`cargo test-all --test weapons -- hero_weapons_novalis:: --ignored --nocapture`).
+/// Survey helper: the crates near the spawn (`cargo xtask test-job --test weapons --filter hero_weapons_novalis:: --ignored --nocapture`).
 #[test]
 #[ignore]
 fn weapons_survey() {

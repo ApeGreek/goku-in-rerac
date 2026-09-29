@@ -1,5 +1,5 @@
 //! Integration tests: the moby class ports: common and cheap classes, creatures, breakables, bolts and path classes (docs/workflows/testing.md §3).
-//! One module per former test file; run one with `cargo test-all --test classes -- <module>::`.
+//! One module per former test file; run one with `cargo xtask test-job --test classes --filter <module>::`.
 
 #[path = "../common/mod.rs"]
 mod common;

@@ -151,8 +151,8 @@ copied.**
 - `crates/rc-formats/src/disc.rs` is `Disc`. It reads the ToC at sector 1500, the level headers, the boot ELF via
   `SYSTEM.CNF`, and `level(id) → LevelFiles` (11 level-group members). It also provides `level_stream_lumps`
   (music, bindata, speech, scene), `read_lump`, `scene_region`, `scene_speech` and `save_game_lump`.
-  `tests/formats/golden.rs::disc_matches_extracted_for_every_level` proves the level-group bytes identical to the Tier 0
-  archive. **Added by Stage 1a:** `RAC1_GLOBAL_FIELDS` + `Disc::global_lumps` (port of the retired C++ reader's
+  `cargo run --release -p rc-trace -- disc-check` (check 1, by hand: no test reads the disc image) proves the
+  level-group bytes identical to the Tier 0 archive. **Added by Stage 1a:** `RAC1_GLOBAL_FIELDS` + `Disc::global_lumps` (port of the retired C++ reader's
   `rac1_global_fields`/`global_lumps`, including the duplicate-name suffix rule) and `Disc::archive_files` (the whole Tier 0 file
   plan as byte ranges of the image). `IsoImage::volume_sectors` exposes the PVD size (truncation check). Build
   identification lives in `crates/rc-extract` (§4.1).
@@ -264,8 +264,8 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
   (§2.6). An unknown RC1 build prints `new build DB row: Build { … }` to paste in.
 - **Size/SHA-1 table** (U7): `crates/rc-extract/data/scus_971_99.tsv`, 2,937 rows `path<TAB>size<TAB>sha1`, hashes
   and sizes only (a unit test checks every line has that shape). Regenerate with `randcrw-extract table --iso <image>
-  --output crates/rc-extract/data/scus_971_99.tsv`; the ignored test `golden::builtin_table_matches_the_disc` checks
-  it. Cross-checked against `extracted/` with the system `shasum`.
+  --output crates/rc-extract/data/scus_971_99.tsv`; `cargo run --release -p rc-trace -- disc-check`
+  (check 3) checks it. Cross-checked against `extracted/` with the system `shasum`.
 - **Speed** (M-series, release build, 4 workers, std threads only): identify 3 ms; full extract 3.1–4.2 s warm
   cache, 7.9 s with a cold image cache (~500–1,300 MiB/s); `--ntsc-only` 3.2 s; `verify` 1.9 s.
 - **Crash safety**: files are written as `*.partial` and renamed once hash-checked; `extract-info.json` is removed at
@@ -464,7 +464,7 @@ the raw layout the retired C++ `rc_extract unpack` wrote to `extracted/`:
   animations; ADPCM is decoded (the ADPCM bytes stay in Tier 0). Not exported yet: menu and goodies images,
   credits images and FMVs (no loader), the RAC1 gadget classes (compressed separately), moby collision, occlusion,
   scenes (cutscenes), sky shell rotations, `bindata`.
-- **Check.** `cargo test -p rc-extract --lib export_level_01 -- --ignored --nocapture` exports level 01, decodes
+- **Check.** `RC_EXPORT_TEST_DIR=<dir> cargo xtask test-quick rc-extract --filter export_level_01 --ignored --nocapture` exports level 01, decodes
   every PNG/WAV/JSON with the test readers, validates every glTF (indices, bounds, min/max, skins, animations,
   image URIs), compares every texture with `parse_textures` and every bank WAV with `vag::decode_extent`
   (`RC_EXPORT_TEST_ALL=1`: every level and the global data). Level 01: 3,304 files, 168.6 MiB (audio 97.6,

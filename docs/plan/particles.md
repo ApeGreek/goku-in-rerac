@@ -403,7 +403,7 @@ and `Particles::camera` (0x167240).
   once and normal smoke fades A = 15t/s0 (integer division); an extra timer step when 0x15f5d0 > 1.
 * **Not modelled.** The frame-load globals (always 0: no throttle draws, no extra smoke step).
 
-**Tests** (`cargo test -p rc-game --lib particles`): per type a multi-tick run from a synthetic record (positions,
+**Tests** (`cargo xtask test-quick rc-game --filter particles`): per type a multi-tick run from a synthetic record (positions,
 colours, sizes, lifetimes against independent f64 / hand formulas) and the RNG use per update (13 and 53: none;
 11: 5 per spawn, 35 on the split, 1 at the phase change, 0 otherwise); `curve_size` against an f64 reference.
 

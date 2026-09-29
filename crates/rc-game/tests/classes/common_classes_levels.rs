@@ -3,7 +3,7 @@
 //! every level whose class table names the same code (`LevelPorts`); headless behaviour on two levels per class.
 //! Skipped when `extracted/` is absent.
 //!
-//! `cargo test-all --test classes -- common_classes_levels:: --nocapture` prints the per-level survey.
+//! `cargo xtask test-job --test classes --filter common_classes_levels:: --nocapture` prints the per-level survey.
 
 use rc_formats::level_overlay::LevelOverlay;
 use rc_formats::moby_anim::{parse_sequences, MobyAnimClass};

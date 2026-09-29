@@ -9,6 +9,7 @@
 //!   recordings in `traces/` (`record` writes new recordings there, the one personal write).
 
 pub mod class_census;
+pub mod disc_check;
 pub mod ee;
 pub mod hero_analysis;
 pub mod hero_record;

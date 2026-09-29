@@ -60,7 +60,7 @@ fn every_level_loads_the_pause_menu() {
 
 /// Gemlik's content gap (a queue for later, not a check): the placed classes whose update is not ported, with
 /// their instances, update address, sequence / joint counts and a kind guess (no class blob → controller / fx;
-/// ≥ 8 sequences and ≥ 8 joints → creature; else prop). `cargo test-all --test ui --
+/// ≥ 8 sequences and ≥ 8 joints → creature; else prop). `cargo xtask test-job --test ui --filter
 /// gemlik_generalisation::gemlik_content_gap --ignored --nocapture`.
 #[test]
 #[ignore = "survey: prints, asserts nothing; run with --ignored --nocapture"]

@@ -4423,6 +4423,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "miniz_oxide 0.8.9",
+ "rc-extract",
  "rc-formats",
  "rc-game",
  "ruzstd",

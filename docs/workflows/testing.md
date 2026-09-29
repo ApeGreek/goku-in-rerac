@@ -4,28 +4,40 @@ What runs when, which tests belong to which area, and the audit of every test in
 commands run from the repo root with `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`. Tests that need game data
 skip themselves when `extracted/` is absent.
 
+**No test relies on the user's personal files** (§10): not the disc image, savestates, PCSX2 traces, screen
+recordings, the settings file or session output in `work/`, not even "skip if missing". Tests read `extracted/`
+through the data root and committed fixtures; findings from personal material reach them only as a few distilled
+numbers. `guards::no_test_or_product_file_references_personal_paths` enforces it.
+
 ## 1. Commands that share the dev build
 
-Every test or check command goes through the aliases in `.cargo/config.toml`, so Bevy and our crates are compiled once:
+**Tests run only through `cargo xtask test-*`.** Never run `cargo test` or `cargo nextest` directly: there is no
+Cargo test alias, and the xtask commands pass the one flag set that shares the dev Bevy build
+(`--workspace --features rc-engine/dev`). Compile checks use the `.cargo/config.toml` aliases:
 
 | What | Command |
 |---|---|
-| All unit tests (every crate's `src/` tests; rc-engine's live in the `randcrw` bin) | `cargo xtask test-quick` (= `cargo test-all --lib --bins`) |
+| All unit tests (every crate's `src/` tests; rc-engine's live in the `randcrw` bin) | `cargo xtask test-quick` |
+| One crate's unit tests | `cargo xtask test-quick <crate>` (e.g. `rc-formats`) |
 | A job's tier (§2.1) | `cargo xtask test-job <area…> [shared]` |
-| Some integration binaries | `cargo test-all --test <binary> --test <binary> …` (the binaries of §3) |
-| One former test file | `cargo test-all --test <binary> -- <module>::` |
-| One test | `cargo test-all --test <binary> -- --exact <module>::<test_fn>`, or a substring: `cargo test-all --test hero novalis_hero_digest` |
+| One or more integration binaries alone (the binaries of §3) | `cargo xtask test-job --test <binary> [--test <binary> …]` |
+| One former test file | `cargo xtask test-job --test <binary> --filter <module>::` |
+| One test | `cargo xtask test-job --test <binary> --filter <module>::<test_fn> --exact`, or a substring: `cargo xtask test-job --test hero --filter novalis_hero_digest` |
+| Ignored surveys, with their output | add `--ignored --nocapture` (e.g. `cargo xtask test-job --test classes --filter creature_classes:: --ignored --nocapture`) |
 | Type check of everything, with tests | `cargo check-all` |
 | Lints | `cargo clippy-all` |
-| Full suite | `cargo xtask test-full` (or `RC_AUDIO=0 cargo test-all --no-fail-fast`) |
+| Full suite | `cargo xtask test-full` |
 
-The `cargo xtask test-*` commands set `RC_AUDIO=0` and run through cargo-nextest when it is installed, else through
-`cargo test-all` (§8). The integration binaries are one per area (§3), each with one module per former test file, so a
-test's path is `<module>::<test_fn>`, e.g. `hero_novalis::novalis_hero_digest` in the binary `hero`.
+The `cargo xtask test-*` commands set `RC_AUDIO=0` (other variables such as `RC_SNAPSHOT_WRITE=1` pass through) and
+run through cargo-nextest when it is installed, else through `cargo test --workspace --features rc-engine/dev` (§8).
+`--filter`, `--exact`, `--ignored` and `--nocapture` mean the same under both runners. The integration binaries are one
+per area (§3), each with one module per former test file, so a test's path is `<module>::<test_fn>`, e.g.
+`hero_novalis::novalis_hero_digest` in the binary `hero`.
 
-Do not use `cargo test -p <crate>` or `cargo test --workspace`. `cargo test -p rc-game --lib` resolved other features
-and recompiled rc-formats and rc-game from scratch (32 s, measured 2026-09-29) next to the shared copy, and plain
-`--workspace` rebuilds Bevy statically. `cargo test-all --lib --bins` was up to date in 0.4 s after a full run.
+Why no by-hand runs: `cargo test -p rc-game --lib` resolved other features and recompiled rc-formats and rc-game from
+scratch (32 s, measured 2026-09-29) next to the shared copy; plain `cargo test --workspace` rebuilds Bevy statically;
+and the old `cargo test-all` alias silently ran the whole workspace when given `-p <crate>` (removed 2026-09-29).
+`cargo xtask test-quick` was up to date in 0.4 s after a full run.
 
 ## 2. Tiers
 
@@ -35,34 +47,32 @@ Two tiers.
 
 Each brief names its areas, for example "areas: weapons, classes". The job runs:
 
-1. **Unit tests:** `cargo test-all --lib --bins`, every crate. The whole run takes about 5 s, and it is the only
+1. **Unit tests:** `cargo xtask test-quick` (`--lib --bins`), every crate. The whole run takes about 5 s, and it is the only
    cheap way to cover a dependency change, so it is not split by area.
 2. **The area groups** of §3, for each area the job touched.
 3. **The shared-code guard set**, when the job touched shared code (§2.3):
-   - Ratchet's NO_IDLE digest. It must be byte-identical to the baseline, unless the brief changes hero behaviour on
-     purpose. The test runs with the package as its working directory, so give it absolute paths:
+   - Ratchet's NO_IDLE digest. **A change detector, not a correctness check:** it pins the port's current hero
+     behaviour, which is known to be imperfect, so a match says "nothing moved", never "the movement is right". It
+     must be byte-identical to the baseline, unless the brief changes hero behaviour on purpose. Movement correctness
+     will come from distilled PCSX2 values in the (deferred) hero feel pass (docs/plan/hero_feel_pass.md). The test
+     runs with the package as its working directory, so give it absolute paths:
 
-     `cargo xtask test-job … shared` does this. By hand:
+     `cargo xtask test-job … shared` does this (it writes `work/test-results/digest_job.txt` with
+     `RC_HERO_DIGEST` and `RC_HERO_DIGEST_NO_IDLE=1` and compares it byte for byte with the baseline).
 
-     ```
-     RC_HERO_DIGEST="$PWD/work/test-results/digest_job.txt" RC_HERO_DIGEST_NO_IDLE=1 \
-       cargo test-all --test hero -- --exact hero_novalis::novalis_hero_digest
-     cmp work/test-results/hero_digest_no_idle.txt work/test-results/digest_job.txt
-     ```
-
-     The baseline `work/test-results/hero_digest_no_idle.txt` (git-ignored) is written only by
-     `cargo xtask digest-baseline`, which prints what changed. Run it only when a human has decided a digest change is
+     The baseline `work/test-results/hero_digest_no_idle.txt` is local: git-ignored (`/work/`), never committed,
+     and written only by `cargo xtask digest-baseline`, which prints what changed. Run it only when a human has decided a digest change is
      intended, or when there is no baseline yet (a job takes one before its first edit). `test-job shared` and
      `test-full` only compare with it, and fail on a mismatch. A test that rewrote its own reference on every run
      would bake regressions in.
-   - `cargo test-all --test world -- all_levels_smoke::`: 19 levels × 600 ticks and Gemlik × 3000 (about 26 s).
+   - `all_levels_smoke::` in `world` (also part of `test-job shared`): 19 levels × 600 ticks and Gemlik × 3000 (about 26 s).
 4. **`cargo check-all`** once at the end, and `cargo clippy-all` for the job's files (as before).
 
 The report lists every command run and its result.
 
 ### 2.2 Full suite
 
-`cargo xtask test-full` (or `RC_AUDIO=0 cargo test-all --no-fail-fast`) runs only:
+`cargo xtask test-full` runs only:
 - on merge to main;
 - for a big shared-code commit, when the coordinator decides it.
 
@@ -83,8 +93,8 @@ Shared code is code that every level or every tick runs through. A change to it 
 ## 3. Area map (per-job groups)
 
 The unit tests of every area run in step 1 of §2.1. The table lists each area's integration binary and its modules
-(the former test files, merged 2026-09-29, §5): `cargo test-all --test <binary>`, or `--test <binary> -- <module>::`
-for one module. `cargo xtask test-job <area…>` runs the unit tests plus the listed binaries; its area table is `AREAS`
+(the former test files, merged 2026-09-29, §5): `cargo xtask test-job --test <binary>`, or add
+`--filter <module>::` for one module. `cargo xtask test-job <area…>` runs the unit tests plus the listed binaries; its area table is `AREAS`
 in `tools/xtask/src/test.rs`, which this table documents (area names and aliases are the same).
 
 Aliases: creatures and mobys → `classes`; levels, collision and water → `world`; menus, HUD, map, save and vendor → `ui`;
@@ -102,7 +112,7 @@ the merged binary under `cargo test` (per-binary caches, §5).
 | audio | `reverb_conformance` `sound_conformance` (in `ui`), plus `weapons -- --exact hero_guns_novalis::novalis_ryno_salvo_sounds_mix_without_overflow` | in `ui`: `--test ui -- reverb_conformance:: sound_conformance::` | `audio::*` | ~3 s |
 | formats | `golden` `level_overlay_disc` `moby_anim_golden` `moby_collision_disc` `moby_shadow_disc` `occlusion_frames` `scene_coverage` `tfrag_light_golden` (rc-formats) | `formats` | rc-formats lib | ~6 s |
 | data | `lifecycle` `roundtrip` (rc-data) | `data` | rc-data lib | ~3 s |
-| extract (extractor, launcher side) | `synthetic`, `golden` (rc-extract; `golden` is `#[ignore]`, run it by hand with a disc) | `extract` | rc-extract lib and bin | <1 s |
+| extract (extractor, launcher side) | `synthetic` (rc-extract; the checks against a real disc are `rc-trace disc-check`, §10) | `extract` | rc-extract lib and bin | <1 s |
 | video | `movies` (rc-video) | `movies` | rc-video lib | <1 s |
 | engine (render, input, engine glue) | none | — | the `randcrw` bin's tests | — |
 | trace tools | `hero_replay_selfcheck` `novalis_spawn` `synthetic` (tools/trace) | `trace` | rc-trace lib | ~2 s |
@@ -155,7 +165,7 @@ Measured (M-series laptop, 2026-09-29, the dev build shared through the aliases)
 | | Before | After |
 |---|---|---|
 | Integration binaries | 70 | 11 |
-| `cargo test-all --no-run` after touching `crates/rc-game/src/lib.rs` (warm) | 20.4 s | 10.4 s |
+| The test build (`--no-run`, workspace, dev features) after touching `crates/rc-game/src/lib.rs` (warm) | 20.4 s | 10.4 s |
 | The integration binaries on disk (executables + `.dSYM`) | 2.2 GB | 0.46 GB |
 | `du -sh target` | 11 GB | 13 GB, of which 3.2 GB are the 68 stale old binaries and their incremental state (`cargo clean` drops them); about 9.8 GB without them |
 | `classes` + `world` under `cargo test` | ~490 s summed (200 + 290) | 14 s + 32 s |
@@ -164,8 +174,8 @@ Measured (M-series laptop, 2026-09-29, the dev build shared through the aliases)
 
 Under nextest every test is its own process, so the caches only save the repeated parses inside one test; the
 13 tests that scan all 19 levels each still build their own `LevelPorts` (30–52 s each under load). Under `cargo test`
-they share one build per binary: `classes` and `world` then take 46 s together, so a `cargo test-all` full run is
-estimated at about 90 s with far less CPU (not measured: the job allowed one full run). `--cargo-test` picks it.
+they share one build per binary: `classes` and `world` then take 46 s together, so a `cargo xtask test-full --cargo-test` run is
+estimated at about 90 s with far less CPU (not measured: the job allowed one full run).
 
 ## 6. Slow tests and tests that look wrong
 
@@ -275,9 +285,20 @@ Pin kinds after the drops (1186 tests):
   asserted nothing. `hero_surfaces::every_level_handles_its_own_surfaces` runs the same `surfaces(n)` on every level
   and asserts on its result.
 
+### 7.3a Moved out of the suite (4, 2026-09-29)
+
+They read the user's disc image (`RC_ISO`, else the ISO in the personal folder), which no test may do (§10). The same
+checks, unchanged, are the dev command `cargo run --release -p rc-trace -- disc-check`:
+- `formats golden::disc_matches_extracted_for_every_level` (check 1);
+- `ui game_state_novalis::disc_save_game_lump_matches_extracted` (check 2);
+- `extract golden::builtin_table_matches_the_disc` (check 3; was `#[ignore]`);
+- `extract golden::extract_matches_the_committed_table` (check 4, with `--extract-into <scratch dir>`; was `#[ignore]`).
+
+The tables below are the audit as taken, minus these four rows.
+
 ### 7.4 Every test
 
-### rc-game: integration tests (286)
+### rc-game: integration tests (285)
 
 | test | pins | runtime | group | verdict |
 |---|---|---|---|---|
@@ -366,7 +387,6 @@ Pin kinds after the drops (1186 tests):
 | `gadgets_novalis::gadgets_page_equips_the_packs` | game-checked: The Gadgets page from the pause menu with both packs owned [`0x141414`, `0x242930`] (disc data) | fast | ui | keep |
 | `gadgets_novalis::gadgets_page_feet_and_head` | game-checked: Feet and head items through the page [`0x14140c`, `0x141410`] (disc data) | fast | ui | keep |
 | `game_state_novalis::first_novalis_arrival` | game-checked: first novalis arrival (L01) | fast | ui | keep |
-| `game_state_novalis::disc_save_game_lump_matches_extracted` | game-checked: disc save game lump matches extracted (disc data) | fast | ui | keep |
 | `gemlik_generalisation::gemlik_class_table_runs_the_body_pieces` | exists/resolves: Gemlik (13) body pieces 1733–1735, 1801–1804 run FxGroupUpdate (L13) | medium | ui | **drop**: duplicate of `level_ports::every_level_runs_the_ports_its_class_table_names` (same seven classes, same `FxPiece` assert on L13) |
 | `gemlik_generalisation::gemlik_pause_menu_is_novalis_tree_at_gemlik_addresses` | game-checked: gemlik pause menu is novalis tree at gemlik addresses [`0x161fe0`] (L01+L13) | medium | ui | keep |
 | `gemlik_generalisation::every_level_loads_the_pause_menu` | exists/resolves: every level loads the pause menu (all levels) | medium | ui | keep |
@@ -381,7 +401,7 @@ Pin kinds after the drops (1186 tests):
 | `help_novalis::log_table_on_every_level` | exists/resolves: log table on every level (all levels) | medium | ui | keep |
 | `help_novalis::director_look_and_map_hints_in_its_cuboids` | game-checked: director look and map hints in its cuboids (disc data) | fast | ui | keep |
 | `help_novalis::infobot_hint_box_on_the_level_text` | game-checked: infobot hint box on the level text (disc data) | fast | ui | keep |
-| `help_novalis::print_cuboids` | survey (ignored): Prints the director's cuboid centres (`cargo test-all --test ui help_novalis::print_cuboids -- --ignored… (L01) | ignored | ui | keep |
+| `help_novalis::print_cuboids` | survey (ignored): Prints the director's cuboid centres (`cargo xtask test-job --test ui --filter help_novalis::print_cuboids --ignored --nocapture`)… (L01) | ignored | ui | keep |
 | `hero_boots_grind::spline_follower_on_every_levels_grind_paths` | game-checked: The data the spline follower relies on, on every level (all levels) | fast | hero | keep |
 | `hero_boots_grind::oltanis_grind_jump_and_rail_switch` | game-checked: Oltanis (level 14) (L14) | fast | hero | keep |
 | `hero_boots_grind::kalebo_long_grind` | game-checked: Kalebo III (level 16) (L16) + determinism | fast | hero | keep |
@@ -1137,7 +1157,7 @@ Pin kinds after the drops (1186 tests):
 | `water/sea::hoven_rescale_sets_rgb_and_halves_alpha` | port logic: hoven rescale sets rgb and halves alpha (L12) | fast | lib:world | keep |
 | `water/sea::ports_are_unique` | port logic: ports are unique | fast | lib:world | keep |
 
-### rc-formats: integration tests (34)
+### rc-formats: integration tests (33)
 
 | test | pins | runtime | group | verdict |
 |---|---|---|---|---|
@@ -1154,7 +1174,6 @@ Pin kinds after the drops (1186 tests):
 | `golden::tfrag_texture_mip_chains` | data/format: Every tfrag texture is square, and every mip level `decode_tfrag_mip_levels` finds (`ty` levels (all levels) | medium | formats | keep |
 | `golden::tfrag_lod_links_are_well_formed` | data/format: The LOD linkage the renderer's morph / collapse passes rely on (tfrag_rac1.md §3b.3, §3b.6), on every retail tfrag (all levels) | medium | formats | keep |
 | `golden::instance_classes_and_tie_draw_distances` | data/format: Instance records against their classes on every level (all levels) | medium | formats | keep |
-| `golden::disc_matches_extracted_for_every_level` | data/format: The Rust disc reader (`rc_formats::disc`) against the extracted Tier 0 archive (all levels) + determinism | medium | formats | keep |
 | `golden::collision_for_every_level` | data/format: collision for every level (all levels) | medium | formats | keep |
 | `golden::occlusion_for_every_level` | data/format: occlusion for every level (all levels) | medium | formats | keep |
 | `golden::gadgets_for_every_level` | data/format: Gadget classes (docs/formats/moby_rac1.md 0.4) (all levels) | medium | formats | keep |
@@ -1421,12 +1440,10 @@ Pin kinds after the drops (1186 tests):
 | `xxh64::reference_vectors` | port logic: reference vectors | fast | lib:data | keep |
 | `xxh64::every_byte_matters` | port logic: every byte matters | fast | lib:data | keep |
 
-### rc-extract: integration tests (5)
+### rc-extract: integration tests (3)
 
 | test | pins | runtime | group | verdict |
 |---|---|---|---|---|
-| `golden::extract_matches_the_committed_table` | survey (ignored): extract matches the committed table (disc data) | ignored | extract | keep |
-| `golden::builtin_table_matches_the_disc` | survey (ignored): builtin table matches the disc (disc data) | ignored | extract | keep |
 | `synthetic::error_codes_for_bad_images` | game-checked: error codes for bad images (disc data) | fast | extract | keep |
 | `synthetic::identify_extract_verify_on_a_synthetic_rc1_disc` | game-checked: identify extract verify on a synthetic rc1 disc (disc data) | fast | extract | keep |
 | `synthetic::binary_json_lines_and_exit_codes` | port logic: The binary (disc data) | fast | extract | keep |
@@ -1517,13 +1534,14 @@ Pin kinds after the drops (1186 tests):
 | `zip::roundtrip_all_methods` | data/format: roundtrip all methods | fast | lib:trace | keep |
 | `zip::corrupt_data_is_detected` | port logic: corrupt data is detected | fast | lib:trace | keep |
 
-### repo-checks: integration tests (5)
+### repo-checks: integration tests (6)
 
 | test | pins | runtime | group | verdict |
 |---|---|---|---|---|
 | `guards::product_crates_do_not_depend_on_tools` | repo guard: Rule (disc data) | fast | repo | keep |
 | `guards::manifest_scan_catches_a_tool_path` | repo guard: The manifest scan itself (disc data) | fast | repo | keep |
-| `guards::product_does_not_reference_personal_or_dev_paths` | repo guard: Rule (disc data) | fast | repo | keep |
+| `guards::no_test_or_product_file_references_personal_paths` | repo guard: no test relies on personal files; no allow-list (§10; renamed 2026-09-29) | fast | repo | keep |
+| `guards::guard_scans_crates_and_tool_tests` | repo guard: the scanned folders (added 2026-09-29) | fast | repo | keep |
 | `guards::personal_patterns_match_segments_only` | repo guard: personal patterns match segments only (disc data) | fast | repo | keep |
 | `guards::top_level_holds_only_the_agreed_folders` | repo guard: Rule (disc data) | fast | repo | keep; fails while a user `.mov` sits in the repo root (expected) |
 
@@ -1547,8 +1565,9 @@ Pin kinds after the drops (1186 tests):
 `$CARGO_HOME/bin` for subcommands. Only calling `cargo-nextest` directly needs the folder on `PATH` (fish:
 `fish_add_path ~/.cargo/bin`; zsh: `export PATH="$HOME/.cargo/bin:$PATH"` in `~/.zprofile`).
 
-**By hand:** `RC_AUDIO=0 cargo nextest run --workspace --features rc-engine/dev [--lib --bins | --test <binary>] [-E
-<filterset>]`. The flags are those of the `test-all` alias, so nextest reuses the dev (dynamic) Bevy build.
+**Never by hand:** the xtask commands call `cargo nextest run --workspace --features rc-engine/dev …` (the flags
+that reuse the dev (dynamic) Bevy build) with the right target flags and filterset; every targeted need has an option
+(§1), so neither `cargo nextest` nor `cargo test` is run directly.
 
 **Settings:** `.config/nextest.toml`, profile `default`:
 - `fail-fast = false`;
@@ -1562,7 +1581,7 @@ Pin kinds after the drops (1186 tests):
   only read.
 
 **Doctests:** none (every lib's `Doc-tests` runs 0), so the nextest runs miss nothing. When one appears, add
-`cargo test-all --doc` to `test-full` (`full_steps` in `tools/xtask/src/test.rs`).
+a `cargo test --workspace --features rc-engine/dev --doc` step to `test-full` (`full_steps` in `tools/xtask/src/test.rs`).
 
 **Determinism:** the shared guard set (`cargo xtask test-job shared`, 851 tests plus the digest) was run twice under
 nextest on 2026-09-29: all passed both times, and the two NO_IDLE digests are byte-identical to each other and to
@@ -1574,11 +1593,18 @@ the baseline taken before the merge.
 |---|---|
 | `cargo xtask test-quick [crate]` | the unit tests (`--lib --bins`); with nextest a crate name narrows it (`-E package(<crate>)`) |
 | `cargo xtask test-job <area…>` | the unit tests and the areas' binaries of §3 in one nextest run (a filterset for the partial areas `audio` and `shared`); with `shared`, then the digest compare |
+| `cargo xtask test-job --test <binary>…` | those integration binaries alone (`--test <binary>`; no unit tests, no digest); next to areas, added to them |
 | `cargo xtask test-full` | the whole suite with `--no-fail-fast`, then the digest compared with the baseline (a mismatch fails), then `cargo xtask sweep` (§9; only warns) |
 | `cargo xtask digest-baseline` | the only writer of the baseline; prints what changed. Run it only when a human has decided the digest change is intended |
 
-Each sets `RC_AUDIO=0`; `--cargo-test` uses `cargo test-all` instead of nextest; arguments after `--` go to nextest
-(or to the test binaries under `cargo test`). The runner choice matters for the level scans: see the end of §5.
+Targeting options of `test-quick` and `test-job`: `--filter <name>` (a test-path substring, repeatable; nextest
+`-E test(<name>)` ANDed with the selection, libtest's positional filter), `--exact` (full paths: `test(=…)`,
+libtest `--exact`), `--ignored` (`--run-ignored only`, libtest `--ignored`), `--nocapture` (`--no-capture`). A
+filtered or `--ignored` `test-job shared` skips the digest. Under `--cargo-test` a filter replaces a partial area's own
+module filters (libtest ORs filters), so it applies to that whole binary.
+
+Each sets `RC_AUDIO=0`; `--cargo-test` uses `cargo test --workspace --features rc-engine/dev` instead of nextest;
+arguments after `--` go to nextest as is (or to the test binaries under `cargo test`). The runner choice matters for the level scans: see the end of §5.
 
 ## 9. Keeping target/ small
 
@@ -1602,3 +1628,36 @@ finds it there).
 * **Full reset:** `cargo clean` (then the next `cargo dev` rebuilds everything, Bevy included: minutes, not seconds).
   It is also the only way to drop a big stale `incremental/`.
 
+## 10. Personal files: none in tests (2026-09-29)
+
+**The rule.** No test relies on the user's personal files, not even optionally or "skip if missing". Personal means:
+anything in the personal folder (the disc image, savestates, PCSX2 traces), screen recordings, the user's settings
+file, anything in `work/` that came from the user's own sessions, and any other file that exists only on the user's
+machine. Tests may read `extracted/` through the data root (`rc_formats::test_data::root`, `RC_EXTRACTED`) like the rest
+of the suite, and committed fixtures. Findings from personal material reach tests only as small distilled values: a
+handful of numbers inline, or a tiny committed fixture (e.g. `crates/rc-game/tests/fixtures/shadow_ratchet_novalis_idle.tsv`).
+No gameplay logs, trace dumps or savestate excerpts are committed. Provenance comments name the source in words
+("distilled from the user's PCSX2 savestate of 2026-09-26"), never with a path.
+
+**The guard.** `tools/repo-checks` (`guards::no_test_or_product_file_references_personal_paths`) scans every file under
+`crates/` and every tool's `tests/` folder for the personal patterns (`.p2s`, `~/PS2`, `PS2/ratchet1`, `work/`,
+`/traces/`, `RC_PERSONAL`), and test files additionally for the disc-image and home-folder hooks (`RC_ISO`, `HOME`,
+`home_dir`). It has no allow-list. Tool sources (`tools/*/src`) are not scanned: tools read personal material on
+purpose (`rc-trace` savestates and recordings, `xtask regen-data` the disc image).
+
+**Disc checks (by hand).** What needs the disc image is a dev command, not a test:
+
+```
+cargo run --release -p rc-trace -- disc-check [--iso IMAGE] [--extracted DIR] [--extract-into SCRATCH]
+```
+
+1. the disc reader (`rc_formats::disc`) against `extracted/` on all 19 levels (every lump, the audio/scene lumps, the
+   TOC, the boot ELF), with per-level read times;
+2. the disc's `save_game` lump against `extracted/global/save_game.bin`, and the card folder `SYSTEM.CNF` names;
+3. the extractor's size/SHA-1 table hashed from the image against `crates/rc-extract/data/scus_971_99.tsv` (run it after
+   regenerating the table with `randcrw-extract table`);
+4. with `--extract-into`: a full and an `--ntsc-only` extraction (~7 GiB; delete afterwards) hold exactly the table's
+   files and verify.
+
+The image defaults to `RC_ISO`, else the ISO in the personal folder. Run it after a change to `rc_formats::disc`,
+`iso9660` or the extractor.

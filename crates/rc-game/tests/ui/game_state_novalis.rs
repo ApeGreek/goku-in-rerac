@@ -1,7 +1,7 @@
 //! New game → Veldin start → Veldin→Novalis transition → Novalis start, against the disc's own tables and
 //! save template (`docs/plan/game_state.md` §4). Skipped when `extracted/` (the extracted game data, never
-//! shipped with the repo) is absent. With the user's ISO (`RC_ISO` or the default path) the disc reader's
-//! `save_game` lump is also checked against `extracted/global/save_game.bin`.
+//! shipped with the repo) is absent. The disc reader's `save_game` lump against `extracted/global/save_game.bin`
+//! needs the disc image, so it is a dev command, not a test: `cargo run --release -p rc-trace -- disc-check`.
 
 use rc_formats::save_game::{crc16, ChunkTables, ItemTables, SaveFile, SaveGameLump};
 use rc_game::game_state::{item, GameState, SessionState, FLAG_VELDIN_CLANK};
@@ -109,17 +109,4 @@ fn first_novalis_arrival() {
     let (tmpl, rep) = GameState::from_save_file(tables, &SaveFile::parse(t).unwrap());
     assert_eq!((rep.total(), tmpl.global.level), (0, -1));
     assert_eq!(tmpl.to_save_file().to_bytes(), *t);
-}
-
-#[test]
-fn disc_save_game_lump_matches_extracted() {
-    let Ok(want) = std::fs::read(root().join("global/save_game.bin")) else { eprintln!("skipped: no extracted/"); return; };
-    let iso = std::env::var_os("RC_ISO").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("PS2/ratchet1/Ratchet & Clank (USA) (En,Fr,De,Es,It).iso")
-    });
-    if !iso.exists() { eprintln!("skipped: no disc image at {}", iso.display()); return; }
-    let disc = rc_formats::disc::Disc::open(&iso).unwrap();
-    assert!(disc.save_game_lump().unwrap() == want);
-    let cnf = disc.iso().read_file(disc.iso().find("/SYSTEM.CNF").unwrap()).unwrap();
-    assert_eq!(rc_formats::save_game::card_dir_name(&cnf).unwrap(), "/BASCUS-97199RATCHET");
 }
