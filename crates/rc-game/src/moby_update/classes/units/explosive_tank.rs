@@ -145,12 +145,14 @@ fn exploding(w: &mut World, id: MobyId) {
     }
 }
 
-/// A scorch mark's words: colours, sizes, life range, radius.
-struct Scorch {
-    c: (u32, u32),
-    s: (f32, f32),
-    life: (i32, i32),
-    r: f32,
+/// A scorch mark's words: colours, sizes, life range, radius (cluster 98f51a1cea64: level13 0x3072c0 / 0x30c2b0,
+/// level10 0x2e3de8 (the Orxon brawler 1202's death, `orxon_brawler`), level12 0x2e3420; each copy reads its own `$gp`
+/// words).
+pub(crate) struct Scorch {
+    pub(crate) c: (u32, u32),
+    pub(crate) s: (f32, f32),
+    pub(crate) life: (i32, i32),
+    pub(crate) r: f32,
 }
 
 /// The tank's (0x3072c0: `$gp` 0x161e3c..0x161e54) and the fireball's (0x30c2b0: 0x161f6c..0x161f84): one code
@@ -159,7 +161,7 @@ const TANK_SCORCH: Scorch = Scorch { c: k::SCORCH_C, s: k::SCORCH_S, life: k::SC
 const BALL_SCORCH: Scorch = Scorch { c: (0x6800_2028, 0x2020), s: (1.5, 5.7), life: (100, 180), r: 0.8 };
 
 /// Level13 0x3072c0 / 0x30c2b0 (module doc).
-fn scorch(w: &mut World, id: MobyId, q: &Scorch) {
+pub(crate) fn scorch(w: &mut World, id: MobyId, q: &Scorch) {
     let a = w.rng.rand_angle();
     let r = w.rng.randf(0.0, q.r);
     let s1 = w.rng.randf(0.0, q.s.0);

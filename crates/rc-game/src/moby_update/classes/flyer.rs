@@ -47,14 +47,14 @@
 //!   offset) by `1/P.110` per tick, pitch and roll through `SpringTurn` 0x26cef0; t += dt; position = last
 //!   tick's curve point (+ lateral offset when seen); the joints: each set flag bit k takes the next joint list
 //!   j (0, 1, … over the set bits), `FUN_002645a8(m, j)`, and bit k ≥ 1 puts the linked emitter (class 27)
-//!   there with P+0x80 = unit(joint − position) and P+0x70 |= 0x1000, bit 0 spawns two type-10 sparks while the
+//!   there with P+0x80 = unit(joint − position) and P+0x70 |= 0x1000, bit 0 spawns two type-10 sparks (`particles::type10`) while the
 //!   countdown is 0; the countdown runs 7 → 0.
 //! * **State 2**: back to 0 once a spline index is set. **State 3**: the delay, then state 1.
 //!
 //! **Not ported (counted in `FxStats::unported`):** of the kill on a hit 0x800000 (state 0x65, `SpawnBeamExplosion`
 //! [`KILL_BEAM`], the links and itself deleted: ported), the first kill's skill point 0x13d408 / level sound 1 / banner
 //! 0x53d6 and the wreck `FUN_0030be70` (class 1510); the group
-//! synchronisation (group ≥ 0); the type-10 sparks of flag bit 0 (the draws are made); the level-3/9 combat
+//! synchronisation (group ≥ 0); the level-3/9 combat
 //! block (hit 0x210000, the 0x13a hide timer); the class-specific sounds; the debug lines. `0x161b00`
 //! (gp−0x5100, "flyers paused", 0 on Novalis) is taken as 0.
 
@@ -598,9 +598,20 @@ fn fly(w: &mut World, id: MobyId, culled: bool) {
             if flags & 1 == 0 {
                 place_emitter(w, id, u, jp, unit(v));
             } else if w.m(id).pvars[P_SPARK] == 0 {
-                // Two PartType10Spawn sparks, each at randf(0.016, 0.031)·K along v (not ported: the draws only).
-                for _ in 0..2 { let _ = w.rng.randf(f32::from_bits(0x3c83_126f), f32::from_bits(0x3cfd_f3b6)); }
-                w.svc.unported("flyer: type-10 sparks");
+                // Two `PartType10Spawn(joint, v)` sparks (`particles::type10`), v = unit(joint − pos)·randf(0.016,
+                // 0.031)·speed: the speed's draw, then the spawn's (its size; also made without a particle system).
+                for _ in 0..2 {
+                    let sp = w.rng.randf(f32::from_bits(0x3c83_126f), f32::from_bits(0x3cfd_f3b6));
+                    let d = unit(v);
+                    let vel = [d[0] * sp, d[1] * sp, d[2] * sp, 0.0];
+                    *w.svc.fx.part_spawns.entry(crate::particles::type10::TYPE).or_default() += 1;
+                    match w.particles.as_deref_mut() {
+                        Some(ps) => {
+                            if crate::particles::type10::spawn(ps, w.rng, jp, vel).is_none() { w.svc.fx.part_failed += 1; }
+                        }
+                        None => { w.rng.randf(f32::from_bits(0x476d_e400), f32::from_bits(0x47b0_5e00)); }
+                    }
+                }
             }
         }
         let m = w.mm(id);

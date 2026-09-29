@@ -45,6 +45,57 @@ deletes them with the old folder. Any other file stops it (move it to `work/` or
 cache `cache/`. **What may not:** trace dumps, savestates, reports, captures, exports, Ghidra material, anything a dev
 tool writes. Those go to `work/` (generated) or `~/PS2/ratchet1/` (personal).
 
+## How the engine finds its data
+
+The engine never reads the disc image; it reads only a data folder that `randcrw-extract` wrote (layout:
+`docs/plan/launcher_extractor.md` §4.1; contract: `docs/plan/launcher_contract.md`).
+
+```
+cargo dev -- --data-dir <data folder>     # or RC_DATA_DIR=<data folder> cargo dev
+cargo dev -- --version-json               # {"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}
+```
+
+The data folder is chosen in this order:
+
+1. `--data-dir <folder>` (also `--data-dir=<folder>`), how the launcher starts the game;
+2. `RC_DATA_DIR`;
+3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (a `randcrw-extract` data folder, same layout).
+
+The folder must exist and hold `toc.bin`, and for 1 and 2 also the extractor's `extract-info.json` with a matching
+`data_format` (the development tree may lack it: one warning). Otherwise the engine prints one `error:` line saying
+what to do (re-extract via the launcher) and exits before opening a window: code 3 (folder missing, not a data folder,
+or extraction incomplete), code 4 (data format mismatch or unreadable `extract-info.json`), code 2 (`--data-dir`
+without a value). `--version-json` prints the contract line and exits without touching any data.
+
+## The engine cache (Tier 1)
+
+`extract` ends by building `<data folder>/cache/v1/` (stage `prepare`, about 0.2 s, 440 MiB): every level's core
+data, gameplay file and HUD banks, WAD-decompressed once, plus `stamp.toml`. `randcrw-extract prepare --out <data
+folder>` rebuilds or refreshes it from the archive alone (no disc). The engine reads lumps through `rc-data` (once per
+process each); when the cache is missing, stale (stamp: cache version, converter versions, `extract-info.json` hash)
+or a lump is corrupt (XXH64 trailer), it rebuilds what it needs on the fly with one log line per lump, and falls back
+to in-memory decompression when the folder cannot be written. The development `extracted/` tree therefore gets
+`extracted/cache/v1/` on the first `cargo dev`. The folder can be deleted at any time. `RC_CACHE=0` skips it;
+`RC_PERF_LOG=1` prints where each lump came from.
+
+## Exports (Tier 2, optional)
+
+`randcrw-extract export --out <data folder> [--to <dir>] [--what textures,audio,models,levels,collision,text|all]
+[--level NN]` writes usable formats from the archive (no disc): indexed PNG textures with JSON sidecars (original CLUT
+and GS format), WAV audio with loop points, glTF 2.0 levels, collision and skinned, animated moby models, and JSON
+tables and text. Default folder `<data folder>/exports/`; the full disc is about 60,000 files and 3.5 GiB in about
+10 s. The game never reads them; the launcher's "Export assets…" runs the same command. Layout and what is lossy:
+`docs/plan/launcher_extractor.md` §5.5; how mods will use them: `docs/plan/mods.md` §2.1a.
+
+## What tests read
+
+Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
+`rc_formats::test_data::root()`); they read only Tier 0 files, so any `randcrw-extract` data folder works, and they
+skip when it is absent. Decompressed lumps, core blocks (`moby_class/NNNN`, `ratchet_seq/NNN`, …) and gameplay
+sections (`level_settings`, …) come from the Rust loaders (`rc_formats::test_data`). An `extracted/` tree written by
+the retired C++ extractor still works; its extra files are no longer read, and `cargo xtask regen-data` regenerates a
+clean tree (above).
+
 ## Players
 
 Players never run these by hand: the launcher (docs/workflows/launcher.md) runs `extract` into its own data folder

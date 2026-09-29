@@ -130,7 +130,7 @@ Background and the decisions behind it: `docs/plan/launcher_extractor.md`, `docs
     Any other non-zero exit (a panic is 101; a signal has no code) is a crash; point at the log. Unknown arguments are
     ignored with a warning, so a newer launcher's extra flags do not stop an older runtime. `--data-dir` wins over
     `RC_DATA_DIR`, and `--data-dir=<dir>` is accepted.
-15. **Packaged version folder** (`tools/package/package.sh`, README "Packaging"): `randcrw` (`randcrw.exe` on
+15. **Packaged version folder** (`tools/package/package.sh`, `docs/workflows/release.md`): `randcrw` (`randcrw.exe` on
     Windows), `randcrw-extract`, `assets/shaders/*.wgsl`, `randcrw-manifest.json`, `README.txt`. The manifest names
     the binaries by these relative paths. The runtime finds `assets/` next to its real (symlink-resolved) executable,
     so the folder can be copied or moved as a whole, but `randcrw` must not be copied out of it alone.

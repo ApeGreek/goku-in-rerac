@@ -25,6 +25,35 @@ pub fn pack_rgba(c: [f32; 4]) -> u32 {
     c.iter().enumerate().fold(0u32, |o, (k, &x)| o | (((x * 255.0) as i32 as u32) & 0xff) << (8 * k))
 }
 
+/// Type 65: the same spark with type 25's update (level01 `PartType65Update` 0x289388 is 0x282760 without the
+/// variant's swapped rates: its only spawner, level07 `0x29c4e8` (also on 15 and 17), gives positive channels, so the
+/// variant branch is unreachable and [`update`] is the same function for it).
+pub const TYPE65: u8 = 65;
+
+/// Level07 `0x29c4e8(pos, vel)`: RGBA `0x270ea0(1, 1, 1, 0.6)`, byte1 0, byte9 0x44, ALPHA 0x48, size `randf(20000,
+/// 120000)` (the one draw), rotation 0, texture `def[65][0]`, channels 1 and alpha 0.6, timer `ticks(80)`, velocity
+/// (w = gravity, 0 → −0.0063). None when the pool is full (no draw).
+pub fn spawn65(sys: &mut Particles, rng: &mut Rng, pos: [f32; 4], vel: [f32; 4]) -> Option<usize> {
+    let i = sys.create_part(TYPE65)?;
+    let def = sys.def_first(TYPE65);
+    let ticks = sys.time.ticks(0x50);
+    let size = rng.randf(20000.0, 120000.0);
+    let r = &mut sys.pool.recs[i];
+    for k in 0..4 { set(r, 0x10 + 4 * k, pos[k]); }
+    rec::set_u32(r, 4, pack_rgba([1.0, 1.0, 1.0, 0.6]));
+    r[1] = 0;
+    r[9] = 4 + 0x40;
+    r[3] = 0x48;
+    set(r, 0xc, size);
+    r[8] = 0;
+    r[2] = def;
+    for o in [0x38, 0x30, 0x34] { set(r, o, 1.0); }
+    set(r, 0x3c, 0.6);
+    rec::set_i16(r, 0xa, ticks as i16);
+    for k in 0..4 { set(r, 0x20 + 4 * k, vel[k]); }
+    Some(i)
+}
+
 /// `PartType25Spawn(pos, vel, variant)` 0x2825f8 with the spawner's size draw `size` (already made). None when the
 /// pool is full.
 pub fn spawn(sys: &mut Particles, pos: [f32; 4], vel: [f32; 4], variant: bool, size: f32) -> Option<usize> {
@@ -150,5 +179,21 @@ mod tests {
         let c = rec::u32(&s.pool.recs[i], 4);
         assert_eq!((c & 0xff, c >> 8 & 0xff), (178, 229));
         assert!(f(&s.pool.recs[i], 0x30) < 0.0);
+    }
+
+    /// Type 65 (level07 `0x29c4e8`): one size draw, the non-variant spark, run by the same update (table row 65).
+    #[test]
+    fn type65_is_the_plain_spark() {
+        let mut s = Particles::new(None, Vec::new());
+        let mut rng = Rng::new();
+        let mut t = rng;
+        let i = spawn65(&mut s, &mut rng, [5.0, 5.0, 5.0, 1.0], [0.1, 0.0, 0.0, 0.0]).unwrap();
+        assert_eq!(f(&s.pool.recs[i], 0xc), t.randf(20000.0, 120000.0));
+        assert_eq!(rng, t);
+        assert_eq!(s.pool.recs[i][0], 65);
+        s.update_parts(&mut rng);
+        let r = &s.pool.recs[i];
+        assert_eq!((f(r, 0x30), f(r, 0x34), f(r, 0x38)), (0.99, 1.0 - 0.030_01, 0.95), "the plain rates");
+        assert_eq!(s.stats.unported_kills[65], 0);
     }
 }

@@ -1,236 +1,277 @@
-# randcrw
+# Ratchet & Clank: ReWrite (randcrw)
 
-A faithful reimplementation of Ratchet & Clank (2002, PS2) in Rust on Bevy, run from the
-owner's own disc, extracted once from their disc image. This is a personal project: it is not
-redistributed, and nothing from the disc (assets, code, dumps, savestates) is stored in this
-repository; the committed verification tables hold only sizes, counts and hashes.
+## Please read first
 
-## Repository map
+> [!IMPORTANT]
+> This repository is for developing randcrw. It is not how you play it. Players will install and run the game
+> through the randcrw launcher, a separate project. Neither the game nor the launcher has been released yet, so there
+> are no downloads (coming later).
 
+> [!WARNING]
+> **You need your own, legally obtained PlayStation 2 disc of Ratchet & Clank (2002).** This project contains no game
+> assets and no copy of the game's code. You extract the game data yourself, from an image of your own disc. The
+> committed verification tables hold only sizes, counts and hashes.
+>
+> Supported right now: **NTSC-U, SCUS-97199, version 1.00, only.** The extractor identifies the disc by its serial and
+> the SHA-1 of its boot executable and refuses anything else, including:
+> - PAL (SCES-50916) and NTSC-J (SCPS-15037) discs, and the demo discs;
+> - a Greatest Hits disc whose boot executable differs from v1.00 (Greatest Hits discs share the serial SCUS-97199);
+> - the later releases: the PS3 HD collection, the PS4 and PS Now versions, and the 2016 game;
+> - the sequels (they are recognised by name and refused).
+>
+> randcrw is an unofficial fan project. It is not affiliated with or endorsed by Sony Interactive Entertainment or
+> Insomniac Games. Ratchet & Clank and all related names are trademarks of their respective owners.
+
+## Table of contents
+
+- [Please read first](#please-read-first)
+- [Project description](#project-description)
+  - [Strategy](#strategy)
+  - [Objectives](#objectives)
+  - [Platforms](#platforms)
+- [Current status](#current-status)
+- [Methodology](#methodology)
+- [Setting up a development environment](#setting-up-a-development-environment)
+  - [Requirements](#requirements)
+  - [Building and running the game](#building-and-running-the-game)
+  - [Testing](#testing)
+  - [Development switches](#development-switches)
+  - [Other dev chores](#other-dev-chores)
+- [Technical project overview](#technical-project-overview)
+- [License](#license)
+
+## Project description
+
+randcrw is a native rewrite of Ratchet & Clank (2002, PlayStation 2) in Rust, on the Bevy engine. The game's systems
+are rebuilt from a decompilation of the original code and run as native code. It is not an emulator, not a static
+recompiler, and it does not model the PS2 hardware.
+
+### Strategy
+
+1. Decompile the game in Ghidra: the boot executable and each level's code overlay, with the names we derive kept in
+   committed tables.
+2. Port the game's shared systems natively, matching the original's behaviour and values. Every port cites the
+   addresses of the functions it reproduces.
+3. Write our own extractor, `randcrw-extract`, that turns an image of your disc into a data folder the engine reads
+   directly. The engine never reads the disc image itself.
+4. Build a launcher (Tauri, separate repository) that installs game versions, runs the extractor once and starts the
+   game. Mod support is planned on top of it.
+
+### Objectives
+
+- **Native and fast.** No emulation layer: custom Bevy render pipelines with WGSL shaders derived from the game's VU1
+  programs, and game logic in plain Rust.
+- **Faithful.** The port must behave like the original: what the player sees, hears and feels. Where the PS2
+  hardware causes a visible effect, the port reproduces the result natively. Bit-exact comparison is a diagnostic
+  tool, not the goal (the native-first policy in [`docs/plan/decisions.md`](docs/plan/decisions.md)).
+- **Shared the way the original shares it.** A system the game uses on many levels is ported once and reused wherever
+  the game uses it, not copied per level.
+- **Mods, later.** Through the launcher; the design is in [`docs/plan/mods.md`](docs/plan/mods.md).
+
+### Platforms
+
+- **macOS on Apple Silicon:** the development platform and the only one tested.
+- **Windows and Linux:** planned, untested. The code has their settings paths and the packaging script has branches
+  for them, but neither has been built or run there.
+
+## Current status
+
+Early, in active development, and not playable from start to finish.
+
+- **All 19 levels load and render:** terrain, ties and shrubs with the game's own LOD, culling and lighting; the sky;
+  animated objects ("mobys"); fog, occlusion, particles and shadows.
+- **Novalis is the most complete level.** On the other levels a growing share of the objects run their ported update
+  code. The latest census (2026-09-29) counts about 2,955 created object instances, in 375 port units, that still
+  run no update ([`docs/plan/class_census.md`](docs/plan/class_census.md)).
+- **In the port:** Ratchet's movement and hero states, the wrench, the weapons and gadgets; the sea and water; the
+  pause menu, the HUD and the in-game map; the Gadgetron vendor; in-engine cutscenes and the FMV movies (our own
+  MPEG-2 decoder); sound effects and music.
+- **Missing:** planet travel and the ship; the main menu and saving / loading; the Clank, Giant Clank and Hologuise
+  sections; the hoverboard and races; ship combat; checking jump and landing timing against the original.
+
+Every known gap is listed by missing system in [`docs/plan/gaps.md`](docs/plan/gaps.md), and
+[`docs/plan/priority_order.md`](docs/plan/priority_order.md) orders them.
+
+## Methodology
+
+- **Decompilation.** The boot executable and the 19 level overlays are separate programs in one Ghidra project, with a
+  PS2 Emotion Engine processor module. Names live in `tools/ghidra/names/` and are applied by script; the first boot
+  function names came from Lombyte's splat configuration. The decompiled C is exported to `work/decomp/`, which is
+  git-ignored and never committed. See [`docs/workflows/ghidra.md`](docs/workflows/ghidra.md) and
+  [`docs/plan/decomp_workflow.md`](docs/plan/decomp_workflow.md).
+- **Per-level code identity.** Each level overlay carries its own compiled copy of the engine and hero code, linked at
+  other addresses. A masked comparison (relocated jump targets, address halves and `$gp` offsets hidden) decides
+  whether a level's copy is the same code as the port's reference. A port then runs on every level whose code
+  matches, and the levels that differ are listed. `cargo run -p rc-trace -- overlay-diff` answers this for any
+  function. See [`docs/plan/level_generalisation.md`](docs/plan/level_generalisation.md).
+- **PCSX2 traces.** `rc-trace` reads the game's memory from PCSX2 savestates, or live over PINE, and compares it with
+  the port. Findings reach the tests only as small, numbers-only fixtures. See
+  [`docs/workflows/pcsx2.md`](docs/workflows/pcsx2.md) and [`docs/plan/trace_harness.md`](docs/plan/trace_harness.md).
+- **Coverage tables.** A port's plan doc lists every call and branch of the functions it ported, each marked as
+  ported (with the file and function), a gap ID, or not applicable with a reason.
+- **Tests without personal files.** The loaders are golden-tested on all 19 levels against committed hash tables.
+  Tests read only the extracted game data and committed fixtures, never the disc image, savestates or recordings; a
+  guard test enforces this. See [`docs/workflows/testing.md`](docs/workflows/testing.md).
+- **References.** Wrench (GPL-3) is used as format documentation only; every reader here is written from the specs in
+  [`docs/formats/`](docs/formats/). OpenGOAL is the architectural model: decompiled game code on a rewritten runtime.
+
+## Setting up a development environment
+
+### Requirements
+
+- **Rust**, stable, through rustup ([rustup.rs](https://rustup.rs)). On macOS, Homebrew's rustup also works; it is
+  keg-only, so put it on `PATH` first:
+
+  ```sh
+  brew install rustup
+  export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+  rustup default stable
+  ```
+
+- **An image of your disc** (`.iso`), and about 4.4 GiB of free space for the extracted data.
+- **Optional:** [cargo-nextest](https://nexte.st) (the test commands use it when installed) and cargo-sweep (keeps
+  `target/` small):
+
+  ```sh
+  cargo install cargo-nextest --locked
+  cargo install cargo-sweep --locked
+  ```
+
+- **Optional, for research:** Ghidra with the Emotion Engine processor module and the GhidraMCP plugin, plus
+  Python 3 for the scripts ([`docs/workflows/ghidra.md`](docs/workflows/ghidra.md)); PCSX2 with PINE enabled
+  ([`docs/workflows/pcsx2.md`](docs/workflows/pcsx2.md)).
+- **Optional, for the launcher:** Node and npm; see [`docs/workflows/launcher.md`](docs/workflows/launcher.md).
+
+Any editor with rust-analyzer works; nothing in the repository depends on one.
+
+### Building and running the game
+
+Run everything from the repository root.
+
+1. **Check your disc image.** This prints the serial, region and version, and whether it is supported:
+
+   ```sh
+   cargo run --release -p rc-extract -- identify --iso "<path to your disc image>.iso"
+   ```
+
+2. **Extract the game data** into `extracted/`, the development data folder (git-ignored). Set `RC_ISO` once, then:
+
+   ```sh
+   export RC_ISO="<path to your disc image>.iso"
+   cargo xtask regen-data
+   ```
+
+   This builds `randcrw-extract`, extracts into a staging folder, verifies every file's size and SHA-1, and only then
+   swaps the result in. It takes about 8 seconds on the development machine. `--iso <image>` works instead of
+   `RC_ISO`. To extract into another folder with the extractor directly:
+
+   ```sh
+   cargo run --release -p rc-extract -- extract --iso "<path to your disc image>.iso" --out <data folder>
+   ```
+
+   `--ntsc-only` skips the PAL copies the disc also carries (about 1.4 GiB the game never reads). The other
+   subcommands (`verify`, `prepare`, `export`) are in [`docs/workflows/game-data.md`](docs/workflows/game-data.md).
+
+3. **Build and run:**
+
+   ```sh
+   cargo dev
+   ```
+
+   `cargo dev` is an alias for `cargo run -p rc-engine --features dev`, which links Bevy dynamically so a rebuild
+   relinks in seconds. The first build compiles Bevy and takes a few minutes. It starts on Novalis;
+   `RC_LEVEL=<n> cargo dev` picks another level. For another data folder: `cargo dev -- --data-dir <data folder>`.
+
+   A release or profiling build: `cargo run --release -p rc-engine`. The crate is `rc-engine`; its executable is
+   `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
+
+### Testing
+
+Tests run only through `cargo xtask`, never through `cargo test` or `cargo nextest` by hand. The xtask commands pass
+the flags that reuse the `cargo dev` Bevy build; tests that need game data skip when `extracted/` is absent.
+
+```sh
+cargo xtask test-quick                # unit tests of every crate (about 5 s)
+cargo xtask test-job hero world       # a job's tier: unit tests plus those areas' integration tests
+cargo xtask test-full                 # the full suite
+cargo check-all                       # type check everything, tests included
+cargo clippy-all                      # lints
 ```
-crates/                 PRODUCT (ships; never depends on tools/)
-  rc-formats              disc and level format readers, bit-exact load-time passes, golden-tested
-                          against committed snapshot hashes (data/loader_snapshots.tsv)
-  rc-data                 Tier 1 engine cache
-  rc-game                 game logic ports (pure Rust, no Bevy)
-  rc-engine               Bevy app, executable `randcrw`
-  rc-extract              `randcrw-extract`: extract / verify / prepare / export
-tools/                  DEV ONLY (never ships; one README each)
-  ghidra/scripts, names   Ghidra import / naming / export scripts and the name tables
-  trace                   PCSX2 harness (package `rc-trace`): the port vs the game's EE RAM
-  package                 release packaging (package.sh)
-  repo-checks             guard tests for this layout
-  xtask                   `cargo xtask <command>`: dev chores, one short command each (regen-data, package)
-docs/                   formats/ (format specs), plan/ (investigations, roadmap, decisions),
-                        workflows/ (one page per dev workflow: ghidra, pcsx2, game-data, release, launcher, testing)
-extracted/   (ignored)  game data only, as randcrw-extract writes it
-work/        (ignored)  generated dev output: decomp/, trace/, ghidra-import/, vu/, exports/, captures/
-dist/, target/ (ignored) release packages, build output
-~/PS2/ratchet1/         outside the repo: the ISO, savestates/, traces/ (recordings), the Ghidra project's
-                        future home ghidra/ (today ~/ratchet1.gpr + ~/ratchet1.rep)
-```
 
-Four kinds of data, four homes:
+The areas, the tiers, how to run one test, and the hero digest are in
+[`docs/workflows/testing.md`](docs/workflows/testing.md) and [`tools/xtask/README.md`](tools/xtask/README.md).
 
-| Kind | Home | In git |
-|---|---|---|
-| Source: code, docs, Ghidra scripts, name lists, committed expected values (hash tables, distilled fixtures) | the repo | yes |
-| Game data, rebuildable from the ISO | `extracted/` (dev; players: the launcher's data folder) | no |
-| Generated dev output, rebuildable by a tool | `work/` | no |
-| Personal material: the ISO, the Ghidra project, savestates, recordings | `~/PS2/ratchet1/` | no |
+### Development switches
 
-Only source and game data may feed tests; personal material never does (PCSX2 findings reach tests as distilled,
-numbers-only fixtures). `tools/repo-checks` guards the product side. Layout and rules: `docs/plan/repo_reorg.md`.
-
-## Toolchain
-
-Rust comes from Homebrew's rustup; put it on `PATH` first:
-
-```
-export PATH=/opt/homebrew/opt/rustup/bin:$PATH
-cargo dev                        # run the engine (Bevy dynamically linked, fast relink)
-cargo xtask test-quick           # unit tests of every crate (about 5 s)
-cargo xtask test-job hero world  # a job's tier: unit tests + the areas' integration binaries (docs/workflows/testing.md)
-cargo xtask test-full            # the full suite (tests needing game data skip without extracted/)
-cargo xtask regen-data           # (re)build the dev game data extracted/ from your disc image (RC_ISO)
-cargo xtask sweep                # keep target/ under 30 GB (cargo-sweep; --dry-run, --limit 20G)
-cargo xtask package              # release packaging (tools/package/package.sh)
-cargo xtask help                 # the other dev chores
-cargo run --release -p rc-engine # release / profiling build
-```
-
-`cargo dev` and `cargo dev-build` are aliases in `.cargo/config.toml` (`-p rc-engine --features dev`); so is
-`cargo xtask` (`run -q -p xtask --`, the dev-chore runner in `tools/xtask`, std only).
-The crate is `rc-engine`; its executable is `randcrw` (`target/debug/randcrw`, `target/release/randcrw`).
-
-Testing: tests run only through `cargo xtask test-quick [crate]`, `cargo xtask test-job <area…>` (or
-`--test <binary>`, with `--filter <name>` for one module or test), `cargo xtask test-full` and `cargo xtask
-digest-baseline`; never `cargo test` or `cargo nextest` by hand (`docs/workflows/testing.md` §1). They pass
-`--workspace --features rc-engine/dev`, which enables Bevy's `dynamic_linking` like `cargo dev`, so the tests reuse
-the one Bevy build `cargo dev` made (plain `cargo test --workspace` would compile a second, static Bevy). Compile
-checks: `cargo check-all` and `cargo clippy-all` (aliases with the same features plus `--all-targets`); they share one
-Bevy check build (metadata only, which a test build cannot reuse). Release builds and `tools/package` stay static
-(never `--features dev`).
-
-`target/` stays under 30 GB through `cargo xtask sweep` (cargo-sweep, `cargo install cargo-sweep --locked`): it
-removes the least recently used build units, refuses while a build runs, and runs at the end of `cargo xtask
-test-full`. `cargo clean` is the manual full reset (the next build recompiles Bevy). Details:
-`docs/workflows/testing.md` §9.
-
-The integration tests are 11 binaries, one per area: rc-game's `hero`, `weapons`, `classes`, `world` and `ui`, and
-`formats`, `data`, `extract`, `movies`, `trace`, `guards` (`tests/<area>/main.rs`, one module per former test file:
-`cargo xtask test-job --test hero --filter hero_novalis::novalis_hero_digest --exact`). The `cargo xtask test-*`
-commands run the tiers of `docs/workflows/testing.md` with `RC_AUDIO=0`, through cargo-nextest when it is installed
-(`cargo install cargo-nextest --locked`; settings in `.config/nextest.toml`), else through `cargo test`.
-
-The loaders' golden tests (`crates/rc-formats/tests/formats/golden.rs`) compare what the Rust loaders produce for all 19
-levels with `crates/rc-formats/data/loader_snapshots.tsv` (per test, level and section: item count, byte count,
-SHA-1). The table was generated while the output was byte-identical to the C++ reference extractor, retired on
-2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo xtask
-test-job --test formats --filter golden::` rewrites the rows of the tests that ran.
-
-## Game data
-
-The engine never reads the disc image. The user extracts their own disc once with
-`randcrw-extract` (`crates/rc-extract`; the launcher runs it), and the game then reads only that
-data folder (layout: `docs/plan/launcher_extractor.md` §4.1; contract:
-`docs/plan/launcher_contract.md`):
-
-```
-cargo xtask regen-data                    # development: (re)build <repo>/extracted from RC_ISO
-cargo run --release -p rc-extract -- extract --iso "<your disc>.iso" --out <data folder>
-cargo dev -- --data-dir <data folder>     # or RC_DATA_DIR=<data folder> cargo dev
-cargo dev -- --version-json               # {"name":"randcrw","version":"0.1.0","game":"rac1","data_format":1}
-```
-
-The data folder is chosen in this order:
-
-1. `--data-dir <folder>` (also `--data-dir=<folder>`), how the launcher starts the game;
-2. `RC_DATA_DIR`;
-3. the development default: `RC_EXTRACTED`, else `<repo>/extracted` (a `randcrw-extract`
-   data folder, same layout).
-
-The folder must exist and hold `toc.bin`, and for 1 and 2 also the extractor's
-`extract-info.json` with a matching `data_format` (the development tree may lack it: one
-warning). Otherwise the engine prints one `error:` line saying what to do (re-extract via the
-launcher) and exits before opening a window: code 3 (folder missing, not a data folder, or
-extraction incomplete), code 4 (data format mismatch or unreadable `extract-info.json`), code 2
-(`--data-dir` without a value). `--version-json` prints the contract line and exits without
-touching any data.
-
-**Engine cache (Tier 1).** `extract` ends by building `<data folder>/cache/v1/` (stage `prepare`,
-about 0.2 s, 440 MiB): every level's core data, gameplay file and HUD banks, WAD-decompressed once,
-plus `stamp.toml`. `randcrw-extract prepare --out <data folder>` rebuilds or refreshes it from the
-archive alone (no disc). The engine reads lumps through `rc-data` (once per process each); when the
-cache is missing, stale (stamp: cache version, converter versions, `extract-info.json` hash) or a
-lump is corrupt (XXH64 trailer), it rebuilds what it needs on the fly with one log line per lump,
-and falls back to in-memory decompression when the folder cannot be written. The development
-`extracted/` tree therefore gets `extracted/cache/v1/` on the first `cargo dev`. The folder can be
-deleted at any time. `RC_CACHE=0` skips it; `RC_PERF_LOG=1` prints where each lump came from.
-
-**Exports (Tier 2, optional).** `randcrw-extract export --out <data folder> [--to <dir>] [--what
-textures,audio,models,levels,collision,text|all] [--level NN]` writes usable formats from the archive (no disc):
-indexed PNG textures with JSON sidecars (original CLUT and GS format), WAV audio with loop points, glTF 2.0
-levels, collision and skinned, animated moby models, and JSON tables and text. Default folder `<data
-folder>/exports/`; the full disc is about 60,000 files and 3.5 GiB in about 10 s. The game never reads them; the
-launcher's "Export assets…" runs the same command. Layout and what is lossy: `docs/plan/launcher_extractor.md`
-§5.5; how mods will use them: `docs/plan/mods.md` §2.1a.
-
-Tests and `rc-trace` read the development `extracted/` tree (`RC_EXTRACTED` overrides it;
-`rc_formats::test_data::root()`); they read only Tier 0 files, so any `randcrw-extract` data folder works, and they
-skip when it is absent. Decompressed lumps, core blocks (`moby_class/NNNN`, `ratchet_seq/NNN`, …) and gameplay
-sections (`level_settings`, …) come from the Rust loaders (`rc_formats::test_data`). An `extracted/` tree written by
-the retired C++ extractor still works; its extra files (`.dec`, `*_dump.bin`, `core/` and `gameplay/` splits,
-`overlay.elf`, PNG/OBJ previews, `vu/`) are no longer read; `cargo xtask regen-data` regenerates a clean tree
-(`docs/workflows/game-data.md`).
-
-Port settings (MSAA, the "Port Options" page) live in `~/Library/Application Support/randcrw/settings.toml`
-(macOS), `$XDG_CONFIG_HOME/randcrw/` (Linux) or `%APPDATA%\randcrw\` (Windows); an older
-`randcre/settings.toml` there is copied over once on the first start. `RC_SETTINGS_FILE` overrides.
-
-## Packaging
-
-```
-cargo xtask package                   # release build of randcrw + randcrw-extract, then package
-cargo xtask package --no-build        # package the binaries already in target/release
-```
-
-(`cargo xtask package` runs `tools/package/package.sh` with the same arguments.)
-
-It writes `dist/randcrw-<version>-<os>-<arch>/` and a `.zip` of it (`dist/` is git-ignored). The folder is a
-launcher version (`docs/plan/launcher_contract.md`): `randcrw`, `randcrw-extract`, `assets/shaders/*.wgsl`,
-`randcrw-manifest.json` (version from `crates/rc-engine/Cargo.toml`) and `README.txt`. The script fails if anything
-else ends up in the folder, so no disc data can be packaged, and it checks the packaged `randcrw --version-json`.
-The build is a plain `--release` build without `--features dev`. macOS is tested; the Linux and Windows (Git Bash)
-branches are written but untested. No signing yet: a downloaded zip is quarantined by macOS Gatekeeper.
-
-The runtime loads its shaders from `assets/` next to its (symlink-resolved) executable, or from
-`../Resources/assets` in a macOS `.app`; when neither exists (`cargo dev`, `target/*/randcrw`) it uses the repo's
-`crates/rc-engine/assets` (`main.rs` `asset_dir`).
-
-## Engine environment switches
-
-Boolean switches are on with `1` (or off with `0` where the default is on).
+The engine reads `RC_*` environment variables for debugging. The ones used most:
 
 | Variable | Effect |
 |---|---|
-| `RC_DATA_DIR` | Game data folder when `--data-dir` is not given (see "Game data") |
-| `RC_EXTRACTED` | Development data tree (default `<repo>/extracted`); the engine's fallback when neither `--data-dir` nor `RC_DATA_DIR` is set, and the tests' root |
-| `RC_CACHE` | `0`: do not use or write the engine cache `<data>/cache/v1` (decompress in memory, once per process) |
-| `RC_PERF_LOG` | `1`: print one line per game-data lump request (engine cache, memory or decompressed; MiB, ms) |
 | `RC_LEVEL` | Level index to load (default 1, Novalis) |
-| `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target, game units) |
+| `RC_GIVE_ITEMS` | `id,id,…`: own those items from the start, and equip the last one per slot |
+| `RC_GIVE_BOLTS` | `n`: start with n bolts |
+| `RC_HERO_AT` | `x,y,z[,yaw]`: place Ratchet there at the level load |
+| `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target) |
 | `RC_SCREENSHOT` | Save a screenshot to this path, then exit |
-| `RC_SCREENSHOT_DELAY` | Seconds before the screenshot (default 3) |
-| `RC_DUMP_FRAMES` | `start..end`: save every frame from update `start` to `end` (inclusive) as `frame_NNNNN.png` into `RC_DUMP_DIR` (default `frames`), then exit (dev only; frame-exact, offscreen like `RC_SCREENSHOT_FRAME`) |
-| `RC_DUMP_DIR` | Folder for `RC_DUMP_FRAMES` |
-| `RC_DUMP_REALTIME` | `1`: `RC_DUMP_FRAMES` in real-time mode (wall-clock ticks as in play, not frame-exact; dev only) |
-| `RC_DUMP_TICKS` | `n,m,…`: in frame-exact mode, update k runs the k-th entry's game ticks, cycled (`1,0` = a 120 Hz display, `2` = 30 Hz; dev only, for real-time pacing repros) |
-| `RC_NOVSYNC` | `1`: present without vsync, so `fps:` measures headroom |
-| `RC_FOG` | `0`: disable fog |
-| `RC_NO_LIGHT` | `1`: skip the load-time lighting passes (tfrag, tie, shrub, moby); stored colours used |
-| `RC_WORLD_LIGHTS` | `0`: point lights (explosions) do not relight tfrags, ties and shrubs |
-| `RC_WORLD_LIGHTS_TRACE` | `1`: print, every frame, the frame time, the point-light bank and the listed tfrag / tie / shrub counts |
-| `RC_LOD` | `0`: force tfrag LOD 0 |
-| `RC_LOD_TINT` | `1`: tint tfrag LOD 1 red, LOD 2 blue, clipping path green |
-| `RC_TIE_LOD` | `0`: force tie LOD 0 with morph k = 0 (culling unchanged) |
-| `RC_TIE_LOD_TINT` | `1`: tint tie LOD 1 red, LOD 2 blue |
-| `RC_SEA` | `0`: do not draw the seas and liquid surfaces of the draw callbacks (crate::sea_render) |
-| `RC_NO_TIES` | `1`: do not draw ties |
-| `RC_NO_SHRUBS` | `1`: do not draw shrubs |
-| `RC_SKY_ROT` | Sky rotation speed in ticks per 60 Hz tick (`0` freezes; default 1) |
-| `RC_ANIM` | `0`: disable moby animation (bind pose) |
-| `RC_MOBY_CPU_LIGHT` | `1`: use the bit-exact CPU moby lighting (bind pose) instead of the GPU path |
-| `RC_MOBY_GLOW` | `0`: no moby glow list (glow packets drawn lit instead of in the moby's glow colour +0x90) |
-| `RC_MOBY_LIGHT_CHECK` | `1`: compare GPU vs bit-exact CPU moby lighting at load and report |
-| `RC_OCCL` | `0`: occlusion off; `1`: freeze the mask built from the starting camera |
-| `RC_OCCL_STATS` | `1`: print occlusion cell and cull counts, at most once a second |
-| `RC_GIVE_HYDROPACK` | `1`: own the Hydro-Pack (item 4) from the start (debug; the swim code reads it) |
-| `RC_GIVE_ITEMS` | `id,id,…` (decimal or `0x` hex): own those items from the start (debug; `rc_game::inventory::debug_grant`, docs/plan/gadgets.md §6); the last back (2 Heli-Pack, 3 Thruster-Pack, 4 Hydro-Pack), feet (28 Magneboots, 29 Grindboots) and head item (5..7) among them are saved as equipped, and the last hand item (e.g. 12, the Swingshot) is requested into the hand. Unset: the game's own starting state |
-| `RC_GIVE_ITEMS_EQUIP` | `0`: `RC_GIVE_ITEMS` only owns the items (nothing equipped; equip them in the pause menu's Gadgets page) |
-| `RC_HERO_AT` | `x,y,z[,yaw]`: place Ratchet there at the level load, before the hero init's ground snap (debug; e.g. on a grind rail with `RC_GIVE_ITEMS=29`) |
-| `RC_GIVE_BOLTS` | `n`: start with n bolts (debug; e.g. to buy at the Gadgetron vendor) |
-| `RC_INTERACT_TRACE` | `1`: log the context prompt's owner changes, the "use" hand-offs (vendor, talkers), vendor purchases and sounds (docs/plan/interaction.md) |
+| `RC_DUMP_FRAMES` | `start..end`: save those frames as PNGs (frame-exact), then exit |
+| `RC_AUDIO` | `0`: no audio |
 
-## Dev workflows
+The full table, the command-line options and the settings file are in
+[`docs/workflows/dev-switches.md`](docs/workflows/dev-switches.md).
 
-One page each in `docs/workflows/`: `ghidra.md` (the Ghidra project: set-up, naming, decompiler export),
-`pcsx2.md` (savestates, PINE, recording and comparing with `rc-trace`), `game-data.md` (extract / verify / prepare /
-export, regenerating the dev `extracted/`), `release.md` (packaging), `launcher.md` (the launcher's dev setup) and
-`testing.md` (test tiers, the area → tests map, the test audit).
-For example, with a savestate taken on Novalis:
+### Other dev chores
 
-```
-PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo run -p rc-trace -- compare-tfrag-light --state latest --level 01
+```sh
+cargo xtask help                      # list the dev chores
+cargo xtask sweep                     # keep target/ under 30 GB (needs cargo-sweep; --dry-run, --limit 20G)
+cargo xtask package                   # release build of randcrw + randcrw-extract, packaged for the launcher
 ```
 
-## Reference material (not vendored)
+Packaging: [`docs/workflows/release.md`](docs/workflows/release.md). Running a local build from the launcher:
+[`docs/workflows/launcher.md`](docs/workflows/launcher.md).
 
-* `~/Globals/wrench`: Wrench (GPL-3), used as format documentation only; all reader code here
-  is written from the specs in `docs/formats/`.
-* `~/Globals/jak-project`: OpenGOAL (ISC), architectural reference.
-* `~/Globals/ghidra-emotionengine-reloaded`: PS2 processor module for Ghidra.
-* `~/Globals/ghidra-mcp`: GhidraMCP bridge to the Ghidra project.
+## Technical project overview
 
-See `docs/plan/roadmap.md` for status and milestones and `docs/plan/decisions.md` for the
-decisions already taken.
+```
+crates/          the product; it ships, and never depends on tools/
+  rc-formats       readers for the disc and level formats, golden-tested against committed hashes
+  rc-data          the engine cache: decompressed game data on disk, served once per process
+  rc-game          the game logic ports (plain Rust, no Bevy)
+  rc-engine        the Bevy app; executable `randcrw`
+  rc-extract       the extractor; executable `randcrw-extract` (identify, extract, verify, prepare, export)
+  rc-video         our own MPEG-2 decoder and PSS movie player core
+tools/           dev only, never ships; one README each
+  trace            `rc-trace`: the PCSX2 harness and the overlay diff
+  ghidra           Ghidra import, naming and export scripts, and the name tables
+  package          release packaging
+  repo-checks      guard tests for the repository layout and rules
+  xtask            `cargo xtask <command>`: one short command per dev chore
+docs/
+  formats/         format specs
+  plan/            investigations, decisions, roadmap, gaps
+  workflows/       one page per dev workflow
+extracted/       (git-ignored) game data only, as randcrw-extract writes it
+work/            (git-ignored) generated dev output: decompiler export, traces, captures, exports
+dist/, target/   (git-ignored) release packages, build output
+```
+
+Data has four homes: source in the repository; game data, rebuilt from your disc, in `extracted/`; generated dev
+output, rebuilt by a tool, in `work/`; and personal material (the disc image, the Ghidra project, savestates,
+recordings) in a folder of your own outside the repository. Only source and game data may feed tests. Details:
+[`docs/plan/repo_reorg.md`](docs/plan/repo_reorg.md).
+
+Where to read next:
+
+- [`docs/plan/roadmap.md`](docs/plan/roadmap.md): milestones and what each system does in the port.
+- [`docs/plan/decisions.md`](docs/plan/decisions.md): the decisions taken, and why.
+- [`docs/plan/gaps.md`](docs/plan/gaps.md) and [`docs/plan/priority_order.md`](docs/plan/priority_order.md): what is
+  missing, and in what order.
+- [`docs/plan/launcher_contract.md`](docs/plan/launcher_contract.md): the interface between the launcher, the
+  extractor and the game.
+- [`docs/plan/launcher_extractor.md`](docs/plan/launcher_extractor.md): the data folder layout and the extractor's
+  design.
+- [`docs/workflows/`](docs/workflows/): game data, testing, Ghidra, PCSX2, release, launcher, dev switches.
+
+## License
+
+All rights reserved for now. The workspace's `Cargo.toml` declares `license = "UNLICENSED"`: no licence is granted.

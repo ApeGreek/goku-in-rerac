@@ -245,15 +245,15 @@ L01:0027c498	CreatePart	particles	has	V	CreatePart
 H:8eab78ecd474c056	FUN_002678b8	particles	has	V	CreatePart (short copy)
 L01:00278810	FUN_00278810	particles	has	V	trail puffs (cutscene_fx.rs)
 C:dd9a5274ae45		particles	has	L	ring of type-21 / type-44 particles, not on L01
-L01:0027e750	PartType05Spawn	ptype	missing	V	type 5 spawner (no type05 module)
-L01:00282ef0	PartType28Spawn	ptype	missing	V	type 28
+L01:0027e750	PartType05Spawn	particles	has	V	type 5 spawner (particles::type05, 2026-09-29)
+L01:00282ef0	PartType28Spawn	particles	has	V	type 28 (particles::type28)
 L01:00284d88	PartType40Spawn	ptype	missing	V	type 40
-L01:00285768	PartType41Spawn	ptype	missing	V	type 41
+L01:00285768	PartType41Spawn	particles	has	V	type 41 (particles::type41)
 L01:00287e70	PartType58Spawn	ptype	missing	V	type 58
-L01:00289850	PartType67Spawn	ptype	missing	V	type 67
-L01:0028a7a8	PartType74Spawn	ptype	missing	V	type 74
-C:1fa9adb9d4ec	FUN_00274948	ptype	missing	V	CreatePart(0x45): type 69 spawner, not on L01
-L01:002780b0	SpawnImpactSparks	ptype	missing	L	SpawnImpactSparks (particles.md only)
+L01:00289850	PartType67Spawn	particles	has	V	type 67 (particles::type67)
+L01:0028a7a8	PartType74Spawn	particles	has	V	type 74 (particles::type74)
+C:1fa9adb9d4ec	FUN_00274948	particles	has	V	CreatePart(0x45): type 69 spawner, not on L01 (particles::type69)
+L01:002780b0	SpawnImpactSparks	particles	has	L	SpawnImpactSparks (particles::type01::impact_sparks)
 L01:00211870	CollLine_Fix	coll	has	V	CollLine_Fix
 L01:00212960	coll_sphere	coll	has	V	coll_sphere
 L01:00214468	coll_sphere_mobys	coll	has	V	coll_sphere_mobys
@@ -367,7 +367,7 @@ C:c4c12687d93c	FUN_00262e40	path	has	V	position + rotation at t along a path: th
 C:49a176c9f6de	FUN_00270d00	path	has	V	position pushed r from the path walls (path table 0x1b04b0): path.rs push_from_walls (no class consumer ported yet)
 C:aeb1c69a6e0e	FUN_00264558	path	has	V	path point nearest a distance: the flyer driver's 0x28b510, path.rs nearest_at_distance
 C:a3bbdace838c	FUN_002a0260	path	has	V	path point nearest a distance, the same code: path.rs nearest_at_distance
-C:dc2339668382		path	missing	L	nearest path points to a pair, not on L01
+C:dc2339668382	FUN_00294cb0	path	has	V	the next waypoint toward a target (L09 0x294cb0, L13 0x282010, L15 0x265b38): path::toward (W2 lane 1)
 C:17a7139ba6a7	FUN_00263710	path	has	V	segment crosses a path wall: identical to ClampToPath 0x276820 (services.rs clamp_to_path_hit)
 C:7c53e29c001b	FUN_00261b48	path	has	V	segment crosses a path wall: identical to ClampToPath 0x276820 (services.rs clamp_to_path_hit)
 L01:00277260	FUN_00277260	path	missing	L	point at distance along a segment list
@@ -388,12 +388,12 @@ L01:00231450		herostate	missing	V	control mode 3 exit (vehicles / Hologuise, G-H
 L01:00231348	FUN_00231348	herostate	missing	L	body / control-mode switch (0x1413f4), G-HERO-005
 L01:00249580	FUN_00249580	herostate	has	L	walk to a point: the states 0x65..0x67 are ported (hero/stance.rs WalkTo); the entry = point 0x140990 + facing 0x14099c + SetState(0x65)
 L01:002495d0	FUN_002495d0	herostate	has	L	hero state in 0x65..0x67 query (hero.state)
-C:8a18636e69bd	FUN_002159d8	herostate	partly	L	the level's hero SetState copy (not code-identical to L01: H2)
-C:7b3e1e804b94	FUN_00227dd0	herostate	partly	L	hero SetState, level copy (H2)
-C:ea215dba76e7	FUN_002356a0	herostate	partly	L	hero SetState, level copy (H2)
-C:2f2e9be4c73e	FUN_00230b38	herostate	partly	L	hero SetState, level copy (H2)
-C:8cdb2fd899d9	FUN_0024db50	herostate	partly	L	hero SetState, level copy (H2)
-C:ec679874da9e	FUN_0022b728	herostate	partly	L	hero SetState, level copy (H2)
+C:8a18636e69bd	FUN_002159d8	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+C:7b3e1e804b94	FUN_00227dd0	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+C:ea215dba76e7	FUN_002356a0	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+C:2f2e9be4c73e	FUN_00230b38	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+C:8cdb2fd899d9	FUN_0024db50	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+C:ec679874da9e	FUN_0022b728	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
 C:f5aa57dd48b9	FUN_00239528	herostate	partly	L	idle state per body (1 Clank 0x43, 2 Giant Clank 0x5a, 3 Hologuise 0x53)
 C:8ee0c630ac3d	FUN_0021ac18	herostate	partly	L	idle state per body, level copy
 C:0e46409356dd	FUN_0022c418	herostate	partly	L	idle state per body, level copy
@@ -443,11 +443,11 @@ L01:00279070	OpenShipMenu	help	has	V	PromptRelease: interact.rs Prompt::release 
 L01:0028bf50	PauseAllSounds	sound	has	V	PauseAllSounds
 L01:002ad558	EnterSlideshowMode	cine	missing	L	EnterSlideshowMode
 L01:00249530	FUN_00249530	gadget	has	V	an item's ammo (or 1 without ammo): hero/weapons.rs 0x249530 (not the Gadgets page's Drone Device path, G-WPN-002)
-C:b73827d476e2	FUN_0021e530	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
-C:ef4e6bb0b47f	FUN_0024cee8	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
-C:4d615d92f5c8	FUN_0021e398	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
-C:84d6abe16fc6	FUN_002400d0	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
-G:001413d4=00000032	hero_state_0x32	herostate	partly	L	a branch on hero state 0x32 (the scripted freeze; the ship-combat mode with the ship moby 0x140940 on 11 / 13 / 17): G-HERO-002 / G-LVL-009
+C:b73827d476e2	FUN_0021e530	herostate	has	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+C:ef4e6bb0b47f	FUN_0024cee8	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2); the Hoverboard's 0x6b (level 05's class passes it: G-HERO-008)
+C:4d615d92f5c8	FUN_0021e398	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2); the Hoverboard states of level 16 (G-HERO-008)
+C:84d6abe16fc6	FUN_002400d0	herostate	has	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
+G:001413d4=00000032	hero_state_0x32	herostate	has	V	a branch on hero state 0x32, mounted (a turret / vehicle class holds him): ported 2026-09-29 (hero/scripted.rs MOUNTED; G-HERO-002). Its setters are all unported classes (the turrets 440 / 1201, 1267, the ships 1242 / 69 / 1379): the branch runs once they are; a branch that also needs the ship moby 0x140940 is G-LVL-009's
 G:001413d4=00000051	hero_state_0x51	herostate	partly	L	a branch on hero state 0x51 (Clank, body 1): G-HERO-005
 G:001413d4=00000065	hero_state_0x65	herostate	has	L	a branch on the walk-to-point state 0x65 (ported: hero/stance.rs)
 G:001413f4=00000001	body_clank	herostate	partly	L	a branch on body 1 (Clank, 0x1413f4 == 1): G-HERO-005
@@ -474,7 +474,7 @@ C:40920504317a	FUN_002f9948	group	partly	L	group command variant: members → st
 C:bcbd2dbe1730	FUN_002f99b0	group	partly	L	group command variant: members in 0x12 → state 0, +0x94 = the class colour, flags (as 0x2f9948)
 C:9c39817b4fe9	FUN_002e9ea0	group	trivial	V	every 827 of the group in state 0x10 or dead (−2 / −3) test
 C:a0194c2bd0e8	FUN_002ef868	fxmoby	missing	L	debris child moby (class 0x140 + n) with random rotation, spin and life, L09 copy of the effect-moby spawner family (G-CLS-026)
-C:b376dbd21da4	FUN_00272cb8	particles	partly	L	smoke puff spawner of three kinds (types from the table 0x1b2880, colours 0x606060 / 0x907070), not on L01
+C:b376dbd21da4	FUN_00272cb8	particles	has	L	type-0 rain streak spawner of three kinds (particles::type00), not on L01
 C:60ae58782f11	FUN_002e1c98	fxmoby	missing	L	child moby between two joint points (draw distance 0xff, flag 0x4000), not on L01 (G-CLS-026)
 C:01476b25f86a	FUN_002de3e0	fxmoby	missing	L	class-435 shot spawned toward the camera position 0x1675c0, not on L01 (G-CLS-026)
 L01:002a2360	FUN_002a2360	cine	partly	L	registers the ship moby 0x13e030 with its draw callback 0x2a1c40 and the level-13 constants (the port has the loader's ship and its hide / show only)
@@ -485,6 +485,11 @@ C:fa408a22bb62	FUN_0020d760	fxdraw	has	L	immediate 4-vertex GS quad packet (tags
 C:c836aca3587d	FUN_00204070	herostate	missing	L	SwitchCharacter (L00 0x210a08's copy): body 0x1413f4 = mode, the body moby, Clank's health swap, Giant Clank's energy 200, SetState: G-HERO-005
 C:12bb06e65f13	FUN_00204110	herostate	missing	L	leave the body: 0x1413f4 = 0, Ratchet's health back (body 1), the body mobys 0x140970 / 0x140974 / 0x13fddc deleted, the body-2 voice 0x140984 released, SetState(0, 1): G-HERO-005
 C:754a80d04806	FUN_00227cf8	herostate	missing	L	leave the body, L06 copy (no body-2 voice): G-HERO-005
-C:dd572bc43542	FUN_0029b8d8	ptype	missing	L	CreatePart(0x3d): type 61 spawner (grey additive sprite from the table 0x1b21f4, spherical offset 0x2781f0), not on L01
+C:dd572bc43542	FUN_0029b8d8	particles	has	L	CreatePart(0x3d): type 61 spawner (particles::type61), not on L01
 L01:00274738	FUN_00274738	target	has	V	a live Devastator missile already targets t (hero/devastator.rs already_targeted over the list 0x1b0bf0)
 C:e00f1d73700a	FUN_0028ec18	talk	has	V	talk slot i's "talked to" flag 0x13d5bc + 16·i = v (interact.rs)
+C:29928a61391b	FUN_00280400	particles	has	V	CreatePart(0x44): type 68 spawner (L13 0x280400: a glow held on a moby's joint, 0.2 / 0.2 / 0.8, 0x80808080 / 0x10808080), not on L01 and not PartType44Spawn: G-PRT-007 (particles::type68, 2026-09-29)
+C:d7574994a069	FUN_0026a498	creature	has	V	SpawnBeamExplosion, L13 copy (decompile word for word 0x273310's; callees relocated): fx::beam_explosion
+C:c294ae52ce36	FUN_00265af0	hit	has	V	hit record from a template (L13; the 0x26e968 writer shape): World::deliver_hit
+C:70fa5037a649	FUN_0027d8d0	particles	has	V	CreatePart(0x33): type 51 spawner (L07, L13, L14), not on L01: particles::type51::spawn
+C:98f51a1cea64	FUN_002e3de8	particles	has	V	the scorch mark (L10 0x2e3de8, L12 0x2e3420, L13 0x3072c0 / 0x30c2b0; PartType52Spawn with the level's gp words): explosive_tank::scorch

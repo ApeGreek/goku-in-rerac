@@ -52,8 +52,9 @@ pub enum Module {
     Weapons,
     /// `crank.rs`: the bolt crank 0x3b (set and driven by the crank class 280).
     Crank,
-    /// `scripted.rs`: the scripted / cutscene control states (0x72 ported: the cinematics' hold; 0x1d: the Visibomb's
-    /// flight).
+    /// `scripted.rs`: the scripted / cutscene control states the classes set and end (0x72: the cinematics' hold; 0x1d:
+    /// the Visibomb's flight; 0x1f: the mouse's summon; 0x32: turrets and vehicles; 0x78: the Umbris boss; 99 / 100:
+    /// the scene body).
     Scripted,
     /// Later: the other bodies (Clank, Giant Clank, Hologuise disguise).
     Bodies,
@@ -112,7 +113,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("ledge climb / jump up", 4, Ledge, true),                   // 0x1c
     s("steering the Visibomb (no control)", 9, Scripted, true),   // 0x1d
     s("look stance (set by mobys)", 0, Stance, true),             // 0x1e
-    s("scripted idle", 9, Scripted, false),                       // 0x1f
+    s("held by a class, control kept (the mouse's summon)", 9, Scripted, true), // 0x1f
     s("gadget lunge (the Walloper)", 6, Melee, true),             // 0x20
     s("wrench rebound", 10, Melee, false),                        // 0x21
     s("Thruster-Pack stomp (R1 in the air)", 0xb, Packs, true),   // 0x22
@@ -131,7 +132,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("slippery-floor walk (surface 7)", 1, Surface, true),       // 0x2f
     s("weapon fire stance 3", 8, Weapons, false),                 // 0x30
     s("sinking floor, surface 4", 0x10, Surface, true),           // 0x31
-    s("scripted freeze", 9, Scripted, false),                     // 0x32
+    s("mounted: a turret / vehicle class holds him (frozen)", 9, Scripted, true), // 0x32
     s("underwater stroke", 0x11, Swim, true),                     // 0x33
     s("underwater drift", 0x11, Swim, true),                      // 0x34
     s("Hydro-Pack thrust", 0x11, Swim, true),                     // 0x35
@@ -201,7 +202,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("hurt on the water surface", 7, Damage, true),              // 0x75
     s("hurt under water", 7, Damage, true),                       // 0x76
     s("death fall (below the level's death height)", 2, Damage, true),  // 0x77
-    s("scripted fall", 9, Scripted, false),                       // 0x78
+    s("held by the Umbris boss 1106", 9, Scripted, true),         // 0x78
     s("pit fall (surface 8 / 0xc)", 2, Damage, true),             // 0x79
     s("pack jump wall rebound", 10, Packs, true),                 // 0x7a
     s("sinking liquid, no health (surface 3)", 0x19, Surface, true), // 0x7b
@@ -362,6 +363,8 @@ mod tests {
         want.extend([0x72, 0x63, 0x64]);
         // The Visibomb's flight (scripted.rs).
         want.push(0x1d);
+        // The class holds 0x1f / 0x32 / 0x78 (scripted.rs, G-HERO-002).
+        want.extend([0x1f, 0x32, 0x78]);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));

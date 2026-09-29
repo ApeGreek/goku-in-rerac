@@ -39,7 +39,8 @@ RC_AUDIO=0; cargo-nextest when installed, else `cargo test --workspace --feature
   test-job <area>... [--test <binary>]...
       The per-job tier: the unit tests plus the integration binaries of each area. Areas (aliases):
         hero, weapons, classes (creatures, mobys), world (levels, collision, water), ui (menus, hud, map, save,
-        vendor), audio, formats, data, extract, video (movies), engine (render, input: unit tests only), trace,
+        vendor), audio, formats, data, extract, video (movies), engine (render, input: unit tests only), particles
+        (fx: the ported classes' particle consumers), trace,
         repo (guards, layout), shared (for shared code: the all-levels smoke, and the NO_IDLE hero digest
         compared with work/test-results/hero_digest_no_idle.txt).
       --test <binary>     also run this integration binary whole (repeatable); with no area, only the binaries

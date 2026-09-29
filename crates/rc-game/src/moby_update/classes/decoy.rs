@@ -370,16 +370,16 @@ fn land(w: &mut World, id: MobyId, z: f32, n: [f32; 3]) {
 /// `0x2d9f90`: a surface of kind 0, 1, 3, 8, 0xb, 0xc or 0xd under it pops it (`0x2d90a8`). True when it popped.
 fn pop_surface(w: &mut World, id: MobyId, surface: i32) -> bool {
     if !matches!(surface, 0 | 1 | 3 | 8 | 0xb | 0xc | 0xd) { return false; }
-    // `0x2d90a8`: ten type-5 puffs around it (3 jitter draws, 3 colour draws, a size, a life), then deleted.
+    // `0x2d90a8`: ten type-5 puffs around it (`particles::type05`: 3 jitter draws ±0.2, 3 colour draws, the growth, a
+    // life), then deleted.
     for _ in 0..10 {
-        for _ in 0..3 { w.rng.randf(f32::from_bits(0xbe4c_cccd), f32::from_bits(0x3e4c_cccd)); }
-        w.rng.rand();
-        w.rng.rand();
-        w.rng.rand();
-        w.rng.randf(f32::from_bits(0x47c3_5000), f32::from_bits(0x4912_7c00));
-        let r = w.rng.rand();
-        let life = w.ticks(r % 0x28 + 10);
-        if life != 0 { fx::part_unported(w, 5); }
+        let mut at = w.m(id).position;
+        for x in &mut at[..3] { *x += w.rng.randf(f32::from_bits(0xbe4c_cccd), f32::from_bits(0x3e4c_cccd)); }
+        let (r, g, b) = (w.rng.rand(), w.rng.rand(), w.rng.rand());
+        let grow = w.rng.randf(f32::from_bits(0x47c3_5000), f32::from_bits(0x4912_7c00));
+        let n = w.rng.rand();
+        let life = w.ticks(n % 0x28 + 10);
+        fx::part05(w, grow, 0.0, at, [(r + 0x30) as u32 & 0x3f, (g + 0x20) as u32 & 0x3f, b as u32 & 0x2f], life);
     }
     w.delete_moby(id);
     true
@@ -632,7 +632,7 @@ pub(crate) mod tests {
     }
 
     /// `0x2d9f90` / `0x2d90a8`: a decoy bouncing on a pop surface (the pool's floor, surface 1) pops at once: 10 type-5
-    /// puffs (records) and deleted; on an ordinary floor (surface 2) it lands and stands.
+    /// puffs (live records, `particles::type05`) and deleted; on an ordinary floor (surface 2) it lands and stands.
     #[test]
     fn pops_on_a_pop_surface() {
         let mut b = Bench::new(pool(8.0, 4.0), &[CLASS], [40.0, 40.0, 9.0]);
@@ -644,6 +644,12 @@ pub(crate) mod tests {
         }
         assert!(b.table.mobys[d].is_deleted(), "popped");
         assert_eq!(b.parts(5) - p5, 10, "ten type-5 puffs");
+        // The puffs live their game lives (`particles::type05`): 10 records, faded and gone within 50 updates, none
+        // killed unported.
+        assert_eq!(b.parts.live_by_type()[5], 10);
+        let mut rng = crate::rng::Rng::new();
+        for _ in 0..50 { b.parts.update_parts(&mut rng); }
+        assert_eq!((b.parts.live_by_type()[5], b.parts.stats.unported_kills[5]), (0, 0));
         let mut b = Bench::new(floor(8.0, 0x22), &[CLASS], [40.0, 40.0, 9.0]);
         let d = thrown(&mut b, [20.0, 20.0, 9.0], [0.02, 0.0, 0.0]);
         for _ in 0..200 { b.tick(None); }

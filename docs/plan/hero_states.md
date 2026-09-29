@@ -105,7 +105,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 1 | look stance | 0 | L1/L2 in 0/2/3/4 | 0 release (anim `0x226f10(1)`), 4 | ground case + camera-facing turn (0x1413f5) | `0x226f10(1)`, 0xd | stance.rs (P2) | P |
 | 8 | pack glide / hover | 5 | ✕ held in 6 (> 0.6) / jumps (> 0.6, 1.0, 1.5), Heli-Pack owned, back ≠ Hydro | 6 after 30 ticks without ✕, 0x18, 0x11, landing 3/4/0/2 (0x13f524 = 12 − T) | target 3·dt (5·dt with 0x1404f8 = 3), TurnTo(0.025, 0.3, 720°/s), SpeedStep(15, 7)·dt², vz 0x248f68/0x248b68, sound slots, `HeroWallLedgeCheckA` | 0x13 curve −2 | packs.rs (P4) | P |
 | 0xa | Heli-Pack long jump | 4 | crouch + ✕ moving (stick > 0.7, fwd > 0.9·x) with the Heli-Pack; R1 tap in 7/9 | 3 on landing (anim 5, momentum ×0.8), 0x7a wall | jump case: h 1.9, g 11·dt², air 120 | 0x12 | packs.rs (P4) | P |
-| 0xc | jump variant | 4 | unknown (no parameters in the jump entry) | jump case | jump case | — | jump.rs (none) | – |
+| 0xc | jump variant (dead) | 4 | **no caller on any level** (2026-09-29, "Scripted control"); only the shared jump-group case labels name it | jump case | jump case | — | jump.rs (none) | – |
 | 0xd | Thruster-Pack high jump | 4 | crouch + ✕ standing, Thruster | jump case | curve jump: h 0.1..0.2, takeoff 9, table 0x17c3a0, window 9..44 | 0x11 | packs.rs (P4) | P |
 | 0xf | Heli-Pack high jump | 4 | crouch + ✕ standing, Heli-Pack | jump case | curve jump: h 1.9, takeoff 9, table gp−0x7518, fall-over 4.5, air 130 | 0x15 | packs.rs (P4) | P |
 | 0x10 | Thruster-Pack long jump | 4 | crouch + ✕ moving / ✕+R1 combo in 6 / R1 tap in 7/9, Thruster | 6 after 60 ticks > 1.5, 0x7a, 0x22 | jump case: h 0.4..0.9, ramp 1, g 8.5·dt², acc 44 / dec 50·dt², 0x13f744 = 11.5·dt | 0x26 | packs.rs (P4) | P |
@@ -117,7 +117,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x19 | ledge hang | 3 | 0x18, shimmy end | 0x1c (✕), 6 (back + ✕ / R1, 0x13f500 = 10 / 40), 0x1a / 0x1b (probe `HeroWallLedgeCheckC` 0x22d838 (L00 0x20c758) at ±90° 0.3) | as 0x18 | 0x21 | ledge.rs (P3) | P |
 | 0x1a / 0x1b | shimmy left / right | 3 | 0x19 + stick | 0x19 (wrap / no probe), 0x1c, 6 | two probes `HeroWallLedgeCheckB`, speed from table 0x1c4130 by frame | 0x24 / 0x25 | ledge.rs (P3) | P |
 | 0x1c | ledge climb / jump up | 4 | ✕ hanging | jump case | jump case: h 2.0, takeoff 10, g 25·dt²; carry follows 0x13f848 | 0x22 | ledge.rs (P3) | P |
-| 0x1d / 0x1f / 0x32 / 0x72 / 0x78 | scripted control (0x1413fc no control; 0x32 frozen; 0x78 vel = 0); **0x1d = steering the Visibomb** (ported 2026-09-28: scripted.rs, hero_gameplay.md §17; 0x72 also ported) | 9 | cutscene / moby scripts; 0x1d: the Visibomb's launch / end | set by the scripts | none / ground case | idle | Scripted | 0x1d, 0x72 |
+| 0x1d / 0x1f / 0x32 / 0x72 / 0x78 | class holds: 0x1d steering the Visibomb, 0x1f held with control (the mouse), 0x32 mounted (turrets, vehicles; frozen), 0x72 the cinematics' hold, 0x78 held by the Umbris boss (vel = 0) — "Scripted control" (§3) | 9 | the classes that set them | only the setter's `SetState(0, 1)` | idle case (0x1d / 0x1f / 0x72) / none (0x32 / 0x78) | idle / 0xb | scripted.rs | P (all, 2026-09-29) |
 | 0x3b | bolt crank (was "item use") | 9 | `SetState(0x3b, 1)` by the bolt crank class 280 (`0x2e0c68`, levels 1 / 4 / 8): □ at the bolt with the wrench | 0 by the crank (□ after 60 ticks, or done); the hit intake | none (frozen 0x1413fd: the crank stores his position, yaw, target yaw and clears 0x13f430..0x13f4bf every tick) | 0x44 latch, 0x3f hold, 0x40 / 0x41 turn; wrench 0xb | crank.rs | P |
 | 0x1e | look stance (mobys) | 0 | four moby classes | 0 | ground case | `0x226f10(1)` | stance.rs (P2) | P |
 | 0x20 | gadget lunge (the Walloper) | 6 | ○ with the Walloper (group 0 / 1, or 4 once landed; not state 1) | 0 after frame 20 | lunge 18·dt ticks 10..18, 3 hit spheres (0.8 ahead, ±50°) | — | walloper.rs (hero_gameplay.md §15) | P |
@@ -136,7 +136,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x2e | weapon draw walk | 1 | no SetState caller in any level | 0x17 / 0 after frame 28 | — | 0x2e | weapons.rs (unreachable) | – |
 | 0x2f | slippery-floor walk | 1 | walk on surface 7 (0x140632; L00) | 2 off the surface, 0 | own case (L00 0x217970) | 0x37 / 0x6d | surface.rs (P1) | P |
 | 0x31 | sinking floor | 0x10 | surface 4 (0x140633), grounded, not in groups 7/0x10/0x14 | 0 when off it and 0x13f530 = 0 (momentum = the carried part) | vz = min(disp.z − 50·dt², −40·dt²), turns with 0x13f440, particles 47, sound slot 0x141570, body roll springs | 100 | surface.rs (P1) | P |
-| 0x38..0x3a | gadget poses | 0x13 | one moby callback (`0x309cd0`, not a hand item) | 0 | stop | 0x46 / 0x47 / 0x48 | (Weapons, later) | – |
+| 0x38..0x3a | the Hydrodisplacer's use poses | 0x13 | the Hydrodisplacer item's update `0x309cd0` (item 22) on a pad 341 | 0 (0x38 / 0x39 unless holding item 0x16; 0x3a on the wrap) | velocity to the pad's centre clamped to 2·dt, yaw toward the pad's (≤ 9.42·dt a tick) | 0x46 / 0x47 / 0x48 (8 ticks) | with G-WPN-006 | – |
 | 0x3c | burn bounce | 4 | surface 1 (0x140635; L00), damage 1 | jump case | jump case: h 5.5, takeoff 5, g 15·dt², 150 ticks; → 0x7c on level 10 / twice | 0x43 | damage.rs (P2) | P |
 | 0x3d | death | 0x14 | health < 1 in 0/2, landing without health | fade 0x2319b0 on wrap | ground case | 0x45 | damage.rs (P2) | P |
 | 0x3f | Magneboots walk | 1 | walk / SetState(2) with 0x13f658 = 1 | 4, 0x71, 6, 2 (off the floor), 0 (no stick after 30) | own case: 2..3.5 u/s inside ±70°, TurnTo / SetPlanarVel / gravity in mode 1 | 0x5b | boots.rs (P5) | P |
@@ -631,9 +631,77 @@ still ends it). [H: disassembly of 0x2e0c68 and SetState case 0x3b]
   0.71 it unwinds and the doors close; deterministic; the class on levels 1 / 4 / 8). The `novalis_hero_digest` guard
   is byte-identical (its runs have no moby loop; `loop_in` is not part of the hashed block).
 
+### Scripted control (G-HERO-002, 2026-09-29)
+
+**Question.** Are the states the classes and scripts set — 0x1d, 0x1f, 0x32, 0x72, 0x78, the gadget poses 0x38..0x3a,
+the jump variant 0xc — one "scripted control" mechanism with per-state data, or separate states? **Finding: one
+shape, several owners, not one mechanism.** Each is its own `SetState` case (level 01 `0x23cf98`, level 00 `0x2223f8`;
+`rc-trace overlay-diff` / H2: the level copies are case subsets of level 00's, the shared bodies unchanged) that writes
+group 9, `0x1415d4 = 0` and an animation, has no case in the transitions `0x242930`, and is ended only by the class
+that set it. What differs per state is exactly the data a table would hold (control flag, frozen flag, hand-item flag,
+velocity, sequence, physics case), so the port keeps them as match arms of one module (`hero/scripted.rs`), not a
+new abstraction. The gadget poses, 0xc and the per-body idle are **not** part of it (below).
+
+**Who sets what** (every level's decomp grepped for a literal call of its own `SetState` copy and of `HeroTeleport`;
+created instances from the census `classes.tsv`):
+
+| state | setters (class: level, created) | ended by | the state is |
+|---|---|---|---|
+| 0x1d | Visibomb launch `0x2cb540` (hand item) | the flight's end `0x2cb788` | steering the missile (ported 2026-09-28) |
+| 0x1f | the mouse 1818 (01–06, 08, 11, 12, 14: 10), `SetState(0x1f, 0)` + `SetAnim(6, 0, 0)`; the path trooper 459's arrival camera (01: 25, none with a camera cuboid on Novalis) | the mouse's state 4 `SetState(0, 1)`; the trooper after 360 ticks | held while a class shows something, **control kept** |
+| 0x32 | Batalia's turret 440 (08: 1; walking into it once its mission byte is done, or `0x2e1698` from the Water Worker 1283's talk), Gaspar's 1201 (09: 3), Hoven's 1267 (12: 1), the ships 1242 (11), 69 (13, `HeroTeleport(…, 0x32, 1)`), 1379 (17, likewise) | the same classes (`SetState(0, 1)`) | **mounted**: a turret or vehicle holds and places him |
+| 0x72 | camera trigger `0x2fb5b0`, gunship `0x2f7728` | `SetState(0, 1)` | the cinematics' hold (ported 2026-09-28) |
+| 0x78 | the Umbris boss 1106 (07: 1, `0x314150`), which then writes his position and yaw every tick | the boss (`SetState(0, 1)`) | held by the boss |
+| 0x38..0x3a | the Hydrodisplacer item's own update `0x309cd0` (item 22; the code is on every level) on a Hydrodisplacer pad 341 | its transitions (0x38 / 0x39 → 0 unless the hand item is 0x16; 0x3a → 0 on the wrap) | the Hydrodisplacer's use poses (G-WPN-006) |
+| 0xc | **none**: no literal or teleport caller on any level; the only `0xc` values near SetState are animation ids | — | dead: only the shared jump-group case labels name it |
+
+**Entry / physics / transitions** (level 01 = level 00 for these three; `0x2370b8` has no case for 0x32 / 0x78 on
+level 01 — the jump table's tail — and an explicit empty one on level 00):
+
+| state | `0x1413fc` | `0x1413f7` | `0x1413fd` frozen | velocity | animation | physics | transitions |
+|---|---|---|---|---|---|---|---|
+| 0x1f | 0 (the prologue's clear) | 0 | 0 | kept | idle `0x226f10(0)` over 10 ticks, whatever `play` | the idle case (drag, edge brake, `StickTarget`, gravity) | none |
+| 0x32 | 1 | 1 | 1 | kept (the move is skipped) | with `play`: idle on the eased curve 1 (`SetAnim(−1, …)`) | none | none |
+| 0x78 | 1 | 1 | 0 | zeroed (`0x221170(0x13f430)`) | with `play`: the fall sequence 0xb on curve 1 | none (no gravity) | none |
+
+**What else reads them.** 0x32: the hit intake refuses hits (`0x231580`), the HUD health / bolts / bolt-alert draws
+draw nothing (`0x24e418`, `0x24ea00`, `0x24eed8`), the hero update skips the fog-map writer (`0x228a1c`), the pause /
+map gates and the prompt rules exclude it (`0x2aba68`, the vendor rule), the Drone Device hides its drones (479). 0x1f and
+0x78 are read only by their own setters (the boss re-tests 0x78 before `SetState(0, 1)`).
+
+**Coverage** (`crates/rc-game/src/hero/scripted.rs`; tests `hero::scripted::tests`, `hero_scripted_novalis`, `hud::tests`):
+
+| address | what | port | test |
+|---|---|---|---|
+| `0x23cf98` case 0x1f | group 9, `0x1415d4` = 0, idle over 10 ticks; `0x1413fc` left clear; hand item kept | `scripted::entry` (HELD) | `class_hold_entries_match_setstate`, `novalis_mouse_summon_holds_ratchet_in_0x1f` |
+| case 0x32 | `0x1413fc` = 1, group 9, `0x1415d4` = 0, `0x1413f7` = 1, `0x1413fd` = 1, `play` → curve-1 idle | `scripted::entry` (MOUNTED) | `class_hold_entries_match_setstate` |
+| case 0x78 | `0x1413fc` = 1, group 9, `0x1415d4` = 0, `0x1413f7` = 1, velocity zeroed, `play` → curve-1 sequence 0xb | `scripted::entry` (GRABBED) | `class_hold_entries_match_setstate` |
+| SetState prologue / tail | leaving 0x32 / 0x78 clears `0x1413f7` → the hand-item restore request `0x14145c`; `0x1413fd` cleared | `states::set_state` (existing) | `mounted_hangs_frozen_and_takes_no_hits` |
+| `0x2370b8` 0x1f | the idle case | `scripted::physics` → `phys_ground` | `held_ignores_the_pad_until_let_go` |
+| `0x2370b8` 0x32 / 0x78 | nothing; the frozen flag skips the move (0x32) | `scripted::physics` (empty arm); `input_physics_move` | `mounted_hangs_frozen_and_takes_no_hits`, `grabbed_hangs_where_the_boss_puts_him` |
+| `0x242930` | no case; the prologue (hits, death height) runs | `scripted::transitions` (empty) | `hits_reach_the_held_and_the_grabbed` |
+| `0x231580` | 0x32 refuses hits; 0x1f / 0x78 take them | `damage::hit_intake` (existing) | `mounted_hangs_frozen_and_takes_no_hits`, `hits_reach_the_held_and_the_grabbed` |
+| `0x24e418` / `0x24ea00` | health / bolts draw nothing in 0x32 | `hud::draw_health` / `draw_bolts` (`Inputs::hero_state`) | `mounted_hides_health_and_bolts` |
+| `0x24eed8` | the bolt alert returns early in 0x32 | NOT ported: the alert's draw itself is G-UI-011 | — |
+| `0x228a1c` | the fog writer skipped in 0x32 | `rc-engine gameplay::map_tick` (existing) | — |
+| `0x2aba68` | pause / map gates exclude 0x72 / 0x32 / 0x1d | `rc-engine menu_render` (existing); levels 08 / 12 in 0x32: Start → `mode_freezeInit(0)` and the vehicle pause (ship classes 0x45 / 0x563 / 0x4da) NOT ported (G-LVL-002 H1 / G-LVL-009); `RaceTimerShow` and the pad-0x200 HUD show skipped in 0x1d / 0x32: the show is not in the port (G-UI-011) | — |
+| sounds, particles, lights, stats, bolts, save flags | none in the three cases | n/a | — |
+
+**Consumers ported with it** (`classes::units`; tests `scripted_consumers`): the kill cuboids 1039 (U216: 06, 08, 13,
+18; `kill_volume`: the 0x32 gate, `SetState(0x77)`, `FadeToBlack` + the death sequence through the new
+`HeroCall::Death`) and Batalia's circling fighters 438 (U274: 08, 25; `batalia_fighter`: the path flight, the trail,
+the shot-down fall and blasts; its 0x32 branch is the skill point, G-SAV-007 deferred). The mouse 1818 (already
+ported) no longer freezes the hero (`HeroTick::Unimplemented`) in 0x1f.
+
+**Not ported, with owners:** 0x38..0x3a with the Hydrodisplacer (G-WPN-006: entry group 0x13, anim 0x46 / 0x47 /
+0x48 over 8 ticks; physics (L00 `0x217970`): the velocity toward pad 341's centre clamped to 2·dt (`0x25f730`) and the yaw turned toward the pad's at up to 9.42·dt a tick; the
+transitions above); 0xc (no caller: nothing to port); the per-body idle `0x227638` / L06 `0x239528` (body 0 is
+`SetState(0, 1)`; the others are G-HERO-005's states); the vehicle word `0x140940` / `0x140944` that several 0x32
+readers also test (written only by the ships: G-LVL-009).
+
 ### Later (not in this push)
-Weapons (0x20, 0x21, the other gloves and guns: see "Weapons + first person"), scripted
-states (0x1d, 0x1f, 0x32, 0x63, 0x64, 0x72, 0x78; with the cutscene port), other bodies (Clank, Giant Clank,
+Weapons (0x20, 0x21, the other gloves and guns: see "Weapons + first person"), the gadget poses 0x38..0x3a (with
+the Hydrodisplacer, G-WPN-006; the scripted states are ported: "Scripted control" above), other bodies (Clank, Giant Clank,
 Hologuise), the Hoverboard. Each gets a module when started; the registry already names its rows.
 
 ## 4. Findings to fix inside the packages (not fixed now: the restructure is behaviour-neutral)

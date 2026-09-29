@@ -47,7 +47,7 @@ fn ptr(pvars: &[u8], o: usize) -> Option<MobyId> { let v = p::i32(pvars, o); (v 
 fn set_ptr(pvars: &mut [u8], o: usize, id: Option<MobyId>) { p::set_i32(pvars, o, id.map(|i| i as i32 + 1).unwrap_or(0)); }
 
 /// `FUN_00273278`: a live moby of class 500..540.
-fn is_crate(w: &World, id: Option<MobyId>) -> bool {
+pub(crate) fn is_crate(w: &World, id: Option<MobyId>) -> bool {
     match id {
         Some(i) if i < w.table.mobys.len() => (w.m(i).o_class as i32 - 500) as u32 & 0xffff < 0x29,
         _ => false,

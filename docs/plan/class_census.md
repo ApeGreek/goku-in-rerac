@@ -129,14 +129,14 @@ marked; `C:` rows cite one level copy (the others: `clusters.tsv`).
 |---|---|---|---|---|---|---|---|
 | Big-head cheat manipulator and flag [conditional] (`cheat`) | missing | G-SAV-006 | 57 | 48 | 1,497 | 827 (155); 1246 (126); 749 (106); 193 (93) | `L01:00278720` FUN_00278720×35; `C:ec9f80c602e5` FUN_00251d70×8; `G:0015edb7=00000000` cheat_bighead_flag×4; `C:606d87e75d7d` FUN_0025ea60×2 |
 | Path helpers not linked on Novalis (`path`) | partly | G-CLS-025 | 1 (was 53) | 1 (was 31) | 2 (was 1,108) | 947 (2) (was 75/115/116 (246); 827 (155); 749 (106); 1564 (92)) | `L01:00277260` FUN_00277260×1 (2026-09-29 W1: `C:c4c12687d93c` FUN_00262e40, `C:49a176c9f6de` FUN_00270d00, `C:17a7139ba6a7` FUN_00263710, `C:aeb1c69a6e0e` FUN_00264558, `L01:00277d40`, `C:a3bbdace838c` FUN_002a0260 are has: `rc_game::path`) |
-| Hero scripted states, bodies and the branches on them (`herostate`) | partly | G-HERO-002, G-HERO-005, G-LVL-002 (H2) | 96 | 68 | 880 | 827 (155); 193 (93); 638 (64); 1843 (60) | `G:001413d4=00000032` hero_state_0x32×14; `G:001413f4=00000002` body_giant_clank×13; `G:001413f4=00000001` body_clank×12; `C:8a18636e69bd` FUN_002223f8×11; `C:ea215dba76e7` FUN_002356a0×5; `C:2f2e9be4c73e` FUN_00230b38×4 |
+| Hero scripted states, bodies and the branches on them (`herostate`) | partly | G-HERO-005, G-HERO-008 (~~G-HERO-002~~ closed 2026-09-29), G-LVL-002 (H2) | 96 | 68 | 880 (2026-09-29 after G-HERO-002: 34 units / 52 class-levels / 487 created; the state-0x32 branches and the level `SetState` copies are has) | 827 (155); 193 (93); 638 (64); 1843 (60) | `G:001413d4=00000032` hero_state_0x32×14; `G:001413f4=00000002` body_giant_clank×13; `G:001413f4=00000001` body_clank×12; `C:8a18636e69bd` FUN_002223f8×11; `C:ea215dba76e7` FUN_002356a0×5; `C:2f2e9be4c73e` FUN_00230b38×4 |
 | NPC look-at manipulators and animation leftovers (`anim`) | partly | G-HERO-009 | 47 | 42 | 422 | 638 (64); 238 (54); 623 (51); 294 (40) | `L01:002777d8` FUN_002777d8×40; `C:94cf214dfe7f` FUN_0027b9c0×2; `L01:0026c7a8` MobyAnimBlendEx×2; `L01:002b52a8` FUN_002b52a8×1 |
 | Creature-layer copies not linked on Novalis (`creature`) | has (2026-09-29) | ~~G-ENM-009~~ | 0 (was 23) | 0 (was 22) | 0 (was 363) | (was 238 (54); 294 (40); 1023 (40); 1112 (31)) | the three clusters re-tagged has / ported ("In the port: creature units") |
 | Effect-moby spawners not linked on Novalis (`fxmoby`) | partly | G-CLS-026 | 31 | 21 | 276 | 623 (51); 79 (30); 541 (29); 1511 (26) | `C:494499ccf189` FUN_0028dee8×15; `C:01476b25f86a` FUN_002de3e0×3; `C:60ae58782f11` FUN_002e1c98×3; `C:48e5de3f3f27` FUN_00300c60×2; `C:a0194c2bd0e8` FUN_002ef868×2 |
 | Point-light flicker (`light`) | partly | G-REN-024 | 12 | 6 | 256 | 1246 (126); 580 (82); 615 (19); 612 (15) | `C:5d1f33c5603a` FUN_0025fb60×6 |
 | Moby platforms and riders (`platform`) | partly | G-CLS-024 | 7 | 7 | 181 | 1246 (126); 812 (25); 574 (17); 1381 (8) | `L01:002753b0` FUN_002753b0×3; `C:584a926e540b` FUN_00265358×2; `L01:00275290` FUN_00275290×2; `L01:002752c0` FUN_002752c0×2; `L01:00275528` FUN_00275528×2 |
 | Ship-combat mode [override] (`shipmode`) | missing | G-LVL-009 | 2 | 2 | 112 | 1843 (60); 1319 (52) | `X:1319` fighter_1319×1; `X:1843` fighter_1843×1 |
-| Particle types not ported (`ptype`) | missing | G-PRT-001 | 18 | 14 | 90 | 28 (43); 1139 (12); 1440 (9); 170 (5) | `C:1fa9adb9d4ec` FUN_00274948×5; `L01:002780b0` SpawnImpactSparks×2; `C:dd572bc43542` FUN_0029b8d8×1; `L01:0027e750` PartType05Spawn×1; `L01:00282ef0` PartType28Spawn×1; `L01:00284d88` PartType40Spawn×1 |
+| Particle types not ported (`ptype`) | missing | G-PRT-001 | 18 | 14 | 90 | 28 (43); 1139 (12); 1440 (9); 170 (5) | `C:1fa9adb9d4ec` FUN_00274948×5; `L01:002780b0` SpawnImpactSparks×2; `C:dd572bc43542` FUN_0029b8d8×1; `L01:0027e750` PartType05Spawn×1; `L01:00282ef0` PartType28Spawn×1; `L01:00284d88` PartType40Spawn×1 — **2026-09-29**: every tagged spawner but types 40 / 58 (`PartType40Spawn`, `PartType58Spawn`: G-PRT-008) is ported and re-tagged `particles has` (particles.md "Update types, 2026-09-29"); a census re-run moves those units off `ptype` |
 | Break-effect variant (`breakfx`) | partly | G-CLS-014 | 5 | 5 | 87 | 1382 (34); 573 (27); 1048 (20); 556 (5) | `C:6e363a2f7f51` FUN_00251f08×5 |
 | Follow / script camera settings from mobys (`camera`) | partly | G-HERO-026 | 38 | 29 | 74 | 615 (19); 351/1301 (10); 877 (6); 1380 (4) | `C:3b375f0ab07b` FUN_002e9758×24; `C:33058002480b` FUN_002f89b0×4; `L01:00313740` FUN_00313740×3; `L01:00313768` FUN_00313768×3; `L01:00313820` FUN_00313820×3; `L01:00313b48` FUN_00313b48×3 |
 | Blob shadows (`shadow`) | partly | G-REN-025 | 7 | 7 | 70 | 1112 (31); 1269 (20); 1110 (12); 871 (4) | `C:bd2754fc3a9b` FUN_00259fe8×6; `L01:0026eec8` FUN_0026eec8×1 |
@@ -217,10 +217,10 @@ the appendix, verdict "cheap"); "private" is the unit's own code in 32-bit words
 | U463 | 1417 | 14 | 8 | L14:306ee0 | 742 |
 | U468 | 67 | 15 | 8 | L15:29aff0 | 296 |
 
-**Ready with a conditional blocker only** (the cheat manipulator / flag or `memcard_Save`; 17 units / 246): U268 (252: 77); U406 (63: 58); U299 (52: 46); U520 (1445: 24); U334 (1199: 15); U405 (29: 9); U333 (1196: 7); U163 (1120: 1); U164 (1190: 1); U311 (1290: 1); U318 (18: 1); U339 (1326: 1); U349 (23: 1); U459 (1354: 1); U485 (1388: 1); U488 (1419: 1); U570 (1750: 1).
+**Ready with a conditional blocker only** (the cheat manipulator / flag or `memcard_Save`; 17 units / 246): U268 (252: 77); U406 (63: 58); U299 (52: 46); U520 (1445: 24); ~~U334 (1199: 15); U405 (29: 9); U333 (1196: 7)~~ (ported 2026-09-29, W3); U163 (1120: 1); U164 (1190: 1); U311 (1290: 1); U318 (18: 1); U339 (1326: 1); U349 (23: 1); U459 (1354: 1); U485 (1388: 1); U488 (1419: 1); U570 (1750: 1).
 
 **Ready with a hero-state branch only** (a dead branch on state 0x32 / 0x51 or on the body 0x1413f4, to file under
-G-HERO-002 / G-HERO-005 in the class port; 18 units / 230): U300 (193: 93); U335 (1202: 57); U478 (233: 28); U387 (336: 11); U439 (250: 11); U330 (1067: 6); U336 (1229: 5); U338 (1302: 5); U471 (92: 4); U548 (1772: 2); U231 (1302: 1); U301 (263, 264, 265, 266, 267: 1); U331 (1073: 1); U356 (361: 1); U415 (388: 1); U425 (1271: 1); U493 (1469: 1); U544 (1428: 1).
+G-HERO-002 / G-HERO-005 in the class port; 18 units / 230): U300 (193: 93); ~~U335 (1202: 57)~~ (ported 2026-09-29, W3); U478 (233: 28); U387 (336: 11); U439 (250: 11); U330 (1067: 6); U336 (1229: 5); U338 (1302: 5); U471 (92: 4); U548 (1772: 2); U231 (1302: 1); U301 (263, 264, 265, 266, 267: 1); U331 (1073: 1); U356 (361: 1); U415 (388: 1); U425 (1271: 1); U493 (1469: 1); U544 (1428: 1).
 
 Newly ready since the 2026-09-28 tags: the help directors and NPCs that needed only the help system (1413, 1324, 1343,
 1347, 1348, 1349, 1000, 1344, 422, 558, 253, 1179, 586, 1035, 318 and more: every "partly: help" unit), Kerwan's
@@ -369,6 +369,92 @@ placed / **3,325 created** instances in **393 units** (verdicts cheap 217 / 1,53
 two created by code, so outside the census). Findings for the census itself: `0x294cb0` / `0x265b38` is ported now
 (`path::toward`); level13 `0x280400` is a type-68 spawner, not `PartType44Spawn` (G-PRT-007; U407 was "has
 particles"); 568 is "cheap" but inert without 1422.
+
+### In the port: G-HERO-002's consumers, and what it unblocked (2026-09-29, hero_states.md "Scripted control")
+
+The hero states 0x1f / 0x32 / 0x78 are ported (`hero/scripted.rs`); the tags `G:001413d4=00000032` and the level
+`SetState` copies (`C:8a18636e69bd`, `C:7b3e1e804b94`, `C:ea215dba76e7`, `C:2f2e9be4c73e`, `C:8cdb2fd899d9`,
+`C:ec679874da9e`, `C:b73827d476e2`, `C:84d6abe16fc6`) are **has** (every state a class passes them is ported: 0, 6,
+0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100, found by grepping every level's class code for its `SetState` copy); level 05 /
+16's copies stay partly (the Hoverboard's 0x6b, G-HERO-008), the per-body idles partly (G-HERO-005).
+
+| unit (this run's id) | classes (levels: created) | reference update | port |
+|---|---|---|---|
+| U216 | 1039 kill cuboids (06, 08, 13, 18: 4) | level06 0x2f7930 | `units::kill_volume` |
+| U274 | 438 Batalia's circling fighters (08: 25) | level08 0x2de848 (+ trail 0x2dec90) | `units::batalia_fighter` |
+
+**Now cheap for a class job (herostate cleared, census 2026-09-29):** 440 the Batalia turret (08: 1; the one portable
+setter of 0x32, 1,606 words, entered by walking in once its mission byte is done, else from the Water Worker 1283,
+which needs saves), 587 (18: 28), 336 (12: 11), 1150 / 1151 (09: 5), 1178 (11: 4), 1772 (17: 2; its 0x32 branch also
+reads the ship moby: G-LVL-009), 263–267 (09: 1), 361 (11: 1), 388 (13: 1); partly: 347 (17: 8, anim). Cleared of
+herostate but blocked elsewhere: the fighters 1843 / 1319 (the `shipmode` override), 1059 / 294 / 1231 (cheat),
+the 0x32 setters 1201 / 1267 / 1242 / 69 / 1379 and 1380, 713, 1083, 21 / 244, 1270 (the type-5 script camera
+`C:3b375f0ab07b`), 1106 (the Umbris boss, 0x78's setter: cheat, ptype, shadow).
+
+Census re-run after them: `herostate` **66 → 34 units, 93 → 52 class-levels, 786 → 487 created** (the rest: the
+bodies 1 / 2 / 3, the per-body idles, SwitchCharacter and leaving a body, G-HERO-005; the Hoverboard's 0x6b).
+
+### In the port: W3, the remaining ready enemy units (2026-09-29, creatures.md §11)
+
+| unit (this run's id) | classes (levels: created) | reference update | port |
+|---|---|---|---|
+| U335 | 1196 Orxon's path scouts (10: 7) | level10 0x2df270 | `units::orxon_flyers` (`update_1196`) |
+| U336 | 1199 Orxon's swoop flyers (10: 15 of 51 placed) | level10 0x2e01a8 | `units::orxon_flyers` (`update_1199`) |
+| U337 | 1202 Orxon's brawlers (10: 57 of 65 placed) | level10 0x2e1d38 | `units::orxon_brawler` |
+| U407 / U408 / U424 | 29 Gemlik's gun turrets (13: 9), their rider 36 and shot 1238 (created by code: 0 placed) | level13 0x2b41b8, 0x2b4c80, 0x306300 | `units::gemlik_turret` |
+
+Tag fixes: `C:dc2339668382` (the next waypoint toward a target, L09 / L13 / L15) is **has** (`path::toward`); level13
+`0x280400` has its own row `C:29928a61391b`: a **type-68** spawner (`particles::type68`, G-PRT-007 closed the same day), not `PartType44Spawn` (its code shares
+nothing with L01 0x286450; the old "has particles" of U407 came from the CreatePart copy it calls). New rows: level13
+`0x26a498` = `SpawnBeamExplosion` (`C:d7574994a069`, has), `0x265af0` the hit-record writer (`C:c294ae52ce36`, has),
+the type-51 spawner `C:70fa5037a649` (L07 / L13 / L14, has: `particles::type51`), the scorch `C:98f51a1cea64` (L10 / L12 /
+L13, has: `explosive_tank::scorch`).
+
+Census re-run after them (2026-09-29, with the day's other ports): **480** unported class-levels, 3,188 placed /
+**2,955 created** instances in **375 units** (verdicts cheap 214 / 1,333, missing 134 / 1,465, partly 21 / 149,
+unknown 6 / 8); these four units took 88 created instances (4 class-levels, plus the two created-by-code classes the
+census now lists as ported rows). The lane's list is done: nothing of G-ENM-010's "ready" list is left.
+
+### In the port: cheap wins round 2 (2026-09-29, G-CLS-027)
+
+Taken in the census's order by created instances (unit ids of the 2026-09-29 13:49 run; the re-run renumbers them),
+all levels. Each unit is a row (or rows) of `units::PORTS`; the coverage table of every ported function (each call,
+branch and side effect, with its port or its gap) is the module doc of the port; tests
+`rc-game/tests/classes/cheap_classes_c.rs` (every unit resolves on exactly its census levels with the census's created
+counts, and runs headless on one of them covering its side-effect rows) and the unit tests in each module.
+
+| unit | classes (levels: created) | reference | port | notes |
+|---|---|---|---|---|
+| U480 | 408 alarms (15, 17: 48) | level15 0x2cb4c8 | `units::quartu_alarm` | state machine, pulsing light, the level's alarm word, fade, loop sound 5, drone release; the family call `set_off` (0x2cbac0) is made by the guards 44 (unported); the full-screen tint's colour is ported (`tint`), its draw is **G-REN-030** |
+| U470 | 77 alarm drones (15, 17: 36) | level15 0x2a2488 | `units::quartu_drone` | released by 408 (`release` 0x2a2868), rise, home, explode (death explosion + sphere hit 0x10001), type-60 sparks, the group glow (`Callback::UnitQuads`, 0x2a29b8) |
+| U474 | 123 swinging lasers (15, 17: 46) | level15 0x2a6e68 | `units::swing_laser` | circle / slide / pendulum paths; the beam: a template line hit (0x10001), a world line, 40 type-60 sparks a tick, a camera-facing quad (0x2a7628) |
+| U411 | 127, 128, 159, 169 rotators (13: 24) | level13 0x2c7f38 | `units::linked_rotator` | the turning twin of `linked_mover` (U247): same pvar layout, `linked_mover::link_state` shared |
+| U215 | 1038 orb holders (06, 10, 17: 21) + the orb 1040 they create | level06 0x2f7288 / 0x2f7ab8 | `units::orb_holder` | the glow is the gold bolts' item glow with other data (`gold_bolt::glow_init_with` / `item_glow_with`, third consumer); death bits both ways |
+| U503 / U502 / U514 | 552 barrier posts (16: 20), 546 switches (6), 1387 walls (4) | level16 0x2cf4a8 / 0x2cf198 / 0x2e36e8 | `units::kalebo_barrier` | one family: posts pair by height, beams (`Callback::UnitQuads`), loop 0; switches turn the wall's collision, re-arm |
+| U185 | 843 sliding blocks (05: 16) | level05 0x30e508 | `units::cuboid_slider` | placed by a cuboid; `turn::spring` |
+| U473 | 93 swing doors (15: 12) | level15 0x2a3ba8 | `units::swing_door` | cuboids for Ratchet, the camera and the run list's targetable mobys (the run list rebuilt per door [L]) |
+| U307 | 1172 chain anchors (09: 10) | level09 0x303d10 | `units::chain_anchor` | the chain end of `chain_link` (U303); resolver, flash, `SetDeathBits`, the break passed on, beam explosion |
+| U477 | 196, 197, 1958 sliding doors (15, 17: 10) | level15 0x2bddb0 | `units::slide_door` | |
+
+**Not cheap after all** (a system the census does not see): U171 (133, 05: 20) adds `ticks(60)` to the hoverboard
+boost timer 0x13fc14 when Ratchet hits it (G-HERO-008 / G-LVL-007); U510 (933, 16: 25) reads the hero capsule's contact
+moby 0x13f58c (G-HERO-033) and resolves damage on a stack record; U281 (468 / 469, 08: 10) ramps its loop's volume
+(`SoundSetVolume` 0x2a1968, tagged has L, but no `SoundSink` method: G-AUD-011); U326 (939, 10: 11) launches the
+class 938 it creates (0x2d85c8: its bounce 0x2d8170 and the engine 0x24d508, outside the census: G-CLS-001);
+1143 (16: 10) and 823 (05, 07: 8) attach a manipulator to a class joint list (the list target is not loaded for class
+mobys: G-HERO-009); 1378 (10, 17: 6) writes the airless flag 0x14161b (G-HERO-032). **Census false positives**: U127
+(03: 246, the flyer variant: G-CLS-028 / G-CLS-026, see the path units above) and U40 (class 27, 01: 10, run as an
+external). **Deferred for size** (reached, not attempted): U154 (the 466 family, 04: 38, 3,032 words), U325 (857, 10:
+31, 4,300 words), U499 (471, 16: 37: its own scrolling draw and a voice handoff), U561 (1355, 18: 36: two draw
+callbacks), U535 (99, 17: 35), 1210 (03: `CarryRiders` with a rotation change, not ported), U488 / U532 (the
+sprite-callback units: their draws are environment meshes, level15 0x2eac90 …). Reached down the list to the units of 10 instances; the rest of the appendix is open.
+
+Tools: `rc-trace overlay-diff` now prints the counterpart address of identical cells too (`= addr`), which gives a
+level-address → level-01 map for any list of functions (used here to name every call of a unit's decomp).
+
+Census before → after (both `cargo run -p rc-trace -- class-census`; the "after" run includes the other lanes' ports
+of the same afternoon): 393 units / 3,325 created (cheap 217 / 1,532) → **375 units / 2,955 created** (cheap 223 /
+1,365, missing 125 / 1,432, partly 20 / 147, unknown 7 / 11). This round: 13 unit rows, 253 created instances.
 
 ## Unique classes: the ones that need something no other class needs
 

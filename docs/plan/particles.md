@@ -696,3 +696,103 @@ jump, wading and ankle-deep water with the jump and landing), `hero::swim::effec
 `particles::type45::tests::rings_ride_the_hero_water_level`. Engine, frame-exact, scratch `hero_water/`: jumping in
 (rings, drops, the splash shell, bubbles), the water jump's splash at its tick 20, wading bubbles; two runs identical
 (PNGs, WAV, traces).
+
+## Update types, 2026-09-29 (G-PRT-001, G-PRT-007)
+
+**System or not.** Evidence from the table and the census: every particle type is its own update function (81 table
+slots, `RegisterPartTypes` 0x27d4e0) with its own spawner, and the only code shared between types is the pool, the
+timers (`FastDecTimer`), `FastTweenColor`, the vector helpers and the renderer's kinds. So a "type" is per-item code
+(one module each, no invented abstraction); the shared *mechanisms* found are (1) **copies** (identical bodies:
+clusters.tsv / the decomp), made table rows, and (2) **a record holding a moby pointer**, which 9 types need
+(14, 31, 39, 61, 67, 68, 74, 78, 79): ported once as `Particles::moby_frames` / `joint_frames`, filled by the moby loop
+after its pass (`World::refresh_particle_mobys`, called from `refresh_particle_anchors`) for the mobys `Particles::
+moby_refs` lists; each update applies its own game test (0xfe / 0xfd, state ≥ 0x80, class change, or none).
+A third shared piece is **the weather state** (types 0, 73 and `SpawnImpactSparks`): `Particles::weather` (0x160250
+the camera step, 0x160260 the floor, written by class 1400) and `Particles::grid` (the level height grid).
+
+**Level identity.** `cargo run -p rc-trace -- overlay-diff --fn L01:<update/spawner>…` (work/overlay_diff/prt001_*):
+every update is `=` on all levels except the small ones the matcher could not pair: types 5 / 7 (two identical
+functions: `?`), 49 / 70 (`U` cells that pair a neighbouring *spawner*, the reference extent running past the tiny
+update), 67 on level 13 (`s`: level 00's superset build), 73 (level 09: a callee). Spawners outside level 01 were found by
+scanning every overlay's export for `CreatePart(n)` (the per-level `CreatePart` from the 0x27c4a0 cluster).
+
+**Def tables.** Spawners index the part-def table (0x1b2500 on level 01, 0x1b2380 on 13, 0x1b2880 on 08, 0x1b2980
+on 17), usually at their own type; exceptions pinned from the addresses: type 10 takes `def[3]`, type 40 `def[12]`,
+types 79 / 80 `def[53]`, type 71 `def[60]`.
+
+### Ported (module, update / spawner, consumers)
+
+| Type | Module | Update / spawner | Consumer | What it is |
+|---|---|---|---|---|
+| 68 | `type68` | L01 0x289cc0 / L13 0x280400 | **63 flying biter (ported)**: `glow_on` spawns it | the thruster ribbon (kind 3) on joint list 0 |
+| 10 | `type10` | 0x27f788 / 0x27f660 | **flyer driver `classes::flyer` (ported)**, flag bit 0 (none on Novalis; the family's other classes, G-CLS-015) | engine spark puff |
+| 5, 7 | `type05` | 0x27e850 (= 0x27f200) / 0x27e750 | **decoy pop, Glove of Doom canister pop, the morph's flash (ported)**; U412 (170) | growing flash |
+| 18 | `type18` | 0x2815b8 / 0x281430 | **the Suck Cannon's thrown flight `react::flight` (ported)** | smoke trail |
+| 74 | `type74` | 0x28a908 / 0x28a7a8 | the Sonic Summoner's jets (U371 1242; not ported) | puff in a moby's frame |
+| 78 | `type78` | 0x28ae98 / 0x28ad08 | the Morph-o-Ray beam (`hero::morph_ray`, **not wired**: hero seam) | homing spark |
+| 28 | `type28` | 0x2831b0 / 0x282ef0 | U397 (1281) | pulsing mote |
+| 41 | `type41` | 0x2858a8 / 0x285768 | U134 (816) | held sprite |
+| 69 | `type69` | 0x289df0 / L00 0x274948 | U436, U33, U439, U458, U34 | twinkle (modes 1–4: no spawner, counted) |
+| 67 | `type67` | 0x2899c0 / 0x289850 | U203 (1139) | orbiting spark and trail |
+| 1 | `type01` | 0x27dbc8 / 0x27daf0, `SpawnImpactSparks` 0x2780b0 | 1400 (U399 / U293), type 73 | rain splash |
+| 0, 73 | `type00`, `type73` | 0x27d928 / L08 0x272cb8; 0x28a5b8 / L08 0x27f5f0 | 1400 | rain streak (kind 3), flake |
+| 61 | `type61` | 0x2888f0 / L07 0x29b8d8 | U254 (1106) | joint glow pulled to the camera |
+| 70 | `type70` | 0x28a078 / L00 0x274cf8 (9 overlays) | unported classes | flat decal (kind 1) |
+| 14 | `type14` | 0x280ac8 / 0x280970 | class 156 (`0x2c7530`, code-made projectile) | muzzle flash |
+| 31 | `type31` | 0x283be8 / L15 0x25e2c0 | L15 / L18 classes | line closing on a moby (kind 2) |
+| 39 | `type39` | 0x284c98 / L08 0x279f00 | L08 class | glow held until the caller ends it |
+| 43 | `type43` | 0x286238 / L08 0x27b450 | L08 class | tinted smoke fading in and out |
+| 48, 50 | `type48` | 0x286e20, 0x286f90 / L05 0x29bbe0, 0x29be70 | L05 classes | glint; falling spark |
+| 49 | `type49` | 0x286eb8 / L03 0x260130 | L03 / L07 / L15 classes | tracer line (kind 2) |
+| 51 | `type51` | 0x287060 / L13 0x27d8d0 | L07 / L13 / L14 classes | rising dust |
+| 65 | row on `type25` | 0x289388 / L07 0x29c4e8 | L07 / L15 / L17 classes | = type 25's spark (below) |
+| 77 | `type77` | 0x28ac58 / L08 0x27fe00 | L08 class | drifting puff |
+| 79, 80 | `type79` | 0x28b160, 0x28b2a8 / L17 0x26fb60, 0x26fdd0 | L17 classes | sparks; flashes |
+
+**Copies (table rows, no new code).** Type 7's update 0x27f200 is type 5's 0x27e850 (one cluster hash, 176 bytes, in
+every overlay). Type 65's update 0x289388 is type 25's 0x282760 without the variant's swapped colour rates; its only
+spawner gives positive channels, so the variant branch cannot run and `type25::update` is the same function for it.
+
+### Coverage (per update / spawner; every call, branch, draw and side effect)
+
+| address | what | ported / not |
+|---|---|---|
+| 0x289cc0 (68) | kill: pointer 0, class ≠ +0x36, state 0xfe / 0xfd | `type68::update` (test `follows_the_joint…`) |
+| | draws: `randf(0.05, 1)` then `randf(±jitter)` | ported, order tested |
+| | `0x2645a8` joint point → end 1; `0x264508` joint matrix row 0 → end 2 = end 1 + unit(row 0)·(j/100 − 1)·len | ported (`joint_frames`; no joint list: the moby's origin/rows) |
+| | +0x2c restored, +0x1c = w1·w | ported |
+| L13 0x280400 (68 spawn) | kind 3, 0x48, byte9 from moby+0x32, def[68][0], both ends at the joint, fields +0x30..+0x3c | `type68::spawn` (test `spawn_record`); `flying_biter::glow_on` passes the game's arguments |
+| 0x27f660 / 0x27f788 (10) | spawn: one `randf(60900, 90300)`, `def[3]`, ticks(87); update: alpha −0.04, kill (alpha then timer), size +12000, blue < 0.225 branch (unreachable from the spawn, ported), pos += vel, vel ·0.9, rot −1 | `type10` (test `spawn_fades…`); flyer: the speed draw then the spawn's draw (made without a system too) |
+| 0x27e750 / 0x27e850 (5, 7) | life 0 → no record; +0x24 = grow/life; update `FastDecTimer__FRi`, size +step, last `ticks(6)` alpha `t·127/ticks(6)` | `type05` (test `flash_grows…`); decoy / canister: jitter (3), colour (3 raw), grow, life draws in order; chicken: `(1e6, 0, chicken pos, 0x7f ×3, ticks(15))` |
+| 0x281430 / 0x2815b8 (18) | 3 offset draws, raw rand (rot), size draw; offset through the rows (row 3·w: stack garbage, taken as 0 [L]); +0x28 **stale** (not written: kept as the game) | `type18` (test `trail_puff…`); `react::flight` (5 draws, also without a system) |
+| 0x28a7a8 / 0x28a908 (74) | raw rand (rot); offset = rows·(pos − moby); update: size from the descriptor (integer), vel ·(1 − 0.02), kill on 0xfe / 0xfd / null, pos = moby + rows·offset, `FastTweenColor(t/life, c1, c0)`, timer | `type74` (descriptor = `Particles::descs74`); test `rides_the_moby…` |
+| 0x28ad08 / 0x28ae98 (78) | rot by mode (only `randi(255)` draws), target's damage-record word (+0x3c, never read); update ramps (≤ 5 ticks in, then out), homing when d.x ≤ 2 and d.y ≤ 2 (signed), sideways push 0.2 (gp−0x69b4 image value [L]), gravity 0x13f5e0 | `type78` (tests `ramps_and_lives`, `homes_on_its_target`); `Particles::gravity` stays (0, 0, −1): the hero hook does not write it (seam) |
+| 0x282ef0 / 0x2831b0 (28) | 2 offset draws, 3 raw (colour: `rand() % 0x60`… from the disassembly), alpha draw, size draw, 2 velocity draws without rows (with rows: `MatrixMulVec3(spread, 0, −0.0025)`); update pulse / tail / kill 0.0244 | `type28` (tests: both spawn paths, `pulses_and_dies`) |
+| 0x285768 / 0x2858a8 (41) | blend −1 rule, frame `def[41][k]`; timer −1 = held | `type41` |
+| L00 0x274948 / 0x289df0 (69) | draws size, `randi(256)`, `rand_range(10, 30)`; update box, **modes 1–3** (moby pvars +0xd0 / +0x1f0 / +0xe0) and **mode 4** (moby + 0.2 z): no spawner sets them → counted in `PartStats::unported_branch`, position held; `randf_sym(0, 64)` a tick | `type69` |
+| 0x289850 / 0x2899c0 (67) | `randi(255)` in each spawn (a head's puff: one draw a tick); mode 0 fade `0x26e3b0`, moby-riding puffs; heads: timer, last-10 fade, puff spawn, mode-1 orbit (`EulerToMatrix(0, a, 0)`, the moby rows), angle steps | `type67` (tests: orbit + trail, beam puffs) |
+| 0x2780b0 + 0x27daf0 / 0x27dbc8 (1) | grid height + dz, camera + 5 test, `CollLine_Fix(0x12)` (world mesh only here [L]), xy distance alpha; splash z + 0.1 (the game also moves the caller's hit point), 10-frame animation | `type01::impact_sparks`, `impact_sparks_here` |
+| L08 0x272cb8 / 0x27d928 (0) | kinds 0 / 1 / 2 (one draw), ribbon, weather step, the cell-change floor test (kind 2 skips it), gravity 9.8·dt², floor drift | `type00` |
+| L08 0x27f5f0 / 0x28a5b8 (73) | two draws (the kind's dropped `randf`, the rotation); splash on landing (`SpawnImpactSparks`) | `type73` |
+| L07 0x29b8d8 / 0x2888f0 (61) | randf, raw rand ×2; update frame step, size easing, alpha pulse, pull to the camera | `type61` |
+| others (70, 14, 31, 39, 43, 48, 50, 49, 51, 77, 79, 80) | every field and branch as in the module docs; no sounds, lights or hits in any | their modules, one test each |
+| **sounds / lights / hits / other mobys** | none of the ported types plays a sound, adds a light or touches another moby; the only hits come from types 40 and 58 (not ported: G-PRT-008) | — |
+
+### Not ported (with the reason)
+
+| Type | Why |
+|---|---|
+| 40 (0x284f70 / 0x284d88, U323 702 L10), 58 (0x288068 / 0x287e70, U254 1106 L07) | they **deliver hits** from inside `UpdateParts`: 40's flame line `CollLine_Fix(…, 0, moby, hit template 0x10001)` and its splits; 58's fire emitter `FUN_0026eaa8(…, hero moby, …)` when Ratchet is within √0.3. A particle → hit-record seam is a new shared system (G-PRT-008); with it both port as per-type code |
+| 71 (0x28a0e0 / L15 0x2647f0, L17) | the packed-char vectors (`fun_00214a98` / `0x2764a8`) and the hero point 0x13f420: portable, left for its level-15/17 consumer |
+| 42 | its only spawner (0x2858f0) is called from its own update: nothing creates the first one |
+| 3, 9, 17, 20, 24, 29, 30, 33, 36, 37, 38, 54, 63, 75, 76 | no `CreatePart(n)` in any overlay (no spawner, no consumer): not ported (no speculative ports) |
+
+**Native, not emulated.** All new updates are plain `f32` (the game's operation order, no PS2 float model); colours
+through the existing `tween_color`; draw kinds 0–3 through the existing `particle_render` (kind 3 ribbons for 0 / 68,
+kind 2 lines for 31 / 49, kind 1 decals for 70) with `display_blend` and the level's part textures; no GS/VU modelling.
+[L] items: type 18's row-3 term, type 78's 0.2 push (image value), the world-only line tests (types 1 / 49), a moby
+missing from `moby_frames` leaving 67 / 79 / 39 in place, type 70's level 15 / 17 pairing.
+
+**Checked on screen** (Gemlik, `RC_LEVEL=13 RC_HERO_AT=508,440,300,1.5708`, frame 150): the flying biters of group 8
+fly with a small yellow-white flame ribbon under their bodies (4 type-68 records alive and drawn, `unported types
+killed []`); two captures byte-identical.

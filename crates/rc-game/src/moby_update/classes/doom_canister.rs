@@ -256,14 +256,13 @@ fn fly(w: &mut World, id: MobyId) {
 fn pop(w: &mut World, id: MobyId, surface: i32) {
     if !matches!(surface, 0 | 1 | 3 | 8 | 0xb | 0xc | 0xd) { return; }
     for _ in 0..20 {
-        for _ in 0..3 { w.rng.randf(f32::from_bits(0xbe99_999a), f32::from_bits(0x3e99_999a)); }
-        w.rng.rand();
-        w.rng.rand();
-        w.rng.rand();
-        w.rng.randf(f32::from_bits(0x47c3_5000), f32::from_bits(0x4943_5000));
-        let r = w.rng.rand();
-        let life = w.ticks(r % 0x28 + 10);
-        if life != 0 { fx::part_unported(w, 5); }
+        let mut at = w.m(id).position;
+        for x in &mut at[..3] { *x += w.rng.randf(f32::from_bits(0xbe99_999a), f32::from_bits(0x3e99_999a)); }
+        let (r, g, b) = (w.rng.rand(), w.rng.rand(), w.rng.rand());
+        let grow = w.rng.randf(f32::from_bits(0x47c3_5000), f32::from_bits(0x4943_5000));
+        let n = w.rng.rand();
+        let life = w.ticks(n % 0x28 + 10);
+        fx::part05(w, grow, 0.0, at, [(r + 0x30) as u32 & 0x3f, (g + 0x20) as u32 & 0x3f, b as u32 & 0x2f], life);
     }
     w.mm(id).state = FADING;
 }
@@ -359,7 +358,7 @@ mod tests {
         assert!(!b.parts.anchors.contains_key(&c), "anchor removed");
     }
 
-    /// `0x2ddce0`: a canister coming down on a pop surface (the pool's floor, surface 1) pops: 20 type-5 records and
+    /// `0x2ddce0`: a canister coming down on a pop surface (the pool's floor, surface 1) pops: 20 type-5 records (live, `particles::type05`) and
     /// state 4 (it fades), no bots.
     #[test]
     fn pops_on_a_pop_surface() {
@@ -372,6 +371,12 @@ mod tests {
         }
         assert_eq!(b.table.mobys[c].state, FADING, "popped");
         assert_eq!(b.parts(5) - p5, 20, "twenty type-5 puffs");
+        // The puffs live their game lives (`particles::type05`): 20 records, faded and gone within 50 updates, none
+        // killed unported.
+        assert_eq!(b.parts.live_by_type()[5], 20);
+        let mut rng = crate::rng::Rng::new();
+        for _ in 0..50 { b.parts.update_parts(&mut rng); }
+        assert_eq!((b.parts.live_by_type()[5], b.parts.stats.unported_kills[5]), (0, 0));
         for _ in 0..40 { b.tick(None); }
         assert!(b.table.mobys[c].is_deleted() && b.alive(doom_bot::CLASS) == 0, "gone without bots");
     }

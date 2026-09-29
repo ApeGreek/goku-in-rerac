@@ -45,6 +45,15 @@ pub fn part_unported(w: &mut World, ty: u8) -> bool {
     ok
 }
 
+/// `PartType05Spawn(grow, size, pos, r, g, b, life)` 0x27e750 (`particles::type05`, no draws): life 0 makes no call
+/// to `CreatePart` (nothing counted). The decoy's and the Glove of Doom canister's pops, the morph's flash.
+pub fn part05(w: &mut World, grow: f32, size: f32, pos: [f32; 4], rgb: [u32; 3], life: i32) {
+    if life == 0 { return; }
+    *w.svc.fx.part_spawns.entry(crate::particles::type05::TYPE).or_default() += 1;
+    let Some(p) = w.particles.as_deref_mut() else { return };
+    if crate::particles::type05::spawn(p, grow, size, pos, rgb[0], rgb[1], rgb[2], life).is_none() { w.svc.fx.part_failed += 1; }
+}
+
 /// A spawner call of type `ty`: `f` fills the record (and makes the spawner's draws) when there is a particle
 /// system; `draws` makes the same draws when there is none. Counted in `FxStats`; false when the pool was full.
 fn spawn_part(w: &mut World, ty: u8, draws: impl FnOnce(&mut crate::rng::Rng), f: impl FnOnce(&mut crate::particles::Particles, &mut crate::rng::Rng) -> Option<usize>) -> bool {

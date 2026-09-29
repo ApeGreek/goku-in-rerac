@@ -581,7 +581,7 @@ fn setup(
         draws: Vec::new(),
         hud2d: Hud2d { frame_sizes, ..default() },
         // Until the first frame reads the game state (Persistent / Session / HeldWeapon): 4/4, no bolts, no slot.
-        game: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: lh.lang },
+        game: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: lh.lang, hero_state: 0 },
         banner_seq: 0,
         cine_banner_seq: 0,
         reset: 0,
@@ -632,6 +632,8 @@ fn tick_and_build(
         if let Some(s) = &session { rt.game.hp = s.0.hp; }
         rt.game.weapon = held.as_ref().and_then(|h| h.0);
         if let Some(w) = feed.weapon { rt.game.weapon = w; }
+        // Ratchet's state 0x1413d4 (mounted, 0x32: the health and bolt draws skip).
+        if let Some(p) = play.as_deref() { rt.game.hero_state = p.game.hero.state; }
     }
     if feed.reset != rt.reset {
         rt.reset = feed.reset;

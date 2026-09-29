@@ -143,15 +143,19 @@ pub fn fast_dec_timer(t: &mut i32) -> i32 {
 
 /// The glow init (0x308470 / the infobot's 0x2fcd88): four `randi(255)` angles, the spins, `ticks(63 + 64k)` timers,
 /// the sizes.
-pub fn glow_init(w: &mut World, id: MobyId, base: usize) {
+pub fn glow_init(w: &mut World, id: MobyId, base: usize) { glow_init_with(w, id, base, glow::SPINS, glow::SIZES) }
+
+/// [`glow_init`] with a class's own spins and sizes (the same code with other constants: the orb holders 1038's
+/// `0x2f7548` on level 06, `units::orb_holder`).
+pub fn glow_init_with(w: &mut World, id: MobyId, base: usize, spins: [f32; 4], sizes: [f32; 4]) {
     let a: [f32; 4] = std::array::from_fn(|_| w.rng.randi(0xff) as f32);
     let t: [i32; 4] = std::array::from_fn(|k| w.ticks(0x3f + 0x40 * k as i32));
     let pv_ = &mut w.mm(id).pvars;
     for k in 0..4 {
         p::set_ff(pv_, base + glow::ANGLE + 4 * k, a[k]);
-        p::set_ff(pv_, base + glow::SPIN + 4 * k, glow::SPINS[k]);
+        p::set_ff(pv_, base + glow::SPIN + 4 * k, spins[k]);
         p::set_i32(pv_, base + glow::TIMER + 4 * k, t[k]);
-        p::set_ff(pv_, base + glow::SIZE + 4 * k, glow::SIZES[k]);
+        p::set_ff(pv_, base + glow::SIZE + 4 * k, sizes[k]);
     }
 }
 
@@ -159,7 +163,10 @@ pub fn glow_init(w: &mut World, id: MobyId, base: usize) {
 /// (away from the camera) 0.1 apart, each turning by its spin and pulsing between [`GLOW_A`] and [`GLOW_B`] on its
 /// `ticks(255)` timer, size × `fade`, life 2. `spawn` false: the angles and timers advance, no sprite (the infobot
 /// in game mode 2).
-pub fn item_glow(w: &mut World, id: MobyId, base: usize, centre: [f32; 3], fade: f32, spawn: bool) {
+pub fn item_glow(w: &mut World, id: MobyId, base: usize, centre: [f32; 3], fade: f32, spawn: bool) { item_glow_with(w, id, base, centre, fade, spawn, (GLOW_A, GLOW_B)) }
+
+/// [`item_glow`] in a class's own colours (the orb holders 1038's `0x2f7628` on level 06: `units::orb_holder`).
+pub fn item_glow_with(w: &mut World, id: MobyId, base: usize, centre: [f32; 3], fade: f32, spawn: bool, colours: (u32, u32)) {
     let away = set_len(sub(f3(w.camera.map(|x| f32::from_bits(x.0))), centre), -0.3);
     let step = set_len(away, 0.1);
     let mut at = add(away, centre);
@@ -177,7 +184,7 @@ pub fn item_glow(w: &mut World, id: MobyId, base: usize, centre: [f32; 3], fade:
             (a, p::ff(pv_, base + glow::SIZE + 4 * k), t)
         };
         let f = (0.5 - (t255 - timer) as f32 / t255 as f32).abs();
-        let rgba = crate::particles::tween_color(f.to_bits(), GLOW_A, GLOW_B);
+        let rgba = crate::particles::tween_color(f.to_bits(), colours.0, colours.1);
         if spawn {
             if let Some(s) = w.particles.as_deref_mut() {
                 s.hero = hero;

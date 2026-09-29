@@ -181,8 +181,9 @@ pub fn morph(w: &mut World, target: MobyId, gold: u8) -> Option<MobyId> {
     } else {
         w.delete_moby(target);
     }
-    // PartType05Spawn(1e6, 0, pos, 0x7f, 0x7f, 0x7f, ticks(15)): the morph's flash (type 5 is not ported; no draws).
-    fx::part_unported(w, 5);
+    // PartType05Spawn(1e6, 0, chicken pos, 0x7f, 0x7f, 0x7f, ticks(15)): the morph's flash (`particles::type05`).
+    let (at, t15) = (w.m(ch).position, w.ticks(15));
+    fx::part05(w, 1e6, 0.0, at, [0x7f; 3], t15);
     for b in &mut w.mm(ch).pvars[..0x20] { *b = 0; }
     let g_next = w.svc.creatures.react.chicken_next;
     let old = w.svc.creatures.react.chickens[g_next];

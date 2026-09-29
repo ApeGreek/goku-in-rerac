@@ -60,6 +60,7 @@ pub const AREAS: &[Area] = &[
     Area { name: "extract", aliases: &[], parts: &[Bin("rc-extract", "extract")] },
     Area { name: "video", aliases: &["movies"], parts: &[Bin("rc-video", "movies")] },
     Area { name: "engine", aliases: &["render", "input"], parts: &[] },
+    Area { name: "particles", aliases: &["fx"], parts: &[Tests("rc-game", "classes", &["particle_consumers::"])] },
     Area { name: "trace", aliases: &[], parts: &[Bin("rc-trace", "trace")] },
     Area { name: "repo", aliases: &["guards", "layout"], parts: &[Bin("repo-checks", "guards")] },
     Area { name: "shared", aliases: &[], parts: &[Tests("rc-game", "world", &["all_levels_smoke::"])] },

@@ -56,7 +56,7 @@ two aligned instructions of context; "level code neither level 01 nor level 00 h
 
 | Cell | Meaning |
 |---|---|
-| `=` | identical after masking the relocated fields (`jal` targets, `%hi`/`%lo`, `$gp`, stack offsets), and the same boot addresses, constants and callees |
+| `=` | identical after masking the relocated fields (`jal` targets, `%hi`/`%lo`, `$gp`, stack offsets), and the same boot addresses, constants and callees (the TSV cell is `= <counterpart address>`: a level-address map for any list of `--fn`s) |
 | `c` | the function's own code is identical; a callee differs (see the callee's row) |
 | `S` | a switch whose shared cases are identical; only the set of cases differs |
 | `k` | the same code reading other constants |
@@ -101,3 +101,13 @@ Step 2 reads the level ELFs from `work/ghidra-import/levelNN.elf`. **Follow-up:*
 
 The name tables and scripts are in git, so they need no backup of their own. After the project moves to
 `~/PS2/ratchet1/ghidra/`, back up that folder instead.
+
+## Reference material (not vendored)
+
+Checked out next to the repo on the author's machine, never copied into it:
+
+* `~/Globals/wrench`: Wrench (GPL-3), used as format documentation only; all reader code here is written from the
+  specs in `docs/formats/`.
+* `~/Globals/jak-project`: OpenGOAL (ISC), architectural reference.
+* `~/Globals/ghidra-emotionengine-reloaded`: PS2 processor module for Ghidra.
+* `~/Globals/ghidra-mcp`: GhidraMCP bridge to the Ghidra project.

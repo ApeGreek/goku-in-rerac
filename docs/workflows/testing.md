@@ -98,7 +98,7 @@ The unit tests of every area run in step 1 of §2.1. The table lists each area's
 in `tools/xtask/src/test.rs`, which this table documents (area names and aliases are the same).
 
 Aliases: creatures and mobys → `classes`; levels, collision and water → `world`; menus, HUD, map, save and vendor → `ui`;
-movies → `video`; render and input → `engine`; guards and layout → `repo`.
+movies → `video`; render and input → `engine`; fx → `particles`; guards and layout → `repo`.
 Wall times: the 2026-09-29 full run before the merge, summed over the old binaries; for `classes` and `world` also
 the merged binary under `cargo test` (per-binary caches, §5).
 
@@ -115,6 +115,7 @@ the merged binary under `cargo test` (per-binary caches, §5).
 | extract (extractor, launcher side) | `synthetic` (rc-extract; the checks against a real disc are `rc-trace disc-check`, §10) | `extract` | rc-extract lib and bin | <1 s |
 | video | `movies` (rc-video) | `movies` | rc-video lib | <1 s |
 | engine (render, input, engine glue) | none | — | the `randcrw` bin's tests | — |
+| particles (alias fx; added 2026-09-29) | `particle_consumers` (in `classes`: the ported classes' particle types living their lives) | in `classes`: `--test classes --filter particle_consumers::` | `particles::*` (listed under world; every job runs the unit tests) | ~5 s |
 | trace tools | `hero_replay_selfcheck` `novalis_spawn` `synthetic` (tools/trace) | `trace` | rc-trace lib | ~2 s |
 | repo layout (new crates, dependencies, top-level files) | `guards` (tools/repo-checks) | `guards` | — | <1 s |
 | shared code (§2.3; area `shared`) | the guard set of §2.1: `hero -- --exact hero_novalis::novalis_hero_digest` (digest compare) and `world -- all_levels_smoke::` | — | — | ~27 s |
@@ -1664,3 +1665,18 @@ cargo run --release -p rc-trace -- disc-check [--iso IMAGE] [--extracted DIR] [-
 
 The image defaults to `RC_ISO`, else the ISO in the personal folder. Run it after a change to `rc_formats::disc`,
 `iso9660` or the extractor.
+
+## 11. The loader golden tests and the build flags
+
+**Golden tests.** `crates/rc-formats/tests/formats/golden.rs` compares what the Rust loaders produce for all 19
+levels with `crates/rc-formats/data/loader_snapshots.tsv` (per test, level and section: item count, byte count,
+SHA-1). The table was generated while the output was byte-identical to the C++ reference extractor, retired on
+2026-09-27 (`docs/plan/decisions.md`). After an intended loader change, `RC_SNAPSHOT_WRITE=1 cargo xtask test-job
+--test formats --filter golden::` rewrites the rows of the tests that ran.
+
+**One Bevy build.** The `cargo xtask test-*` commands pass `--workspace --features rc-engine/dev`, which enables
+Bevy's `dynamic_linking` like `cargo dev`, so the tests reuse the one Bevy build `cargo dev` made
+(plain `cargo test --workspace` would compile a second, static Bevy). `cargo check-all` and `cargo clippy-all`
+(aliases in `.cargo/config.toml`) add `--all-targets` with the same features; they share one Bevy check build
+(metadata only, which a test build cannot reuse). Release builds and `tools/package` stay static (never
+`--features dev`).

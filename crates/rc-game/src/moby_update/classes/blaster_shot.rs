@@ -185,7 +185,8 @@ fn trail_rec(w: &World, id: MobyId, k: usize) -> Option<usize> {
 }
 
 /// Five impact sparks at `pos`: `dir` reflected off `normal` plus a random half of its length (type 27, size 30000).
-fn impact_sparks(w: &mut World, pos: [f32; 3], dir: [f32; 3], normal: [f32; 3]) {
+/// The same loop is inline in the Gemlik turret's shot 1238 (level13 `0x306300`, `units::gemlik_turret`).
+pub(crate) fn impact_sparks(w: &mut World, pos: [f32; 3], dir: [f32; 3], normal: [f32; 3]) {
     for _ in 0..5 {
         let x = w.rng.randf(-1.0, 1.0);
         let y = w.rng.randf(-1.0, 1.0);

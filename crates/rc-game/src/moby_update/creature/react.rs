@@ -968,9 +968,20 @@ fn flight(w: &mut World, id: MobyId, r: usize) -> i32 {
     }
     vel[2] -= 0.00925;
     set_rv(w, r, id, rec::VEL, vel);
-    // PartType18Spawn(pos, rows): the trail (type 18 not ported: its 3 draws, counted).
-    for (lo, hi) in [(-0.1f32, 0.1f32), (-0.3, 0.3), (-0.3, 0.3)] { w.rng.randf(lo, hi); }
-    super::fx::part_unported(w, 18);
+    // PartType18Spawn(pos, rows): the smoke trail (`particles::type18`; its 5 draws, also made without a particle system).
+    let (at, m) = (w.m(id).position, w.m(id).rows);
+    let rows = [0, 1, 2].map(|k| [m[k][0], m[k][1], m[k][2]]);
+    *w.svc.fx.part_spawns.entry(crate::particles::type18::TYPE).or_default() += 1;
+    match w.particles.as_deref_mut() {
+        Some(ps) => {
+            if crate::particles::type18::spawn(ps, w.rng, at, rows).is_none() { w.svc.fx.part_failed += 1; }
+        }
+        None => {
+            for (lo, hi) in [(-0.1f32, 0.1f32), (-0.3, 0.3), (-0.3, 0.3)] { w.rng.randf(lo, hi); }
+            w.rng.rand();
+            w.rng.randf(f32::from_bits(0x46da_b201), f32::from_bits(0x4743_3c00));
+        }
+    }
     tail(w, id, r)
 }
 

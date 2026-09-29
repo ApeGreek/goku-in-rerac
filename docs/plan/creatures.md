@@ -610,3 +610,71 @@ pose).
   then landed and biting Ratchet (one mid-bite in the foreground).
 - Level 08, `RC_HERO_AT=272.5,191,35.2,2.4`, frame 148: a hover zapper 252, its glow turned red, firing its blue-white
   arc into Ratchet.
+
+## 11. W3: the remaining ready enemy units (G-ENM-010 / G-ENM-001, 2026-09-29)
+
+Four units, each found by code identity (`units::PORTS`): Orxon's path scout 1196, swoop flyer 1199 and brawler 1202
+(level 10), and Gemlik's gun turret 29 with the rider 36 and the shot 1238 it creates (level 13; neither is placed, so
+the census never saw them). The per-function coverage tables (every call and branch of the updates, the ticks and
+their private helpers, with the file / function or the gap) are the module docs of `units::orxon_flyers`,
+`units::orxon_brawler` and `units::gemlik_turret`. Tests: `crates/rc-game/tests/classes/orxon_gemlik_enemies.rs`
+(the level harness of `creature_classes`).
+
+### 11.1 System or not (the evidence)
+
+| question | finding |
+|---|---|
+| 1196's tick `0x2dfc38` and 1199's `0x2e17c0` (two census clusters) | **one half shared, one not**: the targeting halves (the Taunter's alert range, the area-path or cuboid search, the home leash) are the same code but for one compare of the cuboid test (1196 `0 ≤ x`, 1199 `1 ≤ x`, disassembly 0x2dff94): one function `orxon_flyers::targeting` with that lane as its data row; the hit halves differ in code (1199: the attacker-class filter, class sound 2, the heading through `0x26fa48`; 1196: the skill-point branch): two functions |
+| 1202 and the flyers | separate code (states, records, sounds): separate ports; 1202's group wake `0x2e47d8` is 1196's `0x2e0138` word for word (the Morph-o-Ray, the lure and the scout all end in it): one function `orxon_flyers::wake_group_of` |
+| 1202's death scorch `0x2e3de8` | the explosive tank's scorch (cluster 98f51a1cea64, L10 / L12 / L13) with level10's `$gp` words: `explosive_tank::scorch` (three consumers now) |
+| 1202's death sparks `0x2e3a90` | per class (the goo burst of 572 has the same shape but other counts, offsets and the knockback term): `orxon_brawler::sparks` |
+| 1202's flank `0x2e4840` | per class: the widest free angle (±90°) about the target, closed by the group's charging or nearer members |
+| level13 `0x26a498` | `SpawnBeamExplosion` word for word (only the callees differ): `fx::beam_explosion` (tagged `C:d7574994a069`) |
+| 1238's hit sparks | the Blaster shot's five impact sparks, inline: `blaster_shot::impact_sparks` |
+| level13 `0x265af0` | the hit-record writer (`World::deliver_hit`) |
+| `0x1f28f8` / `0x2211a0` in these classes | `a += b` in place (its first argument is a dummy): 1199's pull-back and cuboid entry and 1202's fall **move** the moby |
+| the 1202 / 1199 / 1196 / 29 / 36 / 1238 reaction tables | the levels' shared no-op tables (L10 0x1dde28, L13 0x1f615c): no Suck Cannon reaction; its projectile is a weapon hit |
+
+### 11.2 Side effects: coverage and tests
+
+| unit | side effect | ported | test (`orxon_gemlik_enemies::`) |
+|---|---|---|---|
+| U335 1196 (10: 7) `orxon_flyers::update_1196` | wake in its area, rise, fly the path; at a node with w the +0x160 moby's group wakes (1202s 1 → 2); hover about the path's end | yes | `scout_wakes_flies_its_path_and_wakes_the_brawlers`, `scout_run_is_deterministic` |
+| | no attack on Ratchet | n/a | same (no record from 1196) |
+| | hits: flash, cooldown; death: 0xb, the flight, `SetDeathBits(0x200)` (save bit, bolts), the piece explosion (light); `BoltBurst(1, 3, 0)` drops none (flags 0) | yes | `weapons_hurt_and_kill_a_scout` |
+| | the skill point 0x13d418 (the level word) | branch taken, the award NOT (G-SAV-007) | `weapons_hurt_and_kill_a_scout` (counted) |
+| | the big-head cheat | NOT (G-SAV-006) | — |
+| U336 1199 (10: 15) `orxon_flyers::update_1199` | the bob, hover about home, the group's attack delay (+0xbc), wind-up, dive (class sound 0), the bite on Ratchet (flags 1, damage 1, exact push) | yes | `swoop_flyers_dive_and_bite_ratchet`, `swoop_run_is_deterministic` |
+| | the cuboid flyers: charge at the cuboid's height, the bite (flags 0x10001), the pull-back | yes | `cuboid_flyers_charge_and_bite_ratchet` |
+| | its own class's hits ignored; flash; death (class sound 2, the flight, `SetDeathBits`, the explosion) | yes | `weapons_hurt_and_kill_a_swoop_flyer` |
+| U337 1202 (10: 57) `orxon_brawler` | sleep, the group wake (lure, Morph-o-Ray aim, a watched moby's end, the scout), the flanking chase, the swing on Ratchet (flags 0x10001, damage 3.1, type 0 / 1) | yes | `brawlers_wake_run_spread_and_swing_at_ratchet`, `brawler_run_is_deterministic`, `the_morph_ray_aim_wakes_a_brawler_group` |
+| | the knockback (arc, flash, cooldown, the group) and the counter-swing; the death: scorch, 160 sparks, the piece explosion, six pieces, `SetDeathBits` | yes | `weapons_knock_back_and_kill_a_brawler` |
+| | the fall (0xc) onto ground: the death | yes | `a_falling_brawler_dies` |
+| | the hazard surface under a fall (the death flight) | yes, untested (no reachable spot found) | — |
+| | the skill point 0x13d419 (a 794 attacker) | branch taken, the award NOT (G-SAV-007) | — |
+| | Clank's branches (body 1), the capsule contact range | read, never true in the port (G-HERO-005, G-HERO-033) | — |
+| U407 29 / 36 / 1238 (13: 9) `gemlik_turret` | the rider created and riding; tracking and firing every 2 ticks; the shots' hits on Ratchet (flags 0x10001, damage 1, type 1 / 1; class sound 0, type-27 sparks) | yes | `turret_tracks_and_fires_at_ratchet`, `turret_run_is_deterministic` |
+| | a drone takes a shot (its record), the shot fizzles (type 51) | yes | `a_drone_takes_the_turret_shot` |
+| | the rider's front shield against splash; its death (flash, `SetDeathBits`, sequence 3, its burst) blows up the turret (its blast, death bits) | yes | `the_rider_shields_the_front_and_its_death_blows_up_the_turret` |
+| | the orphaned turret blows up | yes | `a_turret_without_its_rider_blows_up` |
+| | the big-head cheat on the rider | NOT (G-SAV-006) | — |
+
+`w3_units_resolve_on_their_levels`: every unit on its level only, the census's instance counts (7, 15, 57, 9; 36 and
+1238 none placed), no reaction tables.
+
+**Not the game's, noted [L]:** a +0x160 entry of −1 makes 1196 read the moby slot before the array (the port wakes
+nothing); a ground probe that misses leaves the collision output stale in the game (the port uses z 0); 1199's cuboid
+bite template's type bytes are stack leftovers (0 here); 1202's capsule contact word 0x13f590 has no port (only
+`Hero::cap_moby`); the turret's muzzle step's w lane is stack (0 here).
+
+### 11.3 Frames (`RC_AUDIO=0 RC_SCENE=0`, two runs each, byte-identical; scratch `w3/frames/`)
+
+- Level 10, `RC_HERO_AT=279,214,60,2.6`, frame 300 (`l10_brawlers_b.png`): Ratchet on the upper platform facing a
+  red brawler 1202 rearing with its claws up among the yellow hounds (another class) and two gadgebots; frame 420
+  (`l10_brawlers_c_1.png`): the brawler's spiked claw swinging beside him, one health orb gone.
+- Level 10, `RC_HERO_AT=243,256,35,3.1416`, frame 130 (`l10_swoop_final_1.png`): two orange swoop flyers 1199, one
+  diving at Ratchet, who is in his hurt pose with an orb gone.
+- Level 10, `RC_HERO_AT=217.2,262.5,35,1.5708`, frame 120 (`l10_scout_a.png`): the blue path scout 1196 flying off
+  along its path past two sleeping (curled, red) brawlers.
+- Level 13, `RC_HERO_AT=572.5,411,304.35,0.6`, frame 70 (`l13_turret_final_1.png`): the turret's glass booth with its
+  rider firing orange shots down at Ratchet (hurt pose, an orb gone); the missed shots' green type-51 puffs.

@@ -181,7 +181,7 @@ copied.**
   and `$XDG_CONFIG_HOME/randcre/settings.toml` on Linux. It is disabled in deterministic mode.
 - `rc-trace` resolves `RC_EXTRACTED`, else `<workspace>/extracted` (`tools/trace/src/lib.rs`), and reads
   files directly. The `rc-game` tests read `../../extracted/levels/01/...` directly and skip when absent.
-- Other `RC_*` variables used by the engine are debug switches (about 70; see `README.md`). Only `RC_ISO`,
+- Other `RC_*` variables used by the engine are debug switches (see `docs/workflows/dev-switches.md`). Only `RC_ISO`,
   `RC_SOURCE` and `RC_EXTRACTED` concern data location.
 
 ### 3.3 The `extracted/` tree (dev machine)

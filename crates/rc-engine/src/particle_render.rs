@@ -170,6 +170,8 @@ pub struct LevelParticles {
     /// Class-27 emitters in instance order, with their update distance byte (moby+0x30).
     pub owners: Vec<(Owner, u8)>,
     pub level: u32,
+    /// The level's height grid (core +0xa4; Batalia, Orxon, Oltanis): the weather particles read it.
+    pub grid: Option<rc_formats::level::HeightGrid>,
 }
 
 /// Reads the particle textures and the level's emitters (class 27 on Novalis) with their pvars.
@@ -194,7 +196,8 @@ pub fn load(core: &rc_formats::level::LevelCore, index: &[u8], core_data: &[u8],
             owners.push((Owner { instance: i, pos: [pos[0], pos[1], pos[2], 0.0], rot: m.rotation, pvars: p.to_vec() }, m.update_distance as u8));
         }
     }
-    Ok(LevelParticles { textures, owners, level })
+    let grid = rc_formats::level::HeightGrid::parse(&core.header, core_data);
+    Ok(LevelParticles { textures, owners, level, grid })
 }
 
 /// The live simulation.
@@ -319,6 +322,8 @@ fn setup(
     sys.level = lp.level;
     // The world mesh the sparks' lines test (type 25).
     sys.coll = level.0.collision.clone().map(std::sync::Arc::new);
+    // The height grid the weather particles read (types 0, 73, `SpawnImpactSparks`).
+    sys.grid = lp.grid.clone().map(std::sync::Arc::new);
     let stats = std::env::var("RC_PART_STATS").is_ok_and(|v| v.trim() == "1");
     println!(
         "particles: {} part textures, {} fx textures, {} class-27 emitters (instances {:?})",

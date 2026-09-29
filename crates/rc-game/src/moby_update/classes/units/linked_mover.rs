@@ -37,8 +37,8 @@ type V = [f32; 4];
 /// `rows · v` (x, y, z; w 0).
 fn rows_mul(r: &[[f32; 4]; 4], v: V) -> V { std::array::from_fn(|l| if l == 3 { 0.0 } else { r[0][l] * v[0] + r[1][l] * v[1] + r[2][l] * v[2] }) }
 
-/// The link's state, None when it is away (module doc).
-fn link_state(w: &World, id: MobyId) -> Option<u8> {
+/// The link's state (pvar +0x10), None when it is away (module doc); also the rotators' (`linked_rotator`, the same pvar layout).
+pub fn link_state(w: &World, id: MobyId) -> Option<u8> {
     let l = usize::try_from(pi32(w, id, 0x10)).ok()?;
     let s = w.table.mobys.get(l)?.state;
     (s != 0xfe && s != 0xfd).then_some(s)

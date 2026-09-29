@@ -23,8 +23,18 @@
 //!   sparkles), 59 ([`type59`], hero sparkles), 60 ([`type60`], glints), 62 ([`type62`], the nanotech orbs and their
 //!   trails), and (2026-09-27) 16 ([`type16`], smoke), 19 / 55 ([`type19`], ribbons), 22 ([`type22`], rising puffs),
 //!   23 ([`type23`], glow puffs), 26 ([`type26`], moby glow), 35 ([`type35`], drops), 45 / 66 ([`type45`], flat
-//!   rings), 46 ([`type46`], water rings), 64 ([`type64`], bursting scorch), and (2026-09-28) 32 ([`type32`], the Glove of Doom canister's glow); a record of any other type kills itself on its first update and is
-//!   counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
+//!   rings), 46 ([`type46`], water rings), 64 ([`type64`], bursting scorch), and (2026-09-28) 32 ([`type32`], the Glove of Doom canister's glow),
+//!   and (2026-09-29, G-PRT-001 / G-PRT-007, docs/plan/particles.md "Update types, 2026-09-29") 0 / 73 / 1 ([`type00`],
+//!   [`type73`], [`type01`]: the weather's streaks, flakes and splashes, `SpawnImpactSparks`), 5 / 7 ([`type05`]), 10
+//!   ([`type10`]), 14 ([`type14`]), 18 ([`type18`]), 28 ([`type28`]), 31 ([`type31`]), 39 ([`type39`]), 41
+//!   ([`type41`]), 43 ([`type43`]), 48 / 50 ([`type48`]), 49 ([`type49`]), 51 ([`type51`]), 61 ([`type61`]), 65 (a row
+//!   on [`type25`]), 67 ([`type67`]), 68 ([`type68`]), 69 ([`type69`]), 70 ([`type70`]), 74 ([`type74`]), 77
+//!   ([`type77`]), 78 ([`type78`]), 79 / 80 ([`type79`]); a record of any other type kills itself on its first update
+//!   and is counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
+//! * **Mobys held by pointer** (types 14, 31, 39, 61, 67, 68, 74, 78, 79): the record keeps the moby index + 1; the moby
+//!   loop publishes those mobys ([`Particles::moby_frames`]: position, rows, state, class) and type 61 / 68's joints
+//!   ([`Particles::joint_frames`]) after its pass ([`Particles::moby_refs`] lists them), and each update applies the
+//!   game's own gone test.
 //! * **RNG.** Updates draw from the `&mut Rng` given to [`Particles::update_parts`] (the game's one stream), in
 //!   pool order; only types 11 (its split spawns five children and its phase changes draw one value), 16 (the landing
 //!   smoke), 35 (its rings' spawns), 55 (two a tick), 64 (the burst), 15 (a
@@ -44,15 +54,21 @@
 //! keeps its countdown at +0xc8 and its moby at +0x7c), copied from `rc_formats::gameplay::parse_pvars`
 //! (the loader's table walk and fixups) when the level is set up.
 
+pub mod type00;
+pub mod type01;
 pub mod type02;
 pub mod type04;
+pub mod type05;
 pub mod type06;
 pub mod type08;
+pub mod type10;
 pub mod type11;
 pub mod type12;
 pub mod type13;
+pub mod type14;
 pub mod type15;
 pub mod type16;
+pub mod type18;
 pub mod type19;
 pub mod type21;
 pub mod type22;
@@ -60,22 +76,40 @@ pub mod type23;
 pub mod type25;
 pub mod type26;
 pub mod type27;
+pub mod type28;
+pub mod type31;
 pub mod type32;
 pub mod type34;
 pub mod type35;
+pub mod type39;
+pub mod type41;
+pub mod type43;
 pub mod type44;
 pub mod type45;
 pub mod type46;
 pub mod type47;
+pub mod type48;
+pub mod type49;
+pub mod type51;
 pub mod type52;
 pub mod type53;
 pub mod type56;
 pub mod type57;
 pub mod type59;
 pub mod type60;
+pub mod type61;
 pub mod type62;
 pub mod type64;
+pub mod type67;
+pub mod type68;
+pub mod type69;
+pub mod type70;
 pub mod type72;
+pub mod type73;
+pub mod type74;
+pub mod type78;
+pub mod type77;
+pub mod type79;
 
 use crate::ps2v::{self, F};
 use crate::rng::Rng;
@@ -114,6 +148,8 @@ pub mod rec {
     /// Three `f32` at `o` (a vector's xyz).
     pub fn v3(r: &Record, o: usize) -> [f32; 3] { [ff(r, o), ff(r, o + 4), ff(r, o + 8)] }
     pub fn set_v3(r: &mut Record, o: usize, v: [f32; 3]) { for (k, x) in v.iter().enumerate() { set_ff(r, o + 4 * k, *x); } }
+    /// Four `f32` at `o` (a vector's xyzw).
+    pub fn v4(r: &Record, o: usize) -> [f32; 4] { [ff(r, o), ff(r, o + 4), ff(r, o + 8), ff(r, o + 12)] }
     /// Four `f32` at `o`.
     pub fn set_v4(r: &mut Record, o: usize, v: [f32; 4]) { for (k, x) in v.iter().enumerate() { set_ff(r, o + 4 * k, *x); } }
 }
@@ -307,11 +343,13 @@ pub struct PartStats {
     pub unported_collision: u64,
     /// Emitter spawns that needed `fast_add_rotations` paths or other unported branches.
     pub unported_emitter: u64,
+    /// Updates that took a branch of a ported type no known spawner reaches (type 69's modes 1–4).
+    pub unported_branch: u64,
 }
 
 impl Default for PartStats {
     fn default() -> Self {
-        PartStats { created: 0, create_failed: 0, killed: 0, unported_kills: [0; PART_TYPES], unported_collision: 0, unported_emitter: 0 }
+        PartStats { created: 0, create_failed: 0, killed: 0, unported_kills: [0; PART_TYPES], unported_collision: 0, unported_emitter: 0, unported_branch: 0 }
     }
 }
 
@@ -366,21 +404,64 @@ pub struct Particles {
     pub links: std::collections::HashMap<(usize, u8), usize>,
     /// 0x13f490: Ratchet's platform motion this tick (type 44's puffs ride it), set by the particle hook.
     pub hero_plat: [f32; 3],
+    /// The mobys the live records hold by pointer ([`Particles::moby_refs`]: types 67, 68, 74, 78), as their updates
+    /// read them, written by the moby loop after its pass (`moby_update::services::World::refresh_particle_anchors`).
+    /// A moby missing here is gone (its slot left the table); the per-type updates apply the game's own state tests.
+    pub moby_frames: std::collections::HashMap<usize, MobyFrame>,
+    /// The world matrices of the joints the live type-68 records hold (`MobyAttachToJoint` 0x264508 of (moby, joint
+    /// list): rows 0–2 the joint's axes, row 3 its point), written with [`Particles::moby_frames`].
+    pub joint_frames: std::collections::HashMap<(usize, u8), [[f32; 4]; 4]>,
+    /// The descriptors type-74 records point at (+0x3c: the caller's static data), added by [`type74::spawn`].
+    pub descs74: Vec<type74::Desc>,
+    /// 0x13f5e0: the gravity direction (type 78 homes around it); (0, 0, −1) unless the hero hook writes it.
+    pub gravity: [f32; 3],
+    /// The level's height grid (core +0xa4, `rc_formats::level::HeightGrid`): the weather particles (types 0, 73 and
+    /// `SpawnImpactSparks`) read it; None on levels without one.
+    pub grid: Option<std::sync::Arc<rc_formats::level::HeightGrid>>,
+    /// The weather globals the weather emitter 1400 writes and types 0 / 73 read.
+    pub weather: Weather,
+}
+
+/// The weather globals (level 08's 1400 update `0x307cf0` writes them each tick; levels without weather leave them 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Weather {
+    /// 0x160250: the camera's move this tick (camera 0x1675c0 − the emitter's last camera), added to every drop.
+    pub wind: [f32; 4],
+    /// 0x160260: the lowest a drop falls (camera z − the emitter's depth).
+    pub floor: f32,
+}
+
+/// A moby as the particle updates that keep a moby pointer read it: +0x10 its position, +0x20 its state, +0xa6 its
+/// class, +0xc0 its rows.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MobyFrame {
+    pub pos: [f32; 3],
+    pub rows: [[f32; 3]; 3],
+    pub state: u8,
+    pub o_class: i16,
 }
 
 impl Particles {
     /// Level-init state with the ported update table.
     pub fn new(defs: Option<PartDefs>, owners: Vec<Owner>) -> Self {
         let mut table: [Option<UpdateFn>; PART_TYPES] = [None; PART_TYPES];
+        table[0] = Some(type00::update as UpdateFn);
+        table[1] = Some(type01::update as UpdateFn);
         table[2] = Some(type02::update as UpdateFn);
         table[4] = Some(type04::update as UpdateFn);
+        table[5] = Some(type05::update as UpdateFn);
         table[6] = Some(type06::update as UpdateFn);
+        // Type 7's update 0x27f200 is type 5's code (one cluster hash): type05's module doc.
+        table[7] = Some(type05::update as UpdateFn);
         table[8] = Some(type08::update as UpdateFn);
+        table[10] = Some(type10::update as UpdateFn);
         table[11] = Some(type11::update as UpdateFn);
         table[12] = Some(type12::update as UpdateFn);
         table[13] = Some(type13::update as UpdateFn);
+        table[14] = Some(type14::update as UpdateFn);
         table[15] = Some(type15::update as UpdateFn);
         table[16] = Some(type16::update as UpdateFn);
+        table[18] = Some(type18::update as UpdateFn);
         table[19] = Some(type19::update19 as UpdateFn);
         table[21] = Some(type21::update as UpdateFn);
         table[22] = Some(type22::update as UpdateFn);
@@ -388,13 +469,22 @@ impl Particles {
         table[25] = Some(type25::update as UpdateFn);
         table[26] = Some(type26::update as UpdateFn);
         table[27] = Some(type27::update as UpdateFn);
+        table[28] = Some(type28::update as UpdateFn);
+        table[31] = Some(type31::update as UpdateFn);
         table[32] = Some(type32::update as UpdateFn);
         table[34] = Some(type34::update as UpdateFn);
         table[35] = Some(type35::update as UpdateFn);
+        table[39] = Some(type39::update as UpdateFn);
+        table[41] = Some(type41::update as UpdateFn);
+        table[43] = Some(type43::update as UpdateFn);
         table[44] = Some(type44::update as UpdateFn);
         table[45] = Some(type45::update45 as UpdateFn);
         table[46] = Some(type46::update as UpdateFn);
         table[47] = Some(type47::update as UpdateFn);
+        table[48] = Some(type48::update48 as UpdateFn);
+        table[49] = Some(type49::update as UpdateFn);
+        table[50] = Some(type48::update50 as UpdateFn);
+        table[51] = Some(type51::update as UpdateFn);
         table[52] = Some(type52::update as UpdateFn);
         table[53] = Some(type53::update as UpdateFn);
         table[56] = Some(type56::update as UpdateFn);
@@ -402,11 +492,24 @@ impl Particles {
         table[59] = Some(type59::update as UpdateFn);
         table[60] = Some(type60::update as UpdateFn);
         table[55] = Some(type19::update55 as UpdateFn);
+        table[61] = Some(type61::update as UpdateFn);
         table[62] = Some(type62::update as UpdateFn);
         table[64] = Some(type64::update as UpdateFn);
+        // Type 65's update 0x289388 is 0x282760 less the variant branch its spawner never reaches: type25's doc.
+        table[65] = Some(type25::update as UpdateFn);
         table[66] = Some(type45::update66 as UpdateFn);
+        table[67] = Some(type67::update as UpdateFn);
+        table[68] = Some(type68::update as UpdateFn);
+        table[69] = Some(type69::update as UpdateFn);
+        table[70] = Some(type70::update as UpdateFn);
         table[72] = Some(type72::update as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3] }
+        table[73] = Some(type73::update as UpdateFn);
+        table[74] = Some(type74::update as UpdateFn);
+        table[77] = Some(type77::update as UpdateFn);
+        table[78] = Some(type78::update as UpdateFn);
+        table[79] = Some(type79::update79 as UpdateFn);
+        table[80] = Some(type79::update80 as UpdateFn);
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3], moby_frames: Default::default(), joint_frames: Default::default(), descs74: Vec::new(), gravity: [0.0, 0.0, -1.0], grid: None, weather: Weather::default() }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -440,6 +543,24 @@ impl Particles {
                 }
             }
         }
+    }
+
+    /// The mobys (and the joints) the live records hold by pointer, for [`Particles::moby_frames`] /
+    /// [`Particles::joint_frames`]: type 68's / 61's moby and joint list, type 74's, 67's, 14's, 79's, 39's and 31's moby, type 78's target.
+    pub fn moby_refs(&self) -> (Vec<usize>, Vec<(usize, u8)>) {
+        let (mut mobys, mut joints) = (Vec::new(), Vec::new());
+        for (_, r) in self.pool.live() {
+            if let Some((m, l)) = type68::joint_of(r).or_else(|| type61::joint_of(r)) {
+                mobys.push(m);
+                joints.push((m, l));
+            }
+            mobys.extend(type74::moby_of(r).or_else(|| type78::moby_of(r)).or_else(|| type67::moby_of(r)).or_else(|| type14::moby_of(r)).or_else(|| type79::moby_of(r)).or_else(|| type39::moby_of(r)).or_else(|| type31::moby_of(r)));
+        }
+        mobys.sort_unstable();
+        mobys.dedup();
+        joints.sort_unstable();
+        joints.dedup();
+        (mobys, joints)
     }
 
     /// Live records per type.
@@ -582,11 +703,11 @@ mod tests {
     fn update_parts_kills_unported_types_and_counts_them() {
         let mut s = Particles::new(None, Vec::new());
         s.create_part(58);
-        s.create_part(61);
+        s.create_part(63);
         s.update_parts(&mut Rng::new());
         assert_eq!(s.pool.count, 0);
         assert_eq!(s.stats.unported_kills[58], 1);
-        assert_eq!(s.stats.unported_kills[61], 1);
+        assert_eq!(s.stats.unported_kills[63], 1);
         assert!(s.table[25].is_some() && s.table[47].is_some() && s.table[60].is_some());
     }
 

@@ -7,8 +7,8 @@
 //! the target is gone. The ground ones (+0x20a = 1) stay on foot. A weapon hit knocks one back (health 1: the second
 //! kills) or kills it (the death flight, `SetDeathBits`, then the death explosion); a fall below z 5 kills it (the
 //! Gemlik pits). A cuboid (+0x22c) can bound where it sees a target. While it flies and is drawn it carries a
-//! particle of type 68 (level13 `0x280400`: a glow on the moby, colours 0x80808080 / 0x10808080); that type's update
-//! and draw are not ported (G-PRT-007). The Suck Cannon takes it (the level-01 critter table shape, held 7).
+//! particle of type 68 (level13 `0x280400`: a flickering additive ribbon trailing its joint list 0, colours
+//! 0x80808080 / 0x10808080; `crate::particles::type68`). The Suck Cannon takes it (the level-01 critter table shape, held 7).
 //!
 //! **Pvars** (0x270): +0x20 the damage record (+0x26 s16 the class's hit cooldown), +0x38 the lure, +0x40 the flight
 //! velocity, +0x60 the suck record, +0x110 the flash, +0x120 the knockback record, +0x180 the walker, +0x198 the
@@ -53,7 +53,7 @@
 //! | case 99: untargetable; `0x2686e0` & 0x140 → the rate slot `0x2b4ec0(0x1613b0, 3, ticks(1)·60)` (= `0x2efbf8`), a free one → `0x26b0d8(0.5, 13, m, pos, 4)` (= `0x273f50`: 3 spark pairs, 2 flashes, shake, class sound 4, light); deleted; below z 0 → deleted | the death | [`update`] (`fx::rate_slot`, `fx::death_explosion`) |
 //! | tail: `0x269580` (= `0x2723f8`) flash update; outside [2, 1021]³ → deleted | | [`update`] |
 //! | `0x2b4ff0` (cases 1–5): ground (fl 0) within 0.3 below the feet → K vz −= 9.8·dt², z += vz, not below; below the ground → z += 9.8·dt², K velocity 0; else K velocity 0 | settle | [`settle`] |
-//! | `0x2b4f28` / `0x2b4fb8` | the particle on (drawn: `0x280400(0.2, 0.2, 0.8, m, 0, 0x80808080, 0x10808080, 0x19)`) / off (`0x273410` = `KillPart`) | [`glow_on`], [`glow_off`] (the record's slot; type 68's update and draw: G-PRT-007) |
+//! | `0x2b4f28` / `0x2b4fb8` | the particle on (drawn: `0x280400(0.2, 0.2, 0.8, m, 0, 0x80808080, 0x10808080, 0x19)`) / off (`0x273410` = `KillPart`) | [`glow_on`] (`particles::type68`: the ribbon lives and draws), [`glow_off`] |
 //! | table (level13 0x1f6174): 0x2b7980 / 0x2b79d0 / 0x2b7a20 (bounce: class sound 2) / 0x2b7ad0 (held 7, refused → 1), 0x2b7b00 (+0x60), `DeleteMoby` | the Suck Cannon: the level-01 critter shape | `react::slot_*` with `react::CRITTER` and the class's sequence table |
 //!
 //! Native `f32`; the rand draws at the game's points.
@@ -174,13 +174,16 @@ pub fn glow_off(w: &mut World, id: MobyId) {
     }
 }
 
-/// `0x2b4f28`: drawn → the flight particle on (type 68, `0x280400`; its record's slot is kept, the type's update and
-/// draw are not ported: G-PRT-007), else off.
+/// `0x2b4f28`: drawn → the flight particle on (`0x280400(0.2, 0.2, 0.8, m, 0, 0x80808080, 0x10808080, 0x19)`: the
+/// type-68 ribbon on joint list 0, `crate::particles::type68`; its record's slot is kept), else off.
 pub fn glow_on(w: &mut World, id: MobyId) {
     if w.m(id).visible == 0 { return glow_off(w, id); }
     if c::pi32(w, id, pv::PART) != 0 { return; }
     *w.svc.fx.part_spawns.entry(GLOW_PART).or_default() += 1;
-    let slot = w.particles.as_deref_mut().and_then(|p| p.create_part(GLOW_PART));
+    let at = w.joint_point(id, 0);
+    let (draw_dist, o_class) = (w.m(id).draw_dist, w.m(id).o_class);
+    let s = crate::particles::type68::Spawn { w1: 0.2, k: 0.2, len: 0.8, moby: id, list: 0, rgba1: 0x8080_8080, rgba2: 0x1080_8080, jitter: 0x19, draw_dist, o_class, at };
+    let slot = w.particles.as_deref_mut().and_then(|p| crate::particles::type68::spawn(p, s));
     if slot.is_none() { w.svc.fx.part_failed += 1; }
     c::set_pi32(w, id, pv::PART, slot.map_or(0, |s| s as i32 + 1));
 }

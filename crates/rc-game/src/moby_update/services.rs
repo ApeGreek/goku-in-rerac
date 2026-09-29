@@ -1061,6 +1061,9 @@ pub enum HeroCall {
     /// `SetAnim(blend, seq, frame)` 0x247a90 (`blend` = `(float)ticks(n)`), as the hero code's own
     /// ([`Hero::set_anim`]).
     SetAnim { blend: f32, seq: u8, frame: i32 },
+    /// The death sequence `0x2319b0` ([`crate::hero::damage::death_fade`]: the deaths counted, the fade and the
+    /// reload flag 0x141401), called by a class (the kill cuboids 1039).
+    Death,
 }
 
 impl HeroFields {
@@ -1132,6 +1135,7 @@ impl HeroFields {
             match *call {
                 HeroCall::SetState { id, play } => { h.set_state(c, id, play); }
                 HeroCall::SetAnim { blend, seq, frame } => h.set_anim(c.anim, c.rng, pf(blend), seq, frame),
+                HeroCall::Death => crate::hero::damage::death_fade(h),
             }
         }
         // After the calls: the gold bolt stores 0x1413ff after its HeroTeleport's SetState (which clears it).
@@ -1476,6 +1480,7 @@ impl<'a> World<'a> {
     /// class than the record's (+0x38), is not listed, so its records die on their next update.
     pub fn refresh_particle_anchors(&mut self) {
         use crate::particles::{rec, type19, type26};
+        self.refresh_particle_mobys();
         let Some(p) = self.particles.as_deref() else { return };
         let keys: Vec<(usize, i16, bool, i16)> = p
             .pool
@@ -1502,6 +1507,43 @@ impl<'a> World<'a> {
             out.insert((m, j), q);
         }
         if let Some(p) = self.particles.as_deref_mut() { p.joint_anchors = out; }
+    }
+
+    /// `MobyAttachToJoint(moby, list, M)` 0x264508: the world matrix of joint list `list`'s last joint (its pose rows
+    /// turned by the moby's rows, row 3 its point: `rc_formats::moby_anim::attach_matrix`). Without the class's joint
+    /// list or animation data: the moby's rows and position.
+    pub fn joint_matrix(&self, id: MobyId, list: usize) -> [[f32; 4]; 4] {
+        let m = &self.table.mobys[id];
+        let chain = self.svc.joint_lists.get(&m.o_class).and_then(|l| l.get(list)).filter(|c| !c.is_empty());
+        let Some((class, chain)) = self.classes.anim(m.o_class).zip(chain) else {
+            return [m.rows[0], m.rows[1], m.rows[2], [m.position[0], m.position[1], m.position[2], 1.0]];
+        };
+        let snap = self.svc.snapshots.get(id).and_then(|s| s.as_ref());
+        let p = rc_formats::moby_anim::evaluate_chain(class, &m.anim, snap, chain);
+        let rows = [m.rows[0], m.rows[1], m.rows[2]].map(|r| r.map(f32::to_bits));
+        rc_formats::moby_anim::attach_matrix(&p, &rows, [m.position[0], m.position[1], m.position[2]], m.scale)
+    }
+
+    /// The mobys and joints the live particle records hold by pointer (`Particles::moby_refs`: types 67, 68, 74, 78),
+    /// as their updates read them during `UpdateParts`, after the moby loop ([`crate::particles::Particles::moby_frames`],
+    /// `joint_frames`). A moby past the table is left out (gone); the updates test its state and class themselves.
+    pub fn refresh_particle_mobys(&mut self) {
+        let Some(p) = self.particles.as_deref() else { return };
+        let (mobys, joints) = p.moby_refs();
+        let frames: std::collections::HashMap<usize, crate::particles::MobyFrame> = mobys
+            .into_iter()
+            .filter_map(|m| {
+                let mo = self.table.mobys.get(m)?;
+                let rows = [0, 1, 2].map(|k| [mo.rows[k][0], mo.rows[k][1], mo.rows[k][2]]);
+                Some((m, crate::particles::MobyFrame { pos: [mo.position[0], mo.position[1], mo.position[2]], rows, state: mo.state, o_class: mo.o_class }))
+            })
+            .collect();
+        let jf: std::collections::HashMap<(usize, u8), [[f32; 4]; 4]> =
+            joints.into_iter().filter(|(m, _)| *m < self.table.mobys.len()).map(|(m, l)| ((m, l), self.joint_matrix(m, l as usize))).collect();
+        if let Some(p) = self.particles.as_deref_mut() {
+            p.moby_frames = frames;
+            p.joint_frames = jf;
+        }
     }
 
     // -----------------------------------------------------------------------------------------------

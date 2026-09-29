@@ -61,6 +61,22 @@
 //! | U341 | 1344 the Orxon help director (10) | level10 0x2e85b8 | [`help_orxon`] |
 //! | U391 | 422 the Hoven help director (12) | level12 0x2ed280 | [`help_hoven`] |
 //! | U419 | 558 the Gemlik help director (13) | level13 0x2f3778 | [`help_gemlik`] |
+//! | U470 | 77 Quartu alarm drones (15, 17) | level15 0x2a2488 | [`quartu_drone`] |
+//! | U480 | 408 Quartu alarms (15, 17), and the drones they release | level15 0x2cb4c8 | [`quartu_alarm`] |
+//! | U216 | 1039 kill cuboids (06, 08, 13, 18; off while flying a ship: hero state 0x32, G-HERO-002) | level06 0x2f7930 | [`kill_volume`] |
+//! | U274 | 438 Batalia's circling fighters (08; shot down from the turret in hero state 0x32) | level08 0x2de848 | [`batalia_fighter`] |
+//! | U474 | 123 swinging lasers (15, 17) | level15 0x2a6e68 | [`swing_laser`] |
+//! | U411 | 127, 128, 159, 169 rotators on a linked moby's state (13) | level13 0x2c7f38 | [`linked_rotator`] |
+//! | U335 | 1196 Orxon's path scouts (10; wake the brawlers' groups) | level10 0x2df270 | [`orxon_flyers`] |
+//! | U336 | 1199 Orxon's swoop flyers (10) | level10 0x2e01a8 | [`orxon_flyers`] |
+//! | U337 | 1202 Orxon's brawlers (10; Clank's-part branches: G-HERO-005) | level10 0x2e1d38 | [`orxon_brawler`] |
+//! | U407 | 29 Gemlik's gun turrets (13), their rider 36 and shot 1238 (created by code) | level13 0x2b41b8, 0x2b4c80, 0x306300 | [`gemlik_turret`] |
+//! | U215 | 1038 orb holders (06, 10, 17), and the orb 1040 each makes | level06 0x2f7288, 0x2f7ab8 | [`orb_holder`] |
+//! | U503, U502, U514 | 552 barrier posts, 546 switches, 1387 walls (16) | level16 0x2cf4a8, 0x2cf198, 0x2e36e8 | [`kalebo_barrier`] |
+//! | U185 (2026-09-29 run) | 843 sliding blocks placed by a cuboid (05) | level05 0x30e508 | [`cuboid_slider`] |
+//! | U473 | 93 swing doors (15) | level15 0x2a3ba8 | [`swing_door`] |
+//! | U307 | 1172 chain anchors (09) | level09 0x303d10 | [`chain_anchor`] |
+//! | U477 | 196, 197, 1958 sliding doors (15, 17) | level15 0x2bddb0 | [`slide_door`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -119,6 +135,21 @@ pub mod flying_biter;
 pub mod buzz_bomb;
 pub mod area_stalker;
 pub mod wave_gate;
+pub mod quartu_drone;
+pub mod quartu_alarm;
+pub mod kill_volume;
+pub mod batalia_fighter;
+pub mod swing_laser;
+pub mod linked_rotator;
+pub mod orxon_flyers;
+pub mod orxon_brawler;
+pub mod gemlik_turret;
+pub mod orb_holder;
+pub mod kalebo_barrier;
+pub mod cuboid_slider;
+pub mod swing_door;
+pub mod chain_anchor;
+pub mod slide_door;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -197,6 +228,27 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U341 help", level: help_orxon::REFERENCE_LEVEL, func: help_orxon::UPDATE_FN, classes: &help_orxon::CLASSES, update: help_orxon::update, joints: &[] },
     UnitPort { unit: "U391 help", level: help_hoven::REFERENCE_LEVEL, func: help_hoven::UPDATE_FN, classes: &help_hoven::CLASSES, update: help_hoven::update, joints: &[] },
     UnitPort { unit: "U419 help", level: help_gemlik::REFERENCE_LEVEL, func: help_gemlik::UPDATE_FN, classes: &help_gemlik::CLASSES, update: help_gemlik::update, joints: &[] },
+    UnitPort { unit: "U470 77", level: quartu_drone::REFERENCE_LEVEL, func: quartu_drone::UPDATE_FN, classes: &quartu_drone::CLASSES, update: quartu_drone::update, joints: &[] },
+    UnitPort { unit: "U480 408", level: quartu_alarm::REFERENCE_LEVEL, func: quartu_alarm::UPDATE_FN, classes: &quartu_alarm::CLASSES, update: quartu_alarm::update, joints: &[] },
+    UnitPort { unit: "U216 1039", level: kill_volume::REFERENCE_LEVEL, func: kill_volume::UPDATE_FN, classes: &kill_volume::CLASSES, update: kill_volume::update, joints: &[] },
+    UnitPort { unit: "U274 438", level: batalia_fighter::REFERENCE_LEVEL, func: batalia_fighter::UPDATE_FN, classes: &batalia_fighter::CLASSES, update: batalia_fighter::update, joints: &[] },
+    UnitPort { unit: "U474 123", level: swing_laser::REFERENCE_LEVEL, func: swing_laser::UPDATE_FN, classes: &swing_laser::CLASSES, update: swing_laser::update, joints: &[] },
+    UnitPort { unit: "U411 127", level: linked_rotator::REFERENCE_LEVEL, func: linked_rotator::UPDATE_FN, classes: &linked_rotator::CLASSES, update: linked_rotator::update, joints: &[] },
+    UnitPort { unit: "U335 1196", level: orxon_flyers::REFERENCE_LEVEL, func: orxon_flyers::SCOUT_FN, classes: &orxon_flyers::SCOUT_CLASSES, update: orxon_flyers::update_1196, joints: &[] },
+    UnitPort { unit: "U336 1199", level: orxon_flyers::REFERENCE_LEVEL, func: orxon_flyers::SWOOP_FN, classes: &orxon_flyers::SWOOP_CLASSES, update: orxon_flyers::update_1199, joints: &orxon_flyers::SWOOP_CLASSES },
+    UnitPort { unit: "U337 1202", level: orxon_brawler::REFERENCE_LEVEL, func: orxon_brawler::UPDATE_FN, classes: &orxon_brawler::CLASSES, update: orxon_brawler::update, joints: &orxon_brawler::CLASSES },
+    UnitPort { unit: "U407 29", level: gemlik_turret::REFERENCE_LEVEL, func: gemlik_turret::UPDATE_FN, classes: &gemlik_turret::CLASSES, update: gemlik_turret::update, joints: &gemlik_turret::CLASSES },
+    UnitPort { unit: "U407 36", level: gemlik_turret::REFERENCE_LEVEL, func: gemlik_turret::RIDER_FN, classes: &gemlik_turret::RIDER_CLASSES, update: gemlik_turret::rider_update, joints: &gemlik_turret::RIDER_CLASSES },
+    UnitPort { unit: "U407 1238", level: gemlik_turret::REFERENCE_LEVEL, func: gemlik_turret::SHOT_FN, classes: &gemlik_turret::SHOT_CLASSES, update: gemlik_turret::shot_update, joints: &[] },
+    UnitPort { unit: "U215 1038", level: orb_holder::REFERENCE_LEVEL, func: orb_holder::UPDATE_FN, classes: &orb_holder::CLASSES, update: orb_holder::update, joints: &[] },
+    UnitPort { unit: "U215 orb", level: orb_holder::REFERENCE_LEVEL, func: orb_holder::ORB_FN, classes: &orb_holder::ORB_CLASSES, update: orb_holder::orb_update, joints: &[] },
+    UnitPort { unit: "U503 552", level: kalebo_barrier::REFERENCE_LEVEL, func: kalebo_barrier::UPDATE_FN, classes: &kalebo_barrier::CLASSES, update: kalebo_barrier::post_update, joints: &[] },
+    UnitPort { unit: "U502 546", level: kalebo_barrier::REFERENCE_LEVEL, func: kalebo_barrier::SWITCH_FN, classes: &kalebo_barrier::SWITCH_CLASSES, update: kalebo_barrier::switch_update, joints: &[] },
+    UnitPort { unit: "U514 1387", level: kalebo_barrier::REFERENCE_LEVEL, func: kalebo_barrier::WALL_FN, classes: &kalebo_barrier::WALL_CLASSES, update: kalebo_barrier::wall_update, joints: &[] },
+    UnitPort { unit: "U185 843", level: cuboid_slider::REFERENCE_LEVEL, func: cuboid_slider::UPDATE_FN, classes: &cuboid_slider::CLASSES, update: cuboid_slider::update, joints: &[] },
+    UnitPort { unit: "U473 93", level: swing_door::REFERENCE_LEVEL, func: swing_door::UPDATE_FN, classes: &swing_door::CLASSES, update: swing_door::update, joints: &[] },
+    UnitPort { unit: "U307 1172", level: chain_anchor::REFERENCE_LEVEL, func: chain_anchor::UPDATE_FN, classes: &chain_anchor::CLASSES, update: chain_anchor::update, joints: &[] },
+    UnitPort { unit: "U477 196", level: slide_door::REFERENCE_LEVEL, func: slide_door::UPDATE_FN, classes: &slide_door::CLASSES, update: slide_door::update, joints: &[] },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.
@@ -306,6 +358,9 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((laser_fence::REFERENCE_LEVEL, laser_fence::UPDATE_FN)) => laser_fence::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
+        Some((quartu_drone::REFERENCE_LEVEL, quartu_drone::UPDATE_FN)) => quartu_drone::fx_quads(table, svc, id),
+        Some((swing_laser::REFERENCE_LEVEL, swing_laser::UPDATE_FN)) => swing_laser::fx_quads(table, svc, id),
+        Some((kalebo_barrier::REFERENCE_LEVEL, kalebo_barrier::UPDATE_FN)) => kalebo_barrier::fx_quads(table, svc, id),
         _ => None,
     }
 }

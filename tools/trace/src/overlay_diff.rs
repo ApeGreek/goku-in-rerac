@@ -852,7 +852,8 @@ pub fn run(extracted: &Path, work: &Path, repo: &Path, o: &Options) -> Result<Su
             *counts.entry(c.status).or_default() += 1;
             line.push(c.status);
             match c.status {
-                '.' | '=' => { let _ = write!(tsv, "\t{}", c.status); }
+                '.' => tsv.push_str("\t."),
+                '=' => { let _ = write!(tsv, "\t= {:x}", c.counterpart.unwrap_or(0)); }
                 '?' => tsv.push_str("\t?"),
                 s => { let _ = write!(tsv, "\t{s} {:x} -{}/+{} h{} k{} o{} s{} c{}", c.counterpart.unwrap_or(0), c.removed, c.added, c.hunks.len(), c.consts.len(), c.other.len(), c.case_only.len(), c.callee_diffs.len()); }
             }

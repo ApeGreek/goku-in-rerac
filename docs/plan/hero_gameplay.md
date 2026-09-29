@@ -525,7 +525,7 @@ next update [L: one tick]; the lure moby is Ratchet's (the classes only test it 
 flight uses (0, 0, 1) for the stale normal [L]; the whistle's aliveness is the previous flush's
 (`HeroFx::item_loop_alive`). The chicken's suck record lives in its own pvars (+0xe0; the game: a global table).
 
-**Not ported** (gaps): particle type 18 (the flight trail: records and draws counted; G-PRT-001); the held-count HUD
+**Not ported** (gaps): ~~particle type 18~~ (the flight trail: ported 2026-09-29, `particles::type18`, 5 draws a record); the held-count HUD
 element (G-UI-011); the mines' lure list 0x1b0c30 (batch 2); the gold cannon (G-WPN-009); the stats (G-SAV-009). (The
 vortex, the vacuum and the rings: §10.1; crates, the pickup sound and the full coverage table: §10.2.)
 
@@ -1127,7 +1127,7 @@ Ratchet's hit ignored — the port tests the world alone [L], as the Bomb Glove 
 | 0 → 1 (+0x44, +0x98 −1, +0x6e, +0x6c) | | P |
 | 1: owner alive and in hand → nothing; else delete | | P |
 | 2: grow 0.02 a tick; −9·dt²; apart from the listed decoys (1.8, ×0.015); Ratchet's +0x94 off in 0x1e; `FUN_0026d610(0.2, 0.2, 0)`; walls → `FUN_00212960(0.23)`; pushed from Ratchet when falling; reflected ×0.2 (×1.05 off a primitive); slow on < 35° → +0x44++ and land (a primitive after 240); land: blend 1 (ticks(10)), +0x98 0, +0x94 collision, vel 0, state 3, +0x44 ticks(600), z, the tilt | | P `decoy::fly` / `land`; tests (flew, landed) |
-| `0x2d9f90` → `0x2d90a8` on surfaces 0, 1, 3, 8, 0xb, 0xc, 0xd: 10 × (3 `randf` + 3 `rand` + `randf` + `rand`) `PartType05Spawn`, list out, delete | the pop | P `decoy::pop_surface` (type 5 records: **G-PRT-001**); test `decoy::tests::pops_on_a_pop_surface` (surface 1: 10 puffs, deleted; surface 2: stands) |
+| `0x2d9f90` → `0x2d90a8` on surfaces 0, 1, 3, 8, 0xb, 0xc, 0xd: 10 × (3 `randf` + 3 `rand` + `randf` + `rand`) `PartType05Spawn`, list out, delete | the pop | P `decoy::pop_surface` (type 5 records, live since 2026-09-29 `particles::type05`; was **G-PRT-001**); test `decoy::tests::pops_on_a_pop_surface` (surface 1: 10 puffs, deleted; surface 2: stands) |
 | `FUN_00220ed8`(+0x6f): the bounce sound 0 every 20 ticks, else `FUN_002747a0(dt)` jitter | | P |
 | 3 / 4: `MobyGetHitMessage(0x30001)`; the tilt; the push; +0x5c, +0x6c; one attacker per 30 ticks; type 0x101 → +0x6c ticks(100); `fun_0022da68(0)`; +0x07 = 0xfa; health −= damage; `FUN_00272318` flash | the hits (creatures' bites and strikes, bombs) | P `decoy::stand`; tests (bites, sound 0, the red flash) |
 | health < 0: `FUN_002747a0(0.5)` jitter, `SpawnBeamExplosion(0, 0, 4, 3, 9, 1, 12, decoy, drift, 0, 0, 0, 0, 2, 1, 1, −1, gold)`, gold: `FUN_0026e7d8` + sphere hits, list out, delete | the burst | P (gold: **G-WPN-009**); test (sound 2, light, shake) |

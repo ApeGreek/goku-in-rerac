@@ -26,4 +26,11 @@ The script packages exactly these and fails if anything else ends up in the fold
 So nothing from `tools/`, `extracted/`, `work/` or `~/PS2/ratchet1/` can ship, and no disc data can be packaged. The
 script also runs the packaged `randcrw --version-json` to check it.
 
-macOS is tested; the Linux and Windows (Git Bash) branches are written but untested. No signing yet.
+macOS is tested; the Linux and Windows (Git Bash) branches are written but untested. No signing yet: a downloaded zip is
+quarantined by macOS Gatekeeper.
+
+## Where the runtime finds its shaders
+
+The runtime loads its shaders from `assets/` next to its (symlink-resolved) executable, or from `../Resources/assets`
+in a macOS `.app`; when neither exists (`cargo dev`, `target/*/randcrw`) it uses the repo's `crates/rc-engine/assets`
+(`main.rs` `asset_dir`).

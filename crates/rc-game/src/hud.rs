@@ -249,6 +249,9 @@ pub struct Inputs {
     pub weapon: Option<(u16, i32, i32)>,
     /// 0x15ed88 (rc_formats::strings::lang).
     pub lang: u32,
+    /// Ratchet's state 0x1413d4: mounted (0x32, `crate::hero::scripted::MOUNTED`: a turret or vehicle holds him) the
+    /// health and bolt draws draw nothing (0x24e418 / 0x24ea00 test it first).
+    pub hero_state: i32,
 }
 
 /// The HUD.
@@ -297,7 +300,7 @@ impl HudState {
             bolts_pin_handle: None,
             banner: Banner { y: 100, ..Default::default() },
             help: crate::help::HelpBox::default(),
-            inputs: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: 0 },
+            inputs: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: 0, hero_state: 0 },
             last: None,
         }
     }
@@ -626,10 +629,10 @@ impl HudState {
         out.push(Draw::Text { font: Font::Regular, x: x - w, y, rgba, text: text.to_vec() });
     }
 
-    /// 0x24e418.
+    /// 0x24e418 (nothing while Ratchet is mounted, state 0x32; the Giant Clank body's test is G-HERO-005's).
     fn draw_health(&self, i: usize, out: &mut Vec<Draw>) {
         let s = &self.slots[i];
-        if s.slide == 0 { return; }
+        if self.inputs.hero_state == crate::hero::scripted::MOUNTED || s.slide == 0 { return; }
         let x = ANCHORS[i].0;
         let y = HEALTH_Y + ELEMENT_Y;
         let (sf, f) = Self::fractions(s, HEALTH_STEPS, HEALTH_STEPS);
@@ -667,10 +670,10 @@ impl HudState {
         }
     }
 
-    /// 0x24ea00.
+    /// 0x24ea00 (nothing while Ratchet is mounted, state 0x32).
     fn draw_bolts(&self, i: usize, out: &mut Vec<Draw>) {
         let s = &self.slots[i];
-        if s.slide == 0 { return; }
+        if self.inputs.hero_state == crate::hero::scripted::MOUNTED || s.slide == 0 { return; }
         let y = ELEMENT_Y;
         let x = ANCHORS[i].0;
         let (sf, f) = Self::fractions(s, BOLT_SLIDE_STEPS, BOLT_ALPHA_STEPS);
@@ -1014,7 +1017,7 @@ mod tests {
         HudAssets { icons, frame_sizes: vec![(32, 32); next as usize], glyphs: [g, g, g], messages }
     }
 
-    fn inputs(hp: i32, bolts: i32) -> Inputs { Inputs { hp, max_hp: 4, bolts, weapon: None, lang: 0 } }
+    fn inputs(hp: i32, bolts: i32) -> Inputs { Inputs { hp, max_hp: 4, bolts, weapon: None, lang: 0, hero_state: 0 } }
 
     /// The context prompt (slot 12, 0x24c898): requested while an owner holds it, slides in over 8 ticks (alpha
     /// 16·slide), one or two lines in a bar frame centred on x 256 at y 50, and fades out once no longer requested.
@@ -1040,6 +1043,23 @@ mod tests {
         h.set_prompt(false, b"");
         for _ in 0..60 { h.tick(inputs(4, 0)); }
         assert_eq!(h.slots[12].slide, 0);
+    }
+
+    /// Mounted (hero state 0x32) the health and bolt draws draw nothing while their slots stay up (0x24e418 /
+    /// 0x24ea00); back in any other state they draw again.
+    #[test]
+    fn mounted_hides_health_and_bolts() {
+        let mut h = HudState::new(assets());
+        h.tick(inputs(4, 0));
+        let mut d = Vec::new();
+        for _ in 0..20 { d = h.tick(inputs(3, 1234)); }
+        assert!(!d.is_empty(), "shown after the change");
+        let up: Vec<Element> = h.slots.iter().filter(|s| s.slide != 0).map(|s| s.element).collect();
+        assert!(up.contains(&Element::Health) && up.contains(&Element::Bolts), "{up:?}");
+        let mounted = Inputs { hero_state: crate::hero::scripted::MOUNTED, ..inputs(3, 1234) };
+        assert!(h.tick(mounted).is_empty(), "mounted: nothing drawn");
+        assert!(h.slots.iter().any(|s| s.element == Element::Health && s.slide != 0), "the slot stays up");
+        assert!(!h.tick(inputs(3, 1234)).is_empty(), "drawn again");
     }
 
     #[test]

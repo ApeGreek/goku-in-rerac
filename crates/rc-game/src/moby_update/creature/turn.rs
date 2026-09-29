@@ -58,12 +58,15 @@ fn approach_add(x: &mut f32, target: f32, step: f32) {
 /// `FUN_00270830(target, accel, decel, vmax, &x, &v)`: `x` springs toward `target` with velocity `v` (accelerating
 /// by `accel`, braking by `decel` so that it stops there, at most `vmax` a tick): the linear twin of [`turn_toward`].
 /// Used by the water managers' levels and the census units (the Rilgar floodgates 852 / 853, …).
-pub fn spring(target: f32, accel: f32, decel: f32, vmax: f32, x: &mut f32, v: &mut f32) {
+///
+/// Returns the game's value: the remaining difference when it snapped onto the target, else the velocity (0 once
+/// settled: the Orxon flyers' rise ends on it).
+pub fn spring(target: f32, accel: f32, decel: f32, vmax: f32, x: &mut f32, v: &mut f32) -> f32 {
     let d = target - *x;
     if *v * d < 0.0 || d == 0.0 {
         approach_add(v, 0.0, decel);
         *x += *v;
-        return;
+        return *v;
     }
     let stop = (*v * *v) / decel * 0.5;
     if d.abs() < stop {
@@ -74,7 +77,13 @@ pub fn spring(target: f32, accel: f32, decel: f32, vmax: f32, x: &mut f32, v: &m
         let s = (2.0 * decel * d).abs().sqrt().min(vmax);
         approach_add(v, if d < 0.0 { -s } else { s }, accel);
     }
-    if d.abs() <= v.abs() { *x = target } else { *x += *v }
+    if d.abs() <= v.abs() {
+        *x = target;
+        d
+    } else {
+        *x += *v;
+        *v
+    }
 }
 
 /// `0x270cc0(target, accel, decel, vmax, &angle, &vel)`: turn `angle` toward `target` with an angular velocity that
