@@ -302,11 +302,12 @@ through.
   (skill point, level sound 1, banner 0x53d6, debris 1510 `0x30be70`: no Novalis weapon has mask 0x800000).
 * Particle types 16 (smoke), 22 (jet exhaust / ember smoke) and 26 (the globs' and shells' glow): records taken and the
   spawners' draws made, not simulated or drawn (the updates' draws are missing).
-* `Globals::ripple_z` must be filled by the water set-up of levels 5 / 11 for the amoeboid fall-out rule.
+* `Globals::ripple_z` must be filled by the water set-up of levels 5 / 11 for the amoeboid fall-out rule (still open
+  2026-09-29: nothing writes it; a consumer of gaps.md G-REN-008).
 * ~~Suck cannon capture (577 state 7, 572 state 0xe, `0x305260`)~~ (done 2026-09-28: §8); the big-head manipulator (`0x278720`, a cheat flag);
-  the moby shadow probe (`0x26f020` / `0x26eff8`: moby +0x84 / +0x88).
-* The knockback's burn sparks (`0x271258`) and water splash (`0x2ff768`); the beam explosion's debris burst (`0x2c4c20`).
-* The explosion light lights mobys (the point-light merge) but not the world (tfrag / tie / shrub point-light relight).
+  ~~the moby shadow probe (`0x26f020` / `0x26eff8`: moby +0x84 / +0x88)~~ (ported: `shadows.rs` probe_down / set_ground).
+* ~~The knockback's burn sparks (`0x271258`) and water splash (`0x2ff768`); the beam explosion's debris burst (`0x2c4c20`).~~ (ported 2026-09-28: `knock::burn_sparks`, `classes/splash.rs`, `bomb::fireball`)
+* ~~The explosion light lights mobys (the point-light merge) but not the world (tfrag / tie / shrub point-light relight).~~ (world point lights done since: tfrag_lighting.md §9)
 * (Fixed 2026-09-28) The explosion flashes (classes 0x70, 1192) now draw translucent: +0x23 below 0x80 is drawn as an
   alpha-blended, non-depth-writing moby (moby_render_notes.md §8); verified from MobyProc's vertex alpha and the
   flashes' spawners, which set +0x23 = 0x20..0x40.
@@ -355,7 +356,7 @@ the effect frame-rate independent). Additive in linear light (the native `Additi
 display-byte layer). Levels 00 / 14: 6 / 46 fields, 83 / 1024 elements; level 00's instances 163 / 164 (+0x42 = 3)
 spawn type-23 smoke particles (records and draws; type 23 is not simulated).
 
-**Not ported (this survey):** 604 (commanded NPC, driven by other code's commands), 605 (nearest-area marker: writes
+**Not ported (this survey, 2026-09-27; ported since: 604, 605, 750, 832, 1134, 1546 — `classes/mod.rs`; 613 and 695 stay G-CLS-005):** 604 (commanded NPC, driven by other code's commands), 605 (nearest-area marker: writes
 0x141390..98, whose reader is not ported), 613 (water current: hero push fields 0x13f4e4 / 0x13f528 / 0x141608 the hero
 block lacks), 695 (floating pushables: `SetWaterLevel` and the `0x26d270` move-collide), 750 (infobot) / 1341 (help
 hints) / 832 (RC range) / 1546 (cutscene FX), 1134 (gold bolt: the idle glows need particle type 59 and per-level

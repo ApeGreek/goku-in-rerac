@@ -92,6 +92,9 @@ Source: docs/plan/decisions.md, "Native-first fidelity policy (2026-09-27)". The
 
 ## 4. State on 2026-09-27 (hand-over point)
 
+> A snapshot of 2026-09-27, kept for the record: most agents and queue items below are done. The backlog is
+> gaps.md, the order priority_order.md.
+
 ### 4.1 In flight (report expected; what each unblocks)
 | Agent | Owns | Unblocks |
 |---|---|---|

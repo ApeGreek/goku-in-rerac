@@ -83,7 +83,7 @@ state 7 / group 4, timer 730, air ticks 0, grounded 743, histories (idx 6, count
 
 | field | RAM | port | class | diagnosis / fix |
 |---|---|---|---|---|
-| fidget timer 0x140360 | 39 | 70 | **M** | (1) `HeroInit` 0x226b70 draws `rand_range(ticks(180), ticks(300))` into it (after `srand(1234)`, before the load pass); `Hero::init_from_moby` draws nothing. (2) The idle fidgets (0x241e00) are not ported, so the timer never counts down and re-arms. Fix: `hero.rs` `init_from_moby` takes the game rng and draws; port the fidget (`hero/states.rs`). |
+| fidget timer 0x140360 | 39 | 70 | **M** | (1) `HeroInit` 0x226b70 draws `rand_range(ticks(180), ticks(300))` into it (after `srand(1234)`, before the load pass); `Hero::init_from_moby` draws nothing. (2) The idle fidgets (0x241e00) were not ported then (ported 2026-09-28: `hero/idle.rs`), so the timer never counted down and re-armed. Fix: `hero.rs` `init_from_moby` takes the game rng and draws; port the fidget (`hero/states.rs`). |
 | seq_timer 0x13f4f4 | 14 | 710 | **M** | the game changed Ratchet's sequence 14 ticks ago: an idle fidget animation. Same fix as above (`hero/anim.rs` fidget seqs). Visible in play: the port's Ratchet never fidgets. |
 | ground surface 0x13f640 | 0 | −1 | **M** | the ground probe's hit surface/footstep class is not stored (port keeps −1 = none). Fix in `hero/physics.rs` ground probe (0x232dc0): store the hit's surface byte. Affects footstep sounds / surface reactions. |
 | rot.x, rot.y | −0.0 | +0.0 | H | sign of zero only; compare with `==` on floats. Tolerance: ±0 equal. |
@@ -211,7 +211,7 @@ the RAM bank; the moby lighting will need set 13
    order: srand before hero init).
 5. Class-27 emitters must not spawn in the load pass (culled load-time view): `rc_game::particles::type06::emitter_update`
    `None` semantics, `rc-engine/src/gameplay.rs` load pass.
-6. Idle fidgets (0x241e00: timer countdown, seq change): `rc_game::hero::states` / `hero::anim`.
+6. Idle fidgets (0x241e00: timer countdown, seq change): `rc_game::hero::states` / `hero::anim` (done: `hero/idle.rs`).
 7. Ground-probe surface 0x13f640: `rc_game::hero::physics` probe 0x232dc0.
 8. Scene-5 bookkeeping: classes 730/790 and flags 15/16, mission byte 3 (`rc_game::moby_update::classes`,
    `scene_player.rs`).
@@ -373,7 +373,7 @@ savestate needed).
 
 Load pass on the stream, together (4 + 5): **bolt spin bits 281/281** (before 149/281: offset 0 vs 1), **class-500 crate
 turns 199/199** (before 118/199), moby `rot` 817 → 898/929. Hero 76/87 → 79/89. The rest of the hero list is H plus
-item 6: `seq_timer` 14/710 and `fidget_timer` 39/73. The fidget countdown / re-arm 0x241e00 is not ported, so the
+item 6: `seq_timer` 14/710 and `fidget_timer` 39/73. The fidget countdown / re-arm 0x241e00 was not ported at the time (since ported: `hero/idle.rs`), so the
 drawn 229 is re-armed by the idle entry's own `rand_range(50, 100)`.
 
 **1. Spawn test.** The test runs per record when `flags` (+0x08) ≠ 0, with `id` = +0x0c and `m` = +0x04:

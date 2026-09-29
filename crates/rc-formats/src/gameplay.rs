@@ -38,7 +38,7 @@ pub struct MobyInstance {
     /// 0x1c: instance scale; moby+0x2c = class scale (class header 0x24) × this (EE FPU `mul.s`).
     pub scale: f32,
     /// 0x20: → moby+0x32 (s16). Wrench calls it an f32 `draw_distance`; the loader reads it as an
-    /// integer (64 on Novalis), and MobyProc culls/fades against it (not ported).
+    /// integer (64 on Novalis), and MobyProc culls/fades against it (rc-engine `moby_lod.rs`).
     pub draw_distance: i32,
     /// 0x24: → moby+0x30 (byte), update distance.
     pub update_distance: i32,
@@ -73,7 +73,8 @@ pub struct MobyInstance {
     /// 0x70: written as an s32 to moby+0x38: byte 0 = directional light set, byte 1 = second set,
     /// byte 2 = cross-fade weight (0 = none) of the MobyProc light selection.
     pub light: i32,
-    /// 0x74: if not -1 the loader calls `FUN_0025e7b0(moby)` (level overlay; not ported).
+    /// 0x74: if not -1 the loader calls `FUN_0025e7b0(moby)` (`MobyUnknown74Hook`: the NPC's talk slot, rc-game
+    /// `moby_update::interact`).
     pub unknown_74: i32,
 }
 const _: () = assert!(std::mem::size_of::<MobyInstance>() == MOBY_INSTANCE_SIZE);

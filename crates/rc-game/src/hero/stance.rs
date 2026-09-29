@@ -23,8 +23,8 @@
 //!
 //! **First person** (0x1413f5, `Hero::f13f5`): the first-person camera (camera type 4, `crate::follow_camera`) sets
 //! it once its blend-in is over; the ground physics then turns Ratchet to the camera ([`first_person_turn`]).
-//! Not modelled: the first-person play-time stat, the walk lean `HeroLean`
-//! (0x235638, not ported in the walk either), the weapon put-away `0x22efd8` (0x1413f8 is 0 on foot).
+//! Not modelled: the first-person play-time stat, the weapon put-away `0x22efd8` (0x1413f8 is 0 on foot). The walk
+//! lean `HeroLean` (0x235638) is `Hero::lean` (`super::idle`), called from the walk / air / jump / pack physics.
 
 use super::anim::AnimCtl;
 use super::common::blend;

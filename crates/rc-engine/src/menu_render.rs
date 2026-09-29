@@ -499,7 +499,7 @@ fn menu_frame(
                     if h.opened { println!("menus: frame {frame}: quick select opened (slots {:?})", gs.global.quick_select); }
                     if let Some(r) = h.request { println!("menus: frame {frame}: double tap: hand request item {r} (0x141408)"); }
                     if u.closed {
-                        println!("menus: frame {frame}: quick select closed, selection {} → hand request {:?} (0x141408 = {}; the hand swap FUN_002307e0 is not ported)", qs.sel, u.request, sess.temp_hand);
+                        println!("menus: frame {frame}: quick select closed, selection {} → hand request {:?} (0x141408 = {}; the hand swap FUN_002307e0 runs in hero/items.rs)", qs.sel, u.request, sess.temp_hand);
                     }
                 }
                 qs.draw(&rt.assets, &gs.global, play.game.counter, &mut rt.draws);

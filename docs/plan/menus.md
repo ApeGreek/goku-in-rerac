@@ -614,8 +614,8 @@ code, by function:
 | 0x294830 toggles | 0, 1 | `options.rs` | options tests |
 | 0x294cc0 camera | 1, 0 | `options.rs` | options tests |
 | 0x295370 confirm page | 0 (×2) | `planet_select::confirm_update` | planet-select tests |
-| 0x295770 Sketchbook pager (30 pages) | 1 | NOT ported (G-UI-004: locked Goodies pages) | — |
-| 0x295858 Epilogue pager (12 pages) | 1 (×2) | NOT ported (G-UI-004) | — |
+| 0x295770 Sketchbook pager (30 pages) | 1 | NOT ported (G-UI-002: locked Goodies pages) | — |
+| 0x295858 Epilogue pager (12 pages) | 1 (×2) | NOT ported (G-UI-002) | — |
 | 0x296990 / 0x296ce0 / 0x296fc0 memory-card pages | 1, 0 | NOT ported (G-SAV-002) | — |
 
 The sounds reach the audio system as `MenuSound::event` (class 0x472, flags 0x11, one owner for all 14 frame mobys:
@@ -650,7 +650,7 @@ sounding voice while the menu holds the world's voices (`menu_open_holds_music_a
 | 0x2904e8 | stream buffer layout | n/a (memory only) | — |
 | 0x295af8 Skill Points draw | the entry's location / planet names, or "All Levels" | `pages::skill_draw` | `goodies_skill_points_and_movies` |
 | 0x295730 In-Level Movies enter | the list = 0x1b8aa8[level % 19] | `pages::movies_enter` | same |
-| Goodies entries | Credits (11), Cinematics, Movies post-actions; Sketchbook / Epilogue / Making Of / Commercials locked (−1) | lists ported; post-actions G-UI-004; locked pages NOT ported (G-UI-004) | same (locked: no action, no sound) |
+| Goodies entries | Credits (11), Cinematics, Movies post-actions; Sketchbook / Epilogue / Making Of / Commercials locked (−1) | lists ported; post-actions G-UI-004; locked pages NOT ported (G-UI-002) | same (locked: no action, no sound) |
 | Cheats page 0x1b7fb0 | the cheat list | NOT ported (G-SAV-006) | — |
 | Save / Load pages | memory-card slots, previews | NOT ported (G-SAV-002) | — |
 

@@ -1,5 +1,5 @@
 # Class census system tags (docs/plan/class_census.md): one row per shared function the unported classes call.
-# key: L01:<level-01 address> | boot:<boot address> | C:<clusters.tsv hash, 12 hex> (engine code not linked on level 01) | H:<masked-code hash>.
+# key: L01:<level-01 address> | boot:<boot address> | C:<clusters.tsv hash, 12 hex> (engine code not linked on level 01) | H:<masked-code hash> | G:<global address>[=<compared constant>] (a direct read of engine state the unit's own code forms; only tagged globals count) | X:<class> (an override for state the census cannot see, with its reason).
 # status: has (the port has it: cited in crates/) | partly | missing | trivial (arithmetic a port writes inline) | ignore (debug) | family (level code private to one class family).
 # conf: V = read in the decomp / the port cites it; L = inferred from the decompiled code without a port citation.
 key	name	system	status	conf	note
@@ -204,10 +204,10 @@ L01:002742a8	FUN_002742a8	creature	has	V	piece explosion
 L01:0026e618	GroundHeight	creature	has	V	GroundHeight
 L01:0026e690	FUN_0026e690	creature	has	V	GroundHeight wrapper
 L01:002151d8	CollType	coll	has	V	CollType
-L01:00271258	FUN_00271258	creature	missing	V	burn sparks: counted unported (knock.rs)
-L01:002ff768	FUN_002ff768	water	missing	V	water-entry splash: counted unported (knock.rs)
-L01:0026d270	FUN_0026d270	creature	missing	V	moby move-collide (floating pushables 695): not ported (gaps G-CLS-005)
-L01:00270340		creature	missing	L	hop movement (GroundHeight, SpringTurn2): no port citation
+L01:00271258	FUN_00271258	creature	has	V	burn sparks: creature/knock.rs `burn_sparks`
+L01:002ff768	FUN_002ff768	water	has	V	water-entry splash 775 spawner: classes/splash.rs, hero/fx.rs
+L01:0026d270	FUN_0026d270	creature	has	V	moby move-collide: creature/walker.rs `move_ground` (the floating pushables 695 are a class port, G-CLS-005)
+L01:00270340		creature	has	V	hop / jump step: the Doom bot's `jump_step` (doom_bot.rs, class-local; a second caller should share it)
 C:ad33de15cdab	FUN_00247c10	creature	missing	L	steering toward a target (SpringTurn2 + walker step), not on L01
 C:a8d6490c966c	FUN_0025b710	creature	missing	L	same steering helper, other copy
 C:9a9b8f2fffcb		creature	missing	L	random wander, not on L01
@@ -334,12 +334,12 @@ L01:0021d3f8	font_print_right	hud	has	L	font print
 L01:0021d6d8	font_print_center_large	hud	has	L	font print
 L01:002259e8	msg_string__Fi	hud	has	L	message string
 L01:00278eb8		hud	has	V	prompt tick
-L01:00225818	Help_Request	help	partly	V	Help_Request: the help box is ported; its callers / voices / gates are G-UI-017
-L01:00278f58	try_set_help_message	help	partly	V	try_set_help_message
-L01:00279000	force_help_message	help	partly	V	force_help_message
-L01:002258b0	FUN_002258b0	help	partly	L	help box state reset
-L01:00225a28	FUN_00225a28	help	partly	L	help enable timer
-L01:00225a88	FUN_00225a88	help	partly	L	help disable
+L01:00225818	Help_Request	help	has	V	Help_Request: rc-game help.rs (system ported 2026-09-28, G-UI-017 consumers stay)
+L01:00278f58	try_set_help_message	help	has	V	try_set_help_message: interact.rs Prompt::try_set
+L01:00279000	force_help_message	help	has	V	force_help_message: interact.rs Prompt::force
+L01:002258b0	FUN_002258b0	help	has	V	help box kill: help.rs `kill`
+L01:00225a28	FUN_00225a28	help	has	V	help suspend: help.rs `suspend`
+L01:00225a88	FUN_00225a88	help	has	V	help resume: help.rs `resume`
 L01:00261448	memcard_Save__Fii	save	missing	V	memcard_Save: logged only (G-SAV-002)
 L01:00260e80	memcard_MakeWholeSave	save	missing	L	memcard_MakeWholeSave
 L01:002755f8	CarryRiders	platform	has	V	CarryRiders (hero riding)
@@ -386,8 +386,8 @@ L01:002487a8	FUN_002487a8	herostate	has	V
 L01:0026ebe8	FUN_0026ebe8	herostate	has	V	hand -> head point (melee.rs)
 L01:00231450		herostate	missing	V	control mode 3 exit (vehicles / Hologuise, G-HERO-005)
 L01:00231348	FUN_00231348	herostate	missing	L	body / control-mode switch (0x1413f4), G-HERO-005
-L01:00249580	FUN_00249580	herostate	missing	L	hero states 0x65..0x67 with a target point (scripted)
-L01:002495d0	FUN_002495d0	herostate	missing	L	hero state 0x65..0x67 query
+L01:00249580	FUN_00249580	herostate	has	L	walk to a point: the states 0x65..0x67 are ported (hero/stance.rs WalkTo); the entry = point 0x140990 + facing 0x14099c + SetState(0x65)
+L01:002495d0	FUN_002495d0	herostate	has	L	hero state in 0x65..0x67 query (hero.state)
 C:8a18636e69bd	FUN_002159d8	herostate	partly	L	the level's hero SetState copy (not code-identical to L01: H2)
 C:7b3e1e804b94	FUN_00227dd0	herostate	partly	L	hero SetState, level copy (H2)
 C:ea215dba76e7	FUN_002356a0	herostate	partly	L	hero SetState, level copy (H2)
@@ -398,12 +398,12 @@ C:f5aa57dd48b9	FUN_00239528	herostate	partly	L	idle state per body (1 Clank 0x43
 C:8ee0c630ac3d	FUN_0021ac18	herostate	partly	L	idle state per body, level copy
 C:0e46409356dd	FUN_0022c418	herostate	partly	L	idle state per body, level copy
 C:b664c822083b	FUN_00208ca8	herostate	missing	L	leave body mode 2 (Giant Clank / vehicle): restores Ratchet, deletes the body moby
-L01:00304168	FUN_00304168	react	missing	V	Suck Cannon (class 849) capture interface; counted unported (amoeboid.rs 0x305260)
-L01:00304390	FUN_00304390	react	missing	V	Suck Cannon capture
-L01:003044a0	FUN_003044a0	react	missing	V	Suck Cannon capture
-L01:00304690	FUN_00304690	react	missing	V	Suck Cannon release
-L01:00304100	FUN_00304100	react	missing	V	Suck Cannon state lookup
-L01:00305260	FUN_00305260	react	missing	V	the capture state 0xe/7 (amoeboid.rs, critter.rs count it)
+L01:00304168	FUN_00304168	react	has	V	Suck Cannon approach: creature/react.rs `approach` (G-WPN-003 closed 2026-09-28)
+L01:00304390	FUN_00304390	react	has	V	Suck Cannon swallow: react.rs `swallow`
+L01:003044a0	FUN_003044a0	react	has	V	Suck Cannon fire-out: react.rs `fire_out`
+L01:00304690	FUN_00304690	react	has	V	Suck Cannon let-go: react.rs `let_go`
+L01:00304100	FUN_00304100	react	has	V	suck record slot lookup: react.rs (+0x10 through 0x304100)
+L01:00305260	FUN_00305260	react	has	V	the carried update: react.rs `carried` (the classes call it from their held state)
 L01:002c5080	FUN_002c5080	fxmoby	has	V	DebrisSpawn
 L01:002c20e0	FUN_002c20e0	fxmoby	has	V	FlashSpawn
 L01:00309a68	FUN_00309a68	fxmoby	has	V	flash class 1192
@@ -411,7 +411,7 @@ L01:002f8530	SpawnDebrisMoby	fxmoby	has	V	SpawnDebrisMoby (gunship.rs)
 L01:002f3570	FUN_002f3570	fxmoby	has	V	explosion light
 C:494499ccf189	FUN_0028dee8	fxmoby	missing	L	child moby spawn with scale / spin / random velocity, not on L01
 C:48e5de3f3f27	FUN_00300c60	fxmoby	missing	L	random-class debris spawn, not on L01
-L01:002e2cc0	FUN_002e2cc0	fxmoby	missing	L	class 428 debris spawn: no port citation
+L01:002e2cc0	FUN_002e2cc0	fxmoby	has	V	class-428 feather spawner: classes/chicken.rs 0x2e2cc0
 L01:0026fba0	FUN_0026fba0	breakfx	has	V	volume points
 C:6e363a2f7f51	FUN_00251f08	breakfx	partly	L	break pieces + volume points variant, not on L01
 L01:0026ed38	SetWaterLevel	water	has	V	SetWaterLevel
@@ -439,11 +439,52 @@ C:a8c09d3f73ff	FUN_00295778	family	family	V	L04 family (capsule collision)
 C:99346c2b3975	FUN_002e9d10	family	family	V	L06 knock variant
 L01:00278020	FUN_00278020	heightmap	missing	L	level height from the byte grid 0x15fc98..0x15fca8
 L01:002a29a0	FUN_002a29a0	levelexit	missing	L	game mode request 0x15f5c0 (level exit / transition)
-L01:00279070	OpenShipMenu	levelexit	missing	L	OpenShipMenu (G-LVL-001)
+L01:00279070	OpenShipMenu	help	has	V	PromptRelease: interact.rs Prompt::release (Lombyte's name OpenShipMenu is wrong: it drops the prompt lease)
 L01:0028bf50	PauseAllSounds	sound	has	V	PauseAllSounds
 L01:002ad558	EnterSlideshowMode	cine	missing	L	EnterSlideshowMode
-L01:00249530	FUN_00249530	gadget	missing	V	Drone Device path: not ported (gadgets.rs)
+L01:00249530	FUN_00249530	gadget	has	V	an item's ammo (or 1 without ammo): hero/weapons.rs 0x249530 (not the Gadgets page's Drone Device path, G-WPN-002)
 C:b73827d476e2	FUN_0021e530	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
 C:ef4e6bb0b47f	FUN_0024cee8	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
 C:4d615d92f5c8	FUN_0021e398	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
 C:84d6abe16fc6	FUN_002400d0	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2)
+G:001413d4=00000032	hero_state_0x32	herostate	partly	L	a branch on hero state 0x32 (the scripted freeze; the ship-combat mode with the ship moby 0x140940 on 11 / 13 / 17): G-HERO-002 / G-LVL-009
+G:001413d4=00000051	hero_state_0x51	herostate	partly	L	a branch on hero state 0x51 (Clank, body 1): G-HERO-005
+G:001413d4=00000065	hero_state_0x65	herostate	has	L	a branch on the walk-to-point state 0x65 (ported: hero/stance.rs)
+G:001413f4=00000001	body_clank	herostate	partly	L	a branch on body 1 (Clank, 0x1413f4 == 1): G-HERO-005
+G:001413f4=00000002	body_giant_clank	herostate	partly	L	a branch on body 2 (Giant Clank): G-HERO-005
+G:001413f4=00000003	body_hologuise	herostate	partly	L	a branch on body 3 (the Hologuise): G-WPN-006 / G-HERO-005
+G:0015edb7=00000000	cheat_bighead_flag	cheat	missing	V	the big-head cheat flag 0x15edb7 read directly (G-SAV-006; conditional, as the manipulator 0x278720)
+X:1843	fighter_1843	shipmode	missing	V	override: the fighters' attack states 5 / 6 and the target-list bit run only in the ship-combat mode (hero state 0x32 with the ship moby 0x140940 of class 0x45, read directly): G-LVL-009 (class_units_levels_09_18.md U543)
+X:1319	fighter_1319	shipmode	missing	V	override: the same fighter source compiled for Pokitaru: G-LVL-009 (U370)
+X:838	voice_handoff_838	voicehand	missing	V	override: one looping class voice handed between the group's emitters by rewriting the slot record's owner and position (0x13e5d8 + slot·0x70: a computed store the census cannot see): G-AUD-010
+X:855	voice_handoff_855	voicehand	missing	V	override: as 838: G-AUD-010
+H:cd35c1d4fa65eb86	FUN_00217300	math	trivial	V	zero a quadword (sqc2 vf0)
+C:16bfd13f798c	FUN_0025c758	shadow	has	V	ShadowSetGround 0x26eff8's level copy (moby +0x84 / +0x88 = z ∓ 0.2): shadows.rs set_ground
+C:a3aa13a8e1c8	FUN_00263ad0	math	trivial	V	angle += (target − angle)·k (fast_subtract_rotations / fast_add_rotations)
+C:4875a26d9e16	FUN_00258090	math	trivial	V	add a vector to n quadwords (VU0 loop)
+C:ada069a1b3e9	FUN_00316128	math	trivial	V	state ∈ {0xb, 0xc, 0x12, 0x14} test
+C:075ded76f1bf	FUN_0030f270	math	trivial	V	class 0x49b in state 2 test
+L01:00300518	FUN_00300518	math	trivial	V	state == 1 test
+L01:0020f230	FUN_0020f230	math	trivial	V	yaw / pitch / length of a difference vector (FastArcTan, FastVecLength)
+L01:0024b108	FUN_0024b108	hud	trivial	L	HUD record anchor: x / y shifted by the half width / height per the flags +0x60
+C:a717d063371e	FUN_002f5360	family	family	V	L06 six-child set: state 2 → 4, the children → 5 (class sound 0)
+C:cdf5239bdc5f	FUN_002f53e8	family	family	V	L06 six-child set: state 6 → 8, the children → 9
+C:8d520530637e	FUN_0029aec0	lsound	partly	L	level sound on a slot (0x15f574 base; record owner 0x13e5ce / 0x13e5d8), L06 copy
+C:40920504317a	FUN_002f9948	group	partly	L	group command variant: members → state 0x12, +0x94 = 0, flags |= 1 & ~0x1000 (scheduler::group_cmd sets the command byte only)
+C:bcbd2dbe1730	FUN_002f99b0	group	partly	L	group command variant: members in 0x12 → state 0, +0x94 = the class colour, flags (as 0x2f9948)
+C:9c39817b4fe9	FUN_002e9ea0	group	trivial	V	every 827 of the group in state 0x10 or dead (−2 / −3) test
+C:a0194c2bd0e8	FUN_002ef868	fxmoby	missing	L	debris child moby (class 0x140 + n) with random rotation, spin and life, L09 copy of the effect-moby spawner family (G-CLS-026)
+C:b376dbd21da4	FUN_00272cb8	particles	partly	L	smoke puff spawner of three kinds (types from the table 0x1b2880, colours 0x606060 / 0x907070), not on L01
+C:60ae58782f11	FUN_002e1c98	fxmoby	missing	L	child moby between two joint points (draw distance 0xff, flag 0x4000), not on L01 (G-CLS-026)
+C:01476b25f86a	FUN_002de3e0	fxmoby	missing	L	class-435 shot spawned toward the camera position 0x1675c0, not on L01 (G-CLS-026)
+L01:002a2360	FUN_002a2360	cine	partly	L	registers the ship moby 0x13e030 with its draw callback 0x2a1c40 and the level-13 constants (the port has the loader's ship and its hide / show only)
+L01:0025dd98	FUN_0025dd98	map	has	V	map tile cache (8-slot LRU at 0x1846a0; rc-game map.rs decodes the tiles once)
+L01:00218838	FUN_00218838	fxdraw	has	L	world point → GS screen coordinates (×16 + 2048, z / 1024) through the view matrix 0x167140 (the port's screen projection; not compared)
+L01:0020cf28	FUN_0020cf28	math	partly	L	angle spring with a velocity clamp (SpringAngle-like with a max rate): not compared with the port's springs
+C:fa408a22bb62	FUN_0020d760	fxdraw	has	L	immediate 4-vertex GS quad packet (tags 0x10000009 / 0x50000009), a FastDrawQuadReal-like emitter
+C:c836aca3587d	FUN_00204070	herostate	missing	L	SwitchCharacter (L00 0x210a08's copy): body 0x1413f4 = mode, the body moby, Clank's health swap, Giant Clank's energy 200, SetState: G-HERO-005
+C:12bb06e65f13	FUN_00204110	herostate	missing	L	leave the body: 0x1413f4 = 0, Ratchet's health back (body 1), the body mobys 0x140970 / 0x140974 / 0x13fddc deleted, the body-2 voice 0x140984 released, SetState(0, 1): G-HERO-005
+C:754a80d04806	FUN_00227cf8	herostate	missing	L	leave the body, L06 copy (no body-2 voice): G-HERO-005
+C:dd572bc43542	FUN_0029b8d8	ptype	missing	L	CreatePart(0x3d): type 61 spawner (grey additive sprite from the table 0x1b21f4, spherical offset 0x2781f0), not on L01
+L01:00274738	FUN_00274738	target	has	V	a live Devastator missile already targets t (hero/devastator.rs already_targeted over the list 0x1b0bf0)
+C:e00f1d73700a	FUN_0028ec18	talk	has	V	talk slot i's "talked to" flag 0x13d5bc + 16·i = v (interact.rs)

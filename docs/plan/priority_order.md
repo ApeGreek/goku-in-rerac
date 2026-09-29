@@ -48,19 +48,23 @@ Inferred edges are marked **[L]**.
 - Deferred items are not scheduled (§5).
 
 **Census caveat.**
-- The census numbers are the 2026-09-28 re-run: 4,030 created instances in 417 units; verdicts: cheap 197 / 1,308.
-- That run predates these ports:
-  - the help system (G-UI-017);
-  - the splash `0x2ff768` and burn sparks `0x271258` (G-ENM-005);
-  - the Suck Cannon interface (G-TRI-015).
-- The census still tags those systems as blocking, so wave 0 re-runs it.
-- `u_s` shows what the re-run will free:
-  - 21 units / 35 instances need **only** help; they are the help directors 1413, 1324, 1343, 1347, 1348, 1349,
-    1000, 1344, 422, 558, 1469, 586 and others;
-  - 11 units / 407 instances need only the cheat or the Suck Cannon interface: enemies 193 (93), 252 (77), 63 (58),
-    1202 (57), 52 (46), 1445, 568, 1199, 29, 1196, 1271;
-  - 8 story directors / item givers need only `memcard_Save`, which stays logged: 1120, 1190, 18, 1353, 1388, 1419,
-    1428, 1750.
+- The census numbers below are the 2026-09-28 re-run (4,030 created instances in 417 units; cheap 197 / 1,308)
+  unless a row says "2026-09-29".
+- **W0 re-ran it on 2026-09-29** (class_census.md "Re-run 2026-09-29"): the family is unchanged (4,030 / 417), the
+  stale tags are fixed (help, the splash and burn sparks, the Suck Cannon interface, the move-collide, the walk-to
+  states, the ammo read, `PromptRelease`), and the census now sees direct reads of engine state (branches on the hero
+  state / body, the ship moby, the cheat flag) plus two overrides (the fighters, the 838 / 855 emitters). Verdicts:
+  cheap **208 / 1,177**, missing 163 / 2,594, partly 40 / 251, unknown 6 / 8; **ready now 243 units / 1,653**
+  (cheap + conditional-only + a dead hero-state branch only). By system (units / instances): cheat 48 / 1,497
+  (conditional), paths 31 / 1,108, hero states and bodies 68 / 880 (of which the branch tests: 14 / 169 on state
+  0x32, 25 / 456 on the body), animation 42 / 422, creature copies 22 / 363, effect mobys 21 / 276, light flicker
+  6 / 256, platforms 7 / 181, ship mode 2 / 112, particle types 14 / 90, break variant 5 / 87, camera 29 / 74, blob
+  shadows 7 / 70, save bytes 3 / 45, level sound 4 / 41, save 38 / 39 (conditional), voice handoff 2 / 33, sprite
+  helper 8 / 20. Sole blockers: paths 648 (17 units), hero states 297 (31), effect mobys 114 (12), creature 84 (5).
+- What the re-run freed (`u_s` predicted about 40 units): the 21 help-only directors are cheap; of the 11 enemy
+  units, 568 is cheap and the other ten are conditional on the cheat (and most also branch on the Giant Clank body:
+  a dead branch to file); the 8 save-only directors are conditional. Not freed: the fighters (G-LVL-009) and
+  838 / 855 (G-AUD-010), now overrides.
 
 ## 2. Dependency graph and scores
 
@@ -70,13 +74,13 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 
 | item | prerequisites (kind; evidence) | unblocks | V R D F = S | E | W |
 |---|---|---|---|---|---|
-| **M-COMMIT** commit the explosion audit: 12 files uncommitted (`bomb.rs`, `creature/fx.rs`, `react.rs`, `debris.rs`, `explosive_tank.rs` …; git status; mem:project-next-queue 2026-09-29) | — | easier: G-ENM-009, G-ENM-010, G-CLS-027. They edit `creature/` and `classes/`, and would otherwise mix into an unverified batch [L]. | 0 0 2 1 = 3 | S | 0 |
-| **G-TOOL-017** census follow-ups: re-run and re-tag | — | easier: G-CLS-027 (unit ids renumber per run, `cen`) and every class wave. It re-tags G-TRI-015, help, `0x2ff768` and `0x271258`. | 0 3 3 1 = 7 | S | 0, then after W2 / W3 / W4 |
-| **G-TRI-015** census still tags the Suck Cannon interface | reuses G-TOOL-017 | true verdict for 11 units / 407 enemies (`u_s`) | 0 2 1 1 = 4 | S | 0 |
+| ~~**M-COMMIT**~~ commit the explosion audit: 12 files uncommitted (`bomb.rs`, `creature/fx.rs`, `react.rs`, `debris.rs`, `explosive_tank.rs` …; git status; mem:project-next-queue 2026-09-29) | **done**: commit 3646133 | — | easier: G-ENM-009, G-ENM-010, G-CLS-027. They edit `creature/` and `classes/`, and would otherwise mix into an unverified batch [L]. | 0 0 2 1 = 3 | S | 0 |
+| **G-TOOL-017** census follow-ups: re-run and re-tag | — | easier: G-CLS-027 (unit ids renumber per run, `cen`) and every class wave. **W0 part done 2026-09-29** (re-tag, data census, 30 functions named; 13 untagged left). | 0 3 3 1 = 7 | S | ~~0~~ done; then after W2 / W3 / W4 |
+| ~~**G-TRI-015**~~ census still tags the Suck Cannon interface | **done 2026-09-29** (re-tagged has: react.rs) | 568 cheap; the other ten enemy units conditional on the cheat | — | — | ~~0~~ done |
 | **G-TOOL-013** `rc-trace` depends on `rc-game` | — | easier: G-TOOL-017 re-runs while class lanes edit `rc-game` mid-wave [L] | 0 0 1 0 = 1 | M [L] | 0 |
-| **DOC-STALE** gaps.md "Stale notes in other docs" (12 entries) | — | — | 0 0 0 1 = 1 | S | 0 |
-| **G-TOOL-014** review items and digest baselines | — | — | 0 0 0 1 = 1 | S | 0 |
-| **G-TOOL-004** tolerance rows into hardware_fidelity_layers.md | — | — | 0 0 0 1 = 1 | S | 0 |
+| ~~**DOC-STALE**~~ gaps.md "Stale notes in other docs" (12 entries) | **done 2026-09-29** (every entry fixed in its source doc / comment) | — | — | — | ~~0~~ done |
+| ~~**G-TOOL-014**~~ review items and digest baselines | **done 2026-09-29** (NO_IDLE `596306d7…`, full `42ec9908…` recorded in gaps.md) | — | — | — | ~~0~~ done |
+| **G-TOOL-004** tolerance rows into hardware_fidelity_layers.md | — | — | 0 0 0 1 = 1 | S | 0 (not done in W0: left for the next docs pass) |
 | **G-TOOL-010** user steps. Move the `.mov` files out: `repo-checks` fails on them. Also: Ghidra project, the `extracted/` regenerate, Ghidra save. | The regenerate step is **easier** after G-EXT-006: the 19 `overlay.elf` references vanish on regenerate (mem:project-dev-tooling-reorg). | green commit runs | user | S | 0 (user) |
 | **M-QS2** the Quick Select page's second-run frame is missing (mem:project-next-queue 2026-09-28) | — | — | 0 0 0 0 = 0 | S | 6 |
 | **M-PINE** the user enables PINE in PCSX2 (hero_feel_pass.md §1, §5) | — | depends: G-HERO-001 [deferred]; live traces for G-TOOL-003 [L] | user | S | user |
@@ -88,11 +92,11 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 |---|---|---|---|---|---|
 | **G-LVL-002** level-branch leftovers: H1, **H2** (the hero state machine copies on 10 levels are not code-identical to level 01), C4, C5, the level-13 branches | **easier** G-TOOL-008 X1: `LG` "expect the hero functions to become n = 19" after the `%lo` masking. The landing part **depends** G-LVL-001 (gaps). | based-on: G-HERO-002 (`cen` herostate row: "level copies … H2"). Easier: G-HERO-001 [L]. | 2 3 2 2 = 9 | M | 1 (H1 / H2); C4 / C5 in 4 |
 | **G-TOOL-008** Ghidra tooling (X1 first, then the VU disassembler, merged scripts, struct types) | — | easier: G-LVL-002 (X1) | 0 0 1 1 = 2 | S (X1) / M | 1 (X1), 8 |
-| **G-HERO-002** scripted hero states, the level `SetState` copies, idle per body `0x239528`, 0x65..0x67 | **based-on** G-LVL-002 H2 (`cen`) | depends: G-REN-008 (Gemlik 0x32, gaps) and G-CLS-003 (615 U86 herostate, `cen`). based-on: G-LVL-009 (state 0x32). 34 units / 119 instances (`cen`); co-needed by 14 help units and 17 camera units (`u_s`). | 3 2 3 2 = 10 | M | 2 |
+| **G-HERO-002** scripted hero states, the level `SetState` copies, idle per body `0x239528` (~~0x65..0x67~~: ported, stance.rs) | **based-on** G-LVL-002 H2 (`cen`) | depends: G-REN-008 (Gemlik 0x32, gaps) and G-CLS-003 (615 U86 herostate, `cen`). based-on: G-LVL-009 (state 0x32). 2026-09-29: `herostate` 68 units / 880 instances with G-HERO-005's bodies, sole blocker of 31 / 297 (`cen`; 14 units / 169 only branch on state 0x32). | 3 3 3 2 = 11 (was 10: R 2 → 3) | M | 2 |
 | **G-HERO-027** the level camera system: camera records, regions, collision grid | — | the Kerwan cables; every level's camera volumes (row). easier: G-HERO-026 [L] (same `follow_camera.rs`; 026 absorbed parts of it) | 3 3 1 2 = 9 | L | 3 |
 | **G-HERO-026** follow and script camera settings from mobys | reuses G-HERO-027 [L] | depends: G-CLS-003 (gaps). Co-needed by 14 help units and 17 herostate units (`u_s`). Sole blocker of 5 units / 22. | 2 2 2 1 = 7 | M | 3 |
 | **G-HERO-009** joint-modifier producers; NPC look-at `0x2777d8` (40 units) | — | 42 units / 422 instances; sole blocker of 15 units / 90 (`u_s`). reuses: G-REN-005 (`0x2278c0`), G-WPN-004 fins (`0x221e38`, WPN-004 row), G-UI-006 logo draw (HERO-009 row). | 2 2 3 1 = 8 | M | 3 |
-| **G-HERO-005** other bodies: Clank, Giant Clank, Hologuise; Clank's health; the Giant Clank energy branch | The Hologuise part **depends** G-WPN-006 (gaps; circular, §7). **based-on** G-HERO-002: the body switch `0x231348` and idle per body sit in the same census system (`cen`). | Clank on 8 levels, Giant Clank on 8 (row). depends: G-WPN-006's Hologuise row. G-TRI-016 [L]. | 3 3 2 1 = 9 | L | 4 |
+| **G-HERO-005** other bodies: Clank, Giant Clank (the Hologuise body 3 goes with G-WPN-006); Clank's health; the Giant Clank energy branch; the L15 / L18 missile of states 0x5d / 0x5f (G-TRI-016, resolved) | **based-on** G-HERO-002: the body switch `0x231348` and idle per body sit in the same census system (`cen`). The circular pair with G-WPN-006 is resolved (§7): nothing here depends on the gadget. | Clank on 8 levels, Giant Clank on 8 (row). depends: G-WPN-006's Hologuise row (the body switch). 2026-09-29: 25 census units / 456 instances branch on the body (`cen`). | 3 3 2 1 = 9 | L | 4 |
 | **G-HERO-029** gravity-frame modes 1 / 2 | — | depends: G-HERO-008 (gaps) | 2 1 1 1 = 5 | M | 5 |
 | **G-HERO-008** Hoverboard | **depends** G-HERO-029 (gaps) | depends: G-LVL-007 (gaps) | 3 1 1 0 = 5 | M | 5 |
 | **G-HERO-025** hand-item slot leftovers | **depends** G-WPN-006 (gaps) | — | 2 1 0 1 = 4 | S | 5 |
@@ -121,16 +125,16 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 |---|---|---|---|---|---|
 | **G-CLS-001** umbrella: the unported class family, 4,030 created in 417 units (re-run) | **based-on** every census system (`cen`) | the rows below | 3 3 3 1 = 10 | — | 1–7 |
 | **G-CLS-025** path helpers not linked on level 01 | — | 31 units / 1,108 instances (`cen`); sole blocker of 13 units / 692 (`u_s`). With creature: 3 units / 141; with light flicker: 580 (82) (`u_s`). → G-ENM-001 / 010 | 3 3 3 1 = 10 | M | 1 |
-| **G-ENM-009** creature-layer copies | reuses the creature layer (ported); **easier** after M-COMMIT [L] | 28 units / 539 instances; sole blocker of 7 / 104; with paths 3 / 141 (`u_s`) → G-ENM-001 / 010 | 3 3 2 1 = 9 | M | 1 |
+| **G-ENM-009** creature-layer copies | reuses the creature layer (ported); M-COMMIT done | 2026-09-29: 22 units / 363 instances (`0x26d270`, `0x271258`, `0x270340` were re-tagged has); sole blocker of 5 / 84 → G-ENM-001 / 010 | 3 2 2 1 = 8 (was 9: R 3 → 2) | M | 1 |
 | **G-CLS-001·L** per-level logic classes: help, story and mission directors, cutaway stagers (LS §3; gaps top-15 item 5) | **Part 1** (29 units: 21 help-only + 8 save-only, `u_s`) **reuses** G-UI-017 (ported) and is **easier** after the G-TOOL-017 re-tag. **Part 2 is based-on** G-HERO-026 (14 units co-need it), G-HERO-002 (14) and G-HERO-009 (7, `u_s`). Both parts are **based-on** G-SAV-010 (78 flag classes, LS §3 "f"). `memcard_Save` and `OpenShipMenu` stay logged: G-SAV-002 and G-LVL-001 are deferred. | depends: G-UI-001 (gaps). Consumers of G-UI-017 and G-SAV-010; G-LVL-002 C5. The writers of G-SAV-009 [deferred]. | 3 3 2 1 = 9 | L | 2 (part 1), 4 (part 2) |
-| **G-UI-017** help-message consumers (the system is ported) | **depends** G-CLS-001 (gaps) | the help hints on every level | 3 3 1 0 = 7 | — | with G-CLS-001·L |
-| **G-ENM-010** hit readers without a class port (2,874 instances) | **depends** G-ENM-001, G-CLS-001 (gaps). Ready now: 11 units / 407 need only the cheat or the Suck Cannon interface (`u_s`; the interface is closed, G-WPN-003). | — | 3 3 0 2 = 8 | L | 2 |
+| **G-UI-017** help-message consumers (the system is ported) | **depends** G-CLS-001 (gaps) | the help hints on every level (2026-09-29: no census unit is blocked by the system itself any more) | 3 3 1 0 = 7 | — | with G-CLS-001·L |
+| **G-ENM-010** hit readers without a class port (2,874 instances) | **depends** G-ENM-001, G-CLS-001 (gaps). Ready now (2026-09-29): 568 is cheap; 193, 252, 63, 1202, 52, 1445, 1199, 29, 1196, 1271 need only the cheat (conditional) and, most of them, branch on the Giant Clank body (a dead branch to file under G-HERO-005) (`cen`). | — | 3 3 0 2 = 8 | L | 2 |
 | **G-ENM-001** enemy and creature classes | **based-on** G-ENM-009 and G-CLS-025 (`cen`). **depends** G-PRT-001 (type 74) and G-CLS-018 (gaps). The Sonic Summoner **reuses** G-REN-023 and G-REN-025 (row). | depends: G-ENM-010 (gaps) | 3 3 1 1 = 8 | L | 2 (ready units), 7 (Summoner) |
-| **G-CLS-027** cheap wins round 2 (mem:project-next-queue "cheap wins round 2") | **easier** G-TOOL-017. reuses `units::PORTS` (parts A / B). Excluded: the fighters U543 / U370 (→ G-LVL-009) and 838 / 855 (→ G-AUD-010) (`cen` "not cheap after all"). | 197 units / 1,308 instances (re-run) | 3 3 0 0 = 6 | L | 2 (levels 00–08), 4 (09–18) |
+| **G-CLS-027** cheap wins round 2 (mem:project-next-queue "cheap wins round 2") | **easier** G-TOOL-017 (done). reuses `units::PORTS` (parts A / B). The fighters (→ G-LVL-009) and 838 / 855 (→ G-AUD-010) are census overrides now, out of the list. | 2026-09-29: 208 units / 1,177 cheap; **243 / 1,653 ready** with the conditional and dead-branch units (`cen` "Cheap wins") | 3 3 0 0 = 6 | L | 2 (levels 00–08), 4 (09–18) |
 | **G-CLS-018** spawn conditions and inactive pools | — | depends: G-ENM-001 (gaps) | 2 3 1 2 = 8 | M | 4 |
 | **G-CLS-023** moby group commands and re-creation | — | depends: G-CLS-010, G-REN-008 (gaps) | 3 2 2 1 = 8 | M | 4 |
 | **G-CLS-024** moby platforms and riders | — | depends: G-CLS-009 (gaps). 1246 (126) together with G-REN-024 (`u_s`). based-on: G-WPN-008 previews [L]. Sole blocker of 3 units / 36. | 2 2 2 1 = 7 | M | 3 |
-| **G-CLS-026** effect-moby spawners | reuses `DebrisSpawn` / `FlashSpawn` (row) | 17 units / 265; sole blocker of 8 / 103 (`u_s`) | 2 2 1 0 = 5 | M | 3 |
+| **G-CLS-026** effect-moby spawners | reuses `DebrisSpawn` / `FlashSpawn` (row) | 2026-09-29: 21 units / 276 (three L08 / L09 spawners newly tagged); sole blocker of 12 / 114 (`cen`) | 2 2 1 0 = 5 | M | 3 |
 | **G-CLS-010** teleporter pad 1135 (8 levels) | **depends** G-CLS-023 (gaps) | — | 3 2 0 0 = 5 | M | 4 |
 | **G-CLS-019** moby runtime leftovers | — | — | 1 3 0 1 = 5 | M | 4 |
 | **G-CLS-003** gadget puzzle classes: Trespasser 615, Hydrodisplacer pads 341 | **depends** G-WPN-006, G-HERO-026, G-REN-008 (gaps). **based-on** G-REN-024 and G-HERO-002 (615 in the light and herostate lists, `cen`). | progression on 7 + 5 levels | 3 1 0 0 = 4 | M | 6 |
@@ -140,7 +144,7 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 | **G-CLS-015** flyer path driver family | **based-on** G-PRT-001 type 10 (PRT row). The skill-point part **depends** G-SAV-007 [deferred] (gaps). | — | 2 1 0 0 = 3 | M | 7 |
 | **G-CLS-011** bolt-crank consumers (Eudora, Batalia) | reuses the bolt crank (ported) | — | 2 1 0 0 = 3 | S | 7 |
 | **G-CLS-013** talk-table kinds 4 / 5 | — | — | 2 0 0 0 = 2 | S | 7 |
-| **G-ENM-005** creature fx helpers: census residue | **easier** G-TOOL-017 (stale tags) | — | 1 1 0 0 = 2 | S | 6 |
+| ~~**G-ENM-005**~~ creature fx helpers: census residue | **resolved 2026-09-29**: the splash and burn-spark tags are has; no unit is blocked | — | — | — | — |
 | **G-LVL-008** level height grid `0x278020` | — | 1400 (3 instances) | 1 0 0 0 = 1 | S | 2 |
 
 ### Rendering and particles (REN, PRT)
@@ -175,7 +179,7 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 | **G-SAV-010** global-flag class write channel: move the consumers | reuses `interact::set_global_flag` | based-on: G-CLS-001·L (78 classes); G-SAV-003's crank flags | 2 2 1 1 = 6 | S | 2 |
 | **G-UI-001** missions page; zone-flag writers | **depends** G-CLS-001·L (gaps) | — | 2 2 0 1 = 5 | M | 6 |
 | **G-LVL-007** races | **depends** G-HERO-008, G-UI-011 (gaps) | — | 3 1 0 0 = 4 | M | 6 |
-| **G-AUD-010** voice handoff between mobys | — | depends: 838 / 855 (33 instances, `cen`) | 2 1 1 0 = 4 | S | 2 |
+| **G-AUD-010** voice handoff between mobys | — | depends: 838 / 855 (33 instances; census overrides `X:838` / `X:855` since 2026-09-29) | 2 1 1 0 = 4 | S | 2 |
 | **G-AUD-005** music player leftovers | — | — | 2 1 0 1 = 4 | S | 7 |
 | **G-UI-006** vendor leftovers | The PDA **depends** G-WPN-006 (gaps); the logo **reuses** G-HERO-009. | — | 2 1 0 1 = 4 | M | 7 |
 | **G-UI-010** screen static in linear light | — | — | 1 2 0 1 = 4 | S | 6 |
@@ -185,7 +189,7 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 | **G-CUT-003** front-end movies | **depends** G-UI-002, G-SAV-001 [deferred] (gaps) | depends: G-UI-004 | 2 1 1 0 = 4 | M | blocked |
 | **G-CUT-004** other scene triggers | **depends** G-LVL-001 [deferred], G-UI-002 (gaps) | — | 2 1 0 0 = 3 | M | blocked |
 | **G-UI-004** menu post-actions, leaving the level | **depends** G-LVL-001 [deferred], G-CUT-003 (gaps) | — | 2 1 0 0 = 3 | M | blocked |
-| **G-LVL-009** ship combat (fighters 1843 / 1319: 112; the asteroids' wake 130) | **depends** G-LVL-001 [deferred] (gaps); **based-on** G-HERO-002 (state 0x32, row) | — | 3 2 0 0 = 5 | M | blocked |
+| **G-LVL-009** ship combat (fighters 1843 / 1319: 112, census overrides; the asteroids' wake 130; 14 more units only branch on state 0x32) | **depends** G-LVL-001 [deferred] (gaps); **based-on** G-HERO-002 (state 0x32, row) | — | 3 2 0 0 = 5 | M | blocked |
 
 ### Launcher, extractor, tooling (non-deferred)
 
@@ -205,9 +209,10 @@ One row per item. Scores are V R D F = total; E = effort; W = wave (§4). "—" 
 
 | score | items |
 |---|---|
-| 10 | G-CLS-025, G-HERO-002 (G-CLS-001 umbrella) |
-| 9 | G-ENM-009, G-LVL-002, G-HERO-027, G-HERO-005, G-CLS-001·L |
-| 8 | G-HERO-009, G-WPN-006, G-ENM-010, G-ENM-001, G-CLS-018, G-CLS-023 |
+| 11 | G-HERO-002 (2026-09-29: 880 instances) |
+| 10 | G-CLS-025 (G-CLS-001 umbrella) |
+| 9 | G-LVL-002, G-HERO-027, G-HERO-005, G-CLS-001·L |
+| 8 | G-ENM-009 (2026-09-29: 363), G-HERO-009, G-WPN-006, G-ENM-010, G-ENM-001, G-CLS-018, G-CLS-023 |
 | 7 | G-TOOL-017, G-HERO-026, G-CLS-024, G-UI-017 |
 | 6 | G-CLS-027, G-PRT-001, G-REN-004, G-UI-011, G-UI-002, G-SAV-010 |
 | 5 | G-HERO-029, G-HERO-008, G-HERO-016, G-CLS-026, G-CLS-010, G-CLS-019, G-REN-024, G-REN-005, G-REN-008, G-REN-027, G-REN-025, G-REN-012, G-REN-013, G-REN-019, G-PRT-005, G-UI-001, G-LVL-009 (blocked) |
@@ -220,15 +225,15 @@ Each wave is ≤ 3 lanes; lanes are queues and don't share files. After W2, W3 a
 
 | wave | lane (file area [L]) | items, in order | why here |
 |---|---|---|---|
-| **W0** housekeeping | A: git | M-COMMIT (the commit agent excludes the `.mov` files); then the user's G-TOOL-010 steps. Hold the `extracted/` regenerate until G-EXT-006, or accept losing the ELF reference. | Nothing else should build on 12 uncommitted files. |
-| | B: `tools/trace`, `tools/ghidra/names`, class_census.md, gaps.md | G-TOOL-017 re-run with the re-tag: G-TRI-015, help, `0x2ff768`, `0x271258` → G-TOOL-013 | Every class wave's numbers and order depend on it; frees about 40 units (§1). |
-| | C: `docs/plan/*` except the two above | DOC-STALE → G-TOOL-014 → G-TOOL-004 → the read-only triage checks G-TRI-004 / 005 / 006 / 007 / 008 / 011 / 014 (§6) | Cheap, and it removes false leads before the ports. |
+| **W0** housekeeping — **done 2026-09-29** except the user steps, G-TOOL-004 and G-TOOL-013 | A: git | ~~M-COMMIT~~ (3646133); then the user's G-TOOL-010 steps (open). Hold the `extracted/` regenerate until G-EXT-006, or accept losing the ELF reference. | Nothing else should build on 12 uncommitted files. |
+| | B: `tools/trace`, `tools/ghidra/names`, class_census.md, gaps.md | ~~G-TOOL-017 re-run with the re-tag: G-TRI-015, help, `0x2ff768`, `0x271258`~~ (done, plus the data census and 30 named functions) → G-TOOL-013 (open: M effort, not started) | Every class wave's numbers and order depend on it; freed 21 help directors, 568 and the pushables 695; found the dead hero-state branches (§1). |
+| | C: `docs/plan/*` except the two above | ~~DOC-STALE → G-TOOL-014~~ (done) → G-TOOL-004 (open) → the read-only triage checks ~~G-TRI-004 / 005 / 006 / 007 / 008 / 011~~ (closed, gaps.md) / 014 (open: 0x248920 not read) | Cheap, and it removes false leads before the ports. |
 | **W1** the three biggest shared blockers | 1: new path module + its first consumers [L] | **G-CLS-025**, then its 13 sole-blocked units (L03's nine-class family 246, 1564, 1667–1671) | 1,108 instances; sole blocker of 692 |
 | | 2: `moby_update/creature/` | **G-ENM-009** (+ its 7 sole-blocked units) | 539 instances; pairs with paths for 141 more |
 | | 3: `tools/ghidra`, then `hero/**` | G-TOOL-008 X1 → **G-LVL-002** H2 diff + H1 branch transcription → port the differing hero functions | Ratchet's own code may differ on 10 levels (F2). Prerequisite of G-HERO-002. |
-| **W2** class ports on W1 + hero states | 1: `classes/` (enemies) | **G-ENM-010 / G-ENM-001**: first the 11 ready units / 407 (193, 252, 63, 1202, 52 …; the cheat branch filed under G-SAV-006), then the units W1 freed (creature + path 141) | Enemies that ignore weapons on 18 levels (F2) |
-| | 2: `classes/` (directors, `units/`), `audio/voices`, `fx_draw` | **G-CLS-001·L part 1** (29 help-only / save-only directors) + **G-SAV-010** consumers + G-WPN-002 (1342's `0x249530`) → quick wins G-AUD-010 (frees 838 / 855), G-AUD-007 `0x27eca0` (38), G-REN-020 (20), G-LVL-008 (3) → **G-CLS-027** round 2, levels 00–08 | The story and help flow of every level; quick wins next to what they free |
-| | 3: `hero/**` | **G-HERO-002** (the per-level `SetState` copies on H2's findings) → G-WPN-008 wrench aim search (S) | Needs H2; of its 34 units, 17 also need the camera and 14 help |
+| **W2** class ports on W1 + hero states | 1: `classes/` (enemies) | **G-ENM-010 / G-ENM-001**: first the ready enemy units (568 cheap; 193, 252, 63, 1202, 52, 1445, 1199, 29, 1196, 1271: the cheat branch filed under G-SAV-006, the Giant Clank body branch under G-HERO-005), then the units W1 freed (creature + path) | Enemies that ignore weapons on 18 levels (F2) |
+| | 2: `classes/` (directors, `units/`), `audio/voices`, `fx_draw` | **G-CLS-001·L part 1** (the 21 help-only directors, now cheap, + the 8 save-only ones, conditional) + **G-SAV-010** consumers + Kerwan's 1342 (cheap: `0x249530` is the ammo read, ported) → quick wins G-AUD-010 (frees 838 / 855), G-AUD-007 `0x27eca0` (38), G-REN-020 (20), G-LVL-008 (3) → **G-CLS-027** round 2, levels 00–08 (pool 2026-09-29: 243 ready units / 1,653) | The story and help flow of every level; quick wins next to what they free |
+| | 3: `hero/**` | **G-HERO-002** (the per-level `SetState` copies on H2's findings; the top-scored item since 2026-09-29: 880 instances, sole blocker of 31 units / 297) → G-WPN-008 wrench aim search (S) | Needs H2; the largest shared blocker after the paths |
 | **W3** second-tier shared systems | 1: hero joint modifiers, `moby_attach` [L] | **G-HERO-009** → G-REN-005 (Clank's pulse, same `0x2278c0`) → G-WPN-004 (fins reuse `0x221e38`; the rebound) | 422 instances; three reuse edges |
 | | 2: moby services, `classes/` of the users [L] | G-REN-024 (S; frees 580 with W1's paths) → **G-CLS-024** (with G-REN-024 frees 1246: 126) → G-CLS-009 → **G-CLS-026** | 256 + 181 + 265 instances |
 | | 3: `follow_camera/**` | **G-HERO-027** → **G-HERO-026** | Every level's camera; co-needed by the directors |
@@ -285,21 +290,22 @@ Both lead the gaps.md top 15.
 ## 6. Top 20, in the order to do them
 
 1. **M-COMMIT**: 12 uncommitted files in `creature/` and `classes/`, which the next three lanes edit.
-2. **G-TOOL-017 + G-TRI-015**: the census is stale for help, the splash and burn sparks, and the Suck Cannon; every
-   class-wave ordering depends on it.
+2. ~~**G-TOOL-017 + G-TRI-015**~~: done 2026-09-29 (class_census.md "Re-run 2026-09-29").
 3. **G-CLS-025** path helpers: the largest real blocker (1,108 instances; sole 692).
-4. **G-ENM-009** creature copies: 539 instances; with paths, 141 more.
+4. **G-ENM-009** creature copies: 363 instances (2026-09-29; sole blocker of 84).
 5. **G-LVL-002 H2** (with X1): the hero code may differ on 10 levels; prerequisite of G-HERO-002.
-6. **G-ENM-010 / G-ENM-001**: 11 enemy units / 407 instances are ready now; enemies ignore weapons on 18 levels.
+6. **G-ENM-010 / G-ENM-001**: 11 enemy units / 407 instances are ready now (568 cheap, ten conditional on the cheat with a
+   dead Giant Clank branch); enemies ignore weapons on 18 levels.
 7. **G-CLS-001·L part 1 + G-SAV-010**: 29 directors are ready once help counts as ported; the story and hints of
    every level.
-8. **G-HERO-002** scripted states: 119 instances; of its 34 units, 17 also need the camera and 14 help.
+8. **G-HERO-002** scripted states: 880 instances with the bodies' branches (2026-09-29), sole blocker of 31 units / 297;
+   the highest score on the page (11) once H2 is in.
 9. **G-HERO-027 + G-HERO-026** camera: every level's camera volumes; co-needed by the directors.
 10. **G-HERO-009** joint modifiers: 422 instances; reused by Clank's pulse, the Visibomb fins and the vendor logo.
 11. **G-REN-024 + G-CLS-024**: 256 + 181 instances; together they free 1246 (126).
-12. **G-CLS-026** effect-moby spawners: 265 instances.
+12. **G-CLS-026** effect-moby spawners: 276 instances (sole blocker of 114).
 13. **G-HERO-005** Clank and Giant Clank: sections on 8 + 8 levels.
-14. **G-CLS-027** cheap wins round 2: 1,308 instances of class-only work.
+14. **G-CLS-027** cheap wins round 2: 1,177 instances of class-only work, 1,653 with the conditional and dead-branch units.
 15. **G-CLS-001·L part 2**: the directors that need the camera and hero states.
 16. **G-CLS-018 + G-CLS-023 (+ G-CLS-010)**: dormant pools, spawners, teleporters on 8 levels.
 17. **G-UI-011** HUD slots: prerequisite of the gadgets and the races.
@@ -314,33 +320,34 @@ Both lead the gaps.md top 15.
 | item | source | where it would go if confirmed |
 |---|---|---|
 | G-TRI-001 `slab_allocator` use-after-free log lines | gaps | its own bug hunt; before W7's render lane |
-| G-TRI-004 script-camera push; G-TRI-005 `unknown_74`; G-TRI-006 shadow probe; G-TRI-007 `ripple_z`; G-TRI-008 ISO lumps; G-TRI-011 fog-zone camera | gaps (probably stale) | W0 lane C: check and close |
+| ~~G-TRI-004 script-camera push; G-TRI-005 `unknown_74`; G-TRI-006 shadow probe; G-TRI-007 `ripple_z`; G-TRI-008 ISO lumps; G-TRI-011 fog-zone camera~~ | checked 2026-09-29: closed in gaps.md (each with its finding) | — |
 | G-TRI-009 Oltanis instances without geometry; G-TRI-010 mpegs 0, 1, 64–69; G-TRI-012 texture `type` enum; G-TRI-013 unknowns lists | gaps | no consumer yet (no-speculative-ports rule) |
-| G-TRI-014 pad vibration | gaps | nothing to port if the build has none |
-| G-TRI-016 the L15 / L18 missile from level hero code | gaps, explosions.md §E | G-HERO-005 (W4) if Giant Clank |
+| G-TRI-014 pad vibration | gaps | still open: the boot ELF links libpad's vibration (`sce_vib_*` at 0x1250d8…); `0x248920` not read |
+| ~~G-TRI-016 the L15 / L18 missile from level hero code~~ | resolved 2026-09-29: Giant Clank's states 0x5d / 0x5f → a consumer of G-HERO-005 (W4) | — |
 | G-PRT-004 ribbon / line callers | gaps ("names none") | no consumer named: hold |
 | M-SPHERES `class_spheres` from the class header at load | mem:project-next-queue 2026-09-26 (creatures leftover); the tests fill them by hand (`all_levels_smoke.rs:191`) | the moby system (W4 lane 3) if the engine doesn't |
 | M-APPICON the launcher's app icon ("amateurish" first attempt) | mem:project-launcher-and-mods | W8 lane 3, if still open (the launcher has `assets-src/icon/gen.py`) |
 | M-WATER-EXACT whether to chase byte-exact water after the perf rewrite | mem:project-randcre-status-2026-09-26 | a user decision; G-TOOL-016 territory |
-| M-249530 `0x249530` "Drone Device path" (census, Kerwan 1342) vs G-WPN-002's Gadgets-page path `0x28f260` | `cen`, gaps | G-WPN-002 or G-HERO-002 once read |
+| ~~M-249530 `0x249530` "Drone Device path" (census, Kerwan 1342) vs G-WPN-002's Gadgets-page path `0x28f260`~~ | resolved 2026-09-29: `0x249530` is the ammo read (`hero/weapons.rs`, ported); the census note was wrong; 1342 is cheap | — |
 
-**Contradictions:**
+**Contradictions (all resolved 2026-09-29 unless marked):**
 - **Circular "Depends on" pairs in gaps.md:**
-  - G-HERO-005 ↔ G-WPN-006, over the Hologuise only. Placed: bodies 1 / 2 in W4, the Hologuise with G-WPN-006 in W5.
-  - G-UI-011 ↔ G-LVL-007, over the race timer only. Placed: the timer with the races in W6.
-- **Stale census tags.** The 2026-09-28 re-run still counts four systems as blocking though they are ported:
-  - help (G-UI-017): 53 units / 108;
-  - the splash `0x2ff768` and burn sparks `0x271258` (G-ENM-005);
-  - the Suck Cannon interface (G-TRI-015).
-- **Cheap list vs gaps.** The census's cheap list still contains the fighters U548 / U373 (112, G-LVL-009) and 838
-  (G-AUD-010). A call-only census cannot see those blockers.
-- **Mixed counts in gaps.md.** The top 15 uses the re-run numbers (G-ENM-009 28 / 539, G-CLS-026 17 / 265); the rows
-  keep the first run's (29 / 555, 18 / 281).
-- **The dev tooling reorg.** MEMORY.md indexes it as "deferred", but its note says done (d41ec5e, 2026-09-27).
-- **Digest baseline.**
-  - G-TOOL-014 says to record NO_IDLE `94746b95`.
-  - The memory log (2026-09-28) says NO_IDLE is now `596306d7`, and asks which commit changed it.
-- **Locked Goodies pages.** menus.md §12 files them under G-UI-004; gaps.md under G-UI-002.
-- **The `.mov` files.** G-TOOL-010 counts two; the repo root now holds three different ones (16.35 / 16.37 / 16.47).
-- **The in-game map.** gaps.md's [deferred] marker list still names the map screen, but G-UI-001's system was ported
-  2026-09-28.
+  - G-HERO-005 ↔ G-WPN-006, over the Hologuise only. Resolved: the body switch is hero code and depends on nothing in
+    the gadget; the Hologuise body 3 has no consumer without the gadget, so it is ported with G-WPN-006 (W5), which
+    depends on G-HERO-005's body switch. Bodies 1 / 2 stay in W4.
+  - G-UI-011 ↔ G-LVL-007, over the race timer only. Resolved: the slot machinery is ported; the race timer's only
+    consumer is the races, so it is ported with G-LVL-007 (W6); G-UI-011 no longer depends on G-LVL-007.
+- **Stale census tags.** Fixed: help, the splash and burn sparks and the Suck Cannon interface are tagged has against
+  the code (class_census.md "Re-run 2026-09-29").
+- **Cheap list vs gaps.** Fixed: the census now reads engine state directly (the hero state / body compares, the ship
+  moby, the cheat flag) and carries overrides for what it still cannot see (the fighters, 838 / 855).
+- **Mixed counts in gaps.md.** Fixed: the rows and the top 15 both use the 2026-09-29 run.
+- **The dev tooling reorg.** MEMORY.md indexes it as "deferred", but its note says done (d41ec5e, 2026-09-27): for
+  the coordinator's memory index (not a repo file).
+- **Digest baseline.** Re-derived: NO_IDLE `596306d7baa53abb8107b2d0ccfc5369`, full `42ec9908f7c83181a599154cb4749b40`
+  (gaps.md G-TOOL-014); the commit that moved it off `94746b95` is not bisected (hero_gameplay.md §12 already
+  reports `596306d7`).
+- **Locked Goodies pages.** They are pause pages: G-UI-002; menus.md §12 fixed.
+- **The `.mov` files.** G-TOOL-010 is count-agnostic now.
+- **The in-game map.** Removed from gaps.md's [deferred] marker list.
+- **The pack swap** (M-PACK): not a gap; no doc implied it was missing (checked 2026-09-29).

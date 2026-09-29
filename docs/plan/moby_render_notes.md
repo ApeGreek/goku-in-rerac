@@ -89,6 +89,9 @@ bit-exactness on real data is **inferred** from the op-by-op port, not measured.
 
 ## 5. Not done
 
+(The 2026-09-26 list. All of it is done since — §7–§9, moby_skinning_lighting.md, `rc_game::moby_update` — except
+the leftovers filed in gaps.md G-REN-018 (render) and G-CLS-018 (spawn conditions).)
+
 - Animation: keyframe decode (`fun_0020e0e0`), palette upload, GPU skinning.
 - Metal/chrome pass (−2) and glass (−3) triangles: skipped (none in Novalis high-LOD packets).
 - Point-light merge (third light), distance fade/cull against the draw distance (+0x32), alpha < 0x80

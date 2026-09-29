@@ -14,8 +14,9 @@
 //! 3. [`light_vertex`]: VU0 program 104691 (entry 0, single-matrix loop) per vertex, plus the EE pack
 //!    in `fun_001ee650` (multiplier bytes, halfword saturation).
 //!
-//! The point-light merge (MobyProc 0x212150) is not ported: the third light's row and colour are 0
-//! (no level point lights are placed yet), which is also what the job holds when none is in range.
+//! The point-light merge (MobyProc 0x212150) is the engine's per-frame job (rc-engine `moby_render.rs`, the
+//! mobys' third light); this load-time pass leaves the third light's row and colour 0, which is also what the
+//! job holds when none is in range.
 
 use crate::moby::MobySubmesh;
 use crate::tfrag_light::{ps2, DirLightSet, LightBank, NormalTable};

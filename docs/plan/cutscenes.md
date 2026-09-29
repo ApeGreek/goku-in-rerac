@@ -244,8 +244,9 @@ identical PNGs and WAVs.
 **Not yet:** kind C between-level / menu movies (§5); memcard save (logged; the in-memory game state holds every
 write). Done since (hero_gameplay.md §6): the gold bolt cutaway, `UnlockPlanet` + `ShowPlanetBanner` into the game
 state and the HUD, a gameplay class's `FadeToBlack` (`scene_render::FadeHold`), the talker scene → movie → scene
-chain in the engine (the Water Pump Worker's Infobot); the collapsing platform's stray release; the script camera's collision
-push; `CameraScript2` kinds 1 / 4 pose copy details. (The FX driver 1546 and the rest of the mode-2 world: §7.)
+chain in the engine (the Water Pump Worker's Infobot); the collapsing platform's stray release; `CameraScript2` kinds 1 / 4
+pose copy details. Still not ported: the script camera's collision push `0x20f2a8` (no Novalis caller passes `collide`,
+`follow_camera/script.rs`; a consumer would file it under G-HERO-026). (The FX driver 1546 and the rest of the mode-2 world: §7.)
 
 ## 7. The scene pass (2026-09-27): data coverage, what runs in mode 2, the one general player
 
@@ -354,5 +355,5 @@ state differs because it ran). Headless: rc-formats conformance, rc-game (digest
 **Left** (effects hand-off `scratchpad/scene_pass/effects_handoff.md`): type-23 orbs render dim; the explosion light
 does not relight the world (tfrag / tie / shrub point lights: `LightTfrags` 0x2a8e40, `LightTies` 0x2ab218,
 `LightShrubs` 0x29e7e8); particle types 46 / 35, the splash 0x2ff768, the infobot thrusters 0x278450, the ship draw
-callback 0x2a70a8; ~~the hero's state 100 body~~ (ported 2026-09-28, hero_gameplay.md §7); the infobot's projection screen in scene 4 draws black [L: an effect of
+callback 0x2a70a8; ~~the hero's state 100 body~~ (ported 2026-09-28, hero_gameplay.md §7); the infobot's projection screen in scene 4 draws black (the original is black too: breakables.md §4) [L: an effect of
 its own]; the actors' collision; mode-6 space scenes (parsed and checked, not played).

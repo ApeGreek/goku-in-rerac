@@ -302,7 +302,7 @@ Differences: the composite mixes in linear light (exact at HUD coverage 0 or 1),
 clamped (exact over opaque HUD pixels), no per-blend COLCLAMP inside the HUD target, no texture paging emulation.
 `RC_HUD_DEMO=1`, `RC_HUD_TEXT`, `RC_HUD_TEXT_WINDOW=1`, `RC_HUD_HELP=<id>`, `RC_LANG`, `RC_HUD=0` (hud_render.rs).
 
-**Not done**: vendor screen, quick-select ring (slot 3), boss/vehicle meters (slot 4), race timer (slot 12),
+**Not done** (~~vendor screen~~, ~~quick-select ring (slot 3)~~: done, interaction.md §10 / menus.md §2; the rest is G-UI-011 and G-TOOL-007): boss/vehicle meters (slot 4), race timer (slot 12),
 nearby-bolt alert (slot 7), `FontPrintWindow` float path (flag 8) (help voice lines, stream waits and the first-input
 gate: done, "Help system" below), `all_text` menus, PAL layout, PCSX2 pixel comparison.
 

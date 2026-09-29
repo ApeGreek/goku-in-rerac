@@ -425,7 +425,8 @@ billboard), the tie per-instance F (`TieLodState::fog`), the tfrag LOD constants
 disables the zones. Verified on screen: inside zone 7 the rock walls take the gas colour (74, 86, 28) and
 a far of ~51 units; a walk-through from the outdoor face to the gas face (`RC_CAM_PATH`) blends t 0.99 → 0.09
 with no snap and keeps the last values after leaving. Not done: the hero cross-fade (`hero_light` is the
-hook for when the hero moby renders), the zone lookup uses the fly camera (no camera modes).
+hook for when the hero moby renders); the zone lookup reads the main camera entity, which `play_camera.rs` drives
+in game mode (2026-09-29: the earlier "uses the fly camera (no camera modes)" was stale).
 
 ## 6. Underwater, confidence high
 
@@ -517,5 +518,6 @@ hook for when the hero moby renders), the zone lookup uses the fly camera (no ca
   strip +0x1c = 1 are pinned, §3.1.)
 - 1848's mesh identity; (the tint pass position is pinned: after the HUD, §6.1)
   relative to the HUD.
-- Other levels: which classes use the ripple module (05/07/11/12/13), and lava/goo (level-specific code,
-  e.g. `0x21fa98` strip-emitter copies in 09/12/14), not surveyed.
+- ~~Other levels: which classes use the ripple module (05/07/11/12/13), and lava/goo (level-specific code,
+  e.g. `0x21fa98` strip-emitter copies in 09/12/14), not surveyed.~~ Surveyed 2026-09-28 (§3.2, §3.3,
+  level_generalisation.md's water survey); the lava / goo meshes left are G-REN-026.

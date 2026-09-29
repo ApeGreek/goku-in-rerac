@@ -12,13 +12,18 @@
 //! into the next start when a function does not end in `jr ra` / `j` (fall). `jalr` sites in the unit are counted as
 //! unresolved indirect calls.
 //!
+//! **Direct reads of engine state** (data): a unit's own code that forms a data address with `lui`/`%lo` (the boot
+//! ELF's globals below the overlay base, or overlay data) depends on that global. Only the globals the tag table
+//! names (`G:<address>` rows: the state a system owns, e.g. the ship moby `0x140940` of the ship-combat mode) count
+//! as a dependency; every boot global an unported unit touches is listed in `globals.tsv` for the next tagging pass.
+//!
 //! Identity across levels uses the port's code identity ([`rc_formats::level_overlay::mask`], the `Relocation`
 //! masking): a shared function is keyed by its level-01 copy (`L01:addr`), its boot address (`boot:addr`), or, when
 //! level 01 has no copy, by the hash of its masked code (`H:hash`, with a representative level address). Units are
 //! grouped across levels by the hash of their update's masked code (one class-port unit, as `LevelPorts` groups).
 //!
-//! Outputs (tab-separated, `work/census/` by default): `classes.tsv`, `units.tsv`, `shared.tsv`, and, when a
-//! system tag table is given (`tools/ghidra/names/census_systems.tsv`), `systems.tsv` and `unit_systems.tsv`.
+//! Outputs (tab-separated, `work/census/` by default): `classes.tsv`, `units.tsv`, `shared.tsv`, `globals.tsv`, and,
+//! when a system tag table is given (`tools/ghidra/names/census_systems.tsv`), `systems.tsv` and `unit_systems.tsv`.
 
 use anyhow::{Context, Result};
 use rc_formats::level_overlay::{address_refs, mask, LevelOverlay, Relocation, TEXT_SECTION};
@@ -30,6 +35,8 @@ use std::sync::Arc;
 
 /// Boot ELF code is below the overlay base.
 const OVERLAY_BASE: u32 = 0x15ef00;
+/// The boot ELF's load address: a `lui`/`%lo` constant below it is not an address.
+const BOOT_BASE: u32 = 0x10_0000;
 const JR_RA: u32 = 0x03e0_0008;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -39,6 +46,8 @@ pub enum Edge {
     Ptr,
     Table,
     Fall,
+    /// A data address the unit's own code forms (a global it reads or writes), not a call.
+    Data,
 }
 
 impl Edge {
@@ -49,6 +58,7 @@ impl Edge {
             Edge::Ptr => "ptr",
             Edge::Table => "table",
             Edge::Fall => "fall",
+            Edge::Data => "data",
         }
     }
 }
@@ -62,6 +72,9 @@ pub struct Graph {
     /// Function → `jalr` sites (not `jr ra`).
     pub jalr: HashMap<u32, usize>,
     pub extent: HashMap<u32, usize>,
+    /// Function → the data keys it forms: `G:<address>` for a global it reads or writes (outside `.text`, at or
+    /// above the boot ELF's 0x100000), `G:<address>=<value>` for a loaded global compared with a constant.
+    pub data: HashMap<u32, BTreeSet<String>>,
 }
 
 fn words_of(s: &rc_formats::font::OverlaySection) -> Vec<u32> { s.data.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect() }
@@ -92,7 +105,7 @@ impl Graph {
         let mut strong: BTreeSet<u32> = text.iter().filter(|&&w| w >> 26 == 3).map(|&w| (w & 0x03ff_ffff) << 2).collect();
         strong.extend(ov.vtbl().iter().map(|e| e.update));
         let is_fn = |a: u32| strong.contains(&a) || (a >= ts + 8 && at(a - 8) == JR_RA);
-        let mut g = Graph { starts: starts.clone(), callees: HashMap::new(), callers: HashMap::new(), jalr: HashMap::new(), extent: HashMap::new() };
+        let mut g = Graph { starts: starts.clone(), callees: HashMap::new(), callers: HashMap::new(), jalr: HashMap::new(), extent: HashMap::new(), data: HashMap::new() };
         for &f in &starts {
             let Some(n) = ov.extent(f) else { continue };
             let Some(code) = ov.code(f, n) else { continue };
@@ -111,10 +124,14 @@ impl Graph {
                     _ => {}
                 }
             }
+            let mut data: BTreeSet<String> = data_refs(code, ts, te);
             for (_, a) in address_refs(code) {
                 if a >= ts && a < te {
                     if (a < f || a >= end) && starts.contains(&a) && is_fn(a) { out.insert((a, Edge::Ptr)); }
-                } else if a >= OVERLAY_BASE && a % 4 == 0 {
+                    continue;
+                }
+                if a >= BOOT_BASE { data.insert(format!("G:{a:08x}")); }
+                if a >= OVERLAY_BASE && a % 4 == 0 {
                     // A table of function starts (entries inside this function are a switch's jump table).
                     let mut p = a;
                     for _ in 0..256 {
@@ -135,6 +152,7 @@ impl Graph {
                 out.insert((end, Edge::Fall));
             }
             if jalr > 0 { g.jalr.insert(f, jalr); }
+            if !data.is_empty() { g.data.insert(f, data); }
             for &(c, _) in &out { g.callers.entry(c).or_default().insert(f); }
             g.callees.insert(f, out);
         }
@@ -165,6 +183,66 @@ impl Graph {
         }
         (u, leaves)
     }
+}
+
+/// The data keys `code` forms (`Graph::data`): a `lui` (+ `addiu` / `ori`) constant and every load / store whose
+/// base register holds such a constant (`base + offset`: a field of a global block, e.g. the hero state `0x1413d4`
+/// read as `0x13f350 + 0x2084`), and a loaded global compared with a constant (`xori` with an immediate, or a
+/// `beq` / `bne` against a register holding one: the hero state against 0x32, `G:001413d4=00000032`). A linear pass
+/// with one register file; a call clears the caller-saved registers, a branch is not followed (a register set on one
+/// arm and read after the join is a rare extra reference, never a missed one on straight code). Addresses inside
+/// `.text` (`ts..te`) and below the boot ELF are dropped.
+fn data_refs(code: &[u32], ts: u32, te: u32) -> BTreeSet<String> {
+    #[derive(Clone, Copy)]
+    enum R {
+        Const(u32),
+        Load(u32),
+    }
+    let mut regs: [Option<R>; 32] = [None; 32];
+    let mut out = BTreeSet::new();
+    let ok = |a: u32| a >= BOOT_BASE && !(a >= ts && a < te);
+    let mut call_pending = false;
+    for &w in code {
+        let (op, rs, rt, rd) = (w >> 26, (w >> 21 & 31) as usize, (w >> 16 & 31) as usize, (w >> 11 & 31) as usize);
+        let imm = (w & 0xffff) as u16 as i16 as i32;
+        let was_call = call_pending;
+        call_pending = false;
+        regs[0] = Some(R::Const(0));
+        let cst = |r: Option<R>| if let Some(R::Const(c)) = r { Some(c) } else { None };
+        let ld = |r: Option<R>| if let Some(R::Load(a)) = r { Some(a) } else { None };
+        match op {
+            0x0f => regs[rt] = Some(R::Const((w & 0xffff) << 16)),
+            0x09 | 0x19 => regs[rt] = cst(regs[rs]).map(|b| R::Const(b.wrapping_add(imm as u32))),
+            0x0d => regs[rt] = cst(regs[rs]).map(|b| R::Const(b | (w & 0xffff))),
+            0x0e => {
+                if let Some(a) = ld(regs[rs]) { out.insert(format!("G:{a:08x}={:08x}", w & 0xffff)); }
+                regs[rt] = None;
+            }
+            0x04 | 0x05 => {
+                if let (Some(a), Some(c)) = (ld(regs[rs]), cst(regs[rt])) { out.insert(format!("G:{a:08x}={c:08x}")); }
+                if let (Some(a), Some(c)) = (ld(regs[rt]), cst(regs[rs])) { out.insert(format!("G:{a:08x}={c:08x}")); }
+            }
+            // Loads and stores: lb..lwu, lq / sq, lwc1 / swc1, ldc2 / sdc2 (lqc2 / sqc2), ld / sd.
+            0x20..=0x2e | 0x1e | 0x1f | 0x31 | 0x39 | 0x36 | 0x3e | 0x37 | 0x3f => {
+                let a = cst(regs[rs]).map(|b| b.wrapping_add(imm as u32)).filter(|&a| ok(a));
+                if let Some(a) = a { out.insert(format!("G:{a:08x}")); }
+                if matches!(op, 0x20..=0x27 | 0x1e | 0x37) { regs[rt] = a.map(R::Load); }
+            }
+            0x03 => { regs[31] = None; call_pending = true; }
+            0x00 => {
+                if w & 63 == 9 { regs[rd] = None; call_pending = true; } else if w & 63 != 8 { regs[rd] = None; }
+            }
+            0x1c => regs[rd] = None,
+            0x11 | 0x12 => { if rs < 4 { regs[rt] = None; } }
+            0x08 | 0x0a..=0x0c | 0x18 => regs[rt] = None,
+            _ => {}
+        }
+        if was_call {
+            // The delay slot has run: the callee clobbers everything but s0..s7, gp, sp, fp.
+            for r in (1..16).chain(24..28).chain([31]) { regs[r] = None; }
+        }
+    }
+    out
 }
 
 fn hash_words(w: &[u32]) -> u64 {
@@ -312,15 +390,24 @@ struct Shared {
     words: usize,
 }
 
-/// A tag row of `census_systems.tsv`: key → (system, status, confidence, note).
-fn tags(path: &Path) -> HashMap<String, (String, String, String, String)> {
+/// A tag row of `census_systems.tsv`.
+#[derive(Clone, Debug, Default)]
+struct Tag {
+    name: String,
+    system: String,
+    status: String,
+    conf: String,
+}
+
+/// The tag table: key → tag. Keys: `L01:` / `boot:` / `C:` / `H:` functions, `G:<address>` globals.
+fn tags(path: &Path) -> HashMap<String, Tag> {
     let Ok(s) = std::fs::read_to_string(path) else { return HashMap::new() };
     s.lines()
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .filter_map(|l| {
             let c: Vec<&str> = l.split('\t').collect();
             if c.len() < 4 || c[0] == "key" { return None; }
-            Some((c[0].to_string(), (c[2].to_string(), c[3].to_string(), c.get(4).unwrap_or(&"").to_string(), c.get(5).unwrap_or(&"").to_string())))
+            Some((c[0].to_string(), Tag { name: c[1].to_string(), system: c[2].to_string(), status: c[3].to_string(), conf: c.get(4).unwrap_or(&"").to_string() }))
         })
         .collect()
 }
@@ -351,11 +438,14 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
     let boot_names = names(work, "SCUS_971.99");
     let clusters = Clusters::load(&repo.join("tools/ghidra/names/clusters.tsv"));
     let l01_graph = Graph::build(&l01);
+    let tagmap = tag_file.map(tags).unwrap_or_default();
 
     let mut rows: Vec<ClassRow> = Vec::new();
     let mut units: Vec<Unit> = Vec::new();
     let mut unit_by_hash: HashMap<(u64, bool), usize> = HashMap::new();
     let mut shared: BTreeMap<String, Shared> = BTreeMap::new();
+    // Boot global key → (units whose own code forms it, one is ported).
+    let mut globals: BTreeMap<String, (BTreeSet<usize>, bool)> = BTreeMap::new();
     let mut level_names: HashMap<u32, HashMap<u32, String>> = HashMap::new();
 
     for &level in levels {
@@ -419,6 +509,24 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
                     }
                 }
             }
+            // The globals the unit's own code forms: a tagged one (`G:`) is a dependency like a call. A class
+            // override (`X:<class>`: state the census cannot see, with its reason in the table) counts the same way.
+            let mut data: BTreeSet<String> = private.iter().flat_map(|f| graph.data.get(f).into_iter().flatten().cloned()).collect();
+            data.extend(cls.iter().map(|c| format!("X:{c}")).filter(|k| tagmap.contains_key(k)));
+            for key in &data {
+                let a = key.get(2..10).and_then(|h| u32::from_str_radix(h, 16).ok()).unwrap_or(0);
+                if key.starts_with("G:") && a < OVERLAY_BASE {
+                    let e = globals.entry(key.clone()).or_default();
+                    e.0.insert(uid);
+                    e.1 |= is_ported;
+                }
+                if !tagmap.contains_key(key) { continue; }
+                u.leaves.entry(key.clone()).or_default().insert(Edge::Data);
+                let s = shared.entry(key.clone()).or_default();
+                s.sites.insert((level, a));
+                s.units.insert(uid);
+                if is_ported { s.in_ported_unit = true; }
+            }
             if is_ported {
                 // The functions a ported unit owns count as ported too (by their level-01 key).
                 for &f in &private {
@@ -431,8 +539,8 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
     }
 
     let refs = repo_refs(repo);
-    let tagmap = tag_file.map(tags).unwrap_or_default();
     let name_of = |key: &str, s: Option<&Shared>| -> String {
+        if key.starts_with("G:") || key.starts_with("X:") { return tagmap.get(key).map(|t| t.name.clone()).unwrap_or_default(); }
         if let Some(a) = key.strip_prefix("L01:").and_then(|h| u32::from_str_radix(h, 16).ok()) {
             return l01_names.get(&a).cloned().unwrap_or_default();
         }
@@ -441,7 +549,7 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
         }
         s.and_then(|s| s.sites.iter().find_map(|(l, a)| level_names.get(l).and_then(|m| m.get(a)).cloned())).unwrap_or_default()
     };
-    let addr_of = |key: &str| -> Option<u32> { key.strip_prefix("L01:").or_else(|| key.strip_prefix("boot:")).and_then(|h| u32::from_str_radix(h, 16).ok()) };
+    let addr_of = |key: &str| -> Option<u32> { key.strip_prefix("L01:").or_else(|| key.strip_prefix("boot:")).or_else(|| key.strip_prefix("G:").map(|h| &h[..8.min(h.len())])).and_then(|h| u32::from_str_radix(h, 16).ok()) };
 
     std::fs::create_dir_all(out)?;
     // classes.tsv
@@ -497,15 +605,38 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
             name_of(k, Some(s)),
             s.in_ported_unit as u8,
             s.words,
-            tag.map(|t| t.0.as_str()).unwrap_or(""),
-            tag.map(|t| t.1.as_str()).unwrap_or(""),
-            tag.map(|t| t.2.as_str()).unwrap_or(""),
+            tag.map(|t| t.system.as_str()).unwrap_or(""),
+            tag.map(|t| t.status.as_str()).unwrap_or(""),
+            tag.map(|t| t.conf.as_str()).unwrap_or(""),
             files(false),
             files(true),
             s.callees.iter().cloned().collect::<Vec<_>>().join(";")
         );
     }
     crate::write_output(&out.join("shared.tsv"), t)?;
+    // globals.tsv (boot globals the unported units' own code forms, by the instances of those units)
+    let mut grow: Vec<(&String, Vec<usize>, bool)> = globals
+        .iter()
+        .map(|(k, (us, p))| (k, us.iter().copied().filter(|&u| !units[u].ported).collect::<Vec<_>>(), *p))
+        .filter(|r| !r.1.is_empty())
+        .collect();
+    grow.sort_by_key(|r| (std::cmp::Reverse(r.1.iter().map(|&u| units[u].created).sum::<usize>()), r.0.clone()));
+    let mut t = String::from("global\tunported_units\tcreated\tin_ported_unit\tcrates_refs\tsystem\tstatus\tunits\n");
+    for (k, us, p) in &grow {
+        let tag = tagmap.get(*k);
+        t += &format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            &k[2..],
+            us.len(),
+            us.iter().map(|&u| units[u].created).sum::<usize>(),
+            *p as u8,
+            addr_of(k).and_then(|a| refs.get(&a)).map(|(c, _)| c.len()).unwrap_or(0),
+            tag.map(|t| t.system.as_str()).unwrap_or(""),
+            tag.map(|t| t.status.as_str()).unwrap_or(""),
+            us.iter().map(|u| format!("U{u}")).collect::<Vec<_>>().join(",")
+        );
+    }
+    crate::write_output(&out.join("globals.tsv"), t)?;
 
     // With a tag table: per-unit systems and the system ranking.
     if !tagmap.is_empty() {
@@ -517,7 +648,7 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
             let mut untagged = Vec::new();
             for k in u.leaves.keys() {
                 match tagmap.get(k) {
-                    Some((system, status, _, _)) => {
+                    Some(Tag { system, status, .. }) => {
                         by.entry(status.as_str()).or_default().insert(system.clone());
                         if status == "missing" || status == "partly" {
                             let e = sys.entry(system.clone()).or_default();
@@ -533,7 +664,7 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
             let levels: BTreeSet<u32> = u.copies.iter().map(|c| c.0).collect();
             let classes: BTreeSet<i32> = u.classes.iter().map(|c| c.1).collect();
             let verdict = if by.contains_key("missing") { "missing" } else if by.contains_key("partly") { "partly" } else if !untagged.is_empty() { "unknown" } else { "cheap" };
-            let blocking: Vec<&String> = u.leaves.keys().filter(|k| tagmap.get(*k).is_some_and(|t| t.1 == "missing" || t.1 == "partly")).collect();
+            let blocking: Vec<&String> = u.leaves.keys().filter(|k| tagmap.get(*k).is_some_and(|t| t.status == "missing" || t.status == "partly")).collect();
             t += &format!(
                 "U{i}\t{}\t{}\t{}\t{verdict}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
                 u.created,
@@ -552,7 +683,7 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
         for (k, e) in sys.iter_mut() {
             e.2 = e.0.iter().map(|&u| units[u].created).sum();
             // The system's status: partly when the port has any of its functions, else missing.
-            let has = tagmap.values().any(|t| &t.0 == k && t.1 != "missing");
+            let has = tagmap.values().any(|t| &t.system == k && t.status != "missing");
             e.4 = if has { "partly".into() } else { "missing".into() };
         }
         let mut ranked: Vec<_> = sys.iter().collect();
@@ -580,3 +711,47 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
     })
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MIPS words for the data census: `lui`, `addiu`, `lw`, `xori`, `beq`, `jal`.
+    fn lui(rt: u32, imm: u32) -> u32 { 0x0f << 26 | rt << 16 | imm }
+    fn addiu(rt: u32, rs: u32, imm: i16) -> u32 { 0x09 << 26 | rs << 21 | rt << 16 | (imm as u16 as u32) }
+    fn lw(rt: u32, off: i16, base: u32) -> u32 { 0x23 << 26 | base << 21 | rt << 16 | (off as u16 as u32) }
+    fn xori(rt: u32, rs: u32, imm: u32) -> u32 { 0x0e << 26 | rs << 21 | rt << 16 | imm }
+    fn beq(rs: u32, rt: u32) -> u32 { 0x04 << 26 | rs << 21 | rt << 16 | 4 }
+    const V0: u32 = 2;
+    const V1: u32 = 3;
+    const A0: u32 = 4;
+    const TS: u32 = 0x15ef00;
+    const TE: u32 = 0x320000;
+
+    #[test]
+    fn data_refs_sees_lo_loads_base_offsets_and_compares() {
+        // `lw v1, 0x13d4(v0)` with v0 = 0x140000: the hero state; `xori v1, v1, 0x32`: compared with 0x32.
+        let code = [lui(V0, 0x14), lw(V1, 0x13d4, V0), xori(V1, V1, 0x32), JR_RA, 0];
+        let refs = data_refs(&code, TS, TE);
+        assert_eq!(refs, BTreeSet::from(["G:001413d4".to_string(), "G:001413d4=00000032".to_string()]));
+        // The hero block base 0x13f350 (`lui` + `addiu`) and the state at +0x2084; `li a0, 0x32; beq v1, a0`.
+        let code = [lui(V0, 0x14), addiu(V0, V0, -0xcb0), lw(V1, 0x2084, V0), addiu(A0, 0, 0x32), beq(V1, A0), 0, JR_RA, 0];
+        // (The base constant itself, `G:0013f350`, is `address_refs`'s: `Graph::build` unions both.)
+        let refs = data_refs(&code, TS, TE);
+        assert!(refs.contains("G:001413d4"), "{refs:?}");
+        assert!(refs.contains("G:001413d4=00000032"), "{refs:?}");
+    }
+
+    #[test]
+    fn data_refs_drops_text_addresses_small_constants_and_clobbered_bases() {
+        // A `.text` address and a colour constant are not globals.
+        let code = [lui(V0, 0x20), addiu(V0, V0, 0x1000), lui(V1, 0x20), addiu(V1, V1, 0x2020), JR_RA, 0];
+        assert!(data_refs(&code, TS, TE).is_empty());
+        // After a call the base register is unknown: no reference from the load.
+        let code = [lui(V0, 0x14), 0x0c00_0000, 0, lw(V1, 0x13d4, V0), JR_RA, 0];
+        assert!(data_refs(&code, TS, TE).is_empty());
+        // s0 survives the call.
+        let code = [lui(16, 0x14), 0x0c00_0000, 0, lw(V1, 0x13d4, 16), JR_RA, 0];
+        assert_eq!(data_refs(&code, TS, TE), BTreeSet::from(["G:001413d4".to_string()]));
+    }
+}

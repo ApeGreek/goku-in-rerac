@@ -226,8 +226,8 @@ tests `platform::tests`, `surface::tests`, `tests/hero_platform_novalis.rs` (the
 steep bank at its foot, determinism), `tests/hero_surfaces.rs` (surface ids per level vs rules, Aridia quicksand,
 ice on levels 12 / 14, Novalis' flow chutes). Open: ~~the flow class 679~~ (done, "Hero follow-ups" below), the
 landing picker's leading slippery test (jump.rs), the Thruster hover's slippery brake (packs.rs), the sinking
-floor's sand particles (`0x22b140(4, 2)`, the 6-draw `0x286cb0` spawn: still not ported, so the `rand` stream
-diverges from the PS2 while sinking), ~~the surface sounds~~ (done below).
+~~floor's sand particles (`0x22b140(4, 2)`, the 6-draw `0x286cb0` spawn: still not ported, so the `rand` stream
+diverges from the PS2 while sinking)~~ (done: `hero/fx.rs` PartType47Spawn, surface.rs), ~~the surface sounds~~ (done below).
 
 ### P2 — damage, knockback, death, stances, hero sounds
 **Done (2026-09-26).** `damage.rs` (the hit intake 0x231580, the knockback 0x231518 added to 0x13f430 and 0x13f450,
@@ -362,7 +362,7 @@ pull targets on 2, 3, 4, 5, 7, 10..18; swing targets on 2..7, 9..11, 13..16, 18 
 Swingshot (0xd0) and its hook (0xd1) drawn by moby_attach, the rope `0x2dba30` as a camera-facing textured strip
 (effect texture 0xf); `RC_GIVE_ITEMS=12` also requests it into the hand. Tests: `swingshot::tests` (10),
 `classes::swing_target::tests` (2), `tests/hero_swingshot_levels.rs` (Aridia: a pull and a swing; Kerwan: a swing;
-deterministic). Open: the target glints (particle type 60: its draw is made, the particle not created), the targets'
+deterministic). Open: ~~the target glints (particle type 60: its draw is made, the particle not created)~~ (done: `classes/swing_target.rs`), the targets'
 camera look-at hint `0x2eb4c0`, the look-stance aiming beams `0x20fb60`, the Swingshot's class sounds (queued in
 `SwingItem::sounds`, not played: their pitch-bend draws are missing from the stream, as the wrench's hit sounds), the
 targeted swing from a grind rail (0x13f904), the stats / help counters. The other hand items' rows (weapons, the

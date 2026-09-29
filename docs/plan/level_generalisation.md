@@ -45,7 +45,7 @@ general code, and added guards. Tooling items (T1–T4, the `overlay_diff.py` re
 | H2 | open | not diffed |
 | G1 | open | Gemlik's arrival is scene 0 from its own director class 1353 (`0x30b628`, Gemlik-only: content). `RC_SCENE=+0` forces scene 0 (it plays: 868 ticks, actors 0 / 10 / 1289, speech, subtitles) |
 | A1 | ok as is | `entry` pauses the music on 13; the landing sequence (not ported) unpauses it: a direct boot plays unpaused, the post-landing state |
-| A2 | open | reverb (another agent) |
+| A2 | done | reverb (ported 2026-09-28: audio.md "Reverb zones and level sounds") |
 | T1–T4 | open | tooling |
 
 ### Water on every level (2026-09-28)
@@ -188,7 +188,7 @@ How the address is found on another level:
 | H2 | hero / tick | Hero functions differ between overlays | L01 `.text` | diff vs other overlays | M |
 | G1 | game state / scene | First-arrival scene trigger: level 1, scene 5 | L01 | new per level | M |
 | A1 | audio | Level start: `start_track(0)`, never paused | L01 `.text` | transcribe entry | S |
-| A2 | audio | Reverb not modelled (Novalis STUDIO_C 1500 only known) | — | new | M |
+| A2 | audio | ~~Reverb not modelled (Novalis STUDIO_C 1500 only known)~~ done 2026-09-28 (audio.md) | — | new | M |
 | T1 | trace | Runtime EE addresses of the Novalis spawn compare | L01 `.lit`/`.bss`/`.data` | code (`$gp`/`%lo` of clustered fns) | M |
 | T2 | trace | Tie/shrub runtime record addresses | L01 `.lit`/`.data` | code | S |
 | T3 | trace | `known_addrs(level)`: level 1 only, falls back to L01 | L01 `.data` | code | S |
@@ -312,7 +312,7 @@ How the address is found on another level:
 - **A1** `rc-game/src/audio.rs:557`: `start_track(0, 1, 0x400)` and always unpaused. `entry` 0x259c40 starts
   track `*0x151708` and unpauses only when (level 1 and planet flag 0x13dd43 clear) or (level 0 and 0x13d390).
   Everything else starts paused.
-- **A2** `audio.rs:18`: reverb is not modelled; the per-level preset source is unknown.
+- **A2** ~~`audio.rs:18`: reverb is not modelled; the per-level preset source is unknown~~ (ported 2026-09-28: audio.md "Reverb zones and level sounds").
 - Already general: `GameState::apply_level_start(level)` / `apply_transition` (`game_state.rs:564-601`); the
   boot-ELF chunk tables (`save_game.rs:25-27`), vendor/price copies (`:288-290`) and item definitions by the
   `GiveItem` pattern (`:345-350`); the HUD / fonts / strings (glyph tables by the FontPrint pattern,

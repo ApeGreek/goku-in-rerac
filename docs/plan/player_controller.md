@@ -688,7 +688,7 @@ Table by back item (`0x22ddd8(3)`): 2 → 0x17c070 {(0: 4, 11), (0: 3, 10), (0: 
 `Hero::idle` (these fields), `Hero::back` (created only once `Hero::set_back_classes(607, 601)` is called),
 `Hero::idle.counter` (0x15f5cc mirror; the tick driver should set it), `Hero::idle.level` (0x15ed84; also
 selects the ground probe's water footstep class 3 on levels 1 and 0x12). `Hero::set_anim` takes the RNG.
-Not ported: the edge look-down of 0x22b928 (0x13f5b0), HeroScanTargets (look targets), HeroLean (walk),
+Not ported: the edge look-down of 0x22b928 (0x13f5b0), HeroScanTargets (look targets), ~~HeroLean (walk)~~ (ported: `Hero::lean`, hero_gameplay.md §7),
 the manipulators' pose application (the angles are computed, not rendered), the sound triggers of the advances
 (PlayClassSound pitch draws), options 0x15edb1/3/5, Clank hidden 0x141628, the hit flash 0x13f53e.
 
