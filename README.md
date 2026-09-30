@@ -20,7 +20,7 @@
 ## About
 
 ReRAC rebuilds Ratchet & Clank (2002, PlayStation 2) as a native PC game, written in Rust on the Bevy engine. The
-game's systems are ported from the original code and run natively, with no emulator in between. The goal is a port
+game's systems are ported and run natively, with no emulator in between. The goal is a port
 that looks, sounds and plays like the original.
 
 ## Status
@@ -74,4 +74,4 @@ More detail is in [`docs/workflows/`](docs/workflows/), for example
 
 ## License
 
-No license is granted for now; the workspace's `Cargo.toml` declares `license = "UNLICENSED"`.
+The workspace's `Cargo.toml` declares `license = "ISC"`.
