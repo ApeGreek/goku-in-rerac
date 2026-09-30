@@ -74,4 +74,4 @@ More detail is in [`docs/workflows/`](docs/workflows/), for example
 
 ## License
 
-The workspace's `Cargo.toml` declares `license = "ISC"`.
+ReRAC is released under the ISC license. See [LICENSE](LICENSE).
