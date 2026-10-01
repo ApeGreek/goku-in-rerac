@@ -798,7 +798,8 @@ fn buzz_run(at: [f32; 3], ticks: usize) -> Option<(Vec<u8>, Lv, Hero)> {
     let mut lv = load(9)?;
     let hero = hero_at(at);
     lv.load_pass(&hero);
-    let mut states = Vec::new();
+    // The load pass runs every update once (INIT → IDLE), so the state before the first tick is recorded too.
+    let mut states = vec![lv.table.mobys[26].state];
     for _ in 0..ticks {
         lv.tick(&hero);
         let s = lv.table.mobys[26].state;
@@ -871,7 +872,12 @@ fn the_taunter_alerts_a_buzz_bomb() {
     lv.tick(&hero);
     let a = p::i32(&lv.table.mobys[27].pvars, bb::pv::ALERT);
     assert!((179..=240).contains(&a), "{a}");
-    for _ in 0..8 { lv.tick(&hero); }
+    // The range follows the alert on the ticks whose `randi(4)` is 0 (the shared rand stream: other classes' draws move
+    // which ticks those are), so wait for one within the alert's 180..240 ticks.
+    for _ in 0..60 {
+        lv.tick(&hero);
+        if p::ff(&lv.table.mobys[27].pvars, bb::pv::RANGE) == 24.0 { break; }
+    }
     assert_eq!(p::ff(&lv.table.mobys[27].pvars, bb::pv::RANGE), 24.0);
 }
 
@@ -895,7 +901,8 @@ fn stalker_run(at: [f32; 3], ticks: usize) -> Option<(Vec<u8>, Lv, Hero)> {
     let mut lv = load(16)?;
     let hero = hero_at(at);
     lv.load_pass(&hero);
-    let mut states = Vec::new();
+    // The load pass runs every update once (INIT → IDLE), so the state before the first tick is recorded too.
+    let mut states = vec![lv.table.mobys[26].state];
     for _ in 0..ticks {
         lv.tick(&hero);
         let s = lv.table.mobys[1329].state;

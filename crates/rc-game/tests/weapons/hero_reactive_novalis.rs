@@ -474,7 +474,11 @@ fn novalis_suck_cannon_pulls_and_fires_a_critter() {
     // press at 330 does.
     let hurt = rows[255..265].iter().any(|r| r.state == 0x16);
     assert!(held < fired && ((260..265).contains(&fired) || (hurt && (330..337).contains(&fired))), "fired at {fired} (hurt at the first press: {hurt})");
-    assert_eq!(rows[fired].suck, (0, 0, 0), "the slot emptied");
+    // One held critter fewer (the cannon holds several: when the other critter is pulled in during a later hold, both
+    // are held and the press fires the first one in; the next press fires the other).
+    assert_eq!(rows[fired].suck.0, rows[fired - 1].suck.0 - 1, "one held critter fired");
+    let last = rows.iter().rposition(|r| r.suck.0 > 0).map_or(fired, |i| i + 1);
+    assert_eq!(rows.get(last).map(|r| r.suck), Some((0, 0, 0)), "the cannon empties after its last shot");
     assert!(rows[fired].watched[k].2.is_some_and(|x| x >= 5), "record {:?}", rows[fired].watched[k].2);
     let burst = rows.iter().position(|r| r.bursts == 1).expect("no burst");
     assert!(rows[burst].watched[k].0 >= 0xfd, "deleted after the burst");

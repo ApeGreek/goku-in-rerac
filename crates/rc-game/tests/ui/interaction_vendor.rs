@@ -115,6 +115,8 @@ struct Run {
     voices: Vec<(usize, i32)>,
     /// Mode-0 frames whose tick registered the vendor's draw callback `0x2ba9c0` (beam and glow points) on list 2.
     beam_frames: Vec<usize>,
+    /// `VendorStartWeaponDemo` requests: (frame, item, demo scene).
+    demos: Vec<(usize, usize, i32)>,
 }
 
 /// Runs `frames` main-loop frames: gameplay ticks in mode 0 (pad `tick_input(frame)`), vendor frames in mode 5
@@ -166,7 +168,7 @@ fn run(d: &Data, frames: usize, bolts: i32) -> Run {
     game.finish_load();
     let mut anim = RatchetAnim::new(&d.ratchet);
     let svc_cell = std::cell::RefCell::new(&mut svc);
-    let mut out = Run { recs: Vec::new(), handoffs: Vec::new(), purchases: Vec::new(), sounds: Vec::new(), state: GameState::zeroed(ChunkTables { global: Vec::new(), level: Vec::new() }), talk_slots, voices: Vec::new(), beam_frames: Vec::new() };
+    let mut out = Run { recs: Vec::new(), handoffs: Vec::new(), purchases: Vec::new(), sounds: Vec::new(), state: GameState::zeroed(ChunkTables { global: Vec::new(), level: Vec::new() }), talk_slots, voices: Vec::new(), beam_frames: Vec::new(), demos: Vec::new() };
     let mut v: Option<(Vendor, usize)> = None;
     let mut pad = PadState::default();
     for f in 0..frames {
@@ -232,11 +234,15 @@ fn run(d: &Data, frames: usize, bolts: i32) -> Run {
             if let Some(id) = o.voice { out.voices.push((f, id)); }
             svc_cell.borrow_mut().counters.bolts = gs.global.bolts;
             if let Some(p) = o.purchase { out.purchases.push((f, p)); }
+            // The weapon demo (substate 3) is the engine's space-scene player; the harness has none, so the demo ends on
+            // the frame after its request, as `take_weapon_demo_done` would report it: `VendorExit(1)`.
+            if let Some(dm) = o.weapon_demo { out.demos.push((f, dm.item, dm.scene)); }
+            let demo_done = vend.sub == 3 && out.demos.last().is_some_and(|&(df, _, _)| df < f);
             if !o.sounds.is_empty() { out.sounds.push((f, o.sounds.clone())); }
             let sub = vend.sub as i8;
             let sb = game.mobys.mobys[vendor].anim.seq_b;
             out.recs.push((game.counter, 5, svc_cell.borrow().interact.prompt.owner, game.mobys.mobys[vendor].state, gs.global.bolts, sub, sb, game.hero.state, world));
-            if o.exit {
+            if o.exit || demo_done {
                 rc_game::moby_update::classes::vendor::on_exit(&mut game.mobys, vendor);
                 // VendorExit's HeroTeleport (the engine's): 3.5 in front of the vendor, facing it, state 0.
                 let vm = &game.mobys.mobys[vendor];
@@ -321,9 +327,15 @@ fn novalis_vendor_prompt_open_buy_close() {
     let leave = r.recs.iter().position(|x| x.5 == 2).expect("substate 2");
     assert_eq!(leave, 247, "8 frames of power-off (the △ frame counts)");
     assert_eq!(r.recs[leave].6, 4, "the fold");
+    // 40 frames of substate 2 after the frame that entered it; then, a weapon bought that has a demo scene
+    // (0x1ca4a0[16]), `VendorStartWeaponDemo` (substate 3) instead of the exit's sound 6, and `VendorExit(1)` at the
+    // demo's end (the harness ends it on the next frame).
+    assert_eq!(r.demos.len(), 1, "{:?}", r.demos);
+    let (df, item, _scene) = r.demos[0];
+    assert_eq!((df, item), (leave + 40, 16), "the Pyrocitor's demo after 40 frames of substate 2");
     let back = r.recs.iter().rposition(|x| x.1 == 5).unwrap() + 1;
-    assert_eq!(back, leave + 41, "40 frames of substate 2 after the frame that entered it");
-    assert!(r.sounds.iter().any(|(f, s)| *f == back - 1 && s == &vec![6]), "closed: sound 6 {:?}", r.sounds);
+    assert_eq!(back, leave + 42, "the demo's frame, then VendorExit(1)");
+    assert!(!r.sounds.iter().any(|(f, s)| *f >= leave && s == &vec![6]), "no sound 6 on the demo's exit {:?}", r.sounds);
     assert_eq!(r.recs[back].1, 0);
     assert_eq!(r.recs[back].7, 0, "Ratchet back in state 0 on the first tick after the exit");
     assert!(r.recs[back..].iter().any(|x| x.2 == owner::VENDOR), "the prompt returns after the exit");

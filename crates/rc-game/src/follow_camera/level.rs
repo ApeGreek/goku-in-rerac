@@ -1142,7 +1142,7 @@ mod tests {
     }
 
     /// Kind 7: the hero's camera mode picks the class-7 camera (priority 6 over the follow camera's 5), switched in
-    /// when the level runs class 7's code; without it (or for a class the port does not run: class 3 here) the choice
+    /// when the level runs class 7's code; without it the choice
     /// is recorded as wanted and the follow camera stays.
     #[test]
     fn unported_class_is_wanted() {
@@ -1156,20 +1156,7 @@ mod tests {
         r.cam.level_cams.ports.swing = true;
         r.tick();
         assert!(r.cam.swing.active, "switched in");
-        let mut r = rig(vec![], vec![]);
-        let mut rail = system();
-        let mut p = vec![0u8; 0x40];
-        p[0x1c..0x20].copy_from_slice(&[6, 5, 3, 7]);
-        p[0x24..0x28].copy_from_slice(&(-1i32).to_le_bytes());
-        rail.push(LevelCamera { record: CameraRecord { class: 3, pos: [0.0; 3], rot: [0.0; 3], pvar_index: 1 }, pvar: Some(p) });
-        r.cam.set_level(LevelCameras::new(1, &rail, None, CameraPorts::default()));
-        r.hero.f15d4 = 3;
-        r.tick();
-        assert_eq!(r.cam.level_cams.wanted, Some(3));
-        assert!(r.cam.follow_is_current());
-        r.hero.f15d4 = 0;
-        r.tick();
-        assert_eq!(r.cam.level_cams.wanted, None);
+        // (Class 3, the rail camera, was the second example here; it runs since batch 5: `rail.rs` and its tests.)
     }
 
     /// A class-23 record at `at`: cuboid `cub`, priority 4, look angle `angle`, the rest 0 (leash off).

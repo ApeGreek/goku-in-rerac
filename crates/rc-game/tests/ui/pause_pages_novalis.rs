@@ -404,10 +404,11 @@ fn goodies_skill_points_and_movies() {
     let key = |v: &[rc_game::menus::pause::Item]| v.iter().map(|i| (i.label, i.action, i.arg)).collect::<Vec<_>>();
     assert_eq!(key(&l.items), key(&m.menu.movie_lists[1]));
     assert_eq!(l.items.len(), 6);
-    // A locked entry (Sketchbook, action −1): ✕ stays, no sound.
+    // A locked entry (Sketchbook: the Goodies enter `0x29aa60` makes it action 2 below 15 skill points): ✕ stays and
+    // plays the Denied sound.
     run(&mut d, &mut m, &mut gs, &[(button::TRIANGLE, 20)]);
     for _ in 0..1 { run(&mut d, &mut m, &mut gs, &[(button::DOWN, 3)]); }
     d.sounds.clear();
     run(&mut d, &mut m, &mut gs, &[(button::CROSS, 20)]);
-    assert_eq!((m.menu.current, d.sounds.clone()), (GOODIES, vec![]));
+    assert_eq!((m.menu.current, d.sounds.clone()), (GOODIES, vec![MenuSound::Denied]));
 }

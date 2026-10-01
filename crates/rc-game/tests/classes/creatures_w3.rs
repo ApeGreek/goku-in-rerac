@@ -83,6 +83,17 @@ fn level_at(level: u32, at: [f32; 3]) -> Option<(Lv, Hero)> {
     Some((lv, hero))
 }
 
+/// The Pokitaru boats 1075 held still: their own update (`units::pokitaru_boat`, ported in batch 5) off, so a test that
+/// drives a boat's state and position by hand (or counts the biters' own particles) is not moved by the boat's sailing
+/// and wake.
+fn hold_boats(lv: &mut Lv) {
+    for i in lv.of_class(1075) {
+        let m = &mut lv.table.mobys[i];
+        m.update_fn = None;
+        m.mode |= rc_game::moby_runtime::mode::NO_UPDATE;
+    }
+}
+
 /// `n` ticks with `ids` marked drawn before each (as MobyProc would for mobys on screen), recording each one's states.
 fn run(lv: &mut Lv, hero: &Hero, ids: &[MobyId], n: usize) -> Vec<Vec<u8>> {
     let mut seen = vec![Vec::new(); ids.len()];
@@ -318,6 +329,7 @@ fn boarders_wait_hidden_and_jump_aboard() {
     let hero = hero_at([at[0], at[1], near[2]]);
     // The boarders wait out at sea; the boat brings them to the beach (area 13): put this one 6 off Ratchet there.
     lv.table.mobys[a].position = [at[0] + 6.0, at[1], near[2], 0.0];
+    hold_boats(&mut lv);
     lv.tick(&hero);
     assert_eq!(lv.table.mobys[a].mode & 1, 1, "hidden while the boat is idle");
     lv.table.mobys[boat].state = 2;
@@ -330,7 +342,7 @@ fn boarders_wait_hidden_and_jump_aboard() {
     let mut speed = None;
     lv.table.mobys[boat].rows[3] = [0.0, 0.0, 0.0, 1.0];
     for _ in 0..400 {
-        // The boat is not ported: keep it where the test put it.
+        // The boat's own update is held (hold_boats): keep it where the test put it.
         lv.table.mobys[boat].state = 2;
         lv.table.mobys[boat].position = [p[0], p[1] + 3.0, p[2] - 30.0, 1.0];
         lv.tick(&hero);
@@ -365,12 +377,14 @@ fn boarding_limits_and_the_boats_end() {
     assert!(group.len() >= 5);
     // The boat leaves (state 5) while they are hidden: taken away (deleted), without an explosion.
     let b = group[6];
+    hold_boats(&mut lv);
     let before = lv.svc.fx.part_spawns.values().sum::<u64>();
     lv.table.mobys[boat].state = 5;
     lv.tick(&hero);
     assert!(lv.table.mobys[b].state >= 0x80, "taken away");
     assert_eq!(lv.svc.fx.part_spawns.values().sum::<u64>(), before, "without an explosion");
     let Some((mut lv, _)) = level_at(11, [0.0, 0.0, -100.0]) else { return };
+    hold_boats(&mut lv);
     lv.table.mobys[a].position = [at[0] + 6.0, at[1], near[2], 0.0];
     let p = lv.table.mobys[a].position;
     let place = |lv: &mut Lv| {
@@ -441,6 +455,8 @@ fn a_knocked_biter_in_the_sea_bubbles_and_is_lost() {
     let a = 499usize;
     let near = lv.table.mobys[a].position;
     let hero = hero_at([near[0] + 25.0, near[1], near[2]]);
+    // The boats' wake (type 34 too) is not the biter's: held.
+    hold_boats(&mut lv);
     lv.tick(&hero);
     let h = lv.hero_idx;
     lv.hit(&hero, a, &wrench(h, [1.0, 0.0]));

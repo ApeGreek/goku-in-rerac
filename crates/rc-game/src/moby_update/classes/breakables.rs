@@ -379,7 +379,7 @@ mod tests {
         use crate::moby_update::classes::ClassUpdate;
         let all: Vec<ClassUpdate> = ClassUpdate::every().collect();
         for u in &all {
-            assert_eq!(ClassUpdate::from_address(u.address()), Some(*u), "{u:?} {:#x}", u.address());
+            assert_eq!(ClassUpdate::from_address(u.key()), Some(*u), "{u:?} {:#x}", u.key());
         }
         for (i, r) in RECIPES.iter().enumerate() {
             // The class-number registry is level 01's (`classes::for_class`): the other levels' copies run through

@@ -164,6 +164,10 @@ fn run(lv: &Level, ticks: u32, input: impl Fn(u32) -> PadInput, acts: &[(u32, Ac
         game.tick(Some(&bytes), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks);
         let mut s = svc_cell.borrow_mut();
         let requests = std::mem::take(&mut s.cinematic.requests);
+        // `start_scene` stores game mode 2 at once; the harness plays no scenes, so a requested scene ends at once (the
+        // engine's mode-2 reset for a scene it does not play): the mission NPC's chain then goes on to the movie and
+        // the next scene as it does after each scene's end.
+        if s.game_mode == 2 && requests.iter().any(|r| matches!(r, EngineRequest::StartScene { .. })) { s.game_mode = 0; }
         let (n, b) = (&game.mobys.mobys[npc], &game.mobys.mobys[bridge]);
         out.push(Rec {
             counter,

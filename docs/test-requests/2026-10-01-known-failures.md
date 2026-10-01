@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 job: batch-5 full-suite results
 date: 2026-10-01
 commit: 58c8b71

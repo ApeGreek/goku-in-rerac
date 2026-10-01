@@ -275,7 +275,8 @@ fn weapons_hurt_and_kill_a_scout() {
     let m = &lv.table.mobys[622];
     assert_eq!(m.state, of::scout::DYING);
     assert_eq!(m.mode & rc_game::moby_runtime::mode::TARGETABLE, 0);
-    assert_eq!(lv.svc.fx.unported.get("skill point 0x13d418").copied(), Some(1));
+    // Skill point 0x13d418 (index 0x10) through `story::award_skill_point` (ported by the story lane).
+    assert_eq!(lv.svc.interact.game.skill_points.get(0x10).copied(), Some(1));
     let lights0 = lv.svc.creatures.lights;
     for _ in 0..240 {
         lv.tick(&hero);

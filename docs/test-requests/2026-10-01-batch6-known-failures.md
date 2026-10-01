@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 job: batch-6 full-suite results
 date: 2026-10-01
 commit: 7bf9dc6
@@ -169,3 +169,32 @@ modes and the foot motes. The fields gadgets added to `post_move` (f52a / f52c c
 the printed columns.
 
 ## 7. Results (the test expert fills this in)
+
+## Resolution (2026-10-01, regression pass)
+
+Every failure above is resolved; the targeted binaries pass (classes `enemy_units`, `creatures_w3`, `cheap_classes_*`,
+`orxon_gemlik_enemies`; world `level_ports`, `cutscene_novalis`, `sea_levels`, `water_levels`; ui `interaction_vendor`,
+`pause_pages_novalis`; weapons `hero_reactive_novalis`; the rc-game unit tests `breakables::`, `follow_camera::level::`).
+
+- **N1–N4 (real bug):** ports reversed on different levels can share an overlay address (level 12's drone shot and
+  level 14's pop-up turret shot, 0x2ece00), so the update slot could run the wrong port. New `ClassUpdate::key`
+  (address, plus the reference level in the high bits when it is not 01) is what `Moby::update_fn` holds and
+  `scheduler::ported` resolves.
+- **N16–N17 (real bug):** the ship classes 531..533 get `ShipUpdate` from the loader whatever the class table says
+  (level 01's entry is the empty update), so on Novalis the ship never ran. `LevelPorts::get` now returns `Ship` for
+  them.
+- **N5, N6:** expected (skill points ported); the tests check the award now.
+- **N7–N12:** the harnesses play no scenes but `start_scene` now stores game mode 2 at once (faithful); the creature
+  harness resets mode 2 after a tick whose scene it cannot play, as the engine does. The two buzz-bomb tests depended
+  on exact rand timing (other classes' draws moved the `randi(4)` ticks): they record the load pass's state and wait
+  for the range switch.
+- **N13:** a weapon bought with a demo scene plays `VendorStartWeaponDemo` before the exit (faithful); the harness ends
+  the demo on the next frame and the test checks the demo request.
+- **N14:** faithful (the Goodies enter makes locked entries action 2: Denied).
+- **N15:** the same harness mode-2 reset in `cutscene_novalis`.
+- **F1:** class 3 is ported (the rail camera); its stale half of the test is removed.
+- **F2:** the new sea ports 8–11 added to the inventory.
+- **F3:** the drip mobys' creation draws part the two paths by design; compared until the first drip.
+- **F4–F6:** the boats sail now; the biter tests hold the boats' own update.
+- **F7:** faithful: both critters were pulled in, the cannon holds several and fires the first one in; the test checks
+  one fewer held per shot and the empty cannon after the last.

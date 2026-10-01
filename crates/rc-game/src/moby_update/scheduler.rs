@@ -45,14 +45,14 @@ pub const CLASS_SLOTS: usize = 0xe0;
 pub const GROUPS: usize = 0x70;
 
 /// The level-table address the port uses for `o_class` (`Some` only for classes with a Rust port).
-pub fn port_update_fn(o_class: i16) -> Option<u32> { classes::for_class(o_class).map(ClassUpdate::address) }
+pub fn port_update_fn(o_class: i16) -> Option<u32> { classes::for_class(o_class).map(ClassUpdate::key) }
 
 /// [`port_update_fn`], then the external ports.
 pub fn update_fn_for(o_class: i16, external: Option<&dyn crate::moby_update::services::ExternalUpdates>) -> Option<u32> {
     port_update_fn(o_class).or_else(|| external.and_then(|e| e.update_fn(o_class)))
 }
 
-/// The Rust port behind a level-table address.
+/// The Rust port behind an update-slot key ([`ClassUpdate::key`]).
 pub fn ported(addr: u32) -> Option<ClassUpdate> { ClassUpdate::from_address(addr) }
 
 /// Moby groups `0x1abcc0[g]` (gameplay header +0x48): member lists of runtime moby indices, the last one

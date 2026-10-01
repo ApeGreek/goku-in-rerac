@@ -186,6 +186,13 @@ impl Lv {
         let mut sched = std::mem::take(&mut self.sched);
         { let mut w = self.world(hero); sched.tick(&mut w); }
         self.sched = sched;
+        // `start_scene` stores game mode 2 at once (DialogStreamStart); the harness plays no scenes, so a requested
+        // scene "never starts" and mode 2 is reset after the tick, as the engine does for a scene request it cannot
+        // play (crate::scene_render's mode-2 reset). Without it a level whose arrival scene fires on tick 0 (Gemlik)
+        // would stay in scene mode and its classes would only run their mode-2 branches.
+        if self.svc.game_mode == 2 && self.svc.cinematic.requests.iter().any(|r| matches!(r, rc_game::cinematic::EngineRequest::StartScene { .. })) {
+            self.svc.game_mode = 0;
+        }
     }
     pub(crate) fn of_class(&self, oc: i16) -> Vec<MobyId> { self.table.mobys.iter().enumerate().filter(|(_, m)| m.o_class == oc && m.state < 0x80).map(|(i, _)| i).collect() }
     /// The hit records the log holds for `target`.

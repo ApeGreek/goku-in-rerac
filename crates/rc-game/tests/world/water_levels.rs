@@ -277,7 +277,9 @@ fn managers_run_on_their_levels() {
 }
 
 /// The 751 port against the ripple module alone on the same stream: the port's init and per-tick update are
-/// `RippleSim::new` / `tick_with` (the Novalis guard: the patch heights, the clock and the stream stay identical).
+/// `RippleSim::new` / `tick_with` (the Novalis guard: the patch heights, the clock and the stream stay identical) until
+/// the first drip. From then on the port creates the drip moby 787 in the game's order (its creation draws), which the
+/// direct `RippleSim` does not model, so the two streams and the heights part there by design.
 #[test]
 fn novalis_751_port_is_the_ripple_module() {
     if overlay(1).is_none() { eprintln!("skipped: no extracted/"); return; }
@@ -296,6 +298,7 @@ fn novalis_751_port_is_the_ripple_module() {
     let mut rng2 = Rng::new();
     rng2.srand(1234);
     let cams = [[150.0f32, 200.0, 60.0], [160.0, 96.0, 61.0], [120.0, 98.0, 57.0]];
+    let mut compared = 0;
     for k in 0..300u64 {
         let cam = cams[(k / 100) as usize];
         {
@@ -304,14 +307,18 @@ fn novalis_751_port_is_the_ripple_module() {
             rc_game::moby_update::classes::dispatch(ClassUpdate::Water(0), &mut w, 0);
         }
         if k > 0 { direct.tick_with(cam, &d.cuboids, &mut rng, k, None); }
+        // The first drip: the paths part here (module doc above); everything before it matched.
+        if table.mobys.iter().any(|m| m.o_class == 787) { break; }
+        let port = svc.water.sim.as_ref().unwrap();
+        assert_eq!(rng.state, rng2.state, "tick {k}: the stream");
+        assert_eq!(port.clock, direct.clock, "tick {k}");
+        for (a, b) in port.patches.iter().zip(&direct.patches) {
+            assert_eq!(a.buf, b.buf, "tick {k}");
+            assert_eq!(a.mask, b.mask, "tick {k}");
+        }
+        compared += 1;
     }
-    let port = svc.water.sim.as_ref().unwrap();
-    assert_eq!(rng.state, rng2.state, "the stream");
-    assert_eq!(port.clock, direct.clock);
-    for (a, b) in port.patches.iter().zip(&direct.patches) {
-        assert_eq!(a.buf, b.buf);
-        assert_eq!(a.mask, b.mask);
-    }
+    assert!(compared > 0, "no tick before the first drip");
     assert_eq!(table.mobys[0].state, 1);
 }
 

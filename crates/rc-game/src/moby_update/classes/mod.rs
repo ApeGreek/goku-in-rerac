@@ -366,7 +366,20 @@ impl ClassUpdate {
         }
     }
 
-    pub fn from_address(a: u32) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.address() == a) }
+    /// The port's key in a moby's update slot (`Moby::update_fn` / `ClassInfo::update_fn`): its address on its reference
+    /// level, with the reference level folded into the high bits when that level is not 01 (bit 31 + level << 24). Two
+    /// ports reversed on different levels can sit at the same overlay address (level 12's drone shot and level 14's
+    /// pop-up turret shot are both 0x2ece00), so the address alone does not name one port; level-01 ports keep their
+    /// plain address (the external updates and the constants compare against those).
+    pub fn key(self) -> u32 {
+        match self.reference_level() {
+            1 => self.address(),
+            l => 0x8000_0000 | (l << 24) | self.address(),
+        }
+    }
+
+    /// The port behind an update-slot key ([`ClassUpdate::key`]).
+    pub fn from_address(a: u32) -> Option<ClassUpdate> { ClassUpdate::every().find(|u| u.key() == a) }
 
     /// [`ClassUpdate::ALL`] and every break-template copy (`Breakable(i)`).
     pub fn every() -> impl Iterator<Item = ClassUpdate> { ClassUpdate::ALL.into_iter().chain(breakables::ids().map(ClassUpdate::Breakable)).chain(crate::water::managers::ids().map(ClassUpdate::Water)).chain(crate::water::sea::ids().map(ClassUpdate::Sea)).chain(units::ids().map(ClassUpdate::Unit)) }
@@ -537,6 +550,9 @@ impl LevelPorts {
 
     /// The port that runs `o_class` on this level.
     pub fn get(&self, o_class: i16) -> Option<ClassUpdate> {
+        // The player's ship: `InitLevelRenderGlobals` 0x255958 installs `ShipUpdate` 0x2a1c40 on the ship it creates
+        // (+0x74), whatever the level's class table lists for 531..533 (level 01's entry is the empty update).
+        if crate::travel::ship::CLASSES.contains(&o_class) { return Some(ClassUpdate::Ship); }
         match self.table.get(&o_class) {
             Some(&(_, u)) => u,
             None => for_class(o_class),
@@ -544,7 +560,7 @@ impl LevelPorts {
     }
 
     /// The level-table address the port uses for `o_class` (`ClassInfo::update_fn`: the port's level-01 label).
-    pub fn update_fn(&self, o_class: i16) -> Option<u32> { self.get(o_class).map(ClassUpdate::address) }
+    pub fn update_fn(&self, o_class: i16) -> Option<u32> { self.get(o_class).map(ClassUpdate::key) }
 
     /// The external update (one of the labels given to [`LevelPorts::from_overlays`]) `o_class` runs on this level.
     pub fn external(&self, o_class: i16) -> Option<u32> { self.external.get(&o_class).copied() }

@@ -235,7 +235,7 @@ fn air_traffic_wreck_blast_bolts_pieces_sound_and_hide() {
         assert_eq!(p::i16(&m.pvars, air_traffic::pv::WRECK_T), 599, "class {c}");
         assert!(m.mode & 0x41 == 0x41 && m.mode & mode::TARGETABLE == 0 && !m.has_collision && m.hit_slot == 0xff, "class {c}: hidden");
         assert_eq!(p::i32(&m.pvars, air_traffic::pv::LOOP_SLOT), -1);
-        assert_eq!(lv.svc.fx.unported.values().sum::<u64>() - un0, (c == 795) as u64, "class {c}: only 795's skill point is not ported");
+        assert_eq!(lv.svc.fx.unported.values().sum::<u64>() - un0, 0, "class {c}: every row ported (795's skill point goes through `story::award_skill_point` since the story lane)");
         // Out of view (no view: culled) when the timer runs out → back, targetable, solid as its class.
         p::set_i16(&mut lv.table.mobys[v].pvars, air_traffic::pv::WRECK_T, 1);
         lv.table.mobys[v].visible = 0;

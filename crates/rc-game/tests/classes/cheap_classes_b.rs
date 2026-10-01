@@ -66,7 +66,7 @@ fn units_resolve_on_their_levels() {
     let Some(_) = overlay(1) else { eprintln!("skipped: no extracted/"); return };
     let mut addrs: HashMap<u32, ClassUpdate> = HashMap::new();
     for u in ClassUpdate::every() {
-        if let Some(o) = addrs.insert(u.address(), u) { panic!("{u:?} and {o:?} share 0x{:x}", u.address()); }
+        if let Some(o) = addrs.insert(u.key(), u) { panic!("{u:?} and {o:?} share 0x{:x}", u.key()); }
     }
     let mut created: HashMap<(&str, i16), usize> = HashMap::new();
     for level in 0..19u32 {
