@@ -2,7 +2,7 @@
 status: open
 job: fleet-ship
 date: 2026-10-01
-commit: TBD
+commit: 42482f3
 areas: [classes, world, hud]
 ---
 
