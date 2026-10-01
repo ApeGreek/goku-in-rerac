@@ -129,14 +129,18 @@ pub fn view_centre(sphere: [f32; 4], eye: Vec3, rows: &[Vec3; 3]) -> [f32; 3] {
 
 /// The per-moby tests of MobyProc after the occlusion test (module doc); `v` = camera-space centre, `r` =
 /// radius, both integer units.
-pub fn moby_proc(v: [f32; 3], r: f32, inp: &ProcInput) -> Result<ProcPick, Cull> {
+pub fn moby_proc(v: [f32; 3], r: f32, inp: &ProcInput) -> Result<ProcPick, Cull> { moby_proc_view(v, r, inp, TAN_HALF_FOV_X) }
+
+/// [`moby_proc`] with the view's horizontal half-angle tangent `tan_x` (`UpdateViewContext` writes the frustum planes
+/// vf20 / vf22 from it: a flown ship's wider view culls less at the sides).
+pub fn moby_proc_view(v: [f32; 3], r: f32, inp: &ProcInput, tan_x: f32) -> Result<ProcPick, Cull> {
     let dd = inp.draw_distance.min(DRAW_DISTANCE_CAP);
     // vf19.y = itof0(dd << 10) − r; vf1.xy = (vz + r, vz − r); vf3 = vf19 − vf1 (vf19.x = n).
     let far = ((dd.wrapping_shl(10)) as f32 - r) - (v[2] - r);
     let near = NEAR - (v[2] + r);
     if far.is_sign_negative() { return Err(Cull::DrawDistance); }
     if !near.is_sign_negative() { return Err(Cull::Near); }
-    let (tx, ty) = (TAN_HALF_FOV_X, TAN_HALF_FOV_X * NTSC_Y_RATIO);
+    let (tx, ty) = (tan_x, tan_x * NTSC_Y_RATIO);
     let (kx, ky) = ((1.0 + tx * tx).sqrt(), (1.0 + ty * ty).sqrt());
     if (tx * v[2] - (v[0].abs() - r * kx)).is_sign_negative() || (ty * v[2] - (v[1].abs() - r * ky)).is_sign_negative() {
         return Err(Cull::Frustum);

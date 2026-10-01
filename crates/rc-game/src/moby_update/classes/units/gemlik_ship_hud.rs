@@ -31,7 +31,7 @@
 //! | 0x2b8be0 | 0x3eb / 0x184 / 0x504: blip 0 (0x75808080); +0xe8 + 1 | [`search`] |
 //! | 0x2b89f8 | the blip: (position − camera) with z 0, turned by π/2 − the camera yaw, / 14; within 46 px: alpha × (46 − d)/8 beyond 38 (`trunc`); `DrawTexturedQuad` of the table 0x1cbdb8[kind] (FX +0x104 + tex + 0x28, its UV rectangle) at (432 + x − cx, h − 80 − y − cy) | [`blip`] |
 //! | 0x2b8320 | the lock marker: four `0x2b7fd0` quarter sprites (FX 0x37, 20·s, at angle, +90°, +180°, +270°) | [`marker`] |
-//! | 0x2b7fd0 | a sprite quarter: corners P + A − B, P + A, P − B, P (A = h·(sin, cos), B = w·(cos, −sin)); UVs (63, 0), (0, 63), (63, 63), (0, 0); RGBA r g b a | [`marker`] |
+//! | 0x2b7fd0 | a sprite quarter: corners P + A − B, P + A, P − B, P (A = h·(sin, cos), B = w·(cos, −sin)); UVs (1, 1), (63, 0), (0, 63), (63, 63) (the packet's register list: UV then XYZ2 per corner; the first UV is the 0x100010 word); RGBA r g b a | [`marker`] |
 //! | 0x2b7d50 / 0x2b7b30 | a flat strip of the s16 corner table, turned (`0x2b7d50`) and scaled, at (x, y) | [`ring`], [`strip`] |
 //! | 0x218838 | the projection of a world point (with the off-screen ones' circles) | [`super::gemlik_ship::screen_point`] |
 
@@ -106,7 +106,7 @@ pub(super) fn marker(out: &mut Vec<ScreenPrim>, fx: usize, x: f32, y: f32, s: f3
         let av = [side * sn, side * cs];
         let bv = [side * cs, -side * sn];
         let pos = [[x + av[0] - bv[0], y + av[1] - bv[1]], [x + av[0], y + av[1]], [x - bv[0], y - bv[1]], [x, y]];
-        out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[63.0, 0.0], [0.0, 63.0], [63.0, 63.0], [0.0, 0.0]], rgba: colour });
+        out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[1.0, 1.0], [63.0, 0.0], [0.0, 63.0], [63.0, 63.0]], rgba: colour });
         ang = add_rot(ang, std::f32::consts::FRAC_PI_2);
     }
 }

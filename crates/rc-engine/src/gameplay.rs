@@ -1394,7 +1394,7 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
             }
         }
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
-        occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73 });
+        occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73, draw_dist: Some(m.draw_dist) });
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
             a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()), &m.joint_mods);
         }
@@ -1980,6 +1980,7 @@ fn upload(
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut transforms: Query<&mut Transform, Without<Camera3d>>,
     cams: MainCamera,
+    projs: Query<&Projection, (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
@@ -2022,7 +2023,8 @@ fn upload(
         let [fwd, left, up] = crate::game_camera::game_rows(t);
         (crate::game_camera::game_eye(t), crate::moby_lod::camera_rows(fwd, left, up))
     });
-    upload_dynamic(&mut p, lv, cam, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0);
+    let tan_x = crate::game_camera::projection_tan_x(projs.iter().next());
+    upload_dynamic(&mut p, lv, cam, tan_x, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0);
 }
 
 /// moby+0x00 (the sphere centre, integer units) in game units; the position when the moby has no sphere.
@@ -2041,6 +2043,7 @@ fn upload_dynamic(
     p: &mut Play,
     lv: &crate::level_load::LoadedLevel,
     cam: Option<(Vec3, [Vec3; 3])>,
+    tan_x: f32,
     commands: &mut Commands,
     buffers: &mut Assets<ShaderBuffer>,
     meshes: &mut Assets<Mesh>,
@@ -2079,7 +2082,7 @@ fn upload_dynamic(
             };
             let sphere = crate::moby_lod::world_sphere(&inp, crate::moby_lod::seq_sphere(&m.anim[ci], &mo.anim, c.bsphere));
             let v = crate::moby_lod::view_centre(sphere, eye, &rows);
-            crate::moby_lod::moby_proc(v, sphere[3], &inp).ok().map(|p| {
+            crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tan_x).ok().map(|p| {
                 let e = if p.shine > 0 { crate::moby_lod::shine_basis(sphere, eye, &rows, &inp.rows) } else { [[0.0; 3]; 3] };
                 (ci, p.alpha, p.fading, p.shine, e)
             })

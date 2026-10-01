@@ -113,6 +113,14 @@ pub struct GameProjection {
     pub far: f32,
 }
 
+/// The horizontal half-angle tangent of a camera's projection (the game's 0.63 for any other projection).
+pub fn projection_tan_x(p: Option<&Projection>) -> f32 {
+    match p {
+        Some(Projection::Custom(c)) => c.get::<GameProjection>().map_or(TAN_HALF_FOV_X, |g| g.tan_x),
+        _ => TAN_HALF_FOV_X,
+    }
+}
+
 impl Default for GameProjection {
     fn default() -> Self {
         GameProjection { tan_x: TAN_HALF_FOV_X, tan_y: TAN_HALF_FOV_X * NTSC_Y_RATIO, near: NEAR, far: FAR }

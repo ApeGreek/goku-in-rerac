@@ -1067,7 +1067,7 @@ fn spawn_mobys(
         instances: inst_buffer.clone(),
         driven_hidden: vec![false; n_inst],
         records_dirty: false,
-        look: m.placed.iter().map(|p| p.map_or(MobyLook { alpha: 0x80, mode: 0, glow: 0, shine_distance: 0 }, |p| MobyLook::of_class(&m.classes[p.class]))).collect(),
+        look: m.placed.iter().map(|p| p.map_or(MobyLook { alpha: 0x80, mode: 0, glow: 0, shine_distance: 0, draw_dist: None }, |p| MobyLook::of_class(&m.classes[p.class]))).collect(),
         moved: vec![false; n_inst],
         lit_by_point: vec![false; n_inst],
         class_parts: parts.into_iter().map(|(ci, (high, low, _))| (ci, [high.0, low])).collect(),
@@ -1139,6 +1139,9 @@ pub struct MobyLook {
     pub mode: u16,
     pub glow: u32,
     pub shine_distance: u8,
+    /// +0x32, the draw distance MobyProc reads (`InitMobyInstance` sets it from the instance's; updates rewrite it:
+    /// the convoys' 0x200). None: the instance's own (an undriven static).
+    pub draw_dist: Option<i16>,
 }
 
 impl MobyLook {
@@ -1153,6 +1156,7 @@ impl MobyLook {
             mode: if glow { 0x10 } else { 0 },
             glow: h.glow_rgba as u32,
             shine_distance: if h.metal_count > 0 { moby_lod::SHINE_DISTANCE } else { 0 },
+            draw_dist: None,
         }
     }
 }
@@ -1193,6 +1197,9 @@ pub struct MobyOcclusion {
     pending_hide: Vec<Entity>,
 }
 
+/// The main camera with its projection (the view tangent MobyProc's frustum cull takes).
+type MainCameraView<'w, 's> = Query<'w, 's, (&'static Transform, Option<&'static Projection>), (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>;
+
 /// `MobyProc` for every placed instance (module doc): the occlusion test (after the "dead" check, which no
 /// static instance fails in the port), then crate::moby_lod, then the GS state ([`MobyBlend`], from moby+0x23 /
 /// +0x34 and the fade). Changes `Visibility` only when an instance's pick changes (spawning a group the first time
@@ -1205,7 +1212,7 @@ pub fn update_moby_occlusion(
     occl: Option<ResMut<crate::occlusion::OcclusionFrame>>,
     mut anim: Option<ResMut<MobyAnim>>,
     level: Res<crate::Level>,
-    cams: Query<&Transform, (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>,
+    cams: MainCameraView,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
@@ -1215,7 +1222,8 @@ pub fn update_moby_occlusion(
 ) {
     let Some(mut state) = state else { return };
     let mask = occl.as_ref().map(|o| o.mask);
-    let cam = cams.iter().next().map(|t| {
+    let tan_x = crate::game_camera::projection_tan_x(cams.iter().next().and_then(|(_, p)| p));
+    let cam = cams.iter().next().map(|(t, _)| {
         let [fwd, left, up] = crate::game_camera::game_rows(t);
         (crate::game_camera::game_eye(t), moby_lod::camera_rows(fwd, left, up))
     });
@@ -1235,6 +1243,7 @@ pub fn update_moby_occlusion(
         let mode = look.mode;
         inp.alpha = look.alpha;
         inp.shine_distance = look.shine_distance;
+        if let Some(dd) = look.draw_dist { inp.draw_distance = dd as i32; }
         let k = s.anim_index[ii];
         let (want, pick, sphere) = if s.driven_hidden[ii] {
             (None, None, None)
@@ -1249,7 +1258,7 @@ pub fn update_moby_occlusion(
             let sphere = moby_lod::world_sphere(&inp, seq);
             let v = moby_lod::view_centre(sphere, eye, &rows);
             let result = if s.lod_on {
-                moby_lod::moby_proc(v, sphere[3], &inp)
+                moby_lod::moby_proc_view(v, sphere[3], &inp, tan_x)
             } else {
                 Ok(ProcPick { low_lod: false, alpha: inp.alpha, fading: false, shine: moby_lod::shine_alpha(moby_lod::sphere_depth(v, sphere[3]), inp.shine_distance) })
             };
