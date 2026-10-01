@@ -145,7 +145,7 @@ pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
     let background = crate::game_camera::level_background(&gameplay).context("parsing level settings")?;
     let mobys = crate::moby_render::load_mobys(root, &core, &core_data, &gameplay).context("loading mobys")?;
     let ties = crate::tie_render::load_ties(&core, &core_data, &gs_ram, &gameplay, &textures).context("loading ties")?;
-    let shrubs = crate::shrub_render::load_shrubs(&core, &core_data, &gameplay, &textures).context("loading shrubs")?;
+    let shrubs = crate::shrub_render::load_shrubs(&core, &core_data, &gs_ram, &gameplay, &textures).context("loading shrubs")?;
 
     let sky = crate::sky_render::load(&core, &core_data, index).context("loading sky")?;
     let occlusion = crate::occlusion::load(&core, &core_data, &gameplay, &tfrags, &ties.instances, &mobys.instances).context("loading occlusion")?;

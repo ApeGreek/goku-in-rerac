@@ -170,7 +170,10 @@ pub struct Card {
 
 impl Default for Card {
     fn default() -> Self {
-        Card { ty: 0, free: 0, formatted: 0, slot: 0, preview_slot: 0, info: 0, previews: [Preview::default(); SLOTS], errors: 0, header: [0; 2] }
+        // The boot ELF's initial data at 0x13d290: every word 0 except +0x14 (0x13d2a4) = −3, "no card checked yet". The
+        // card monitor's status 11 (`mc_status_11`) waits while the slot is below −2, so a check never ends on this
+        // initial value before `memcard_Update`'s chdir (state 8) has written −1 / −2 / a slot.
+        Card { ty: 0, free: 0, formatted: 0, slot: -3, preview_slot: 0, info: 0, previews: [Preview::default(); SLOTS], errors: 0, header: [0; 2] }
     }
 }
 

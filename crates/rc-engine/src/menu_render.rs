@@ -1231,7 +1231,10 @@ fn front_end_frame(
         }
         _ => fe.frame(pressed, movie_busy),
     };
-    if out.logos {
+    // `RC_SKIP_LOGOS=1` (dev switch): the logos movie is not played; the boot goes straight on to the still and the title.
+    if out.logos && std::env::var("RC_SKIP_LOGOS").is_ok_and(|v| v.trim() == "1") {
+        println!("menus: frame {frame}: front end: the logos skipped (RC_SKIP_LOGOS=1)");
+    } else if out.logos {
         // startlevel: the logos PSS `mpegs[0]` (NTSC), language 0, never skipped, back to the front end.
         use crate::movie_render::{MovieExit, MovieRequest};
         crate::movie_render::request(MovieRequest { file: 0, movie: 0, language: Some(0), replay: Some(-1), exit: MovieExit::FrontEnd, ..MovieRequest::in_level(0, None) });
@@ -1307,13 +1310,17 @@ fn front_end_frame(
     }
     if let Some(l) = exit {
         fe.exit(l);
-        crate::media_render::request_level_exit(play, l);
+        // The front end's loop ends straight into `DoSpaceTransition` (`0x15f5c0 = l; 0x15f570 = 1`): no tick of the level
+        // loaded behind the front end runs in between (a gameplay tick here fired that level's first-arrival scene). The
+        // request goes to the travel lane directly (the cinematic inbox is only read by a gameplay tick), and the mode is
+        // the transition's mode 6 until its `Begin` step takes over.
+        crate::travel_render::request_leave(l);
         fer.fe = None;
         fer.freeze = None;
         crate::saves::set_front_end_active(false);
         crate::saves::with_card(|c| c.front_end = false);
         if let Some(a) = audio { a.system().menu_close(true); }
-        mm.state.set(Mode::Gameplay);
+        mm.state.set(Mode::Ship);
         println!("menus: frame {frame}: front end over: level {l} (the travel lane's level change loads it)");
     }
 }

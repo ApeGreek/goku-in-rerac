@@ -80,7 +80,7 @@ pub fn load(root: &std::path::Path) -> anyhow::Result<TitleData> {
     let background = crate::game_camera::level_background(gameplay).context("title level settings")?;
     let mobys = crate::moby_render::load_mobys_with_gs(root, core, data, gameplay, gs).context("title mobys")?;
     let ties = crate::tie_render::load_ties(core, data, gs, gameplay, &textures).context("title ties")?;
-    let shrubs = crate::shrub_render::load_shrubs(core, data, gameplay, &textures).context("title shrubs")?;
+    let shrubs = crate::shrub_render::load_shrubs(core, data, gs, gameplay, &textures).context("title shrubs")?;
     let sky = crate::sky_render::load(core, data, rc_game::sky_stars::TITLE_LEVEL).context("title sky")?;
     let occlusion = crate::occlusion::load(core, data, gameplay, &tfrags, &ties.instances, &mobys.instances).context("title occlusion words")?;
     let particles = crate::particle_render::LevelParticles {

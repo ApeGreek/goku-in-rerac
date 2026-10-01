@@ -103,10 +103,10 @@ pub struct LevelShrubs {
 }
 
 /// Parses the shrub classes and instances, lights every instance and decodes the mip chains of the shrub and
-/// billboard textures. Levels 2 / 3 and billboards live in gs_ram, which the caller does not pass: it is read
-/// again through `disc_source` (same root and level as `main`; ~0.8 MB). Textures that do not decode fall back
-/// to the level's decoded base level.
-pub fn load_shrubs(core: &rc_formats::level::LevelCore, core_data: &[u8], gameplay: &[u8], textures: &[LevelTexture]) -> Result<LevelShrubs> {
+/// billboard textures. Levels 2 / 3, the palettes and the billboards live in `gs_ram`, the GS image of the world
+/// being loaded (a level's `gs_ram.bin`, or the title world's). Textures that do not decode fall back to the
+/// world's decoded base level.
+pub fn load_shrubs(core: &rc_formats::level::LevelCore, core_data: &[u8], gs_ram: &[u8], gameplay: &[u8], textures: &[LevelTexture]) -> Result<LevelShrubs> {
     let t0 = Instant::now();
     let classes = shrub::parse_level_shrubs(core, core_data).context("parsing shrub classes")?;
     let instances = shrub::parse_shrub_instances(gameplay).context("parsing shrub instances")?;
@@ -122,14 +122,15 @@ pub fn load_shrubs(core: &rc_formats::level::LevelCore, core_data: &[u8], gamepl
     let light_time = t0.elapsed();
 
     let t0 = Instant::now();
-    let gs_ram = crate::disc_source::level_file(&crate::level_load::extracted_root(), crate::level_load::level_index(), "gs_ram.bin")
-        .map_err(|e| warn!("shrubs: gs_ram not readable ({e}); base levels only, no billboards"))
-        .ok();
+    // The GS image of the world being loaded (the level's gs_ram, or the title world's): the mip levels 2 / 3, the
+    // palettes and the billboards live there. (It was read from the *current* level's file, which gave the title world
+    // and a runtime level change still on the old level the wrong palettes and mips.)
+    let gs_ram = Some(gs_ram);
     let base = |table: TextureTable, index: usize| textures.iter().find(|t| t.table == table && t.index == index).map(|t| vec![t.texture.clone()]);
     let mut mips = HashMap::new();
     let mut mip_fallbacks = 0;
     for idx in used {
-        let chain = gs_ram.as_deref().and_then(|gs| core.shrub_textures.get(idx).and_then(|e| texture::decode_tfrag_mip_levels(core, core_data, gs, e).ok()));
+        let chain = gs_ram.and_then(|gs| core.shrub_textures.get(idx).and_then(|e| texture::decode_tfrag_mip_levels(core, core_data, gs, e).ok()));
         let levels = match chain {
             Some(l) => Some(l),
             None => base(TextureTable::Shrub, idx).inspect(|_| mip_fallbacks += 1),
@@ -137,7 +138,7 @@ pub fn load_shrubs(core: &rc_formats::level::LevelCore, core_data: &[u8], gamepl
         if let Some(l) = levels { mips.insert(idx, l); }
     }
     let mut billboard_mips = HashMap::new();
-    if let Some(gs) = gs_ram.as_deref() {
+    if let Some(gs) = gs_ram {
         for (ci, c) in classes.iter().enumerate() {
             let Some(info) = c.billboard_texture() else { continue };
             match texture::decode_billboard_mip_levels(gs, info) {

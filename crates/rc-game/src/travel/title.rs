@@ -34,6 +34,11 @@ pub const ACTOR_AMBIENT: [u8; 3] = [0x38, 0x38, 0x38];
 /// The scene sounds (boot 0x1862b0): `(start tick, end tick, boot sound def)`. The defs are the boot's level sound
 /// defs 0x186100 (`0x15f634`, 7 of them: `0x15f630`), the global sound bank's sounds 0, 0, 8, 9, 2, 3, 4.
 pub const TITLE_SOUNDS: [(i32, i32, usize); 5] = [(0, 99_999_999, 2), (0, 99_999_999, 3), (0, 99_999_999, 0), (0x2e4, 0x4d8, 4), (0x114, 0x12c, 1)];
+/// `0x15f5b4`: the base `allocate_voice_for_group_entry` adds to a scene sound's def (and `is_active_state_entry`
+/// compares against), 2 on the boot (its initial data; nothing in the boot writes it). So the table's defs 2, 3, 0, 4, 1
+/// play level defs 4, 5, 2, 6, 3 = bank sounds 2 (the random critter program), 3 (the modulated loop), 8 (the cricket
+/// loop), 4 (Ratchet's tool bursts, ticks 0x2e4..0x4d8) and 9 (the cog pick-up, ticks 0x114..0x12c).
+pub const DEF_BASE: usize = 2;
 
 /// One actor's pose this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -121,13 +126,14 @@ impl TitleScene {
     /// title camera; the plays have no owner and no position: 2-D at the listener).
     pub fn sounds(&mut self, audio: &mut AudioSystem, listener: &crate::audio::voices::Listener, rng: &mut crate::rng::Rng) {
         use crate::audio::voices::state;
-        // is_active_state_entry 0x1eb740: the slot remembers def + 0x15f5b4 (0 on the boot) and plays (state 1 or 2).
+        // is_active_state_entry 0x1eb740: the slot remembers def + 0x15f5b4 ([`DEF_BASE`]) and plays (state 1 or 2).
         let playing = |audio: &AudioSystem, slot: i32, def: usize| {
-            usize::try_from(slot).ok().and_then(|i| audio.slots.slots.get(i)).is_some_and(|s| s.class_index as usize == def && matches!(s.state, state::PLAYING | state::CONFIRMED))
+            usize::try_from(slot).ok().and_then(|i| audio.slots.slots.get(i)).is_some_and(|s| s.class_index as usize == def + DEF_BASE && matches!(s.state, state::PLAYING | state::CONFIRMED))
         };
         // allocate_voice_for_group_entry 0x22dba0 (def, 0, 0): def < 0x15f630 → sound_slot_alloc(def, 0, no owner, no
         // position, 0x400), the slot remembers the def.
         let play = |audio: &mut AudioSystem, def: usize, rng: &mut crate::rng::Rng| -> i32 {
+            let def = def + DEF_BASE;
             let Some(d) = audio.data.sounds.level_defs.get(def).copied() else { return -1 };
             let k = audio.slots.play(&d, 0, None, None, None, 0x400, listener, rng);
             if k >= 0 { audio.slots.slots[k as usize].class_index = def as u16; }
