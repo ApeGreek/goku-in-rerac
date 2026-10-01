@@ -19,7 +19,7 @@ Status: **P** ported, **P\*** ported in this pass, **part** partly, **–** not 
 | Bolt crate 500 (and 502 reinforced, 505 TNT): break → `SetDeathBits` → `BoltBurst` → `BoltSpawn` | `CrateUpdate` 0x2ea178, `CrateDropBolts` 0x2eb498, 0x26c250, 0x275988, 0x2bcdb8 | P | `classes/crate_.rs`. A spawner-counted dropper (+0xb1 ≥ 0) pays at least 1 bolt even with +0xb4 = 0 (H). |
 | **Nanotech crate 501** | same update; init `CrateSpawnIconMoby` 0x300528 → class 806 | P (crate) / **P\*** (806) | The catalogue's names were swapped (H, from `CrateDropBolts` and 0x300de0): **501 is the nanotech crate**, its drop only clears +0xb4 and sets the death bits; the health comes from the cluster 806. The "ammo-crate death gate" (`MissionState::ammo_crate_gate`, pvar +0xf8) is therefore the *nanotech* crates appearing after N deaths to a mission's enemies. |
 | **Ammo crate 511** (init: pvar +0xc6 = 100) | `CrateDropBolts` ammo branch, `0x26bff8`, `0x2daf10` | P (drop) / **P\*** (pickup) | 1 (4 in 5) or 2 pickups of pvar +0xcb's item, re-picked among the owned vendor-list items weighted to those below max. |
-| Multi-hit crates 0x1fb–0x1fd, crates 503/504/506–510, crates on moving platforms | `FUN_0026f378`, `FUN_00275290` | – | None on Novalis (level01 maps only 500/501/502/505/511 to 0x2ea178). Port when a level needs them. |
+| Multi-hit crates 0x1fb–0x1fd, crates 503/504/506–510, crates on moving platforms | `FUN_0026f378`, `FUN_00275290` | crates on carriers: `crate_::attach_platform` / `ride_platform` (2026-09-30) | The multi-hit classes are on no level's class table (all 19 map only 500/501/502/505/511, some without 502): dead code, not ported (G-CLS-009 closed). Crates on carriers: triggers.md §5b. |
 | Crate respawn (planet 0x12, pvar +0xc8) | crate state 6 | P | Reads the ammo tables (now filled, §2.3). |
 
 ### 1.2 Pickups
@@ -1688,3 +1688,67 @@ critters coming, 110, 125; `grid_a2.png`: 130 / 135 a bot's blast at a critter a
 critter in the debris, 190 another blast, a critter dying and its bolts); Rilgar `RC_LEVEL=5
 RC_HERO_AT=161.52519,325.2638,26.5,1.5708 RC_PLAY_SCRIPT='30-31:press CIRCLE'` (`grid_r1.png`: 60 the canister in
 flight, 100 landed by the amoeboid 866, 110 the first bot's blast on it, 120 the amoeboid's burst).
+
+## 19. Joint-modifier producers, Clank's eyelids and glow, the wrench rebound (W3 lane 1, 2026-09-30)
+
+The class side (the shared manipulator records, the NPC look-at, the vendor's hologram, the Visibomb fins) is
+moby_animation.md §9. Here Ratchet's and Clank's writers. Native `f32`; constants cited from the disassembly.
+
+**Coverage** (every call and branch of the ported parts):
+
+| address | what it does | port |
+|---|---|---|
+| 0x238634..0x2386f8 (`0x2370b8` 0x33..0x35) | springs of records 1 / 2 / 3 (`0x22b5e0(0.009, 0.22)`, `0x22b5f8(0.04, 0.2)`, `0x22b610(0.02, 0.2)`); record 1 targets (1.4·roll, 47·Δpitch within ±0.8727, 1.5·roll) with roll = the roll target, Δpitch = this tick's pitch change (0x237f18 `fast_subtract_rotations`); records 4 / 5 (the feet) (–, 40·Δpitch, 1.1·roll), springs (0.03, 0.22) | `hero::swim::Hero::swim_lean` |
+| 0x23a9f8, 0x23ab60..0x23abbc (`0x2370b8` 0x31) | the turn `FastDiffRots` (≥ 0; the port had used the signed difference: fixed, the body now rolls one way as in the game), capped at 80°·dt, ×9; the springs of records 1 / 2 / 3 as above; record 1 targets x 3.5·Δ, z 2.1·Δ | `hero::surface::sinking_floor` |
+| 0x23c458 (every 5th tick) | the edge probe: on the ground, a line (flags 2) hero-local (1.1, 0, 1) → (1.1, 0, −20) (end z ≥ 0.5); a floor within 3: none; else capsule-radius spheres at (0.7 + 0.1k, 0, 0) until one is free (none before 1.6: none); 0x13f5b0 / 0x13f5a8 (the drop, 20 without a floor) / 0x13f5ac (radius + offset, ≥ 0) | `Hero::edge_probe` |
+| 0x22b928 edge branch | a drop > 1.4 and no wall within 1 (0x13f598): head (0.015, 0.3) y = min(1.5°·drop + 11°, 27°, 35°·(1 − room)); neck (0.008, 0.3) y = 0.7 of it | `Hero::head_look` |
+| `0x2278c0` | nothing while Clank is hidden (0x141628; the control modes 1 / 2 put these on Ratchet's moby: G-HERO-005); the glow word, red on the hit flash 0x13f53e (fading in over 5 of 45 ticks, out over the last 20) | `Hero::clank_glow_blink` |
+| `0x2278c0` blink | frames 1..21: the eyelid nodes 0x140240 + 0x40·k on Clank's lists 2..5 (gp−0x7508) attached once (node 3 first), mode 1, poses 0x17c660 / 0x17c6a0 / 0x17c6e0 (× Clank's scale), weight `CLANK_BLINK[frame]`; all detached at frame 0 | `Hero::clank_modifiers`; `rc-engine` `moby_attach` poses Clank with them |
+| `0x2278c0` +0x90, +0x34 \|= 0x10 | Clank's glow packets in the pulse's colour | `moby_attach` (`ExtraMobys::set_glow`) |
+| `HeroItemsAttach` 0x22fec0 (slot 3, Clank) | `CreateMoby(1204)` (glow 0x801432d7, draw distance 0x40, scale × 1.3, mode 0); every frame it shows: `MobyAttachToJoint(clank, 6)`, its rows and position, Ratchet's light, the ticks(120) pulse (red min(0xd7 + 90s, 0xff), green 0x32 + 50s, blue 0x14 + 10s), mode \|= 0x10 | `moby_attach::place_antenna`, `hero::idle::antenna_glow` |
+| `0x229400` → `0x229440` | the red dot glow quad at the antenna point with the Heli- / Thruster-Pack ready (and the other control modes' quads) | NOT ported (G-REN-005) |
+| MobyProc point lights | the point lights reach the hand, back and worn items (their centre: the item's position [L]) | `moby_attach::upload` |
+| 0x2be5d0..0x2be710 (the wrench update) | the swing's line / sphere moby with a target record flag 2 (+0x1e, `FUN_002bdad8`) → `SetState(0x21, 1)`, 0x13fdb8 = the direction from that moby to Ratchet (behind him without one); else the hit sound once, unless the class type is 0x14 (line) / the sphere's is 0x12 | `hero::melee::wrench_update`, `rebounds` |
+| SetState 0x21 | group 10, speed 9·dt, 0x1415d4 = 0; sequence 0x27 + the row's step (2 for the jump attack's row) from frame 5 over ticks(5), the wrench 7 + step | `Hero::rebound_entry` (the wrench's blend lands one tick later: `pending_blend` [L]) |
+| `0x2370b8` / `0x242930` 0x21 | 0x7a's brake along 0x13fdb8 and idle once the anim wraps | `packs::rebound_physics`, the registry |
+
+**Digest**: `novalis_hero_digest` NO_IDLE byte-identical (the posed joints sit in the idle block; no swimming, sinking,
+edge or rebound in it). **Rng**: the Water Pump Worker's head look (moby_animation.md §9) draws `randf` three times per
+glance on Novalis, which moves the pit's critters; three weapons tests were re-placed (the mine 7 → 9 units, the morph
+5 → 4, the Visibomb 6 → 8) and say so.
+
+**Frames** (scratch, two runs identical): Clank on Ratchet's back at the Novalis vendor with the antenna's glowing tip
+(before: the plain dark dot).
+
+**Not ported at the time** (G-HERO-009; the list below was ported 2026-10-01, next section): the Magneboots aim lean `0x2352e0` (needs a weapon in hand on the boots, which the port's
+boots code keeps false), the pack record 18 `0x235e60` (Clank's record on the back through `0x227050`'s other record
+kinds), `HeroScanTargets`' look target, the grind's body lean and look-ahead records (0x17a6e0..), the side probes'
+model tilt (0x13f610..0x13f624), the slope foot IK `0x22c5c0`; the big-head cheats (G-SAV-006).
+
+**The rest of the hero producers (2026-10-01).** `rc_game::hero::pose` (the feet `0x22c5c0`, `HeroScanTargets`, the
+Magneboots lean `0x2352e0`, Clank's sway `0x235e60`; its module doc has the full coverage table), `hero::boots::grind_lean`
+(level00's grind records), the side probes in the ground probe's tail. System or not: all of them write the one shared
+record block 0x17ab00 (`idle::JointRec`, springs `0x2273d0`); each writer is per-state code, ported as such. The
+record block grew: records 6 / 7 (lists 7 / 8, the legs), 18 (kind 1: Clank's list 0, linked into Clank's list through
+`Hero::clank_modifiers`, only while Clank's moby exists), and the translation springs (+0x70 / +0x80 / +0x90, `0x270780`)
+every record runs. Corrections: `0x2352e0` needs no weapon (only the magnetic floor 0x13f658); `0x248920` is not the pad
+vibration (packs.rs said so) but the foot motes' parameters.
+
+| address | what it does | port |
+|---|---|---|
+| 0x232dc0 tail | side probes (±90°, 0.2 out, ±0.45, flags 0x22): drop, pitch, roll per side (0x13f610..0x13f624) | `Hero::side_probes` |
+| `0x22c5c0` | the slope tilt of records 4..7, the worn feet's scale 0.01, the foot motes (state 3, the jump landing's first 12 ticks; type 28 at lists 22 / 23 with their draws) | `Hero::feet_update` |
+| `0x248920` callers in `0x242930` | the landings' mote parameters: fall 6 (hard, roll, walk, plain), the jump group's landing, the glide 8 (crouch, idle, run with rows), the hover 0x81 | `air::tr_fall`, `jump`, `packs::tr_glide` / `tr_hover` (`pose::motes`) |
+| `HeroScanTargets` 0x22c080 | the look target (every 7th tick; record +0x38 range, +0x39 priority, +0x3a height), the line from the head, records 3 / 2 | `Hero::scan_targets` (the target list: `melee::MeleeTarget::look`, now collected every tick) |
+| `0x2352e0` | the Magneboots lean: records 1, 3, 13..16 from world down in the hero's frame | `Hero::magnet_lean` |
+| `0x235e60` | record 18 in the walk (state 2): sway z against the turn, the 0.07 rise in Clank's units | `Hero::clank_sway` |
+| L00 0x21ce0c..0x21d1b0 | the grind: record 0 y (the rail's bend 30·\|eff\| ahead, after 90 ticks), x (the displacement's pitch), the gun lean (records 3 / 1 / 2 z by sequence 0x31 / 0x4a / 0x4b) | `boots::grind_lean` (the look-at moby 0x13f928 branch: n/a, no ported class sets it) |
+| `0x22b700` | the arm lowered at a wall (record 9, 0x141618) | NOT ported (G-HERO-009; 0x141618 is never set) |
+
+**Digest** (`novalis_hero_digest` NO_IDLE): state / timer / position columns identical on all 2,800 lines; the hashes differ
+from the landing at lake 209 / moves 93 on: the landing's foot motes (their `Mote28` spawns in `fx.parts` and their
+draws on the one stream). `HeroScanTargets` alone leaves it identical (no target list in the digest runs). Not
+re-baselined. **Tests**: `tests/hero/hero_pose.rs` (7), `hero_boots_grind::kalebo_grind_leans`. **Frames** (scratch,
+two runs identical, before = the producers switched off): Kalebo III rail 1 at tick 260 (the body bent into the bend),
+Orxon's magnetic bowl with the Magneboots (the body pitched over the slope), the same bowl without them (the downhill
+leg bent, the foot flat on the slope).

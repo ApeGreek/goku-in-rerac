@@ -44,8 +44,13 @@
 //! of its own in the game, kept with the hand item by `rc_game::hero::swingshot`) is drawn at the hook's position
 //! and rows while the Swingshot is in hand, and the rope between them by [`rope_draw`] (the game's `0x2dba30`).
 //!
-//! Not modelled: Clank's antenna glow moby
-//! (class 1204 on Clank's joint list 6 with a pulsing +0x90 colour).
+//! **Clank's eyelids and glow** (`0x2278c0`, `rc_game::hero::idle`): his joint-modifier list (the four eyelid nodes
+//! while he blinks, `Hero::clank_modifiers`) poses him, and his pulsing glow word (`Back::clank_color`, red on
+//! Ratchet's hit flash) colours his glow packets.
+//!
+//! **Clank's antenna glow** (class 1204, `HeroItemsAttach` 0x22fec0: [`place_antenna`]) on Clank's joint list 6, its
+//! +0x90 pulsing (ticks(120)). Not modelled: the red dot of the hero's draw callback `0x229440` (a glow quad at the
+//! antenna point while the Heli- or Thruster-Pack is ready: G-REN-005).
 //!
 //! **Which entities may show.** The port keeps an entity set for every class that can be in the hand (every gadget
 //! class of the level) or on the back (the three packs), where the game has only the slots' mobys. So this module is
@@ -86,6 +91,8 @@ pub enum Slot {
     Head,
     /// Placed by the game (the Swingshot's hook), not by a host joint.
     Hook,
+    /// Clank's antenna glow moby (class 1204, `HeroItemsAttach` 0x22fec0): on Clank's joint list 6.
+    Antenna,
 }
 
 /// What an item hangs from: the host's gameplay instance, the hero slot, the host joint list (index into
@@ -118,6 +125,11 @@ struct Item {
     rows: [V4; 3],
     position: [f32; 3],
     entities: Vec<Entity>,
+    /// The item moby's joint-modifier list (+0x64; Clank's eyelid nodes, `Hero::clank_modifiers`).
+    mods: Vec<moby_anim::JointModifier>,
+    /// Its glow word +0x90 when the game writes one (Clank's pulse, `Back::clank_color`) and the one last uploaded.
+    glow: Option<u32>,
+    glow_written: Option<u32>,
 }
 
 #[derive(Resource)]
@@ -133,6 +145,10 @@ pub struct MobyAttach {
     host_ambient: [u8; 3],
     items: Vec<Item>,
     extra: ExtraMobys,
+    /// Clank's class joint lists' manipulator targets (`rc_formats::moby_anim::list_target`; the eyelid nodes) and
+    /// his joint list 6's chain (the antenna, `MobyAttachToJoint(clank, 6)`).
+    clank_targets: Vec<u8>,
+    clank_antenna_chain: Vec<u8>,
     palette_len: u32,
     ticks: u64,
     uploaded: Option<u64>,
@@ -276,6 +292,10 @@ fn build(
     ];
     for (n, c, ac) in more_packs { specs.push((n, c, ac, host(Slot::Back, BACK_ATTACH))); }
     specs.push(("Clank", clank, clank_anim, host(Slot::Back, BACK_ATTACH)));
+    // Clank's antenna glow (class 1204, when the level has it): placed on Clank, not on Ratchet.
+    if let Ok((c, ac)) = level_class(ANTENNA_O_CLASS) {
+        specs.push(("Clank antenna", c, ac, AttachedTo { host: host_ii, slot: Slot::Antenna, joint_list: BACK_ATTACH, normalise: false }));
+    }
     // The worn items the level has (item slots 1 and 2, rc_game::hero::worn): each boot class twice (left / right
     // boot on attach words 2 / 3), each head class once (attach word 4); columns not normalised (0x22fec0).
     for &(_, o, slot) in WORN_CLASSES {
@@ -319,10 +339,12 @@ fn build(
         let mut snapshot = None;
         if attach.slot == Slot::Hand { moby_anim::set_sequence(&mut state, &ac, 1, 0, 1, &mut snapshot); }
         // Without the game tick only the wrench, the Heli-Pack and Clank show (the old viewer behaviour).
-        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook" | "hand item" | "left boot" | "right boot" | "head item");
+        let visible = !matches!(name, "bomb glove" | "Thruster-Pack" | "Hydro-Pack" | "Swingshot" | "Swingshot hook" | "hand item" | "left boot" | "right boot" | "head item" | "Clank antenna");
+        // The antenna's +0x2c: the class scale × 1.3 (0x22fec0).
+        let scale = class.class.header.scale * if attach.slot == Slot::Antenna { 1.3 } else { 1.0 };
         items.push(Item {
-            name, o_class: class.o_class as i16, visible, shown: None, attach, anim: ac, state, snapshot, scale: class.class.header.scale,
-            base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(),
+            name, o_class: class.o_class as i16, visible, shown: None, attach, anim: ac, state, snapshot, scale,
+            base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(), mods: Vec::new(), glow: None, glow_written: None,
         });
         palette_len += slots;
         geometry.push(class);
@@ -333,7 +355,7 @@ fn build(
         host_k, host_class: placed.class, chains,
         host_rows: crate::moby_light::instance_rows(inst), host_pos: inst.position, host_scale: placed.scale,
         host_light: inst.light_word(), host_ambient: inst.ambient_rgb(),
-        items, extra, palette_len, ticks: 0, uploaded: None,
+        items, extra, clank_targets: clank_targets(), clank_antenna_chain: clank_antenna_chain(), palette_len, ticks: 0, uploaded: None,
     };
     // Placement before the first tick (the game creates the items in the first hero update).
     let host = &anim.instances[host_k];
@@ -354,6 +376,46 @@ const GLOVE_ATTACH: usize = 6;
 const BOMB_GLOVE_O_CLASS: i32 = 192;
 const WRENCH_O_CLASS_I16: i16 = gadget::WRENCH_O_CLASS as i16;
 const BACK_ATTACH: usize = 5;
+
+/// Clank's antenna glow moby (`CreateMoby(0x4b4)` in `HeroItemsAttach`).
+const ANTENNA_O_CLASS: i32 = 1204;
+
+/// Clank's joint list 6's chain (the first byte list; empty when his blob or the list is missing).
+fn clank_antenna_chain() -> Vec<u8> {
+    let Ok(blob) = crate::interact_render::class_blob(CLANK_O_CLASS) else { return Vec::new() };
+    let Ok(c) = rc_formats::moby::parse_moby_class(&blob) else { return Vec::new() };
+    gadget::joint_list(&blob, &c.header, 6).map(|(a, _)| a).unwrap_or_default()
+}
+
+/// `HeroItemsAttach` 0x22fec0 for Clank's antenna glow 1204: while Clank shows, `MobyAttachToJoint(clank, 6, M)`
+/// (Clank's joint list 6 through his pose with his modifier list, his rows, position and scale: `attach_matrix`),
+/// position = M.r3, rows = M's rows as they are (`MatrixCopyRows`), and the pulsing glow word
+/// (`rc_game::hero::idle::antenna_glow`, mode |= 0x10).
+fn place_antenna(a: &mut MobyAttach, counter: Option<i32>) {
+    let Some(ci) = a.items.iter().position(|i| i.o_class == CLANK_O_CLASS as i16) else { return };
+    let Some(ai) = a.items.iter().position(|i| i.attach.slot == Slot::Antenna) else { return };
+    let (visible, w) = {
+        let c = &a.items[ci];
+        if a.clank_antenna_chain.is_empty() || !c.visible { (false, None) } else {
+            let p = moby_anim::evaluate_chains_posed(&c.anim, &c.state, c.snapshot.as_ref(), &[a.clank_antenna_chain.as_slice()], &[], &c.mods);
+            (true, p.first().map(|p| moby_anim::attach_matrix(p, &c.rows, c.position, c.scale)))
+        }
+    };
+    let item = &mut a.items[ai];
+    item.visible = visible && w.is_some() && counter.is_some();
+    if let (Some(w), Some(n)) = (w, counter) {
+        item.position = [w[3][0], w[3][1], w[3][2]];
+        item.rows = [0, 1, 2].map(|i| w[i].map(f32::to_bits));
+        item.glow = Some(rc_game::hero::idle::antenna_glow(n));
+    }
+}
+
+/// Clank's (601) class joint lists' manipulator targets, from his blob in the level core (none: no eyelid nodes).
+fn clank_targets() -> Vec<u8> {
+    let Ok(blob) = crate::interact_render::class_blob(CLANK_O_CLASS) else { return Vec::new() };
+    let Ok(c) = rc_formats::moby::parse_moby_class(&blob) else { return Vec::new() };
+    (0..16).map_while(|l| gadget::joint_list(&blob, &c.header, l).ok()).map(|(_, s)| moby_anim::list_target(&s).unwrap_or(0xff)).collect()
+}
 /// Item 12 (the Swingshot, class 0xd0): attach word 1; its hook moby class 0xd1 (`0x2dcbf0`).
 const SWINGSHOT_ATTACH: usize = 1;
 const SWINGSHOT_O_CLASS: i32 = rc_game::hero::swingshot::SWINGSHOT_CLASS as i32;
@@ -378,7 +440,7 @@ fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap:
     let ps = moby_anim::evaluate_chains_posed(host_class, host, snap, &chains, &[], mods);
     let ws: Vec<(usize, Rows)> = a.chains.iter().zip(&ps).map(|(c, p)| (c.0, moby_anim::attach_matrix(p, &a.host_rows, a.host_pos, a.host_scale))).collect();
     for item in &mut a.items {
-        if item.attach.slot == Slot::Hook { continue; }
+        if matches!(item.attach.slot, Slot::Hook | Slot::Antenna) { continue; }
         let Some(&(_, w)) = ws.iter().find(|(l, _)| *l == item.attach.joint_list) else { continue };
         item.position = [w[3][0], w[3][1], w[3][2]];
         let adv = match item.attach.slot {
@@ -427,9 +489,20 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
             }
         }
     }
+    // Clank's eyelid nodes and glow pulse (`0x2278c0`, rc_game::hero::idle).
+    if let Some(p) = play.as_ref() {
+        let h = &p.game.hero;
+        let targets = std::mem::take(&mut a.clank_targets);
+        for item in a.items.iter_mut().filter(|i| i.o_class == CLANK_O_CLASS as i16) {
+            item.mods = h.clank_modifiers(&targets, item.scale);
+            item.glow = h.back.as_ref().map(|b| b.clank_color);
+        }
+        a.clank_targets = targets;
+    }
     let (k, class) = (a.host_k, &level.0.mobys.anim[a.host_class]);
     let mods = play.as_ref().map(|p| p.game.mobys.mobys[p.game.hero_moby].joint_mods.clone()).unwrap_or_default();
     place(&mut a, class, &anim.instances[k].state, anim.snapshots[k].as_ref(), back.is_none(), hand.is_none(), &mods);
+    place_antenna(&mut a, play.as_ref().map(|p| p.game.hero.idle.counter));
     // The worn items (item slots 1 and 2, rc_game::hero::worn): the class of the slot's item shows while the slot
     // has its moby (states 2 and 3), hidden with Ratchet's items (first person; Clank hidden does not hide them).
     // Ready (2): the keyframe of Ratchet's joints (`HeroItemPoseFromRatchet`); the head item's put-away (3): its own
@@ -498,6 +571,7 @@ fn upload(
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut transforms: Query<&mut Transform>,
     mut commands: Commands,
+    point_lights: Option<Res<moby_render::PointLightFrame>>,
 ) {
     let Some(mut a) = attach else { return };
     if a.uploaded == Some(a.ticks) { return; }
@@ -512,13 +586,26 @@ fn upload(
     let lighting = level.0.mobys.lighting.as_ref();
     let mut palette = crate::moby_anim::identity_palette(a.palette_len);
     let mut records = Vec::with_capacity(a.items.len() * moby_render::EXTRA_RECORD_SIZE);
-    for item in &a.items {
-        let f = moby_anim::evaluate_with_snapshot(&item.anim, &item.state, item.snapshot.as_ref());
+    let a = &mut *a;
+    for (slot, item) in a.items.iter_mut().enumerate() {
+        let f = moby_anim::evaluate_posed(&item.anim, &item.state, item.snapshot.as_ref(), &[], &item.mods);
+        // The game's glow word (mode bit 0x10 set by `0x2278c0` every frame) onto the item's glow packets.
+        if let Some(g) = item.glow.filter(|&g| item.glow_written != Some(g)) {
+            item.glow_written = Some(g);
+            a.extra.set_glow(&mut commands, slot as u32, crate::moby_lod::glow_word(0x10, g));
+        }
         let at = item.base as usize * 64;
         for (k, b) in f.iter().take(item.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[at + k] = b; }
         let lights: Option<light::MobyLights> = lighting.map(|l| light::moby_lights(&item.rows, &l.bank, a.host_light, a.host_ambient, 0x80));
         let model = model_of(item);
-        records.extend_from_slice(&moby_render::extra_record(&model, lights.as_ref(), item.base));
+        let mut rec = moby_render::extra_record(&model, lights.as_ref(), item.base);
+        // The point lights (explosions, the Pyrocitor) reach the items as they reach every moby MobyProc draws
+        // (their centre: the item's position [L]).
+        if let Some(pl) = point_lights.as_ref().filter(|p| !p.0.is_empty()) {
+            let rows = item.rows.map(|r| [f32::from_bits(r[0]), f32::from_bits(r[1]), f32::from_bits(r[2])]);
+            moby_render::write_point_light(&mut rec, moby_render::point_light_merge(&pl.0, item.position, &rows));
+        }
+        records.extend_from_slice(&rec);
         let t = Transform::from_matrix(model);
         for &e in &item.entities {
             if let Ok(mut tr) = transforms.get_mut(e) { *tr = t; }

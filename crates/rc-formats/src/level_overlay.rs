@@ -30,6 +30,8 @@ use std::collections::{BTreeSet, HashMap};
 
 /// Index of `lvl.vtbl` in the overlay's section list (the same on all 19 levels).
 pub const VTBL_SECTION: usize = 3;
+/// Index of `lvl.camvtbl` (the camera classes, [`LevelOverlay::camvtbl`]).
+pub const CAMVTBL_SECTION: usize = 4;
 /// Index of `.text`.
 pub const TEXT_SECTION: usize = 6;
 /// `$gp` in every level (the boot ELF sets it once; the small data is addressed from it: `0x15f5c4` is
@@ -45,6 +47,18 @@ pub struct VtblEntry {
     /// The update function (0: none).
     pub update: u32,
     pub w8: u32,
+}
+
+/// One `lvl.camvtbl` record (0x14 bytes): a camera class and its four functions (`UpdateAllCameras` 0x20d620 reads
+/// them by the UpdateCam's mode +0x8c, the record's index: activate +4 (`Camera_ActivationCheckPriority` 0x20d410),
+/// init +8 (the switch `0x20d110`), update +0xc, pre +0x10 (the current camera's, before the activation loop)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CamVtblEntry {
+    pub class: i32,
+    pub activate: u32,
+    pub init: u32,
+    pub update: u32,
+    pub pre: u32,
 }
 
 /// A parsed level overlay.
@@ -227,6 +241,20 @@ impl LevelOverlay {
                 w8: u32::from_le_bytes(e[8..12].try_into().unwrap()),
             })
             .take_while(|e| e.o_class != -1)
+            .collect()
+    }
+
+    /// The `lvl.camvtbl` records up to the `-1` end marker (the slot init's class → mode lookup `0x20ee30` searches
+    /// them; class 0 is always the first).
+    pub fn camvtbl(&self) -> Vec<CamVtblEntry> {
+        let Some(s) = self.sections.get(CAMVTBL_SECTION) else { return Vec::new() };
+        let w = |e: &[u8], i: usize| u32::from_le_bytes(e[4 * i..4 * i + 4].try_into().unwrap());
+        s.data
+            .as_chunks::<0x14>()
+            .0
+            .iter()
+            .map(|e| CamVtblEntry { class: w(e, 0) as i32, activate: w(e, 1), init: w(e, 2), update: w(e, 3), pre: w(e, 4) })
+            .take_while(|e| e.class != -1)
             .collect()
     }
 

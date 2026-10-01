@@ -20,11 +20,10 @@
 //! Standard floats (`f32`) except where an existing PS2-float helper of the hero code is reused (the joint
 //! springs `turn_spring`, `fast_sin`); the random helpers are [`crate::rng`]'s.
 //!
-//! Not ported (no idle effect on Novalis): the edge look-down branch of `0x22b928` (0x13f5b0 is never set by
-//! the port), `HeroScanTargets` 0x22c080 (look target 0x1415c4: no target in range at the Novalis spawn, 0 in
-//! both savestates), the walk lean `HeroLean` 0x235638 (state 2) and the other writers of the joint records,
-//! the options 0x15edb1 / 0x15edb3 / 0x15edb5, Clank hidden (0x141628, 0 on Novalis), the hit flash 0x13f53e
-//! in the glow, and the sound triggers of the advances (`PlayClassSound` pitch draws, the sound layer).
+//! The edge look-down branch of `0x22b928` reads the edge probe `Hero::edge_probe`. The other producers the hero update
+//! runs around these (the feet `0x22c5c0`, `HeroScanTargets` 0x22c080, the Magneboots lean `0x2352e0`) are
+//! `super::pose`. Not ported: the options 0x15edb1 / 0x15edb3 / 0x15edb5, Clank hidden (0x141628, 0 on Novalis), the
+//! hit flash 0x13f53e in the glow, and the sound triggers of the advances (`PlayClassSound` pitch draws, the sound layer).
 //!
 //! **The joint modifiers** (Ratchet's moby +0x64, docs/plan/hero_gameplay.md §7): the records the springs update are
 //! linked into [`Idle::manips`] while active (`AttachManipulator` / `DetachManipulator`), with the eyelid nodes of the
@@ -96,16 +95,18 @@ pub fn dec_timer_s16(t: &mut i16) -> i32 {
     if 0 < *t { 0 } else { 2 }
 }
 
-/// One joint-manipulator record of the block at 0x17ab00 (stride 0xb0), the rotation part. Its first 0x40 bytes are
-/// the joint-modifier node `FUN_00227050` links into Ratchet's moby `+0x64` list while the record is active
-/// ([`JointRec::modifier`], [`Manip`]).
+/// One joint-manipulator record of the block at 0x17ab00 (stride 0xb0). Its first 0x40 bytes are the joint-modifier
+/// node `FUN_00227050` links into its moby's `+0x64` list while the record is active ([`JointRec::modifier`],
+/// [`Manip`]): Ratchet's for kind 0, Clank's for kind 1 (`FUN_00226ff8(kind)`: 0x1413d0 / 0x1404d4).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JointRec {
     /// Record index (address 0x17ab00 + 0xb0·rec).
     pub rec: u8,
-    /// +0xa0: Ratchet's class joint list the node is attached for (its target joint: the list's second byte list's
+    /// +0xa0: the moby's class joint list the node is attached for (its target joint: the list's second byte list's
     /// first entry, `rc_formats::moby_anim::list_target`).
     pub joint: i16,
+    /// +0xa2: the kind (0 Ratchet, 1 Clank; the port models no other kind).
+    pub kind: u8,
     /// +0x01: manipulator attached.
     pub attached: bool,
     /// +0x40 / +0x50 / +0x60: Euler angles, their spring velocities, this tick's targets (cleared after the
@@ -113,6 +114,11 @@ pub struct JointRec {
     pub cur: [f32; 3],
     pub vel: [f32; 3],
     pub target: [f32; 3],
+    /// +0x70 / +0x80 / +0x90: the translation (the node's +0x30), its spring velocities and this tick's targets
+    /// (cleared after the spring).
+    pub trans: [f32; 3],
+    pub trans_vel: [f32; 3],
+    pub trans_target: [f32; 3],
     /// +0xa4 / +0xa8: spring stiffness and damping.
     pub k: f32,
     pub d: f32,
@@ -123,25 +129,36 @@ pub struct JointRec {
 }
 
 impl JointRec {
-    const fn new(rec: u8, joint: i16, k: u32, d: u32) -> JointRec {
-        JointRec { rec, joint, attached: false, cur: [0.0; 3], vel: [0.0; 3], target: [0.0; 3], k: f(k), d: f(d), scale: 1.0, node_scale: 1.0 }
+    const fn new(rec: u8, joint: i16, k: u32, d: u32) -> JointRec { JointRec::of_kind(rec, joint, 0, k, d) }
+
+    const fn of_kind(rec: u8, joint: i16, kind: u8, k: u32, d: u32) -> JointRec {
+        JointRec {
+            rec, joint, kind, attached: false, cur: [0.0; 3], vel: [0.0; 3], target: [0.0; 3], trans: [0.0; 3], trans_vel: [0.0; 3],
+            trans_target: [0.0; 3], k: f(k), d: f(d), scale: 1.0, node_scale: 1.0,
+        }
     }
 
     /// The record's joint-modifier node (mode 0, composing): the quaternion `FUN_0026ee30(+0x10, +0x40)` builds from
-    /// the angles, [`euler_quat`], and the scale `+0xac` of the update that attached or refreshed it (no translation:
-    /// the translation springs +0x70.. have no writer in the port). `target` = the joint of the record's list.
+    /// the angles, [`euler_quat`], the scale `+0xac` of the update that attached or refreshed it and the translation
+    /// +0x70 (the node's +0x30). `target` = the joint of the record's list.
     pub fn modifier(&self, target: u8) -> JointModifier {
         let s = self.node_scale;
-        JointModifier { quat: euler_quat(self.cur), scale: [s, s, s], ..JointModifier::compose(target) }
+        JointModifier { quat: euler_quat(self.cur), scale: [s, s, s], trans: self.trans, ..JointModifier::compose(target) }
     }
 
-    /// `0x227050` for a kind-0 record in mode 0 (Ratchet): when anything is set or still moving
-    /// (targets ≠ 0, scale ≠ 1, |angle| ≥ 0.005), the angular spring `0x270b58(target, k, d, 0, &angle, &vel,
-    /// 2)` on x, y, z and the manipulator is attached; otherwise it is detached (the angles stay). Then the
-    /// targets are cleared and the scale reset. (The translation part is idle: no idle writer.)
+    /// `0x227050` in mode 0 for a record whose moby exists: when anything is set or still moving (angle targets or
+    /// translation targets ≠ 0, |translation| ≥ 0.003, scale ≠ 1, |angle| ≥ 0.005), the angular spring `0x270b58(target,
+    /// k, d, 0, &angle, &vel, 2)` on x, y, z, the linear spring `0x270780(target, k, d, 0, &trans, &vel)` on x, y, z and
+    /// the manipulator is attached; otherwise it is detached (the angles stay). Then the targets are cleared and the
+    /// scale reset. (The option 0x15edb5's mirror of x / z is not ported: options.)
     fn update(&mut self) {
         let small = |v: f32| v.abs() < f(0x3ba3_d70a);
-        let active = self.target.iter().any(|&t| t != 0.0) || self.scale != 1.0 || !self.cur.iter().all(|&c| small(c));
+        let still = |v: f32| v.abs() < f(0x3b44_9ba6);
+        let active = self.target.iter().any(|&t| t != 0.0)
+            || self.trans_target.iter().any(|&t| t != 0.0)
+            || !self.trans.iter().all(|&x| still(x))
+            || self.scale != 1.0
+            || !self.cur.iter().all(|&c| small(c));
         if active {
             for i in 0..3 {
                 let (mut a, mut v) = (Pf::f(self.cur[i]), Pf::f(self.vel[i]));
@@ -149,19 +166,26 @@ impl JointRec {
                 self.cur[i] = a.to_f32();
                 self.vel[i] = v.to_f32();
             }
+            for i in 0..3 {
+                let (mut x, mut v) = (Pf::f(self.trans[i]), Pf::f(self.trans_vel[i]));
+                super::physics::spring(Pf::f(self.trans_target[i]), Pf::f(self.k), Pf::f(self.d), Pf::ZERO, &mut x, &mut v);
+                self.trans[i] = x.to_f32();
+                self.trans_vel[i] = v.to_f32();
+            }
             self.attached = true;
             self.node_scale = self.scale;
         } else {
             self.attached = false;
         }
         self.target = [0.0; 3];
+        self.trans_target = [0.0; 3];
         self.scale = 1.0;
     }
 }
 
 /// Indices into [`Idle::joints`] (in record order: the springs `0x2273d0` update the block in that order).
 pub mod joint {
-    /// Record 0 (list 9): the walk lean's x (`HeroLean` 0x235638).
+    /// Record 0 (list 9): the walk lean's x (`HeroLean` 0x235638); the grind's body lean x / y (L00 0x217970).
     pub const REC0: usize = 0;
     /// Record 1 (list 10): follows the head look (×0.55 / ×0.52); the lean's z.
     pub const NECK: usize = 1;
@@ -169,16 +193,23 @@ pub mod joint {
     pub const REC2: usize = 2;
     /// Record 3 (list 4): the head look (0x17ad54 / 0x17ad58 = its y / z angles); the lean's x, y, z.
     pub const HEAD: usize = 3;
-    /// Records 4 / 5 (lists 22 / 23): Ratchet's feet; scale 0.01 every tick a feet item is worn (`0x22c5c0`: the
-    /// boots replace his feet). Their angles (the slope foot IK of `0x22c5c0`) are not ported.
+    /// Records 4 / 5 (lists 22 / 23): Ratchet's feet; scale 0.01 every tick a feet item is worn and the slope tilt
+    /// (`0x22c5c0`, [`super::super::pose`]).
     pub const FOOT_L: usize = 4;
     pub const FOOT_R: usize = 5;
+    /// Records 6 / 7 (lists 7 / 8): the legs' slope tilt (`0x22c5c0`).
+    pub const LEG_L: usize = 6;
+    pub const LEG_R: usize = 7;
     /// Record 12 (list 21): follows the head look (/2.8, ×0.25).
-    pub const REC12: usize = 6;
+    pub const REC12: usize = 8;
     /// Records 13..16 (lists 25..28): the idle secondaries; the lean's y / z.
-    pub const SECONDARY: usize = 7;
+    pub const SECONDARY: usize = 9;
     /// Record 17 (list 24): scale from 0x15ee14.
-    pub const REC17: usize = 11;
+    pub const REC17: usize = 13;
+    /// Record 18 (kind 1: Clank's list 0): the walk's sway of Clank on the back (`0x235e60`).
+    pub const CLANK0: usize = 14;
+    /// The records the port models.
+    pub const COUNT: usize = 15;
 }
 
 /// A node of Ratchet's joint-modifier list (moby `+0x64`) in the order the game links them (`AttachManipulator`
@@ -241,7 +272,7 @@ pub struct Idle {
     pub look_yaw: f32,
     pub look_k: f32,
     pub look_d: f32,
-    /// 0x1415c4: look target (HeroScanTargets, not ported: always 0).
+    /// 0x1415c4: the head's look target (`HeroScanTargets`, `super::pose`): its moby index + 1, 0 none.
     pub look_target: i32,
     /// 0x1403b0..0x1403bc: the secondaries' timers; 0x140374 + 0x10·k / 0x140378 + 0x10·k: their y / z targets.
     pub sec_timer: [i32; 4],
@@ -258,10 +289,16 @@ pub struct Idle {
     pub clank_fidget_timer: i32,
     /// 0x15ee14: record 17's scale source (approaches 0.92 by ≤ 0.05 per tick).
     pub rec17_scale: f32,
-    /// Records 0..5, 12..17 of the joint block 0x17ab00.
-    pub joints: [JointRec; 12],
+    /// Records 0..7, 12..18 of the joint block 0x17ab00 (the others have no writer in the port).
+    pub joints: [JointRec; joint::COUNT],
     /// Ratchet's joint-modifier list (moby `+0x64`), head first: the attached joint records and eyelid nodes.
     pub manips: Vec<Manip>,
+    /// 0x13f610..0x13f624: the ground probe's side probes (`super::pose`).
+    pub side: super::pose::SideProbes,
+    /// 0x1405f0..0x1405fe: the foot motes (`0x248920`, `super::pose`).
+    pub motes: super::pose::FootMotes,
+    /// Clank's moby +0x2c (his class scale; [`Hero::set_clank_scale`]): record 18's sway is in his joint units.
+    pub clank_scale: f32,
 }
 
 impl Default for Idle {
@@ -298,14 +335,20 @@ impl Idle {
                 JointRec::new(3, 4, 0x3be5_6042, 0x3e99_999a),
                 JointRec::new(4, 22, 0x3dcc_cccd, 0x3e99_999a),
                 JointRec::new(5, 23, 0x3dcc_cccd, 0x3e99_999a),
+                JointRec::new(6, 7, 0x3dcc_cccd, 0x3e99_999a),
+                JointRec::new(7, 8, 0x3dcc_cccd, 0x3e99_999a),
                 JointRec::new(12, 21, 0x3df5_c28f, 0x3e99_999a),
                 JointRec::new(13, 25, 0x3c75_c28f, 0x3e99_999a),
                 JointRec::new(14, 26, 0x3c75_c28f, 0x3e99_999a),
                 JointRec::new(15, 27, 0x3c54_fdf4, 0x3e80_0000),
                 JointRec::new(16, 28, 0x3c8b_4396, 0x3e57_0a3d),
                 JointRec::new(17, 24, 0x3cf5_c28f, 0x3e4c_cccd),
+                JointRec::of_kind(18, 0, 1, 0, 0),
             ],
             manips: Vec::new(),
+            side: Default::default(),
+            motes: Default::default(),
+            clank_scale: 1.0,
         }
     }
 
@@ -838,21 +881,28 @@ impl Hero {
     // --------------------------------------------------------------------------------------------
     // The sub-updates after the transitions (mode 0).
 
-    /// `0x22b928`, `0x22bdd0`, `0x227590`, `0x2278c0` and the joint springs `0x2273d0`, in the hero update's
-    /// order (`seq_b` = Ratchet's sequence B after the transitions; `counter` = 0x15f5cc).
-    pub(super) fn idle_updates(&mut self, seq_b: u8, counter: i32, rng: &mut Rng) {
-        // 0x22c5c0 (out of the water): with a feet item moby (0x140430) Ratchet's feet records 4 / 5 get scale 0.01
-        // this tick, so the boots replace his feet (its slope foot IK is not ported).
-        if !self.in_water_groups() && self.feet_slot.state != 0 {
-            for k in [joint::FOOT_L, joint::FOOT_R] { self.idle.joints[k].scale = f(0x3c23_d70a); }
-        }
+    /// `0x22c5c0`, `0x22b928`, `HeroScanTargets`, `0x22bdd0`, `0x227590`, `0x2278c0`, `0x2352e0` and the joint springs
+    /// `0x2273d0`, in the hero update's order (`counter` = 0x15f5cc; Ratchet's sequence B after the transitions from
+    /// `anim`). (`0x22b700`, the arm lowered at a wall, record 9: not ported, 0x141618 is never set.)
+    pub(super) fn idle_updates(&mut self, env: &super::physics::Env, anim: &dyn super::AnimCtl, counter: i32, rng: &mut Rng) {
+        let seq_b = anim.view().seq_b;
+        self.feet_update(anim, rng);
         self.head_look(seq_b, rng);
+        self.scan_targets(env, seq_b, counter);
         self.idle_secondaries(seq_b, rng);
         self.blink_update(seq_b, counter, rng);
         self.clank_glow_blink(counter, rng);
-        // 0x2273d0: each record in order; an active one is (re)attached, an idle one detached.
+        self.magnet_lean();
+        // 0x2273d0: each record in order; an active one is (re)attached, an idle one detached. Ratchet's records link
+        // into his list; record 18 (kind 1) into Clank's, and only while Clank's moby exists (`FUN_00226ff8(1)` = 0:
+        // the record is left as it is).
+        let clank = self.back.is_some();
         let i = &mut self.idle;
         for k in 0..i.joints.len() {
+            if i.joints[k].kind != 0 {
+                if clank { i.joints[k].update(); }
+                continue;
+            }
             i.joints[k].update();
             let m = Manip::Rec(k as u8);
             if i.joints[k].attached { i.attach(m) } else { i.detach(m) }
@@ -873,10 +923,10 @@ impl Hero {
         let (state, substate, group) = (self.state, self.substate, self.group);
         let (speed, disp, yaw) = (self.eff_len_xy.to_f32(), self.disp, self.rot[2].to_f32());
         let j = &mut self.idle.joints;
-        let springs = |j: &mut [JointRec; 12], kd: [(u32, u32); 4]| {
+        let springs = |j: &mut [JointRec; joint::COUNT], kd: [(u32, u32); 4]| {
             for (i, (k, d)) in [REC0, NECK, REC2, HEAD].into_iter().zip(kd) { (j[i].k, j[i].d) = (f(k), f(d)); }
         };
-        let body = |j: &mut [JointRec; 12], z13: f32, z14: f32| {
+        let body = |j: &mut [JointRec; joint::COUNT], z13: f32, z14: f32| {
             j[SECONDARY].target[2] = z13;
             for k in 1..4 { j[SECONDARY + k].target[2] = z14; }
         };
@@ -946,6 +996,22 @@ impl Hero {
         let mut d = t - self.idle.rec17_scale;
         if step < d { d = step; } else if d < -step { d = -step; }
         self.idle.rec17_scale += d;
+        // The edge look-down (a drop over 1.4 ahead, no wall within 1): the head (spring 0.015 / 0.3) pitches down by
+        // 1.5° per unit of drop + 11°, at most 27° and at most 35° × (1 − the room before the edge); the neck (0.008 /
+        // 0.3) by 0.7 of it.
+        let (edge, depth, room) = self.edge;
+        if edge && 1.4 < depth && 1.0 < self.wall_ahead[0] {
+            let deg = f(0x3c8e_fa35);
+            let mut y = (depth * 1.5 * deg + f(0x3e44_9809)).min(f(0x3ef1_4639));
+            let cap = (1.0 - room) * 35.0 * deg;
+            if cap < y { y = cap; }
+            let i = &mut self.idle;
+            (i.joints[joint::HEAD].k, i.joints[joint::HEAD].d) = (f(0x3c75_c28f), f(0x3e99_999a));
+            i.joints[joint::HEAD].target[1] = y;
+            (i.joints[joint::NECK].k, i.joints[joint::NECK].d) = (f(0x3c03_126f), f(0x3e99_999a));
+            i.joints[joint::NECK].target[1] = y * f(0x3f33_3333);
+            return;
+        }
         if self.state != 0 || !(seq_b < 3 || seq_b == 0x3a) || self.idle.look_target != 0 { return; }
         let fidget = seq_b.wrapping_sub(1) < 2;
         if fidget { self.fidget_timer = rng.rand_range(ticks(40), ticks(70)); }
@@ -1063,19 +1129,32 @@ impl Hero {
         }
     }
 
-    /// `0x2278c0` in mode 0 on Clank: the glow colour (+0x90, a ticks(110) sine pulse) and Clank's blink (timer
-    /// 0x14034c re-armed to 50..200 when it has run out and Clank is on sequence 1; frames 1..21).
+    /// `0x2278c0` in mode 0 on Clank (docs/plan/hero_gameplay.md §19): nothing while Clank is hidden (0x141628); the glow
+    /// colour (+0x90, a ticks(110) sine pulse; red while Ratchet's hit flash 0x13f53e runs) and Clank's blink (timer
+    /// 0x14034c re-armed to 50..200 when it has run out and Clank is on sequence 1; frames 1..21: the eyelid nodes
+    /// 0x140240.., [`Hero::clank_modifiers`]).
     fn clank_glow_blink(&mut self, counter: i32, rng: &mut Rng) {
+        if self.back_slot.clank_hidden != 0 { return; }
         let base = if self.health == 1 { 0x88 } else { 0x38 };
+        let flash = self.f53e;
         let Some(b) = self.back.as_mut() else { return };
         let p = ticks(110);
         let ph = (counter % p) as f32 / p as f32;
         let s = fast_sin(Pf::f((ph + ph) * std::f32::consts::PI + -std::f32::consts::PI)).to_f32();
         let v = s * 24.0;
-        let r = base + (v as i32 + 0xc);
-        let g = (s * 48.0) as i32 + 0xa0;
-        let bl = v as i32 + 0x4c;
-        b.clank_color = (0x80u32 << 24) | ((bl as u32) << 16) | ((g as u32) << 8) | r as u32;
+        let (vi, gi) = (v as i32, (s * 48.0) as i32);
+        let (mut r, mut g, mut bl) = (base + vi + 0xc, gi + 0xa0, vi + 0x4c);
+        if flash != 0 {
+            // The hit flash: fading in over its first 5 ticks (of 45), out over its last 20, toward red.
+            let (t5, t20, t45) = (ticks(5), ticks(20), ticks(45));
+            let mut t = 1.0f32;
+            if t45 - t5 < flash as i32 { t = (t45 - flash as i32) as f32 / t5 as f32; }
+            if (flash as i32) < t20 { t = flash as f32 / t20 as f32; }
+            bl -= ((vi + 0xc) as f32 * t) as i32;
+            r = (r - ((vi + 0xc) as f32 * t) as i32) + (t * 112.0) as i32;
+            g = (g - ((gi + 0x18) as f32 * t) as i32) - (t * 72.0) as i32;
+        }
+        b.clank_color = (0x80u32 << 24) | ((bl as u32 & 0xff) << 16) | ((g as u32 & 0xff) << 8) | (r as u32 & 0xff);
         let i = &mut self.idle;
         if dec_timer_s16(&mut i.clank_blink_timer) != 0 && b.clank.anim.seq_b == 1 {
             i.clank_blink = 1;
@@ -1086,7 +1165,54 @@ impl Hero {
             if 0x16 <= i.clank_blink { i.clank_blink = 0; }
         }
     }
+
+    /// Clank's joint-modifier list (his moby's +0x64): record 18 while attached (`0x235e60`'s sway, `super::pose`), and
+    /// while he blinks the four eyelid nodes 0x140240 + 0x40·k on his
+    /// joint lists 2..5 (gp−0x7508), node 3 first (attached 0, 1, 2, 3, each in front), mode 1, weight
+    /// `CLANK_BLINK[frame]`, the poses 0x17c660 / 0x17c6a0 / 0x17c6e0 (the translation × Clank's scale +0x2c,
+    /// `clank_scale`); empty when he is not blinking (all detached at frame 0). `targets` = Clank's class joint lists'
+    /// targets (`rc_formats::moby_anim::list_target`).
+    pub fn clank_modifiers(&self, targets: &[u8], clank_scale: f32) -> Vec<JointModifier> {
+        let target = |list: i16| targets.get(list as usize).copied().filter(|&t| t != 0xff);
+        // Record 18 (Clank's list 0, `0x235e60`'s sway) while attached; linked before the eyelids here [L: the
+        // nodes turn different joints, so their order in the list does not matter].
+        let r = &self.idle.joints[joint::CLANK0];
+        let mut out: Vec<JointModifier> = if r.attached && self.back.is_some() { target(r.joint).map(|t| r.modifier(t)).into_iter().collect() } else { Vec::new() };
+        let k = self.idle.clank_blink;
+        if k == 0 || self.back.is_none() { return out; }
+        let w = CLANK_BLINK[k as usize % CLANK_BLINK.len()];
+        out.extend(CLANK_EYELIDS.iter().rev().filter_map(|&(list, quat, scale, trans)| {
+            let joint = targets.get(list as usize).copied().filter(|&t| t != 0xff)?;
+            Some(JointModifier { joint, mode: 1, weight: w, quat, scale, trans: trans.map(|x| x * clank_scale) })
+        }));
+        out
+    }
+
 }
+
+/// The glow word of Clank's antenna moby 1204 (`HeroItemsAttach` 0x22fec0) at tick `counter` (0x15f5cc): a
+/// ticks(120) sine s, red `min(0xd7 + 90s, 0xff)`, green `0x32 + 50s`, blue `0x14 + 10s`, alpha 0x80 (its creation's
+/// 0x801432d7 is the value at s = 0).
+pub fn antenna_glow(counter: i32) -> u32 {
+    let p = ticks(120);
+    let ph = counter.rem_euclid(p) as f32 / p as f32;
+    let s = fast_sin(Pf::f((ph + ph) * std::f32::consts::PI + -std::f32::consts::PI)).to_f32();
+    let r = ((s * 90.0) as i32 + 0xd7).min(0xff);
+    let g = (s * 50.0) as i32 + 0x32;
+    let b = (s * 10.0) as i32 + 0x14;
+    ((b as u32 & 0xff) << 16) | 0x8000_0000 | ((g as u32 & 0xff) << 8) | (r as u32 & 0xff)
+}
+
+/// Clank's eyelid nodes (`0x2278c0`): (joint list (gp−0x7508), quaternion 0x17c660, scale 0x17c6a0, translation
+/// 0x17c6e0; level01 data).
+/// One eyelid node: (joint list, quaternion, scale, translation).
+pub type EyelidNode = (u8, [f32; 4], [f32; 3], [f32; 3]);
+pub const CLANK_EYELIDS: [EyelidNode; 4] = [
+    (2, [f(0x3e18_f712), f(0xbd4b_48d4), f(0x3ea1_a60d), f(0x3f6f_88b9)], [1.0; 3], [f(0x44e2_1948), f(0x43d5_7c29), f(0x44be_451f)]),
+    (3, [f(0x3e25_f84d), f(0xbd63_5e74), f(0x3ea1_0e02), f(0x3f6f_0111)], [1.0; 3], [f(0x44e3_a51f), f(0x43cd_63d7), f(0x450f_5852)]),
+    (4, [f(0x3a12_ccf7), f(0x3b3c_be62), f(0x3ee1_0a13), f(0x3f65_efc8)], [1.0; 3], [f(0x44e2_1948), f(0xc3d5_7c29), f(0x44be_451f)]),
+    (5, [f(0xba6b_edfa), f(0xbb91_2989), f(0x3edf_a2f0), f(0x3f66_464a)], [1.0; 3], [f(0x44e3_a51f), f(0xc3cd_63d7), f(0x450f_5852)]),
+];
 
 #[cfg(test)]
 mod tests {
@@ -1379,5 +1505,69 @@ mod tests {
         assert_eq!(draws(s, r), 1, "one row still draws rand_range(0, 0)");
         assert_eq!(b.owner(3), Some(0));
         assert_eq!(b.owner(1), None);
+    }
+
+    /// `0x2278c0` on Clank: the pulse, red on the hit flash, nothing while Clank is hidden; a blink links the four
+    /// eyelid nodes (node 3 first, mode 1, weight `CLANK_BLINK[frame]`, translation × Clank's scale) until frame 0.
+    #[test]
+    fn clank_glow_flash_and_eyelids() {
+        let empty = || MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] };
+        let classes = Arc::new(BackClasses { packs: vec![(2, 607, empty())], clank: empty() });
+        let m = || BackMoby { anim: AnimState { seq_a: 1, frame_a: 0, seq_b: 1, frame_b: 0, t: 0.0, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: false }, snapshot: None };
+        let mut h = Hero::new();
+        h.health = 3;
+        h.back = Some(Back { state: 2, id: 2, pack_item: 2, pack_o_class: 607, pack: m(), clank: m(), clank_color: 0, classes });
+        let mut r = Rng::new();
+        // Counter 0: sin(−π) = 0 → (0x44, 0xa0, 0x4c).
+        h.clank_glow_blink(0, &mut r);
+        assert_eq!(h.back.as_ref().unwrap().clank_color, 0x804c_a044);
+        // The blink started (timer 0 ran out on sequence 1): frame 2 after the increment; four nodes.
+        assert_eq!(h.idle.clank_blink, 2);
+        let targets = [0xff, 0xff, 10, 11, 12, 13];
+        let mods = h.clank_modifiers(&targets, 0.5);
+        assert_eq!(mods.iter().map(|n| n.joint).collect::<Vec<_>>(), vec![13, 12, 11, 10]);
+        assert!(mods.iter().all(|n| n.mode == 1 && n.weight == CLANK_BLINK[2]));
+        assert_eq!(mods[3].trans, CLANK_EYELIDS[0].3.map(|x| x * 0.5));
+        // The hit flash at its peak (t = 1): (0x38 + 112, 0xa0 − 0x18 − 72, 0x4c − 0xc) = (0xa8, 0x40, 0x40).
+        h.f53e = 30;
+        h.clank_glow_blink(0, &mut r);
+        assert_eq!(h.back.as_ref().unwrap().clank_color, 0x8040_40a8);
+        // Frames run out at 0x16: detached.
+        for _ in 0..30 { h.clank_glow_blink(0, &mut r); if h.idle.clank_blink == 0 { break; } }
+        assert!(h.clank_modifiers(&targets, 0.5).is_empty());
+        // Hidden: nothing changes.
+        h.back_slot.clank_hidden = 1;
+        h.back.as_mut().unwrap().clank_color = 7;
+        h.clank_glow_blink(5, &mut r);
+        assert_eq!(h.back.as_ref().unwrap().clank_color, 7);
+    }
+
+    /// The antenna moby's glow word: 0x801432d7 at the pulse's zero (tick 60 of 120), brightest a quarter later.
+    #[test]
+    fn antenna_glow_pulses() {
+        assert_eq!(antenna_glow(60), 0x8014_32d7);
+        assert_eq!(antenna_glow(180), 0x8014_32d7);
+        let peak = antenna_glow(90);
+        assert_eq!(peak & 0xff, 0xff, "red saturates");
+        assert_eq!(peak, 0x801e_64ff, "sin = 1: green 0x32 + 50, blue 0x14 + 10");
+    }
+
+    /// The edge probe (every fifth tick on the ground) finds the drop 1.1 ahead of Ratchet standing at a floor's edge:
+    /// no floor within 20, a free sphere a little past the edge; the head look then pitches his head and neck down.
+    #[test]
+    fn standing_at_an_edge_looks_down() {
+        use super::super::testkit::{floor, Runner};
+        let coll = floor(100.0, 100, 106, 100, 106);
+        let mut r = Runner::new([423.4, 410.0, 100.0], 0.0);
+        for _ in 0..30 { r.tick(&coll, PadInput::neutral()); }
+        let (on, depth, room) = r.hero.edge;
+        assert!(on && depth == 20.0 && (0.0..1.0).contains(&room), "{:?}", r.hero.edge);
+        let (head, neck) = (&r.hero.idle.joints[joint::HEAD], &r.hero.idle.joints[joint::NECK]);
+        assert!(head.cur[1] > 0.05 && neck.cur[1] > 0.03, "{:?} {:?}", head.cur, neck.cur);
+        assert_eq!((head.k, neck.k), (f(0x3c75_c28f), f(0x3c03_126f)));
+        // In the middle of the floor: no edge.
+        let mut r = Runner::new([412.0, 410.0, 100.0], 0.0);
+        for _ in 0..30 { r.tick(&coll, PadInput::neutral()); }
+        assert!(!r.hero.edge.0);
     }
 }

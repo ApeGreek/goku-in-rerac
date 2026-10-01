@@ -61,6 +61,8 @@ impl Hero {
             if !(self.timer < ticks(90)) {
                 if self.set_state(c, 0, false) { self.set_anim(c.anim, c.rng, blend(6), 0xc, 4); }
                 if off_moby { self.lockout = ticks(22); }
+                // `0x248920`: the landing's foot motes (super::pose).
+                self.land_motes(super::pose::motes::LAND_HARD);
                 return;
             }
             if self.substate == 1 {
@@ -70,9 +72,14 @@ impl Hero {
                 self.lockout = ticks(7);
                 if self.prev_state == 0x2d { self.lockout = ticks(10); }
                 if off_moby && ticks(50) < self.timer { self.lockout = ticks(18); }
+                self.land_motes(super::pose::motes::LAND_ROLL);
                 return;
             }
-            if Pf::b(0x3f00_0000) < self.stick_mag && self.lockout == 0 { self.set_state(c, 2, true); return; }
+            if Pf::b(0x3f00_0000) < self.stick_mag && self.lockout == 0 {
+                self.set_state(c, 2, true);
+                self.land_motes(super::pose::motes::LAND_WALK);
+                return;
+            }
             if DT * Pf::b(0x4040_0000) < self.eff_len_xy {
                 if self.set_state(c, 3, false) {
                     self.set_anim(c.anim, c.rng, blend(12), 6, 0);
@@ -81,6 +88,7 @@ impl Hero {
                 return;
             }
             self.set_state(c, 0, true);
+            self.land_motes(super::pose::motes::LAND);
             return;
         }
         if self.health < 1 { return; }

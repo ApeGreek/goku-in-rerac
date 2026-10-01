@@ -146,7 +146,20 @@ fn drop_bolt(lv: &Level, with_mobys: bool) -> (u8, [f32; 3], f32, f32) {
         sched.tick(&mut w);
     }
     let m = &game.mobys.mobys[id.unwrap()];
-    let rest = f32::from_le_bytes(m.pvars[8..12].try_into().unwrap());
+    let f = |o: usize| f32::from_le_bytes(m.pvars[o..o + 4].try_into().unwrap());
+    // A bolt that settles on a carrier keeps its rest pose in the carrier's frame (+0x5c = the carrier + 1,
+    // `FUN_00275528`): the crates are carriers (mode 0x20, block +0x60), so the world rest point is the local one
+    // through the crate's rows (`FUN_002753b0`; triggers.md §5b).
+    let on = i32::from_le_bytes(m.pvars[0x5c..0x60].try_into().unwrap());
+    let rest = if on > 0 {
+        assert_eq!(on as usize - 1, CRATE_342, "resting on the top crate");
+        let k = rc_game::moby_update::triggers::carrier(&game.mobys.mobys[on as usize - 1]).expect("a carrier");
+        let (mut l, mut lr) = ([f(0), f(4), f(8)], [f(0x10), f(0x14), f(0x18)]);
+        rc_game::moby_update::triggers::from_local(&k, m.class_slot, &mut l, &mut lr).0[2]
+    } else {
+        f(8)
+    };
+    assert!(!with_mobys || on > 0, "with moby collision the bolt rests on the crate");
     assert_eq!(game.mobys.mobys[CRATE_342].position[2], top[2], "the stack did not move");
     (m.state, [m.position[0], m.position[1], m.position[2]], rest, crate_top)
 }

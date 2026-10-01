@@ -42,6 +42,7 @@ pub mod sea;
 pub mod save_game;
 pub mod scene;
 pub mod volumes;
+pub mod cameras;
 pub mod pss;
 pub mod sha1;
 pub mod test_data;

@@ -573,7 +573,8 @@ fn sinking_floor(h: &mut Hero, _env: &Env, anim: &dyn super::AnimCtl, rng: &mut 
     h.target_yaw = if DTF * 0.5 < pl { Pf::f(push[1].atan2(push[0])) } else { h.rot[2] };
     let yaw0 = h.rot[2];
     h.turn_to(SCALE64 * p(pl * 0.125), SCALE64 * Pf::b(0x3e4c_cccd), DT * Pf::b(0x4086_0a92));
-    let mut dyaw = f(fast_subtract_rotations(h.rot[2], yaw0));
+    // FastDiffRots 0x222100: the turn's size (≥ 0, so the body only ever rolls one way).
+    let mut dyaw = f(crate::pad::fast_diff_rots(h.rot[2], yaw0));
     h.vel = V0;
     h.momentum_decay(DT2 * Pf::b(0x40a0_0000));
     let fall = f(h.disp[2]) - DT2F * 50.0;
@@ -589,6 +590,17 @@ fn sinking_floor(h: &mut Hero, _env: &Env, anim: &dyn super::AnimCtl, rng: &mut 
         let (mut a, mut v) = (h.rot[1], h.surf.tilt_vel[1]);
         turn_spring(p(-h.surf.flow[1]), SCALE64 * Pf::b(0x3d0f_5c29), SCALE64 * Pf::b(0x3e99_999a), DT * Pf::b(0x3ff5_be0b), &mut a, &mut v, 0);
         (h.rot[1], h.surf.tilt_vel[1]) = (a, v);
+    }
+    // The lean (0x23ab60..0x23abbc): the springs of records 1 / 2 / 3 (0x22b5e0 / 0x22b5f8 / 0x22b610) and record 1's
+    // (the neck's) x / z targets from the turn: 3.5·Δ, 2.1·Δ.
+    {
+        use super::idle::joint::{HEAD, NECK, REC2};
+        let j = &mut h.idle.joints;
+        (j[NECK].k, j[NECK].d) = (f32::from_bits(0x3c13_74bc), f32::from_bits(0x3e61_47ae));
+        (j[REC2].k, j[REC2].d) = (f32::from_bits(0x3d23_d70a), f32::from_bits(0x3e4c_cccd));
+        (j[HEAD].k, j[HEAD].d) = (f32::from_bits(0x3ca3_d70a), f32::from_bits(0x3e4c_cccd));
+        j[NECK].target[2] = dyaw * f32::from_bits(0x4006_6666);
+        j[NECK].target[0] = dyaw * 3.5;
     }
 }
 
@@ -961,6 +973,13 @@ mod tests {
         for _ in 0..30 { tick_sounds(&mut r, &coll, PadInput::neutral(), &mut snd); }
         assert_eq!(states(&r), vec![0x31]);
         assert_eq!((r.hero.group, r.anim.view().seq_b), (0x10, 100));
+        // The lean's springs (0x22b5e0 / 0x22b5f8 / 0x22b610); no turn, so no lean.
+        {
+            use crate::hero::idle::joint::{HEAD, NECK, REC2};
+            let j = &r.hero.idle.joints;
+            assert_eq!([j[NECK].k, j[REC2].k, j[HEAD].k], [f32::from_bits(0x3c13_74bc), f32::from_bits(0x3d23_d70a), f32::from_bits(0x3ca3_d70a)]);
+            assert_eq!(j[NECK].cur, [0.0; 3]);
+        }
         assert!(snd.log.len() > 20 && snd.log.iter().all(|&e| e == ('v', 6, 4)), "retried while no slot: {:?}", snd.log);
         assert_eq!(r.hero.surf.voice, -1);
         snd.free = true;

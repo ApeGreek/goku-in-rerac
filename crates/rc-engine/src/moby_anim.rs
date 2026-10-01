@@ -95,6 +95,9 @@ pub struct MobyAnim {
     pub pending: Vec<Option<PendingChange>>,
     /// Per instance: hidden (mode bit 1) since the load pass; never evaluated.
     pub hidden: Vec<bool>,
+    /// Per instance: the runtime joint-modifier list of a driven moby (`Moby::joint_mods`, its class manipulators:
+    /// `rc_game::moby_update::manip`); applied by the evaluation (`evaluate_posed`), which makes the pose private.
+    pub mods: Vec<Vec<rc_formats::moby_anim::JointModifier>>,
     ticks: u64,
     evaluated: Option<u64>,
     eval_time: Duration,
@@ -117,7 +120,7 @@ impl MobyAnim {
         let n = instances.len();
         MobyAnim {
             enabled, instances, palette, palette_len, pose_dirty: false,
-            snapshots: vec![None; n], pending: (0..n).map(|_| None).collect(), hidden: vec![false; n],
+            snapshots: vec![None; n], pending: (0..n).map(|_| None).collect(), hidden: vec![false; n], mods: vec![Vec::new(); n],
             ticks: 0, evaluated: None, eval_time: Duration::ZERO, evals: 0, poses: 0, last_report: 0.0,
             bytes: Vec::new(), identity: matrix_bytes(&IDENTITY), written: vec![false; n],
         }
@@ -128,8 +131,9 @@ impl MobyAnim {
     /// Instance `k` belongs to a class the moby scheduler runs (crate::gameplay): its animation state and
     /// snapshot are the table's (`MobyAnimAdvance` ran in the scheduler), so this module never advances it
     /// (`skip_advance`) and drops any spawn-rule change for it.
-    pub fn drive(&mut self, k: usize, mut state: AnimState, snapshot: Option<&MobyFrame>) {
+    pub fn drive(&mut self, k: usize, mut state: AnimState, snapshot: Option<&MobyFrame>, mods: &[rc_formats::moby_anim::JointModifier]) {
         let Some(i) = self.instances.get_mut(k) else { return };
+        if self.mods[k] != mods { self.mods[k] = mods.to_vec(); }
         state.skip_advance = true;
         i.state = state;
         self.snapshots[k] = if state.seq_a == moby_anim::SNAPSHOT_SEQ { snapshot.cloned() } else { None };
@@ -245,7 +249,7 @@ type PoseKey = (usize, u8, u8, u8, u8, u32, Option<usize>);
 /// Returns whether any byte changed and the number of distinct poses evaluated.
 fn evaluate_all(anim: &mut MobyAnim, level: &LoadedLevel) -> (bool, usize) {
     let classes = &level.mobys.anim;
-    let MobyAnim { instances, hidden, snapshots, bytes, identity, written, .. } = anim;
+    let MobyAnim { instances, hidden, snapshots, mods, bytes, identity, written, .. } = anim;
     let mut changed = false;
     let mut put = |bytes: &mut Vec<u8>, at: usize, src: &[u8]| {
         let Some(dst) = bytes.get_mut(at..at + src.len()) else { return };
@@ -266,10 +270,11 @@ fn evaluate_all(anim: &mut MobyAnim, level: &LoadedLevel) -> (bool, usize) {
     for (k, i) in instances.iter().enumerate() {
         if !draws(k, i) { continue; }
         let s = &i.state;
-        let snap = (s.seq_a == moby_anim::SNAPSHOT_SEQ).then_some(k);
+        // A snapshot or a modifier list makes the pose the instance's own.
+        let snap = (s.seq_a == moby_anim::SNAPSHOT_SEQ || !mods[k].is_empty()).then_some(k);
         let key = (i.class, s.seq_a, s.frame_a, s.seq_b, s.frame_b, s.t.to_bits(), snap);
         let pose = memo.entry(key).or_insert_with(|| {
-            let f = moby_anim::evaluate_with_snapshot(&classes[i.class], s, snapshots[k].as_ref());
+            let f = moby_anim::evaluate_posed(&classes[i.class], s, snapshots[k].as_ref(), &[], &mods[k]);
             f.iter().flat_map(matrix_bytes).collect()
         });
         let at = i.base as usize * MATRIX_BYTES;

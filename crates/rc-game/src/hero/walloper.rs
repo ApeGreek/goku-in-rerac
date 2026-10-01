@@ -429,7 +429,7 @@ mod tests {
     #[test]
     fn melee_aim_search_scores() {
         use super::super::melee::{aim_search, MeleeTarget};
-        let t = |id, x: f32, y: f32, health: f32, targetable: bool, is_crate: bool| MeleeTarget { id, pos: [x, y, 0.0], health, targetable, is_crate };
+        let t = |id, x: f32, y: f32, health: f32, targetable: bool, is_crate: bool| MeleeTarget { id, pos: [x, y, 0.0], health, targetable, is_crate, look: [0; 3] };
         let list = [
             t(1, 5.0, 0.0, 1.0, true, false),
             t(2, 3.0, 3.0, 1.0, true, false),

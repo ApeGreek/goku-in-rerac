@@ -24,6 +24,7 @@
 
 pub mod anim;
 pub mod idle;
+pub mod pose;
 pub mod items;
 pub mod melee;
 pub mod physics;
@@ -69,7 +70,7 @@ pub mod scripted;
 pub mod worn;
 
 use crate::ps2v::Pf;
-pub use ledge::{ledge_yaw_input, LedgeBlock};
+pub use ledge::LedgeBlock;
 use physics::V4;
 
 /// Hero state ids (`0x1413d4`) the port implements.
@@ -424,6 +425,9 @@ pub struct Hero {
     /// 0x13f598 / 0x13f5a0: the wall-ahead probe of `0x23c458` (every third tick: distance to the wall 0.7 above
     /// the feet within 4 ahead, 4.0 without one; the elevation of its normal). Native `f32`.
     pub wall_ahead: [f32; 2],
+    /// 0x13f5b0 / 0x13f5a8 / 0x13f5ac: the edge probe of `0x23c458` (every fifth tick on the ground: a drop ahead, its
+    /// depth, the room before the edge; `Hero::wall_ahead_probe`), read by the head look's look-down (`0x22b928`).
+    pub edge: (bool, f32, f32),
     /// The grind / cable / Magneboots fields 0x13f850..0x13f96c ([`boots`], package P5).
     pub boots: boots::Boots,
     /// The hand-item mechanism's pending item update ([`gadgets`], package P6).
@@ -520,7 +524,7 @@ impl Hero {
             melee: melee::Melee::default(), items: items::HeroItems::default(), shockwave: None,
             idle: idle::Idle::new(), back: None, back_classes: None, swim: swim::Swim::new(),
             carry: platform::Carry::default(), surf: surface::Surf::default(),
-            owned: Owned::default(), back_slot: idle::BackSlot::default(), feet_slot: idle::ItemSlot::default(), head_slot: idle::ItemSlot::default(), worn: worn::Worn::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], boots: boots::Boots::default(),
+            owned: Owned::default(), back_slot: idle::BackSlot::default(), feet_slot: idle::ItemSlot::default(), head_slot: idle::ItemSlot::default(), worn: worn::Worn::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], edge: (false, 0.0, 0.0), boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
             joint_targets: Default::default(), help: Default::default(), walloper: Default::default(),
@@ -771,7 +775,7 @@ pub fn hero_update_with_sounds(
     damage::flush(hero, moby, sounds, rng);
     // The swim voices and the delayed-voice queue `0x236860` (mode 0, right after the transitions).
     fx::flush(hero, moby, sounds, rng);
-    if hero.mode == 0 { hero.idle_updates(anim.view().seq_b, counter, rng); }
+    if hero.mode == 0 { hero.idle_updates(env, &*anim, counter, rng); }
     hero.write_back(moby);
     // HeroItemsUpdate's slots 1 (feet) and 2 (head), then 3 (the back).
     hero.worn_items_update(rng);

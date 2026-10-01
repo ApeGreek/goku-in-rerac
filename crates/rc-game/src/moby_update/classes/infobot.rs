@@ -33,8 +33,8 @@
 //!   `memcard_Save`, `ShowPlanetBanner(+0x04)`, deleted.
 //!
 //! The riding placement (after every state but 8..0xb): with an attach cuboid and a class-822 moby, position = the
-//! cuboid's centre (moved with the moby's platform matrices when it has them, mode 0x20: not ported, counted) + the
-//! orbit offset.
+//! cuboid's centre + the orbit offset; a ride that is a carrier moves the cuboid's centre itself each tick with its
+//! carry first (`FUN_002752c0` in place on the level's cuboid record: `triggers::carried`, G-CLS-024).
 //!
 //! **Novalis.** The one infobot (instance 874) has +0x00 = 0, no path and no scene bytes: it stays in state 1. The
 //! Novalis Infobot the player gets is the talk system's: the Water Pump Worker 774 sells it for 500 bolts (talk
@@ -406,8 +406,14 @@ fn ride_place(w: &mut World, id: MobyId, offset: [f32; 3]) {
     let c = pi32(w, id, pv::ATTACH);
     if c == -1 { return; }
     let Some(r) = ride(w, id) else { return };
-    let Some((centre, _)) = cuboid(w, c) else { return };
-    if w.m(r).mode & 0x20 != 0 { w.svc.unported("infobot: cuboid carried by the ride's platform matrices (0x2752c0)"); }
+    let Some((mut centre, _)) = cuboid(w, c) else { return };
+    // `FUN_002752c0(infobot, ride, centre, 0, centre, &rot)`: a carrier moves the cuboid itself (its centre, +0x30 of
+    // the level's cuboid record) with this tick's carry; the rotation result goes to a stack temporary.
+    if let Some(k) = crate::moby_update::triggers::carrier(w.m(r)) {
+        centre = crate::moby_update::triggers::carried(&k, centre, [0.0; 3]).0;
+        let v = std::sync::Arc::make_mut(&mut w.svc.volumes);
+        if let Some(s) = usize::try_from(c).ok().and_then(|i| v.cuboids.get_mut(i)) { s.matrix[3][..3].copy_from_slice(&centre); }
+    }
     let m = w.mm(id);
     m.position = [centre[0] + offset[0], centre[1] + offset[1], centre[2] + offset[2], m.position[3]];
 }
@@ -453,6 +459,35 @@ mod tests {
         assert!((t - 0.75).abs() < 1e-5, "{t}");
         // Past the end: the last segment's end.
         assert_eq!(aim(&pts, [11.5, 0.0, 0.0]), (2, 1.0));
+    }
+
+    /// The ride's carry moves the attach cuboid (the level's record) and the infobot sits on its centre.
+    #[test]
+    fn ride_carries_the_attach_cuboid() {
+        use crate::moby_runtime::{Moby, MobyTable};
+        use crate::moby_update::services::{pvar as p, Services};
+        let mut ride = Moby { o_class: RIDE_CLASS, pvars: vec![0; 0x80], ..Moby::default() };
+        ride.mode |= 0x20;
+        p::set_i32(&mut ride.pvars, 8, 0x20);
+        crate::moby_update::triggers::carry_riders(&mut ride.pvars, 0x20, [0.5, 0.0, 0.25, 0.0], [0.0; 4], [0.0; 4]);
+        let mut bot = Moby { o_class: 0, pvars: vec![0; 0x100], ..Moby::default() };
+        p::set_i32(&mut bot.pvars, pv::ATTACH, 0);
+        p::set_i32(&mut bot.pvars, pv::RIDE, 0);
+        let mut t = MobyTable::new(vec![ride, bot], 4);
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = Services::new();
+        let mut cub = rc_formats::volumes::Shape::default();
+        for k in 0..4 { cub.matrix[k][k] = 1.0; cub.inverse[k.min(2)][k.min(2)] = 1.0; }
+        cub.matrix[3] = [10.0, 20.0, 5.0, 1.0];
+        svc.volumes = std::sync::Arc::new(rc_formats::volumes::Volumes { cuboids: vec![cub], ..Default::default() });
+        {
+            let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 1);
+            ride_place(&mut w, 1, [1.0, 0.0, 3.0]);
+        }
+        assert_eq!(svc.volumes.cuboids[0].matrix[3][..3], [10.5, 20.0, 5.25]);
+        assert_eq!(t.mobys[1].position[..3], [11.5, 20.0, 8.25]);
     }
 
     #[test]

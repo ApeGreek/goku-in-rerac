@@ -77,6 +77,29 @@
 //! | U473 | 93 swing doors (15) | level15 0x2a3ba8 | [`swing_door`] |
 //! | U307 | 1172 chain anchors (09) | level09 0x303d10 | [`chain_anchor`] |
 //! | U477 | 196, 197, 1958 sliding doors (15, 17) | level15 0x2bddb0 | [`slide_door`] |
+//! | U102, U126, U179 | 707 / 734 turntables (02), 1210 joint-carried platform (03), 812 pinned platforms (05) | level02 0x2ddc00, level03 0x2953f8, level05 0x30bf98 | [`carriers`] |
+//! | U565 | 1381 falling platforms carrying the Veldin carriers (18) | level18 0x2f16f0 | [`falling_platform`] |
+//! | U207, U472 | 1511 breakable light fixtures (05, 14) | level05 0x31c8e0, level14 0x307ad8 | [`light_fixture`] |
+//! | U514 | 1143 Gadgetron logos (16 placed; every level's vendor hologram; a manipulator on its own list 1, `crate::moby_update::manip`) | level16 0x2e1088 | [`hologram_logo`] |
+//! | U180 | 823 sweeping searchlights (05, 07; a manipulator on its head, the beam callback 0x30c220) | level05 0x30c0a8 | [`sweep_light`] |
+//! | U155 | 481 bobbing floats with three spinning parts (04; look-at records `manip::look`, a platform) | level04 0x2cdda0 | [`spinner_float`] |
+//! | U203 | 1139 hoverboard-course sparkles (05, 16) | level05 0x31abe0 | [`board_sparkle`] |
+//! | U440 | 30 Oltanis pop-up turrets (14), and their shot 681 | level14 0x2b3bf0, 0x2ece00 | [`popup_turret`] |
+//! | U212 | 1021 Blarg petal doors (06) | level06 0x2f4f00 | [`petal_door`] |
+//! | U390 | 339 Hoven's animated idlers (12) | level12 0x2ec1d0 | [`anim_idler`] |
+//! | U248 | 1013, 1014, 1064, 1065 panels on a linked moby's state (07) | level07 0x30cf90 | [`linked_slider`] |
+//! | U329 | 1015, 1282 Orxon trip blocks (10) | level10 0x2d90a8 | [`trip_block`] |
+//! | U162 | 1101, 1102, 1531, 1532 Eudora switched movers (04) | level04 0x2e17d8 | [`switched_mover`] |
+//! | U487 | 1209 Quartu pressure pads (15, 17) | level15 0x2e5958 | [`pressure_pad`] |
+//! | U211 | 911 Blarg flame jets (06) | level06 0x2f3ad8 | [`flame_jet`] |
+//! | U542 | 669 the fleet's underwater laser spinners (17; only while Ratchet is in the water) | level17 0x2d77f0 | [`water_laser`] |
+//! | U349 | 1544 Orxon's particle vents: puffs, drips, columns (10) | level10 0x2ea1f0 | [`orxon_vent`] |
+//! | U375 | 1246 Pokitaru's biters: beach, swimmer, boat boarders (11) | level11 0x314318 | [`pokitaru_biter`] |
+//! | U95, U101 | 580 Aridia's sand sharks and their nests 668 (02) | level02 0x2d3e50, 0x2dcb38 | [`aridia_sandshark`] |
+//! | U96 | 612 Aridia's flame-throwing sentries (02) | level02 0x2d7748 | [`aridia_flamer`] |
+//! | U373 | 1231 Pokitaru's ball throwers (11), and the ball 1297 they make | level11 0x310180, 0x318b30 | [`pokitaru_thrower`] |
+//! | U128 | 75, 115–120, 132, 795 Kerwan's air traffic (03), and the exhaust trail 235 of 75 / 119 | level03 0x29dba8, 0x2bae48 | [`air_traffic`] |
+//! | U126 | 868, 905, 928 Kerwan's swinging path movers (03) | level03 0x294c08 | [`kerwan_mover`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -150,6 +173,29 @@ pub mod cuboid_slider;
 pub mod swing_door;
 pub mod chain_anchor;
 pub mod slide_door;
+pub mod carriers;
+pub mod falling_platform;
+pub mod light_fixture;
+pub mod hologram_logo;
+pub mod sweep_light;
+pub mod spinner_float;
+pub mod board_sparkle;
+pub mod popup_turret;
+pub mod petal_door;
+pub mod anim_idler;
+pub mod linked_slider;
+pub mod trip_block;
+pub mod switched_mover;
+pub mod pressure_pad;
+pub mod flame_jet;
+pub mod water_laser;
+pub mod orxon_vent;
+pub mod pokitaru_biter;
+pub mod aridia_sandshark;
+pub mod aridia_flamer;
+pub mod pokitaru_thrower;
+pub mod air_traffic;
+pub mod kerwan_mover;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -249,6 +295,37 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U473 93", level: swing_door::REFERENCE_LEVEL, func: swing_door::UPDATE_FN, classes: &swing_door::CLASSES, update: swing_door::update, joints: &[] },
     UnitPort { unit: "U307 1172", level: chain_anchor::REFERENCE_LEVEL, func: chain_anchor::UPDATE_FN, classes: &chain_anchor::CLASSES, update: chain_anchor::update, joints: &[] },
     UnitPort { unit: "U477 196", level: slide_door::REFERENCE_LEVEL, func: slide_door::UPDATE_FN, classes: &slide_door::CLASSES, update: slide_door::update, joints: &[] },
+    UnitPort { unit: "U102 707", level: carriers::REFERENCE_LEVEL_TURNTABLE, func: carriers::TURNTABLE_FN, classes: &carriers::TURNTABLE_CLASSES, update: carriers::turntable, joints: &[] },
+    UnitPort { unit: "U102 734", level: carriers::REFERENCE_LEVEL_TURNTABLE, func: carriers::TURNTABLE_FN_734, classes: &carriers::TURNTABLE_CLASSES_734, update: carriers::turntable, joints: &[] },
+    UnitPort { unit: "U126 1210", level: carriers::REFERENCE_LEVEL_JOINT, func: carriers::JOINT_FN, classes: &carriers::JOINT_CLASSES, update: carriers::joint_platform, joints: &carriers::JOINT_CLASSES },
+    UnitPort { unit: "U179 812", level: carriers::REFERENCE_LEVEL_PINNED, func: carriers::PINNED_FN, classes: &carriers::PINNED_CLASSES, update: carriers::pinned_platform, joints: &[] },
+    UnitPort { unit: "U565 1381", level: falling_platform::REFERENCE_LEVEL, func: falling_platform::UPDATE_FN, classes: &falling_platform::CLASSES, update: falling_platform::update, joints: &[] },
+    UnitPort { unit: "U207 1511", level: light_fixture::REFERENCE_LEVEL, func: light_fixture::UPDATE_FN, classes: &light_fixture::CLASSES, update: light_fixture::update, joints: &[] },
+    UnitPort { unit: "U472 1511", level: light_fixture::REFERENCE_LEVEL_14, func: light_fixture::UPDATE_FN_14, classes: &light_fixture::CLASSES, update: light_fixture::update, joints: &[] },
+    UnitPort { unit: "U514 1143", level: hologram_logo::REFERENCE_LEVEL, func: hologram_logo::UPDATE_FN, classes: &hologram_logo::CLASSES, update: hologram_logo::update, joints: &hologram_logo::CLASSES },
+    UnitPort { unit: "U180 823", level: sweep_light::REFERENCE_LEVEL, func: sweep_light::UPDATE_FN, classes: &sweep_light::CLASSES, update: sweep_light::update, joints: &sweep_light::CLASSES },
+    UnitPort { unit: "U155 481", level: spinner_float::REFERENCE_LEVEL, func: spinner_float::UPDATE_FN, classes: &spinner_float::CLASSES, update: spinner_float::update, joints: &spinner_float::CLASSES },
+    UnitPort { unit: "U203 1139", level: board_sparkle::REFERENCE_LEVEL, func: board_sparkle::UPDATE_FN, classes: &board_sparkle::CLASSES, update: board_sparkle::update, joints: &[] },
+    UnitPort { unit: "U440 30", level: popup_turret::REFERENCE_LEVEL, func: popup_turret::UPDATE_FN, classes: &popup_turret::CLASSES, update: popup_turret::update, joints: &[] },
+    UnitPort { unit: "U440 681", level: popup_turret::REFERENCE_LEVEL, func: popup_turret::SHOT_FN, classes: &popup_turret::SHOT_CLASSES, update: popup_turret::shot_update, joints: &[] },
+    UnitPort { unit: "U212 1021", level: petal_door::REFERENCE_LEVEL, func: petal_door::UPDATE_FN, classes: &petal_door::CLASSES, update: petal_door::update, joints: &[] },
+    UnitPort { unit: "U390 339", level: anim_idler::REFERENCE_LEVEL, func: anim_idler::UPDATE_FN, classes: &anim_idler::CLASSES, update: anim_idler::update, joints: &[] },
+    UnitPort { unit: "U248 1013", level: linked_slider::REFERENCE_LEVEL, func: linked_slider::UPDATE_FN, classes: &linked_slider::CLASSES, update: linked_slider::update, joints: &[] },
+    UnitPort { unit: "U329 1015", level: trip_block::REFERENCE_LEVEL, func: trip_block::UPDATE_FN, classes: &trip_block::CLASSES, update: trip_block::update, joints: &[] },
+    UnitPort { unit: "U162 1101", level: switched_mover::REFERENCE_LEVEL, func: switched_mover::UPDATE_FN, classes: &switched_mover::CLASSES, update: switched_mover::update, joints: &[] },
+    UnitPort { unit: "U487 1209", level: pressure_pad::REFERENCE_LEVEL, func: pressure_pad::UPDATE_FN, classes: &pressure_pad::CLASSES, update: pressure_pad::update, joints: &pressure_pad::CLASSES },
+    UnitPort { unit: "U211 911", level: flame_jet::REFERENCE_LEVEL, func: flame_jet::UPDATE_FN, classes: &flame_jet::CLASSES, update: flame_jet::update, joints: &[] },
+    UnitPort { unit: "U542 669", level: water_laser::REFERENCE_LEVEL, func: water_laser::UPDATE_FN, classes: &water_laser::CLASSES, update: water_laser::update, joints: &[] },
+    UnitPort { unit: "U349 1544", level: orxon_vent::REFERENCE_LEVEL, func: orxon_vent::UPDATE_FN, classes: &orxon_vent::CLASSES, update: orxon_vent::update, joints: &[] },
+    UnitPort { unit: "U375 1246", level: pokitaru_biter::REFERENCE_LEVEL, func: pokitaru_biter::UPDATE_FN, classes: &pokitaru_biter::CLASSES, update: pokitaru_biter::update, joints: &[] },
+    UnitPort { unit: "U95 580", level: aridia_sandshark::REFERENCE_LEVEL, func: aridia_sandshark::UPDATE_FN, classes: &aridia_sandshark::CLASSES, update: aridia_sandshark::update, joints: &[] },
+    UnitPort { unit: "U101 668", level: aridia_sandshark::REFERENCE_LEVEL, func: aridia_sandshark::NEST_FN, classes: &aridia_sandshark::NEST_CLASSES, update: aridia_sandshark::nest_update, joints: &[] },
+    UnitPort { unit: "U96 612", level: aridia_flamer::REFERENCE_LEVEL, func: aridia_flamer::UPDATE_FN, classes: &aridia_flamer::CLASSES, update: aridia_flamer::update, joints: &aridia_flamer::JOINTS },
+    UnitPort { unit: "U373 1231", level: pokitaru_thrower::REFERENCE_LEVEL, func: pokitaru_thrower::UPDATE_FN, classes: &pokitaru_thrower::CLASSES, update: pokitaru_thrower::update, joints: &[] },
+    UnitPort { unit: "U373 1297", level: pokitaru_thrower::REFERENCE_LEVEL, func: pokitaru_thrower::BALL_FN, classes: &pokitaru_thrower::BALL_CLASSES, update: pokitaru_thrower::ball_update, joints: &[] },
+    UnitPort { unit: "U128", level: air_traffic::REFERENCE_LEVEL, func: air_traffic::UPDATE_FN, classes: &air_traffic::CLASSES, update: air_traffic::update, joints: &air_traffic::JOINTS },
+    UnitPort { unit: "U128 235", level: air_traffic::REFERENCE_LEVEL, func: air_traffic::TRAIL_FN, classes: &air_traffic::TRAIL_CLASSES, update: air_traffic::trail_update, joints: &[] },
+    UnitPort { unit: "U126", level: kerwan_mover::REFERENCE_LEVEL, func: kerwan_mover::UPDATE_FN, classes: &kerwan_mover::CLASSES, update: kerwan_mover::update, joints: &[] },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.
@@ -361,6 +438,9 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((quartu_drone::REFERENCE_LEVEL, quartu_drone::UPDATE_FN)) => quartu_drone::fx_quads(table, svc, id),
         Some((swing_laser::REFERENCE_LEVEL, swing_laser::UPDATE_FN)) => swing_laser::fx_quads(table, svc, id),
         Some((kalebo_barrier::REFERENCE_LEVEL, kalebo_barrier::UPDATE_FN)) => kalebo_barrier::fx_quads(table, svc, id),
+        Some((sweep_light::REFERENCE_LEVEL, sweep_light::UPDATE_FN)) => sweep_light::fx_quads(table, svc, id),
+        Some((light_fixture::REFERENCE_LEVEL, light_fixture::UPDATE_FN)) => light_fixture::fx_quads(table, svc, id),
+        Some((water_laser::REFERENCE_LEVEL, water_laser::UPDATE_FN)) => water_laser::fx_quads(table, svc, id),
         _ => None,
     }
 }

@@ -7,8 +7,8 @@
 //! The comet strike 0x15 (crouch + □) has its entry here and its physics, the throw and the wrench's flight
 //! states 10 / 11 in [`super::comet`]; the glove throw 0x23 has the group-6 entry here and the rest in
 //! [`super::weapons`]; the gadget lunge 0x20 has the group-6 entry here and the rest in [`super::walloper`] (with the
-//! melee aim search `0x22e238`, [`aim_search`]). Not ported: 0x51, the rebound 0x21
-//! (needs the targets' records: the port has none), the aim-assist target search `0x22e238` (targets need a
+//! melee aim search `0x22e238`, [`aim_search`]); the rebound 0x21 off a target whose record has flag 2 ([`Hero::rebound_entry`],
+//! the physics and transitions of 0x7a: `super::packs`). Not ported: 0x51, the aim-assist target search `0x22e238` (targets need a
 //! mode-0x20 record no ported class has: always none), the wall-hit spark line and the jump-attack
 //! ground sparks (cosmetic + sounds) and the trail counters of the wrench (pvar +0x70/+0x74/+0x7c). The stats
 //! records the entries bump (0x1416c0, 0x141848, 0x141850 + 0x1417a8) are counted in [`Melee::entered`] and
@@ -584,8 +584,13 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         }
         t = t + k;
     }
+    // 0x2be5e4..: a moby whose target record has flag 2 (`FUN_002bdad8`) sends Ratchet back (0x21); any other plays
+    // the hit sound once a swing, unless its class type is 0x14.
+    let mut rebound = None;
     if let Some(Some(m)) = swept {
-        if hero.melee.hit == 0 {
+        if rebounds(table, m) {
+            rebound = Some(m);
+        } else if hero.melee.hit == 0 && class_type_of(table, hits, m) != Some(0x14) {
             hero.melee.hit = 1;
             hero.items.hit_sounds += 1;
             hero.fx.item_sounds.push(wrench_hit_sound(table, Some(m)));
@@ -599,10 +604,51 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     if hero.group == 0xf { r = Pf::b(0x3f33_3333); }
     if jump { r = Pf::b(0x3ef0_a3d7); }
     let sphere = hits.sphere(table, r, c, 0, ignore, &tmpl);
-    if sphere.is_some() && hero.melee.hit == 0 {
-        hero.melee.hit = 1;
-        hero.items.hit_sounds += 1;
-        hero.fx.item_sounds.push(wrench_hit_sound(table, sphere));
+    // (0x1742d8 is the last test's moby: the sphere's when it listed one, else still the line's.)
+    let last = sphere.or(match swept { Some(Some(m)) => Some(m), _ => None });
+    if let Some(m) = sphere.filter(|&m| class_type_of(table, hits, m) != Some(0x12)) {
+        if rebounds(table, m) {
+            rebound = Some(m);
+        } else if hero.melee.hit == 0 {
+            hero.melee.hit = 1;
+            hero.items.hit_sounds += 1;
+            hero.fx.item_sounds.push(wrench_hit_sound(table, sphere));
+        }
+    }
+    // The rebound: `SetState(0x21, 1)` (after the slot loop, `Weapons::deferred`) and its direction 0x13fdb8: from the
+    // moby hit last to Ratchet, else behind him.
+    if rebound.is_some() {
+        hero.weapons.deferred = Some(0x21);
+        hero.packs.rebound_yaw = match last.and_then(|m| table.mobys.get(m)) {
+            Some(m) => fast_arctan(hero.pos[0] - Pf::f(m.position[0]), hero.pos[1] - Pf::f(m.position[1])).to_f32(),
+            None => fast_add_rotations(hero.rot[2], Pf::b(0x4049_0fdb)).to_f32(),
+        };
+    }
+}
+
+/// `FUN_002bdad8`: the moby's target record (`targeting::record`, `FUN_002711f8`) has flag 2 in its +0x1e.
+pub fn rebounds(table: &MobyTable, id: MobyId) -> bool {
+    let Some(m) = table.mobys.get(id) else { return false };
+    let Some(r) = crate::targeting::record(m) else { return false };
+    m.pvars.get(r + 0x1e..r + 0x20).is_some_and(|b| u16::from_le_bytes([b[0], b[1]]) & 2 != 0)
+}
+
+/// The class type byte (+0x46) of moby `id`'s class, through the hit sink's class data.
+fn class_type_of(table: &MobyTable, hits: &dyn HitSink, id: MobyId) -> Option<u8> { table.mobys.get(id).and_then(|m| hits.class_type(m.o_class)) }
+
+impl Hero {
+    /// SetState 0x21 (0x23cf98): group 10, speed 9·dt, 0x1415d4 = 0; with `play` Ratchet's sequence 0x27 + the combo
+    /// row's step (2 for the jump attack's row) from frame 5 over ticks(5), and the wrench's 7 + step alike.
+    pub(super) fn rebound_entry(&mut self, c: &mut Ctx, play: bool) {
+        self.group = 10;
+        self.speed = DT * Pf::from_i32(9);
+        self.f15d4 = 0;
+        if !play { return; }
+        let row = *self.combo_row();
+        let step = if row[C_KIND] == 1 { 2 } else { row[C_STEP] };
+        let b = ticks(5);
+        self.set_anim(c.anim, c.rng, Pf::from_i32(b), (0x27 + step) as u8, 5);
+        if self.hand_is_wrench() { self.items.pending_blend = Some(((7 + step) as u8, 5, b)); }
     }
 }
 
@@ -624,6 +670,9 @@ pub struct MeleeTarget {
     pub health: f32,
     pub targetable: bool,
     pub is_crate: bool,
+    /// The record's `+0x38` (the head look's range), `+0x39` (its priority), `+0x3a` (its height ×0.125):
+    /// `HeroScanTargets`' bytes (`super::pose`).
+    pub look: [u8; 3],
 }
 
 /// The target list `list` (0x1abe80, `crate::targeting::target_list`) as [`MeleeTarget`]s (the mobys with a record).
@@ -634,7 +683,9 @@ pub fn melee_targets(table: &MobyTable, list: &[MobyId]) -> Vec<MeleeTarget> {
             let health = crate::targeting::record_health(m)?;
             let pos = [m.position[0], m.position[1], m.position[2]];
             let targetable = m.mode & crate::moby_runtime::mode::TARGETABLE != 0;
-            Some(MeleeTarget { id, pos, health, targetable, is_crate: (0..=40).contains(&(m.o_class as i32 - 500)) })
+            let r = crate::targeting::record(m)?;
+            let look = [0x38, 0x39, 0x3a].map(|o| m.pvars.get(r + o).copied().unwrap_or(0));
+            Some(MeleeTarget { id, pos, health, targetable, is_crate: (0..=40).contains(&(m.o_class as i32 - 500)), look })
         })
         .collect()
 }
@@ -811,6 +862,34 @@ mod tests {
         assert_eq!(r.hero.melee.combo, 1, "second swing");
         assert_eq!(a.calls.last().map(|c| (c.0, c.1)), Some((Pf::from_i32(7), 0x18)));
         assert_eq!(chained_at, Some(1));
+    }
+
+    /// The rebound 0x21: a target record with flag 2 (+0x1e) sends Ratchet back; the entry (group 10, 9 u/s, his
+    /// sequence 0x27 + step from frame 5, the wrench's 7 + step), then 0x7a's brake along 0x13fdb8.
+    #[test]
+    fn a_flag_2_target_rebounds_the_wrench() {
+        let mut m = crate::moby_runtime::Moby { mode: 0x20, pvars: vec![0; 0x40], ..crate::moby_runtime::Moby::default() };
+        m.pvars[0..4].copy_from_slice(&8u32.to_le_bytes());
+        let mut t = MobyTable::new(vec![m], 1);
+        assert!(!rebounds(&t, 0));
+        t.mobys[0].pvars[8 + 0x1e] = 2;
+        assert!(rebounds(&t, 0));
+        let (mut r, coll, mut a) = runner();
+        tick(&mut r, &coll, &mut a, sq());
+        assert_eq!(r.hero.state, 0x13);
+        r.hero.weapons.deferred = Some(0x21);
+        r.hero.packs.rebound_yaw = 1.0;
+        {
+            let env = Env { coll: &coll, pad: &r.pad, cam_yaw: r.cam_yaw, cam_rows: r.cam_rows, mirror: false, death_z: Pf::ZERO, mobys: None, hero_moby: None, water: None, world: None };
+            let mut c = crate::hero::states::Ctx { env: &env, anim: &mut a, rng: &mut r.rng, voice: None };
+            crate::hero::weapons::after_items(&mut r.hero, &mut c);
+        }
+        assert_eq!((r.hero.state, r.hero.group), (0x21, 10));
+        assert_eq!(a.calls.last(), Some(&(Pf::from_i32(5), 0x27, 5)));
+        let v0 = r.hero.speed;
+        tick(&mut r, &coll, &mut a, PadInput::neutral());
+        assert!(r.hero.speed < v0, "braking");
+        assert!((r.hero.target_yaw.to_f32() - crate::moby_update::creature::add_rot(1.0, std::f32::consts::PI)).abs() < 1e-5, "faces away from the push");
     }
 
     #[test]

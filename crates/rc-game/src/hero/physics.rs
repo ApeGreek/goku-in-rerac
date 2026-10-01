@@ -758,7 +758,7 @@ impl Hero {
                 self.water_level = Pf::f(env.water.and_then(|w| w.water_height(o.point)).unwrap_or(o.point[2]));
                 if self.pos[2] < self.water_level && self.in_water <= 0 { self.in_water = 1; }
                 hit = env.line(p0, p1, 0x24);
-                let Some(o2) = hit else { self.gravity_frame(); return };
+                let Some(o2) = hit else { self.gravity_frame(env); return };
                 o = o2;
                 // Levels 1 and 0x12 (0x15ed84) walk water with footstep class 3.
                 self.footstep = if matches!(self.idle.level, 1 | 0x12) { 3 } else { o.sound_class() as u8 };
@@ -769,12 +769,12 @@ impl Hero {
                 let z = Pf::f(o.point[2]);
                 self.water_level = z;
                 p0[2] = z - Pf::b(0x3c23_d70a);
-                match env.line(p0, p1, 4) { Some(o3) => o = o3, None => { self.gravity_frame(); return; } }
+                match env.line(p0, p1, 4) { Some(o3) => o = o3, None => { self.gravity_frame(env); return; } }
             }
             // Surfaces 3 / 0xb (the liquid level 0x13f644) and 1 under the burn deaths (level00's probe): super::surface.
-            if !super::surface::probe_surface(self, env, &mut p0, p1, &mut o) { self.gravity_frame(); return; }
+            if !super::surface::probe_surface(self, env, &mut p0, p1, &mut o) { self.gravity_frame(env); return; }
             if self.surface_id == 0xb {
-                self.gravity_frame();
+                self.gravity_frame(env);
                 return;
             }
             if o.kind <= 0 { break 'probe; }
@@ -799,19 +799,31 @@ impl Hero {
             self.last_ground_point = self.ground_point;
         }
         if self.water_level < self.pos[2] { self.in_water = 0; }
-        self.gravity_frame();
+        self.gravity_frame(env);
     }
 
     /// The tail of the probe (0x2331e8): gravity direction and the ground pitch / roll under the hero.
-    fn gravity_frame(&mut self) {
+    fn gravity_frame(&mut self, env: &Env) {
         self.gravity_dir = [Pf::ZERO, Pf::ZERO, Pf::b(0xbf80_0000), Pf::ZERO];
         // Gravity mode 1: against the ground normal (the Magneboots, super::boots).
         if self.gravity_mode == 1 { self.gravity_dir = [-self.ground_normal[0], -self.ground_normal[1], -self.ground_normal[2], Pf::ZERO]; }
         self.pitch = Pf::ZERO;
         self.roll = Pf::ZERO;
+        // The side probes 0x13f610..0x13f624 are cleared on every probe (super::pose).
+        self.idle.side = super::pose::SideProbes::default();
         if matches!(self.group, 0xf | 0x15 | 6 | 4 | 5 | 3) { return; }
         if !(self.height < Pf::b(0x3e80_0000)) { return; }
-        // 0x235fe0: the normal in the moby's frame (transposed rows), pitch = −atan2(l.x, l.z), roll = atan2(l.y, h).
+        let (px, py) = self.frame_tilt(self.ground_normal);
+        let q = Pf::b(0x3f49_0fdb);
+        if -q < py && py < q { self.pitch = py; }
+        if -q < px && px < q { self.roll = px; }
+        // The two side probes (0x13f610..0x13f624) for the model's slope tilt (`0x22c5c0`): super::pose.
+        self.side_probes(env);
+    }
+
+    /// `0x235fe0(n, out)`: the normal in the moby's frame (transposed rows), `out[0]` = atan2(l.y, h) (the roll
+    /// 0x13f638), `out[1]` = −atan2(l.x, l.z) (the pitch 0x13f634).
+    pub(super) fn frame_tilt(&self, n: V4) -> (Pf, Pf) {
         let m = euler_rows(self.moby_rot);
         let mt: [V4; 4] = [
             [m[0][0], m[1][0], m[2][0], Pf::ZERO],
@@ -819,14 +831,9 @@ impl Hero {
             [m[0][2], m[1][2], m[2][2], Pf::ZERO],
             [Pf::ZERO, Pf::ZERO, Pf::ZERO, Pf::ONE],
         ];
-        let l = mul_rows4(&mt, self.ground_normal);
+        let l = mul_rows4(&mt, n);
         let h = Pf::ZERO + (l[0] * l[0] + l[2] * l[2]).sqrt();
-        let px = fast_arctan(h, l[1]);
-        let py = -fast_arctan(l[2], l[0]);
-        let q = Pf::b(0x3f49_0fdb);
-        if -q < py && py < q { self.pitch = py; }
-        if -q < px && px < q { self.roll = px; }
-        // The two side probes (0x13f610..0x13f624) feed only the model tilt: not ported.
+        (fast_arctan(h, l[1]), -fast_arctan(l[2], l[0]))
     }
 
     /// Step-up / snap `0x233588` (mode 0).
@@ -946,9 +953,45 @@ impl Hero {
     /// (`0x15f5cc % 3 == 0`): `0x22b628(0.7, 4.0)` — a line (flags 2) 0.7 above the feet from r − 0.02 to 4.0
     /// ahead in the hero's frame; a hit sets 0x13f598 = the xy distance feet → hit point, 0x13f5a0 = the elevation
     /// of the hit normal (`FastArcTan(n.z, |n.xy|)`), 0x13f5a5 = a moby was hit, 0x13f5a4 = that moby is a crate
-    /// (class 500..=540, `0x273278`); no hit: 4.0 and both flags 0 (0x13f5a0 keeps its value). The every-fifth-tick
-    /// edge look (0x13f5a8..0x13f5b0) is not ported. Native `f32`.
+    /// (class 500..=540, `0x273278`); no hit: 4.0 and both flags 0 (0x13f5a0 keeps its value). Then every fifth tick
+    /// the edge probe ([`Hero::edge_probe`]). Native `f32`.
     pub fn wall_ahead_probe(&mut self, env: &Env) {
+        self.wall_probe(env);
+        if self.idle.counter.wrapping_sub(1).rem_euclid(5) == 0 { self.edge_probe(env); }
+    }
+
+    /// The edge probe of `0x23c458` (every fifth tick): 0x13f5b0 = 0, 0x13f5a8 = 0; on the ground (0x13f650 ≠ 0) a line
+    /// (flags 2) from the hero-local (1.1, 0, 1) down to (1.1, 0, −20) (its end at world z ≥ 0.5); no floor within 3 of
+    /// the start: spheres of the capsule radius (0x13f584) at (1.1 + d, 0, 0) for d = −0.4, −0.3, … until one is free
+    /// (none free before d reaches 0.5: no edge); then 0x13f5b0 = 1, 0x13f5a8 = the drop (20 without a floor),
+    /// 0x13f5ac = radius + d (≥ 0).
+    pub fn edge_probe(&mut self, env: &Env) {
+        self.edge = (false, 0.0, self.edge.2);
+        if self.grounded_ticks == 0 { return; }
+        let r = self.rows.map(to_f32x3);
+        let pos = to_f32x3(self.pos);
+        let local = |v: [f32; 3]| -> [f32; 3] { std::array::from_fn(|k| ((r[0][k] * v[0] + r[1][k] * v[1]) + r[2][k] * v[2]) + pos[k]) };
+        let a = local([1.1, 0.0, 1.0]);
+        let mut b = local([1.1, 0.0, -20.0]);
+        if b[2] < 0.5 { b[2] = 0.5; }
+        let mut depth = 20.0;
+        let hit = env.line(from_f32x3(a), from_f32x3(b), 2);
+        if let Some(o) = &hit {
+            depth = ((o.point[0] - a[0]).powi(2) + (o.point[1] - a[1]).powi(2) + (o.point[2] - a[2]).powi(2)).sqrt();
+            if depth <= 3.0 { return; }
+        }
+        let rad = self.cap_radius.to_f32();
+        let mut d = -0.4f32;
+        loop {
+            let c = local([1.1 + d, 0.0, 0.0]);
+            if crate::collision_query::coll_sphere_m(env.coll, env.mobys, c, rad, crate::collision_query::QueryFlags(2), None).is_none() { break; }
+            d += 0.1;
+            if 0.5 <= d { return; }
+        }
+        self.edge = (true, if hit.is_none() { 20.0 } else { depth }, (rad + d).max(0.0));
+    }
+
+    fn wall_probe(&mut self, env: &Env) {
         if self.idle.counter.wrapping_sub(1).rem_euclid(3) != 0 { return; }
         self.wall_ahead[0] = 4.0;
         self.f5a4 = 0;

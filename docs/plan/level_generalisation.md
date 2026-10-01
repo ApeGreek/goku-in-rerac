@@ -370,7 +370,7 @@ How the address is found on another level:
   - `HeroStatePhysics` 0x2370b8: level 0xf.
   - `HeroStateTransitions` 0x242930: levels 3/6/0x10 (ledge heights) and 0xf/0x11.
   - Idle 0x241e00: level 0xc.
-  - Camera avoidance 0x312ef8: level 0xf (noted at `follow_camera.rs:1007`).
+  - ~~Camera avoidance 0x312ef8: level 0xf~~ ported 2026-09-30 with its level-0xd branch (state 0x7b) (`follow_camera.rs` `avoidance`, player_controller.md §15); class 17's level-0xe ledge exception too (`follow_camera/level.rs`).
   - `InLevelFrameUpdate` 0x2aba68 pause triggers: levels 0xf/8/0xc (`tick.rs`, `menu_render.rs:450`).
   - `GameStateUpdate` 0x2a4080: levels 10/0xd.
   - `InitLevelRenderGlobals` 0x255958: 0xd, < 9, 10.

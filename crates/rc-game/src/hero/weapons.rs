@@ -635,6 +635,8 @@ pub(super) fn after_items(h: &mut Hero, c: &mut Ctx) {
         if h.state == 1 && s == 0x1e { h.set_state(c, 0x1e, true); }
         // The Visibomb's launch `0x2cb540`: `SetState(0x1d, 1)` (super::visibomb).
         if s == super::scripted::MISSILE { h.set_state(c, s, true); }
+        // The wrench's rebound off a flag-2 target `SetState(0x21, 1)` (super::melee).
+        if s == 0x21 { h.set_state(c, s, true); }
     }
     apply_pending(h, c);
 }

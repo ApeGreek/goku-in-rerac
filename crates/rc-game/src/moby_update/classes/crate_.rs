@@ -20,9 +20,14 @@
 //! 0xd0 / 0xe0 platform-local pose, 0xf0 platform, 0xf4 f32 platform height, 0xf8, 0xfc tick.
 //! Pointers are stored as `moby index + 1` (0 = null).
 //!
-//! **Not ported** (none placed on Novalis, or needing code that is not ported): the multi-hit classes
-//! 0x1fb–0x1fd (`FUN_0026f378`; the registry does not map them), crates on moving platforms (`FUN_00275290`
-//! headers, `FUN_002753b0`/`0x275528`), the colour from a mode-0x20 dropper header.
+//! **Crates on carriers** (G-CLS-024, `triggers`' moby side): the stacking init attaches a crate that settles on a
+//! carrier ([`attach_platform`]; the stack above it inherits the pose one height up), and the stack physics then
+//! places it through the carrier's frame every tick ([`ride_platform`]).
+//!
+//! **Not ported, with the evidence** (G-CLS-009, closed 2026-09-30): the multi-hit branch (classes 0x1fb–0x1fd,
+//! `FUN_0026f378` and the class swap toward 0x1fe) is code no level reaches: no level's class table (`lvl.vtbl`)
+//! maps 503, 504 or 506–510 to the crate update or to anything else (each maps only 500 / 501 / 502 / 505 / 511,
+//! level 00 / 02 / 03 / 04 / 08 / 13 / 17 without 502), so no such crate is ever loaded, placed or created.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern)] // FPU compare semantics and op order are spelled out on purpose.
 
 use crate::hero::physics::{self as ph, V4};
@@ -232,12 +237,12 @@ fn stack_init(w: &mut World, id: MobyId) {
                 set_ptr(&mut m.pvars, 0xa4, None);
             }
             Some(h) if is_crate(w, h.moby) => {}
-            Some(_) => {
+            Some(h) => {
                 let m = w.mm(id);
                 set_ptr(&mut m.pvars, 0xa4, None);
                 let f = p::u32(&m.pvars, 0xac) | 8;
                 p::set_u32(&mut m.pvars, 0xac, f);
-                // A platform (FUN_00275290) would be attached here: not ported.
+                if let Some(k) = h.moby { attach_platform(w, id, k); }
             }
         }
         return;
@@ -287,13 +292,19 @@ fn stack_init(w: &mut World, id: MobyId) {
     for &c2 in &members {
         if w.m(c2).state >= 0x80 || !is_crate(w, Some(c2)) || p::i32(&w.m(c2).pvars, 0xa4) != 0 { continue; }
         let up = p::f(&w.m(c2).pvars, 0xb0) * Pf::b(0x3f00_0000);
-        let _ = probe(w, c2, up);
+        if let Some(k) = probe(w, c2, up).and_then(|h| h.moby) {
+            if attach_platform(w, c2, k) {
+                let m = w.mm(c2);
+                let f = p::u32(&m.pvars, 0xac) | 8;
+                p::set_u32(&mut m.pvars, 0xac, f);
+            }
+        }
         let mut cur = Some(c2);
         while let Some(c) = cur {
             if let Some(b) = ptr(&w.m(c).pvars, 0xa4) {
                 let bcc = p::i32(&w.m(b).pvars, 0xcc);
                 p::set_i32(&mut w.mm(c).pvars, 0xcc, bcc);
-                // bp+0xf0 (platform) is never set in the port.
+                inherit_platform(w, c, b);
             }
             let (c6, class, above, path) = { let m = w.m(c); (p::i16(&m.pvars, 0xc6), m.o_class, p::i32(&m.pvars, 0xa0), p::i32(&m.pvars, 0xc0)) };
             if (c6 != 0 || class == 0x1f5) && above != 0 && path != -1 {
@@ -303,6 +314,84 @@ fn stack_init(w: &mut World, id: MobyId) {
         }
     }
     // Loop 3 (distances between every pair, results unused): nothing to do.
+}
+
+/// A crate settling on moby `k` (the stacking init's probe hit `0x1742d8`): when `k` is a carrier
+/// (`FUN_00275290`), the occlusion bits +0x36 = 0x7f80, the crate's pose in the carrier's frame
+/// (`FUN_00275528(…, k, pos, rot, +0xd0, +0xe0)`), +0xf4 = 0 (its height above that pose), +0xf0 = the carrier.
+/// Returns whether it attached. (In the group branch the game writes the occlusion bits of whatever moby its loop
+/// variable last held, the previous stack's top crate [L]; the port writes the crate's own.)
+fn attach_platform(w: &mut World, id: MobyId, k: MobyId) -> bool {
+    let Some(c) = w.table.mobys.get(k).and_then(crate::moby_update::triggers::carrier) else { return false };
+    let (pos, rot) = { let m = w.m(id); ([m.position[0], m.position[1], m.position[2]], [m.rotation[0], m.rotation[1], m.rotation[2]]) };
+    let (l, lr) = crate::moby_update::triggers::to_local(&c, pos, rot);
+    let m = w.mm(id);
+    m.occlusion = 0x7f80;
+    let (dw, ew) = (p::f(&m.pvars, 0xdc), p::f(&m.pvars, 0xec));
+    p::set_v4(&mut m.pvars, 0xd0, [sv::pf(l[0]), sv::pf(l[1]), sv::pf(l[2]), dw]);
+    p::set_v4(&mut m.pvars, 0xe0, [sv::pf(lr[0]), sv::pf(lr[1]), sv::pf(lr[2]), ew]);
+    p::set_f(&mut m.pvars, 0xf4, Pf::ZERO);
+    set_ptr(&mut m.pvars, 0xf0, Some(k));
+    true
+}
+
+/// Loop 2 of the stacking init, up a stack: the crate `b` below `c` rides a carrier, so `c` does too, one crate
+/// height higher in its frame: update distance 0xff, flags | 8, +0xd0 / +0xe0 / +0xf0 copied, +0xf4 = b's + 1.
+fn inherit_platform(w: &mut World, c: MobyId, b: MobyId) {
+    if p::i32(&w.m(b).pvars, 0xf0) == 0 { return; }
+    let (d0, e0, f0, f4) = { let bp = &w.m(b).pvars; (p::v4(bp, 0xd0), p::v4(bp, 0xe0), p::i32(bp, 0xf0), p::f(bp, 0xf4)) };
+    let m = w.mm(c);
+    m.update_dist = 0xff;
+    let f = p::u32(&m.pvars, 0xac) | 8;
+    p::set_u32(&mut m.pvars, 0xac, f);
+    p::set_v4(&mut m.pvars, 0xd0, d0);
+    p::set_v4(&mut m.pvars, 0xe0, e0);
+    p::set_i32(&mut m.pvars, 0xf0, f0);
+    p::set_f(&mut m.pvars, 0xf4, f4 + Pf::ONE);
+}
+
+/// The crate's carrier (+0xf0) as a carrier view (None: none, or no longer a carrier).
+fn platform_of(w: &World, id: MobyId) -> Option<crate::moby_update::triggers::Carrier> {
+    ptr(&w.m(id).pvars, 0xf0).and_then(|k| w.table.mobys.get(k)).and_then(crate::moby_update::triggers::carrier)
+}
+
+/// `FUN_002ec388`'s branch for a crate on a carrier (+0xf0 ≠ 0), after the gravity on +0x48: the height above the
+/// recorded pose +0xf4 settles (`Approach` toward 0, or the crate below's +0xf4 + 1, by `|+0x4c|` with +0x4c −=
+/// 10·dt² per tick; +0x4c = 0 once there); the occlusion bits +0x36 = 0x7f80; the pose is the local one (+0xd0
+/// raised by +0xf4, +0xe0) through the carrier's rows now (`FUN_002753b0`; block flag bit 2 re-records +0xd0
+/// without the height); the velocity +0x40 = this tick's move (w: +0x4c) and `CarryRiders(+0x60, +0x40, old rot,
+/// rot)`: a crate on a platform carries what stands on it.
+fn ride_platform(w: &mut World, c: MobyId) {
+    let below = ptr(&w.m(c).pvars, 0xa4);
+    let t = match below { None => 0.0, Some(b) => p::ff(&w.m(b).pvars, 0xf4) + 1.0 };
+    {
+        let m = w.mm(c);
+        let v = p::ff(&m.pvars, 0x4c) - sv::fl(DT2) * 10.0;
+        p::set_ff(&mut m.pvars, 0x4c, v);
+        let mut h = p::ff(&m.pvars, 0xf4);
+        let left = crate::moby_update::creature::turn::approach(t, v.abs(), &mut h);
+        p::set_ff(&mut m.pvars, 0xf4, h);
+        if left == 0.0 { p::set_ff(&mut m.pvars, 0x4c, 0.0); }
+        m.occlusion = 0x7f80;
+    }
+    let (old_p, old_r) = { let m = w.m(c); (m.position, m.rotation) };
+    let Some(k) = platform_of(w, c) else { return };
+    let (d0, h) = { let m = w.m(c); (p::v4f(&m.pvars, 0xd0), p::ff(&m.pvars, 0xf4)) };
+    let mut l = [d0[0], d0[1], d0[2] + h];
+    let e0 = p::v4f(&w.m(c).pvars, 0xe0);
+    let mut lr = [e0[0], e0[1], e0[2]];
+    let slot = w.m(c).class_slot;
+    let (q, qr) = crate::moby_update::triggers::from_local(&k, slot, &mut l, &mut lr);
+    let m = w.mm(c);
+    p::set_v4f(&mut m.pvars, 0xe0, [lr[0], lr[1], lr[2], e0[3]]);
+    if k.delta.flags & 4 != 0 { p::set_v4f(&mut m.pvars, 0xd0, [l[0], l[1], l[2] - h, d0[3]]); }
+    m.position[..3].copy_from_slice(&q);
+    m.rotation[..3].copy_from_slice(&qr);
+    let w4c = p::ff(&m.pvars, 0x4c);
+    let vel = [q[0] - old_p[0], q[1] - old_p[1], q[2] - old_p[2], w4c];
+    p::set_v4f(&mut m.pvars, 0x40, vel);
+    let new_r = m.rotation;
+    if m.pvars.len() >= 0xa0 { crate::moby_update::triggers::carry_riders(&mut m.pvars, 0x60, vel, old_r, new_r); }
 }
 
 /// The spline counter of the ammo-crate stacks (loop 2 of `FUN_002eac18`): the first point's w word counts.
@@ -509,7 +598,11 @@ fn stack_physics(w: &mut World, id: MobyId) {
         p::set_f(&mut w.mm(c).pvars, 0x48, vz);
         if vz < Pf::b(0xbe99_999a) { vz = Pf::b(0xbe99_999a); p::set_f(&mut w.mm(c).pvars, 0x48, vz); }
         if Pf::b(0x3e99_999a) < vz { vz = Pf::b(0x3e99_999a); p::set_f(&mut w.mm(c).pvars, 0x48, vz); }
-        // (A platform, pvar+0xf0, is never set in the port.)
+        if p::i32(&w.m(c).pvars, 0xf0) != 0 {
+            ride_platform(w, c);
+            cur = next;
+            continue;
+        }
         let below = ptr(&w.m(c).pvars, 0xa4);
         let pos = pv(w.m(c).position);
         let (hit, sup) = match below {
@@ -830,10 +923,13 @@ pub fn bolt_burst(w: &mut World, id: MobyId, lo: i32, hi: i32, flags: u32, path:
     let v = w.svc.counters.challenge_on;
     let dc: u8 = if v != 0 { (flags & 0x20 == 0) as u8 } else { 0 };
     if flags == 0 || (lo == 0 && hi == 0) { return; }
-    if flags & 4 != 0 && w.m(id).mode & 0x20 != 0 {
-        // `*(pvar+0) + 0x20`: the dropper's base velocity from its pvar header (not ported).
-        w.svc.fx.unported_base += 1;
-        base = [Pf::ZERO; 4];
+    if flags & 4 != 0 {
+        // `FUN_002711f8(dropper)` (the mode-0x20 pvar record, pvar +0x00): its +0x20 vector is the base velocity
+        // every coin starts with (a dropper without the header: zero).
+        let m = w.m(id);
+        if let Some(o) = crate::moby_update::triggers::pvar_record(m).filter(|&o| o + 0x30 <= m.pvars.len()) {
+            base = p::v4(&m.pvars, o + 0x20);
+        }
     }
     let lo = if lo > 0 { lo } else { 1 };
     let mut n = w.rng.randi(hi - lo + 1) + lo;
@@ -911,5 +1007,81 @@ pub fn bolt_burst(w: &mut World, id: MobyId, lo: i32, hi: i32, flags: u32, path:
         vel = ph::vadd(vel, base);
         let value = if n50 != 0 { n50 -= 1; 0x32 } else if n20 != 0 { n20 -= 1; 0x14 } else if n5 != 0 { n5 -= 1; 5 } else { n1 -= 1; 1 };
         bolt::spawn(w, id, pos, vel, flags, value, dc);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::moby_runtime::{Moby, MobyTable};
+    use crate::moby_update::services::Services;
+    use crate::moby_update::triggers;
+
+    /// Carrier 0 at the origin (block +0x20) and two crates 1 (bottom, at (3, 0, 1)) and 2 (on it).
+    fn scene() -> MobyTable {
+        let mut k = Moby { o_class: 707, pvars: vec![0; 0x80], ..Moby::default() };
+        k.mode |= 0x20;
+        p::set_i32(&mut k.pvars, 8, 0x20);
+        for i in 0..3 { k.rows[i][i] = 1.0; }
+        let c1 = Moby { o_class: 500, state: 1, pvars: vec![0; 0x100], position: [3.0, 0.0, 1.0, 1.0], ..Moby::default() };
+        let c2 = Moby { o_class: 500, state: 1, pvars: vec![0; 0x100], position: [3.0, 0.0, 2.0, 1.0], ..Moby::default() };
+        MobyTable::new(vec![k, c1, c2], 4)
+    }
+
+    fn with_world(t: &mut MobyTable, f: impl FnOnce(&mut World)) {
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = Services::new();
+        let mut w = World::new(t, &hero, &mut rng, &classes, &mut svc, 3);
+        f(&mut w);
+    }
+
+    #[test]
+    fn crate_attaches_to_a_carrier_and_the_stack_inherits() {
+        let mut t = scene();
+        t.mobys[1].occlusion = 0;
+        with_world(&mut t, |w| {
+            assert!(attach_platform(w, 1, 0));
+            assert!(!attach_platform(w, 1, 2), "a crate is no carrier");
+            inherit_platform(w, 2, 1);
+        });
+        let (c1, c2) = (&t.mobys[1], &t.mobys[2]);
+        assert_eq!((c1.occlusion, p::i32(&c1.pvars, 0xf0), p::ff(&c1.pvars, 0xf4)), (0x7f80, 1, 0.0));
+        assert_eq!(p::v4f(&c1.pvars, 0xd0)[..3], [3.0, 0.0, 1.0]);
+        assert_eq!((p::i32(&c2.pvars, 0xf0), p::ff(&c2.pvars, 0xf4), c2.update_dist, p::u32(&c2.pvars, 0xac) & 8), (1, 1.0, 0xff, 8));
+        assert_eq!(p::v4f(&c2.pvars, 0xd0), p::v4f(&c1.pvars, 0xd0));
+    }
+
+    /// The carrier turns a quarter and moves by (1, 0, 0): the crate goes round with it, publishes its own move to
+    /// its block +0x60, and a raised crate settles toward its rest height.
+    #[test]
+    fn crate_rides_a_turning_carrier() {
+        let mut t = scene();
+        with_world(&mut t, |w| { attach_platform(w, 1, 0); });
+        let q = std::f32::consts::FRAC_PI_2;
+        let r = triggers::euler_matrix([0.0, 0.0, q]);
+        {
+            let k = &mut t.mobys[0];
+            k.position[0] = 1.0;
+            k.rotation[2] = q;
+            for (row, src) in k.rows.iter_mut().zip(&r) { for (x, y) in row.iter_mut().zip(src) { *x = *y as f32; } }
+        }
+        p::set_ff(&mut t.mobys[1].pvars, 0xf4, 0.5);
+        with_world(&mut t, |w| ride_platform(w, 1));
+        let c = &t.mobys[1];
+        let dt2 = sv::fl(DT2);
+        let h = 0.5 - 10.0 * dt2;
+        assert_eq!(p::ff(&c.pvars, 0x4c), -10.0 * dt2);
+        assert_eq!(p::ff(&c.pvars, 0xf4), h);
+        assert!((c.position[0] - 1.0).abs() < 1e-5 && (c.position[1] - 3.0).abs() < 1e-5 && (c.position[2] - (1.0 + h)).abs() < 1e-5, "{:?}", c.position);
+        assert!((c.rotation[2] - q).abs() < 1e-5);
+        let v = p::v4f(&c.pvars, 0x40);
+        assert!((v[0] + 2.0).abs() < 1e-5 && (v[1] - 3.0).abs() < 1e-5 && v[3] == -10.0 * dt2, "{v:?}");
+        let blk = &c.pvars[0x60..];
+        let rz = f32::from_le_bytes(blk[8..12].try_into().unwrap());
+        let dx = f32::from_le_bytes(blk[0x10..0x14].try_into().unwrap());
+        assert!((rz - q).abs() < 1e-5 && (dx - v[0]).abs() < 1e-6);
+        assert_eq!(c.occlusion, 0x7f80);
     }
 }

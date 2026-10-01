@@ -115,7 +115,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("look stance (set by mobys)", 0, Stance, true),             // 0x1e
     s("held by a class, control kept (the mouse's summon)", 9, Scripted, true), // 0x1f
     s("gadget lunge (the Walloper)", 6, Melee, true),             // 0x20
-    s("wrench rebound", 10, Melee, false),                        // 0x21
+    s("wrench rebound", 10, Melee, true),                         // 0x21
     s("Thruster-Pack stomp (R1 in the air)", 0xb, Packs, true),   // 0x22
     s("glove throw (hand item)", 6, Weapons, true),                // 0x23
     s("Swingshot fire", 0xd, Swingshot, true),                   // 0x24
@@ -237,6 +237,10 @@ impl Hero {
                 self.melee_entry(c, id, play);
                 None
             }
+            Melee if id == 0x21 => {
+                self.rebound_entry(c, play);
+                None
+            }
             Swim => {
                 self.swim_entry(c, id, play);
                 None
@@ -278,6 +282,7 @@ impl Hero {
                 0x14 => self.phys_jump_attack(env, anim),
                 0x15 => return super::comet::physics(self, env, anim),
                 0x20 => return super::walloper::physics(self, env, anim),
+                0x21 => super::packs::rebound_physics(self),
                 _ => return false,
             },
             Weapons if s == 0x23 => return super::weapons::physics(self, env),
@@ -308,7 +313,14 @@ impl Hero {
             Air => self.tr_fall(c),
             Jump if implemented(s) => self.tr_jump(c),
             Melee => {
-                if matches!(s, 0x13..=0x15) { self.tr_melee(c) } else if s == 0x20 { super::walloper::transitions(self, c) }
+                if matches!(s, 0x13..=0x15) {
+                    self.tr_melee(c)
+                } else if s == 0x20 {
+                    super::walloper::transitions(self, c)
+                } else if s == 0x21 && c.anim.view().flags & 2 != 0 {
+                    // 0x21 (with 0x7a): idle once the anim wraps.
+                    self.set_state(c, 0, true);
+                }
             }
             Weapons if s == 0x23 => super::weapons::transitions(self, c),
             Swim => match s {
@@ -357,6 +369,8 @@ mod tests {
         want.extend([0x15, 0x23]);
         // The gadget lunge (walloper.rs).
         want.push(0x20);
+        // The wrench rebound (melee.rs; the physics and transitions of 0x7a).
+        want.push(0x21);
         // The bolt crank (crank.rs).
         want.push(0x3b);
         // The scripted hold (scripted.rs, the cinematics) and the scene body 99 / 100.

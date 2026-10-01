@@ -805,3 +805,216 @@ level 0x13f640, the depth 0x1415f4 and the flags of the surface reaction; no lev
   `,760-760:press R1,761-820:press R1+SQUARE,761-840:stick 0 -1,821-900:press R1` with `RC_GIVE_HYDROPACK=1` (new debug
   switch: the game state owns item 4), frame 830: state 0x35 pitched down near the lake floor (z ≈ 35), camera under water
   (`underwater: on`). Two runs: identical `RC_PLAY_TRACE` and identical PNGs.
+
+## 15. The level camera system (camera records, the choice, class 17) — 2026-09-30 (W3 lane 3, G-HERO-027)
+
+Code: `rc-formats/src/cameras.rs` (records, pvar views), `rc-formats/src/level_overlay.rs` (`camvtbl`),
+`rc-game/src/follow_camera/level.rs` (slots, the choice, class 17), `rc-game/src/follow_camera.rs` (the setters, the
+avoidance's level branches), `rc-engine/src/gameplay.rs` (`camera_ports`, the load; `RC_LEVEL_CAMERAS=0` skips it).
+
+**System or not (evidence first).** A system: one `UpdateAllCameras` 0x20d620 / `Camera_ActivationCheckPriority`
+0x20d410 / switch `FUN_0020d110` / slot init `FUN_0020ef58` in every overlay (overlay-diff over every function the
+camera code cites: identical on all 19 levels up to relocations and alignment padding), driven by per-level data (the
+records) and a per-level class table `lvl.camvtbl` (`{class, activate, init, update, pre}` × n, `-1` ending it). The
+classes are per class: each has its own four functions. Class 17 (the follow-camera tweak regions) is one code on all 14
+levels that have it (clusters 1477..1479). The follow camera's setters (0x313560..0x313b48) are shared: callers are
+class 17, the hero-state tweaks `0x3111d8`, the first-person camera's entry turn, and 29 census units (mobys).
+The camera-collision grid is **not** a working system in RAC1: section 0x84 is 0x4010 bytes with every cell 0 on all
+19 levels (`cameras::tests::every_level_disc`), so `0x20fdb0` never returns a primitive and its users (the avoidance's
+pass-through test `0x30f468`, the push-out `0x30f358`, the end sphere, the first-person "no first person" cells) always
+take the "none" path — what the port already did. Nothing to port.
+
+**Records** (gameplay 0x08, loader 0x255958 → table 0x15ef50, reordered to `{pos, class @+0x0c, rot, pvar @+0x1c}`):
+| level | 00 | 01 | 02 | 03 | 04 | 05 | 06 | 07 | 08 | 09 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| records | 7 | 7 | 7 | 34 | 8 | 8 | 8 | 7 | 13 | 10 | 15 | 6 | 11 | 7 | 15 | 13 | 12 | 9 | 7 |
+
+Classes over all levels: 0 ×19 (follow, priority 5, kind 0), 4 ×19 (first person), 5 ×19 (script), 6 ×19 (type 6),
+7 ×19 (kind 7: the Swingshot's camera mode 7), **17 ×58** (14 levels), 3 ×13 (kind 7, camera mode 3: rails; with a rail
+in pvar +0x24 on 08 / 16), 23 ×12, 18 ×8, 19 ×6, 14 ×4 (kind 4, Kerwan), 1 ×2, 8 ×2, 22 ×2, 20 ×1, 21 ×1. Pvar header
+(every class): +0x08 sphere, +0x0c cuboid, +0x10 cylinder, +0x14 path, +0x18 (1.5; not read [L]), +0x1c priority,
++0x1d blend kind, +0x1e, +0x1f activation kind. Class 17's block (0x60) is `RegionTweak` (fields in `cameras.rs`).
+
+**Coverage: the system** (level01 addresses)
+| address | what it does | port |
+|---|---|---|
+| 0x20ef58 slot init | per record: UpdateCam +0x84 index, +0x86 class, +0x8c mode (`0x20ee30`: the class's `camvtbl` row), +0x7c priority, +0x74 kind, +0x78 = −1, +0x7d/+0x7e/+0x8e/+0x8a/+0x89 = 0, +0x80/+0x82 = −1, active flag, pvar +0x04 = slot; camera globals cleared; `CameraResetBehindHero` | `LevelCameras::new` (the fields the choice reads); the follow camera's reset `Camera::new`; the UpdateCam words of classes the port does not run: n/a |
+| 0x20ee30 | class → `camvtbl` row (0 → 0; unknown → the end row) | `CameraPorts::from_overlays` (per class, by code identity) |
+| 0x20d620 `UpdateAllCameras` | the current camera's pre hook (+0x10), every active slot but the current in slot order through 0x20d410 against the best so far, the switch on a change, `Camera_handleCollWithHero`, the update (+0xc), +0x64 = position, `ExecuteCamPostUpdFuncs` | `Camera::activation_loop` + `Camera::update` (pre hooks: the first-person release, the script / type-6 releases as before); `Camera_handleCollWithHero` (camera moby 0x3ef): NOT ported (G-HERO-026); post callbacks 0x15ef4c: none registered by ported code |
+| 0x20d410 check | priority 0 → no; the class hook (−1 no / 1 yes / 0 on); kind 0 always, 1 / 2 once entered (+0x7d), 4 the cuboid pvar +0x0c at the feet 0x13f3d0 (priority first), 7 hero camera mode 0x1415d4 = class (class 3: its rail 0x13f8b0 and not off the end 0x13f8c0), else no; beats the best only with a higher priority unless the best releases (+0x7e) | `level::activation_check` (test `activation_check_kinds_and_priorities`) |
+| 0x20d110 switch | blend by the new camera's pvar +0x1d / the old's +0x7e (1 / 5 blend at +0x78 or 0.018, 3 / 6 copy the pose, 4 cut; Novalis rate 0.01), D copied to 0x169810, the new camera's init, `BackupCurrentCam`, 0x167240 | the switches the port has (first person, script, type 6: follow_camera.rs, script.rs, type6.rs; the Swingshot camera in and out: `swing_switch_in` / `swing_frame`, the pose copy with the follow init's `0x311dd0` path `Camera::init_from`); a switch to an unported class: NOT (G-HERO-027, recorded in `LevelCameras::wanted`; over a released Swingshot camera the follow camera comes back instead) |
+| 0x167373 / 0x167372 blend kind | 0 the rates blend, 2 the orbit about Ratchet (`fun_001ec8a0` capture → `fun_001ec710` / `fun_001ec7f0` / `fun_001ec868`, `fun_001ed2b0` → `fun_001eccd8` step), 1 (no writer among the ported cameras) | `CamBlend::kind` / `running`, `OrbitBlend` (the first-person init / release, `CameraScript2(2 / 4)`, the type-6 hand-back reset it to 0 as the game does) |
+| 0x20e670 `CameraPreUpdate` | up vectors, hero motion | `Camera::pre_motion` (§7; unchanged) |
+
+**Coverage: the classes** (activate / init / update / pre; level01 unless noted)
+| class | functions | what | port |
+|---|---|---|---|
+| 0 | 0x314df8 (returns 0) / 0x311f38 / 0x314e00 / 0x314e90 (empty) | the follow camera | §7, `Camera::update_type0`; init now also clears D+0x220 / D+0x230 |
+| 4 | 0x316880 / 0x316b98 / 0x316330 / 0x316c08 | first person | `first_person_*` (its hook is the loop's class-4 slot) |
+| 5 | 0x317668 (0) / 0x3171b8 / 0x317670 / 0x3176c8 (empty) | script camera | `script.rs` (switched by `CameraScript`, not by +0x7d) |
+| 6 | 0x317f50 (0) / 0x317f58 / 0x318008 / 0x318028 (empty) | the Visibomb's view | `type6.rs` |
+| 17 | 0x319688 / 0x319788, 0x319790, 0x319798 (all empty) | follow-camera tweak regions (never current) | `level.rs` (below) |
+| 7 | 0x318b10 (0) / 0x318030 / 0x318b18 / 0x318c08 | Swingshot camera (camera mode 7; uses the collision push `0x20f2a8`) | `swing.rs` (below; all 19 levels) |
+| 3 | 0x315dd8 (0) / 0x315de0 / 0x315358 / 0x316030 | rail / cable camera (mode 3; Novalis, 05, 08, 16, 17) | NOT (G-HERO-027) |
+| 1, 14 | L03 0x2e8870.., 0x2ebd70.. | kind 4: Ratchet in the record's cuboid (03, 04) | NOT (G-HERO-027) |
+| 23 | L00 0x2ed8b0 (0) / three empty hooks | the placed view (arrival spots; never current) | `level.rs` `placed_*` (below; 11 levels) |
+| 18 | L02 0x2fc298 (0) / three empty hooks | the moby focus (never current) | `focus.rs` (below; 7 levels) |
+| 22 | L15 0x2f8ba8 (−1) → 0x2f88e8 / three empty | class 18's modes 1 / 2 for **giant Clank only** (body 0x1413f4 = 2; its target a point of the table 0x1600ec + i·0x80 + 0x30; D+0x230 = 2) | NOT (G-HERO-005: body 2 is not reachable; no consumer) |
+| 19 | L10 0x2f65f8 (1 when inside: +0x39 / +0x38 / group +0x48 / state +0x44 conditions) / 0x2f5b58 / 0x2f5f18 / 0x2f66c0 | a camera of its own (10, 13, 14, 15) | NOT (G-HERO-027) |
+| 8, 20, 21 | L05 0x32a6d8.., L14 0x315920.. / 0x316748.. | 8: kind 7; 20 / 21: their own hooks (kind 3) | NOT (G-HERO-027) |
+
+**Coverage: class 17** (module doc of `follow_camera/level.rs` has the full rules)
+| address | call / branch | port (`follow_camera/level.rs`) / test |
+|---|---|---|
+| 0x319688 | +0x48 = 1 and +0x4a ≠ 0 → nothing | `region_hook` / `leave_and_once` |
+| | mode 11 only with body 2 (0x1413f4) | `region_hook` (body 2 unreachable: G-HERO-005) |
+| | modes 1 / 10, counter 0, airborne 0x13f65c ≠ 0 → not unless level 14 with camera mode 0xd | `region_hook` (untested: level-14 ledge) |
+| | mode 2 outside group 0x1a → counter 0 (lock kept) | `region_hook` / `mode2_cable_group` |
+| 0x318de0 | mode 8 needs D+0x230 ≠ 0, mode 6 needs 0 | `region_update` (D+0x230 = 1 from the focus scan not ported: mode 8 never runs, G-HERO-026) |
+| | region test false → leave (+0x4a, counter 0, `0x313560`) | `region_leave` / `leave_and_once` |
+| | lock `0x313598` refused → counter 0 (+0x4a), no release | `claim_owner` / `owner_lock_priorities` |
+| | +0x36 and `FastDiffRots(rot.z, 0x167258)` ≥ 80° → leave | / `facing_check`, `novalis_region_tilts_the_camera` |
+| | +0x48 and mode 5 and 0x13cae0 & 5 (L1 / L2) → leave | `region_update` (untested) |
+| | counter 0 → capture D+0x11c / +0x120 into +0x40 / +0x44 | / `region_writes_the_follow_camera` |
+| | mode 5, counter 0 → the snap: turn +0x00 := 0; D+0x130 set to the distance, +0x15c, +0x160, +0xf0, +0x140, position = pivot + offset, +0xd0 = +0x80, +0x40 = +0xa0 = the feet, +0x00 = +0x1f0 = position, +0x34 / +0x38 / +0x2c / +0x30 = 0, +0x24 = +0xf0, +0x28 = +0x160 | `region_snap` (untested: 5 regions on 02 / 05 / 11 / 12 / 14) |
+| | counter += 1; mode 10 → `0x313858`, D+0x230 = 0x14d; mode 11 → `0x313858`, D+0x230 = 2 | / D+0x230 = 0x14d skips the ledge turn in `update_type0` (untested) |
+| | modes 2 / 4: +0x1b8 |= 3, counter ≤ 200, `0x3137f8` | / `mode2_cable_group` |
+| | modes 1 / 7 / 9 / 10: stick → 200; ≥ 200 stopped (held while `0x167334` > 0); ≥ 400 → 1 | / `turn_counters` |
+| | mode 3: counter ≤ 1 (rate / 1); others ≤ 200 | / `turn_counters` |
+| | the turn `0x313af0(turn·π/180·counter/200, tol·π/180, (cos, sin, 0) of rot.z)` unless stopped in 1 / 7 / 9 | `turn_toward` / `turn_counters` |
+| | distance +0x24: `0x313628(d, 0.003)` + `0x3137f8`; modes 6 / 8: 0.002 + `0x313668(d + 1.36)` | / `region_writes_the_follow_camera` (mode 6/8 rates untested) |
+| | pivot +0x28 `0x313690` (0.003 / 0.002); look +0x30 `0x3136c8` (0.005 / 0.002); pitch +0x50 `0x313718`; +0x54 / +0x56 → +0x1b8 |= 2 / 1; +0x34 = 0 → `0x313740(0)` | / `region_writes_the_follow_camera` |
+| | spring +0x38 / +0x3c: eased over 120 ticks from the captured one (`0x313768`, zero args skipped) | / `region_writes_the_follow_camera` |
+| | modes 1 / 7 / 10: `0x3137f8`, `0x313820`, `0x3137b0(0.01, 0.2)` | / `turn_counters` |
+| 0x318c40 | not class 0 current → false; forced inside while running in mode 2 + group 0x1a or mode 4 + camera mode 3; cuboid +0x0c, cuboid +0x4c, cylinder +0x10, sphere +0x08, path +0x14 (level 04's path test is a superset copy: no class-17 path there) | `region_test` / `mode2_cable_group`, `kerwan_cables_take_the_cable_regions` |
+
+**Class 7, the Swingshot camera** (`follow_camera/swing.rs`, 2026-10-01). System or not: one camera class (a row of
+`lvl.camvtbl`), one code on all 19 levels (masked overlay diff of 0x318030 / 0x318b18 / 0x3182c8 / 0x318900 /
+0x20f2a8 and the blend's 0x20d730 / 0x20d910 / 0x20d9f0 / 0x20ded8: `=` everywhere, the `c` / `s` cells on 02..18 are the
+matcher's function ends); its level branches (14, 7, 9) are data in the one copy. Every level has one record (priority
+6, kind 7, blend 3). `CameraPorts::swing` (test `ported_camera_classes_every_level`: true on 00..18).
+| address | call / branch | port (`swing.rs`) / test |
+|---|---|---|
+| 0x318b10 | activation hook: 0 (the kind-7 test decides) | `Candidate::hook` 0 / `unported_class_is_wanted` |
+| 0x20d110 → 0x318030 | blend kind 3 (pose copied, +0x7d = 2; kinds 1 / 5 would set rates, others +0x8e = 1: all overridden by the init) | `swing_switch_in` / `switch_in_and_release` |
+| 0x318030 | D+0x80 = 0; D+0x8c = 1.5 (2.0 on level 14 in 0x2c / 0x2d); D+0xa0 = 4.64, D+0xb0 = 2.0, D+0x30 = 0, D+0xbc = 0 | `swing_init` / `swing_placement` |
+| | D+0x88 (12°), +0x98, +0x9c, +0x84 (Ratchet), +0xa4, +0xb4, +0x00, +0x10..+0x1e, +0x34..+0x3c | n/a: no class-7 code reads them; the follow camera's init rewrites what it reads |
+| | pose = the previous camera 0x167284 (rows, position), +0x40 = its forward, +0x7e = 0 | `swing_init` / `switch_in_and_release` |
+| | swinging (0x2c / 0x2d): D+0x70 = (cos, sin) of 0x13fcfc, D+0xb8 = it, D+0xc0 = 0x13fce4; else D+0x70 = flat unit (0x13fcb4 − camera), D+0xb8 its yaw, D+0xc0 = 0x13fcb4 | / `switch_in_and_release`, `pull_init_and_ramp` |
+| | 0x167370 = 1, 0x167373 = 2, 0x1673f4 = 60 | / `switch_in_and_release`, `orbit_blend_lands` |
+| 0x318b18 | state 0x2c: D+0xc0 ≠ 0x13fce4, or 0x24..0x26: ≠ 0x13fcb4 → own pose into 0x167284's camera, the init, 0x1673f4 = 45 | `swing_update` / `target_change_reinits` |
+| | 0x318ad0 (0x3182c8, 0x318900), the push `0x20f2a8(0.5, pos)`, D+0x80 = 0 | `swing_update` |
+| 0x3182c8 | distance / height targets 4.64 / 2.0; 0x2c with a target: f = clamp(target z − Ratchet z, 0, 0x13fcf0) / 0x13fcf0 → 3.65 + f / 2f | `swing_place` / `swing_placement` |
+| | `Approach` distance 8·dt, height 4·dt, look height (h − 0.5; level 14 in 0x2c: h + 0.25) 8·dt | / `swing_placement` |
+| | 0x2c on levels 14 / 7 / 9 with the target's group ≠ −1: the group list 0x1abcc0[+0x21], classes 0x323 / 0x2f6, not the target, cos > 0 with 0x13f3e8, score `d − 10·cos` < best (1000) → yaw target = toward it | `next_target` (the tick feeds `SwingCamera::group`, `MobySystem::group`) / `group_look` |
+| | else 0x2c: 0x13f3e8, k 0.00125; 0x25: 0x13f3e8, k 0.0035 (gp−0x49b0); d 0.175 (`0x20cf28`); other states: no spring | / `group_look`, `pull_init_and_ramp` |
+| | D+0x80 = 1 → the moby D+0x84's yaw +0x48 | n/a: D+0x80 is 0 after the init and every update, no other writer |
+| | D+0x70 from the yaw; target = Ratchet − dir·distance + (0, 0, height) | / `swing_placement` |
+| | `CollLine_Fix(camera, target, 0x12)` hit: 0.5 short (when > 0.5 away) and up to 5 × `coll_sphere(0.75, flags 0)`; yaw = toward Ratchet, D+0xbc = 0; ≤ 0.5 away: the target point kept | / `wall_stops_short` |
+| 0x318900 | look = Ratchet + (0, 0, D+0x8c); angle = 90° − asin(look dir · forward); 0x25: D+0x30 += 0.017 (≤ 1) × angle; else `0x20cf28(0, angle, 0.02, 0.175)` | `swing_rows` / `pull_init_and_ramp`, `swing_placement` |
+| | forward = rot(saved, turn, saved × dir); saved = it normalised; left = up_s × forward; up = forward × left | / `swing_placement` |
+| 0x318c08 | pre hook: 0x1415d4 ≠ 7 and state ≠ 6 → +0x7d = 0, +0x7e = 3 | `swing_pre` / `switch_in_and_release` |
+| 0x20d110 back | +0x7e = 3 with the follow record's blend 0: pose copied, +0x7d = 2, no blend; init `0x311dd0` (T = S = Ratchet, vertical target, velocities 0, pivot / look along −gravity, offsets from the copied position, D+0x220 = 0), D+0x20 = 0 after class 7 on the ground (0x13f65c = 0) else 90 | `swing_frame`, `init_from`, `place_under_pose` / `switch_in_and_release` |
+| 0x20f2a8 | +0x8a ≠ 0 → no push, +0x8a = 0 | n/a: set by `CameraScript2(0)` on the script camera only |
+| | n = trunc(\|pos − +0x64\| / 0.9r) + 1 steps, each: up to 6 × `coll_sphere(r, flags 0x15ef5c, Ratchet)`, +0x89 = 1 when pushed; 0x167240 = the result (unless 0x16c4ec) | `collision_push` / `collision_push_open`, `collision_push_wall` |
+| 0x20d620 | +0x64 = +0x30 after the update | `swing_frame` |
+| `Camera_handleCollWithHero` | the camera moby 0x3ef deleted while class 7 is current | NOT (G-HERO-026: no camera moby) |
+| orbit blend 0x20ded8 | n < 1 → done (the camera's view, 0x167372 = 0, 0x167370 = 0); f = 1 / CosInterp(1, N, n / N); target (yaw, pitch, distance) of the camera about Ratchet in the captured frame; each eased by f (angles wrapped); position = Ratchet + rot(rot(setlen(fwd, d), yaw, up), pitch, up × v); rotation: the flat angle to the camera's forward (the long way when its side disagrees with the yaw step beyond 90°) × f about the frame's up, then the pitch × f; rows with left = −(gravity × forward); n −= 1 | `CamBlend::orbit_step` / `orbit_blend_lands` |
+
+**Class 23, the placed view** (`follow_camera/level.rs` `placed_*`, `rc_formats::cameras::PlacedView`, 2026-10-01).
+System or not: one class, level 00's code (hook 0x2ed8b0, region test 0x2ed348, update 0x2ed498) on the 11 levels that
+list it (00, 04, 06, 07, 08, 09, 10, 13, 15, 16, 18; masked overlay diff of the two helpers `=` on each, the hook by
+`Relocation::same_code` in `CameraPorts::placed`); like class 17 it never becomes current and retunes the follow camera
+through the same setters and the same lock (0x313598 / 0x313560). Not class 17's code (no shared function). 12 records,
+priority 4, activation kind 3, blend 3. The arrival spots: Ratchet starts inside the cuboid at the ship, the camera
+stands at the record's position; once he is outside with the follow camera up the region is done for good (+0x26).
+| address | call / branch | port / test |
+|---|---|---|
+| 0x2ed8b0 | +0x26 ≠ 0 → nothing; game mode 0x15f5c4 = 0 or not inside → update; else (a cutscene inside) +0x20 = 0, +0x26 = 0; returns 0 | `placed_hook` (the port's camera runs in game mode 0 only: the cutscene branch n/a) / `placed_view_places_the_camera` |
+| 0x2ed348 | follow camera not current → 0; +0x46 and body ≠ 1 → 0; +0x44 and body 1 → 0; +0x34 and \|D+0x164\| or \|D+0x1b0\| > 0.01 → 0; cuboid +0x0c, cylinder +0x10, sphere +0x08 (Ratchet's feet) → 1; else +0x26 = 1, 0 | `placed_test` / `placed_view_conditions`, `placed_view_places_the_camera` |
+| 0x2ed498 | not inside → leave (+0x26 = 1 if running, +0x20 = 0, `0x313560`) | `placed_leave` / `placed_view_places_the_camera` |
+| | `0x313598` refused → leave without the release | / (`owner_lock_priorities` covers the lock) |
+| | L1 / L2 (0x13cae0 & 5) → leave | / `placed_view_conditions` |
+| | +0x20 < 2: distance +0x38 = flat \|record − Ratchet\| (about gravity 0x13f5e0), height +0x3c = −(d · g), look +0x40 = height − distance·tan(+0x2c) (0 at ±90°); the camera at the record: +0x30, D+0x15c, D+0x160, D+0xf0, pivot / look along −g, D+0x130 = D+0x140 = offset, D+0x40 = D+0xa0 = Ratchet, D+0x00 = D+0x1f0 = the position, D+0x200 = 0, D+0x34 / +0x38 / +0x2c / +0x30 = 0, D+0x24 / +0x28 = the heights, D+0x22 = 0 | `placed_update`, `placed_snap` / `placed_view_places_the_camera` |
+| | +0x20 += 1 (≤ 200); +0x38 → `0x313628(d, 0.003)` + `0x3137f8`; +0x3c → `0x313690(h, 0.003)`; +0x40 → `0x3136c8(l, 0.005)`; +0x28 → `0x313718(deg)`; +0x24 = 0 → `0x313740(0)` | / `placed_view_places_the_camera`, `placed_view_conditions` |
+| pvar +0x30 | (0.32 / 0.737 / …) | n/a: not read by the class [L] |
+
+**Class 18, the moby focus** (`follow_camera/focus.rs`, `rc_formats::cameras::MobyFocus`, 2026-10-01). System or
+not: one class; level 02's code (hook 0x2fc298, update 0x2fb9c8, region test 0x2fb648, view test 0x2fb788) on 02,
+03, 06, 07, 08, 12, 18 (decompiles identical up to addresses; `CameraPorts::focus` compares the hook and its update
+copy word for word, the tests by `Relocation`); never current; the follow camera's setters and region lock (with 17 and
+23). Class 22 (L15) is a separate giant-Clank variant of its modes 1 / 2 (not ported, G-HERO-005). 8 records.
+**Data fix**: the camera blocks get the loader's moby-link fixups (gameplay 0x50; +0x28 of every class-18 record):
+`rc_formats::cameras::remap_moby_links` through the load's instance → moby map (engine load); without it the index
+named a free slot on levels with uncreated instances (L08: the regions were dead).
+| address | call / branch | port (`focus.rs`) / test |
+|---|---|---|
+| 0x2fc298 | follow camera current: +0x20 < 0 → nothing, else the update; +0x50 = 0; answers 0 | `focus_hook` / `moby_gone_group_and_suppress` |
+| 0x2fb9c8 | +0x50 ≠ 0 → +0x20 = 0, release | `focus_update` / `moby_gone_group_and_suppress` (no writer of +0x50 found [L]) |
+| | the moby: group +0x44 ≥ 0 → its list's first member with state < 0x80, none → gone; else the moby +0x28, state ≥ 0x80 → gone; gone → +0x20 = −1, release | `focus_moby` (the tick feeds `CamWorld::mobys` / `groups`) / same |
+| | +0x48 = the moby; mode 6 and 0x13f64c ≠ it → +0x20 = 0, release | `focus_ground` / `mode6_and_near_kind` |
+| | `0x313598` refused → +0x20 = 0; region test false → +0x20 = 0, release | / `mode3_turns_toward_the_moby` |
+| | mode 5: +0x20 < 2 → +0x40 = record rot.z, else \|rx\| or \|ry\| ≥ 0.3 → the camera's yaw (the "+π when > 90° off" result is discarded); mode 4: rot.z, or rot.z + π when that is more than 90° off the camera's yaw | / `modes_4_5_facing` |
+| | +0x20 += 1; mode 7: rx ≠ 0 → 300; ≥ 300: no turn, +0x3e += 1, beyond 330 a tenth; ≥ 400 → 1 (+0x3e = 0); 200 < c < 300 → 200 (+0x3e = 300) | / `mode7_tenth` |
+| | modes 1 / 2: end-sphere flags 0xb0 (`0x2f6570`), sphere chain 1 / 12 / 0.11 (`0x2f6598`); stick → 300; ≥ 300: +0x3e += 1, below 400 (mode 1) / 350 no turn, else the view test (30°) → 560 / 400; ≥ that → 1; 200..300 → 200 | `set_end_flags`, `set_sphere_chain` / `modes_1_2_stick_and_restart` |
+| | others: ≤ 200 | / `mode3_turns_toward_the_moby` |
+| | turn = +0x00·scale·counter/200 (°); the view test (+0x30°, +0x2c°) passed: modes 4 / 5 `0x313af0` along +0x40, mode 3 eased over 90 ticks then `0x313b48` toward the moby, else `0x313b48` | `turn_toward`, `Camera::turn_toward_point` / `mode3_turns_toward_the_moby`, `modes_4_5_facing` |
+| | +0x34 → `0x313628(d, 0.003)` + `0x3137f8`; +0x38 → `0x313690`; +0x4c → `0x3136c8(l, 0.005)` | / `mode3_turns_toward_the_moby` |
+| | mode 3: leash 0, `0x3137f8`, `0x313820`, v spring 0.01 / 0.2, h spring 0.01 → 0.03 over 120 ticks / 0.2 | / `mode3_turns_toward_the_moby` |
+| | modes 4 / 5: leash 0, `0x3137f8`, `0x313820`, v spring 0.02 / 0.2, distance 5.84; mode 4 with the moby > 110° off +0x40 (after a turn) → distance 8 (or +0x34 + 3.36); end-sphere flags 0xb0 | / `modes_4_5_facing` |
+| 0x2fb648 | (0x16735c = the moby → inside: no ported writer); mode 6 → on it; +0x22 = 1 → within +0x24 of it; else the first of cuboid +0x0c, cylinder +0x10, sphere +0x08, path +0x14 | `focus_test` / `mode6_and_near_kind` |
+| 0x2fb788 | both 0 → yes; the moby's elevation from the camera (about 0x1672c0) within +0x2c° of the camera's; the flat angle within +0x30° (flat → no) | `focus_view` / `view_limits` |
+
+**The focus scan** (`0x3111d8`'s tail; G-HERO-026): +0x230 = 0 (0x16735c = 0), then `coll_sphere_mobys(15, Ratchet's
+feet, flags 1, Ratchet)`: the first listed moby with a target record (`FUN_002711f8`: mode 0x20) whose byte +0x0d is
+set → +0x230 = 1. Port: `update_type0` (the tick feeds `CamWorld::focus`, the mobys with that byte). Untested beyond
+the query (`collision_query` tests `coll_sphere_mobys`); class 17's modes 6 / 8 read it.
+
+**The Swingshot targets' look-up hint** (G-HERO-026's "look-at hint"; `swing.rs` `LookHint`, level03 0x2eb3d0 /
+0x2eb4c0 / 0x2eb408 / 0x2eb468, level01's record 0x167480..0x167490; the code sits after the Swingshot camera's on every
+level that has the targets [L: read on 03, placed by position on the others]). It is not the auto-yaw: the callback
+raises the follow camera's look height.
+| address | call / branch | port / test |
+|---|---|---|
+| 0x2eb3d0 | reset: camera 0, callback 0x2eb408, distance 10000, target 0, weight 0 (a target going state 0 → 1) | `HintCall::Reset`, `swing_target.rs` / `look_hint` |
+| 0x2eb4c0 | follow camera current, \|0x13ca44\| ≤ 0.05, 0 < d < 22, d < distance, target above Ratchet, ≤ 64° off the camera forward from Ratchet, ≤ 36° from the camera → weight += 0.03 (≤ 1), camera, target, distance = from the camera | `Camera::look_hint` (the tick applies the moby loop's calls before the hero update: `CinematicCall::LookHint`) / `look_hint` |
+| 0x2eb408 | from `0x3111d8`: weight ≠ 0 → `0x3136c8(0.35·weight, 0.005, add)`, `AddCamPostUpdFunc(0x2eb468)` | `look_hint_callback` / `look_hint` |
+| 0x2eb468 | distance 10000; a target → target 0, else weight −= 0.03 (≥ 0); camera 0 | `look_hint_post` / `look_hint` |
+| 0x20ef58 | clears the camera, the weight and the callback | `Camera::set_level` |
+
+**The setters** (`Camera::…` in follow_camera.rs; each a no-op unless the follow camera is current): `0x313628`
+`set_distance`, `0x313668` `set_pull_max`, `0x313690` `set_pivot_height`, `0x3136c8` `set_look_height`, `0x313718`
+`set_script_pitch`, `0x313740` `set_leash`, `0x313768` `set_h_spring`, `0x3137b0` `set_v_spring`, `0x3137f8`
+`lock_toward`, `0x313820` `look_from_smoothed`, `0x313858` `stick_off`, `0x313af0` → `0x313888` `turn_toward` /
+`yaw_input_toward` (with the tolerance; the hero's ledge turn calls it with tolerance 0, `Hero::ledge_camera_yaw`),
+`0x313598` / `0x313560` `claim_owner` / `release_owner`, `0x313b48` `turn_toward_point` (class 18; its auto-yaw
+callers 0x16735c / classes 1422, 1470, 1051 are not ported), level 02's `0x2f6570` `set_end_flags` and `0x2f6598`
+`set_sphere_chain` (class 18; no level-01 copy). Consumers now:
+classes 17, 18 and 23, the Swingshot targets' hint, the underwater / glide pivot height of `update_type0`, the
+first-person entry turn.
+
+**Per-level differences** (overlay-diff over the camera code, `rc-trace overlay-diff --cite crates/rc-game/src/follow_camera*`):
+no function differs beyond relocations and padding; the per-level behaviour is level-number tests inside the shared
+code, now ported: the avoidance `0x312ef8` lists meshed mobys too on level 15 with body 2 (untested: body 2 is G-HERO-005)
+and skips the sphere chain and the line on level 13 in state 0x7b (test `avoidance_level13_sinking_skips_the_line`);
+class 17's ledge exception on level 14; the switch's Novalis blend rate (already in script.rs). `0x316e88` exists on
+01 / 04 / 08 only (the bolt cranks' levels).
+
+**Proof.** `tests/world/camera_levels.rs`: Kerwan's three cables take records 10 / 11 / 12 for the whole slide (counter
+held at 200), the follow camera's distance ≈ 6.45 against 4.64 without the records, and the camera stays ≥ 1.45 off the
+cable (without: 0.42 on cable 1); Novalis's record 1 (cuboid 82) tilts the camera to −22.1° against −6.2°, and never
+takes it facing away. Engine, frame-exact, same spot before (`RC_LEVEL_CAMERAS=0`) and after: Kerwan
+`RC_LEVEL=3 RC_HERO_AT=197.137,148.537,76.03,2.912 RC_PLAY_SCRIPT="30:press X" RC_DUMP_FRAMES=120..120` (after: the camera
+higher and further back, the cable across the view; before: behind and under the cable); Novalis
+`RC_PLAY_SCRIPT="1560-1774:stick 0 -1" RC_DUMP_FRAMES=1670..1670` (after the intro scene; after: tilted down over the
+pad to the river; before: level). Two runs identical PNGs.
+
+**The Novalis digest.** The hero digest's runs cross record 1's cuboid (lake / lake+pack ticks 58..135, moves 180..292
+and 612..): with the records the camera tilts there, and camera-relative input would move Ratchet differently. The
+digest harness (`tests/hero/hero_novalis.rs`) loads no records, so `novalis_hero_digest` (NO_IDLE) is unchanged; the
+engine now differs from it there. Loading the records into the digest is a human decision (a digest re-baseline).
+
+**Dependencies.** Reads: the hero's feet, group 0x1413dc, camera mode 0x1415d4, body 0x1413f4, air ticks 0x13f65c, rail
+0x13f8b0 / 0x13f8c0, the pad's right stick and held buttons, the level number, the trigger shapes
+(`moby_update::triggers`). Written: the follow camera's data (one tick; the spring-back 0x311010 undoes it). Readers
+of the lock words: `0x3111d8` (D+0x230, D+0x220 for Clank's distance, not ported: G-HERO-005).

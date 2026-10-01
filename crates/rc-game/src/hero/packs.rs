@@ -33,7 +33,7 @@
 //! `0x277508` every physics tick: [`thruster_trail`], `crate::afterimage`) and the Thruster-Pack's two flame mobys
 //! (class 0xa7, created with the pack: [`flames_on_create`], `crate::moby_update::classes::thruster_flame`).
 //!
-//! Not ported: the pad vibration `0x248920`.
+//! `0x248920` (not the pad vibration: the foot motes' parameters) at the glide's and the hover's landings: `super::pose`.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern)]
 
 use super::anim::AnimCtl;
@@ -346,7 +346,7 @@ fn stomp_physics(h: &mut Hero, env: &Env) {
 
 /// 0x7a (with 0x21): the speed brakes to 0 (24·dt²) along the rebound direction, gravity 25·dt² from the effective
 /// vz while above the ground, the facing held toward the wall.
-fn rebound_physics(h: &mut Hero) {
+pub(super) fn rebound_physics(h: &mut Hero) {
     let mut s = h.speed;
     approach(Pf::ZERO, DT2 * p(24.0), &mut s);
     h.speed = s;
@@ -507,8 +507,10 @@ fn tr_glide(h: &mut Hero, c: &mut Ctx) {
         }
         return;
     }
+    // The landings' foot motes `0x248920` (super::pose).
     if pad.held & button::CROUCH != 0 {
         h.set_state(c, 4, true);
+        h.land_motes(super::pose::motes::LAND);
         return;
     }
     if h.target_speed <= SPEED_TABLE[0][3] {
@@ -519,6 +521,7 @@ fn tr_glide(h: &mut Hero, c: &mut Ctx) {
                 let s = h.idle_seq();
                 h.set_anim(c.anim, c.rng, p(-2.0), s, 0);
             }
+            h.land_motes(super::pose::motes::LAND);
         }
         return;
     }
@@ -538,6 +541,7 @@ fn tr_glide(h: &mut Hero, c: &mut Ctx) {
             h.set_anim(c.anim, c.rng, blend(12), 4, 0);
         }
     }
+    h.land_motes(super::pose::motes::LAND_ROWS);
 }
 
 /// 0x22: ✕ within the first 12 ticks (not after a pack jump / water / burn jump, nor the glide or fall of a
@@ -585,6 +589,7 @@ fn tr_hover(h: &mut Hero, c: &mut Ctx) {
     } else {
         h.set_anim(c.anim, c.rng, blend(9), 7, 0x17);
     }
+    h.land_motes(super::pose::motes::LAND);
 }
 
 // ------------------------------------------------------------------------------------------------

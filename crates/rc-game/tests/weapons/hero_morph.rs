@@ -197,6 +197,8 @@ struct Row {
     aim: (f32, f32),
     looping: bool,
     rng: u32,
+    /// Live type-78 records (the beam's homing sparks) after the tick's particle update.
+    sparks: usize,
 }
 
 /// What a run gives and watches.
@@ -351,6 +353,7 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
             beam_quads: if m.beam.drawn == Some(tick) { m.beam.quads(cam).len() } else { 0 },
             looping: h.fx.item_loop_alive[rc_game::hero::fx::LOOP_MORPH],
             rng: game.rng.state,
+            sparks: parts_cell.borrow().live_by_type()[78] as usize,
         });
     }
     rows
@@ -385,7 +388,8 @@ fn first_of(lv: &Lv, class: i16, skip: usize) -> usize {
     lv.instances.iter().enumerate().filter(|(i, m)| m.o_class as i16 == class && lv.tests.get(*i).is_some_and(|t| t.spawn)).nth(skip).map(|(i, _)| i).expect("instance")
 }
 
-/// Novalis, a critter 577 in the pit: ○ held fires the beam at it, the meter runs down (the critter's record: an
+/// Novalis, a critter 577 in the pit (4 units away: the Water Pump Worker's head look draws from the stream and
+/// moves the critters; 2026-09-30): ○ held fires the beam at it, the meter runs down (the critter's record: an
 /// instant morph), the critter is replaced by a chicken 270 at its place (deleted, its bolts dropped), which runs from
 /// Ratchet; letting go stops the beam and fades the light.
 #[test]
@@ -394,7 +398,7 @@ fn novalis_morphs_a_critter() {
     assert_eq!(lv.items.defs[21].o_class, 185, "item 21 is the Morph-o-Ray (class 185)");
     assert_eq!(lv.items.defs[21].b18, 1, "holding class 1");
     let b = instance_of(&lv, 592);
-    let at = facing(&lv, b, 5.0, std::f32::consts::PI);
+    let at = facing(&lv, b, 4.0, std::f32::consts::PI);
     let s = Setup { item: 21, at, watch: &[b], sound_ticks: 0, record: None, then: None };
     let input = hold(40, 300);
     let rows = run(&lv, &s, &input, 420);
@@ -410,6 +414,11 @@ fn novalis_morphs_a_critter() {
     assert!(seen_states(&rows, ch).len() >= 2, "states {:?}", seen_states(&rows, ch));
     let _ = (p0, later);
     assert!(!rows[330].firing && !rows[330].beam && rows[330].light == -1, "stopped and the light faded");
+    // The beam's sparks (type 78, `0x2d2d08` → `PartType78Spawn`): pairs one tick in two while firing, homing on the
+    // target while it lives; after the firing they run out (life at most 8 / 0.2 × 1.2 × 3 = 144 ticks).
+    assert!(rows[first + 10..=300].iter().filter(|r| r.sparks > 0).count() > 200, "sparks while firing");
+    assert!(rows[first + 10..=morph].iter().any(|r| r.sparks >= 6), "pairs pile up while homing: {:?}", rows[morph].sparks);
+    assert_eq!(rows[419].sparks, 0, "run out");
     assert_eq!(rows, run(&lv, &s, &input, 420), "deterministic");
 }
 

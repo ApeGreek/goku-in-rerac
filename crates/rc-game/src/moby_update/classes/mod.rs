@@ -651,7 +651,8 @@ impl ClassUpdate {
     pub fn needs_joint_lists(self) -> bool {
         match self {
             ClassUpdate::Unit(i) => units::PORTS[i as usize].classes.iter().any(|c| units::PORTS[i as usize].joints.contains(c)),
-            _ => matches!(self, ClassUpdate::Flyer | ClassUpdate::PathEnemy | ClassUpdate::Gunship | ClassUpdate::GoldBolt | ClassUpdate::Mouse),
+            // (TalkingNpc, Visibomb: their manipulators' target joints, `crate::moby_update::manip`.)
+            _ => matches!(self, ClassUpdate::Flyer | ClassUpdate::PathEnemy | ClassUpdate::Gunship | ClassUpdate::GoldBolt | ClassUpdate::Mouse | ClassUpdate::TalkingNpc | ClassUpdate::Visibomb),
         }
     }
 
@@ -659,6 +660,8 @@ impl ClassUpdate {
     pub fn reads_joints_of(self, o_class: i16) -> bool {
         match self {
             ClassUpdate::Unit(i) => units::PORTS[i as usize].joints.contains(&o_class),
+            // The vendor turns its hologram's joints (`manip::attach` on the child).
+            ClassUpdate::Vendor => o_class == vendor::HOLOGRAM,
             _ => self.needs_joint_lists() && self.classes().contains(&o_class),
         }
     }

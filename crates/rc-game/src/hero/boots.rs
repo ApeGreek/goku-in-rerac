@@ -60,10 +60,11 @@
 //! grind wrench's hit sphere (radius 1 at the hip, queued with the pack hits and delivered through the hit sink after
 //! the hero update), the cable grab's voice 0xd and sparkle burst `0x2a7e20`.
 //!
-//! **Not ported** (cosmetic or outside the hero): the camera look-ahead and body-lean joint records (0x17a6e0..,
-//! 0x17a798.., 0x17a848.., 0x17a8f8); the look-at moby
+//! **The grind's joint records** (L00 0x17a6e0.. = records 0..3 of the block, `super::idle::joint`): [`grind_lean`].
+//!
+//! **Not ported** (cosmetic or outside the hero): the look-at moby
 //! 0x13f928 and the moby-armed targeted grind jump (0x13f908 / 0x13f90c / 0x13f8a0, set by no ported class);
-//! level 16's class-0x101 bump; the aim lean with a weapon in hand; the Hologuise / other bodies.
+//! level 16's class-0x101 bump; the aim lean's steering with a weapon in hand (0x13f920 only springs back to 0); the Hologuise / other bodies.
 //!
 //! Standard `f32` for the new code (the hero block's PS2 floats converted at the boundary); the random draws are
 //! the game's, in its order.
@@ -73,7 +74,7 @@ use super::anim::AnimCtl;
 use super::physics::*;
 use super::states::Ctx;
 use super::Hero;
-use crate::pad::{button, fast_diff_rots};
+use crate::pad::{button, fast_arctan, fast_diff_rots};
 use crate::ps2v::Pf;
 use crate::rng::Rng;
 use crate::spline::{self, Cursor};
@@ -637,7 +638,7 @@ fn cable_entry(h: &mut Hero, c: &mut Ctx) {
 /// Per-state physics; false = not ported (the hero freezes).
 pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng) -> bool {
     match h.state {
-        0x28..=0x2b | 0x42 => phys_grind(h, env, rng),
+        0x28..=0x2b | 0x42 => phys_grind(h, env, anim.view().seq_b, rng),
         0x3f => phys_magnet_walk(h, env),
         0x70 | 0x71 => h.phys_ground(env, anim, rng),
         0x74 => phys_cable(h, env, anim, rng),
@@ -653,8 +654,8 @@ fn spark(h: &mut Hero, rng: &mut Rng, pos: V3, vel: V3, gravity: f32) {
     super::fx::spark(h, rng, [pos[0], pos[1], pos[2], w], [vel[0], vel[1], vel[2], gravity], false);
 }
 
-/// The grind case of L00 0x217970 (0x28..0x2b, 0x42).
-fn phys_grind(h: &mut Hero, env: &Env, rng: &mut Rng) {
+/// The grind case of L00 0x217970 (0x28..0x2b, 0x42). `seq_b` = Ratchet's moby +0x53.
+fn phys_grind(h: &mut Hero, env: &Env, seq_b: u8, rng: &mut Rng) {
     let st = h.state;
     // The rail's loop (class sound 0) in the hero's sound slot 0 (0x141568) while riding or swinging on it; the grind
     // jump, the rail switch and the grind hurt release it (the game tests the slot's owner and state first).
@@ -690,7 +691,8 @@ fn phys_grind(h: &mut Hero, env: &Env, rng: &mut Rng) {
     let d = sp * b.dir as f32;
     let (p, _) = spline::advance(pts, closed, d, &mut b.cur);
     let q_old = old.map(|op| spline::advance(op, b.old_closed, d, &mut b.old_cur).0);
-    // (The camera look-ahead and the body-lean records: not ported.)
+    grind_lean(h, pts, closed, seq_b);
+    let b = &mut h.boots;
     let next = spline::step_index(pts, b.cur.seg, b.dir, closed);
     let dv = sub(xyz(pts[next as usize]), p);
     if len(dv) < 0.001 {
@@ -791,6 +793,56 @@ fn phys_grind(h: &mut Hero, env: &Env, rng: &mut Rng) {
         let tmpl = super::packs::template(env, 1.0, 0x1_0000, dir);
         h.packs.hits.push(super::packs::PackHit::Sphere { r: Pf::ONE, centre: c, flags: 0x10, tmpl });
     }
+}
+
+/// The grind's joint-record targets (L00 0x21ce0c..0x21d1b0, after the rail advance; records 0..3 of the block, L00
+/// 0x17a680 = L01 0x17ab00: `super::idle::joint`):
+///
+/// | address | what it does | port |
+/// |---|---|---|
+/// | 0x21ce0c..0x21cf7c | more than 90 ticks in the state (0x13f4ec): the rail 30·\|eff\| and 0.1 further ahead (two copies of the cursor, `0x25d808`); both inside the rail (or a closed one): the turn to it `d = fast_subtract_rotations(0x13f8cc, yaw ahead)`, record 0 springs (0.03, 0.2), y = clamp(0.37·d, ±45°), negated in the other stance 0x13f8dc | [`grind_lean`] |
+/// | 0x21cf84..0x21cfbc | not 0x29 / 0x42 / 0x2a: record 0 x = the displacement's pitch `atan2(0x13f458, \|0x13f450.xy\|)` | [`grind_lean`] |
+/// | 0x21cfc0..0x21d024 | a gun in hand (0x140408 ≠ 0xc and its definition's +0x18 ≠ 0): records 3 / 1 / 2 springs (0.017, 0.3), (0.027, 0.3), (0.027, 0.3) | [`grind_lean`] |
+/// | 0x21d024..0x21d0cc | a look-at moby 0x13f928: records 3 / 2 z from its bearing in the hero's frame | n/a: 0x13f928 is set by no ported class (module doc) |
+/// | 0x21d0d0..0x21d1ac | Ratchet on sequence 0x31 / 0x4a: record 3 z = −47° + lean 0x13f920, records 1 / 2 z = 42° + lean / 1.7; on 0x4b: record 3 z = 8° + lean, records 1 / 2 z = −4° + lean / 2 (`fast_add_rotations`) | [`grind_lean`] |
+///
+/// Side effects: the records only.
+fn grind_lean(h: &mut Hero, pts: &[spline::Point], closed: bool, seq_b: u8) {
+    use super::idle::joint::{HEAD, NECK, REC0, REC2};
+    let add_rot = |a: f32, b: f32| fast_add_rotations(pf(a), pf(b)).to_f32();
+    if ticks(0x5a) < h.f4ec {
+        let a = 30.0 * h.eff_len.to_f32();
+        let (mut c1, mut c2) = (h.boots.cur, h.boots.cur);
+        let (p1, e1) = spline::advance(pts, closed, a, &mut c1);
+        let (p2, e2) = spline::advance(pts, closed, a + 0.1, &mut c2);
+        if !(e1 || e2) || closed {
+            let ahead = fast_arctan(pf(p2[0] - p1[0]), pf(p2[1] - p1[1]));
+            let t = (fast_subtract_rotations(pf(h.boots.yaw), ahead).to_f32() * f32::from_bits(0x3ebd_70a4)).clamp(-DEG45, DEG45);
+            let r = &mut h.idle.joints[REC0];
+            (r.k, r.d) = (f32::from_bits(0x3cf5_c28f), f32::from_bits(0x3e4c_cccd));
+            r.target[1] = if h.boots.stance != 0 { -t } else { t };
+        }
+    }
+    if !matches!(h.state, 0x29 | 0x42 | 0x2a) {
+        let d = h.disp;
+        h.idle.joints[REC0].target[0] = fast_arctan(Pf::ZERO + (d[0] * d[0] + d[1] * d[1]).sqrt(), d[2]).to_f32();
+    }
+    let id = h.items.slot.id;
+    let gun = id != 0xc && h.weapons.defs.get(id.max(0) as usize).is_some_and(|w| w.w18 != 0);
+    if !gun { return; }
+    let j = &mut h.idle.joints;
+    (j[HEAD].k, j[HEAD].d) = (f32::from_bits(0x3c8b_4396), f32::from_bits(0x3e99_999a));
+    (j[NECK].k, j[NECK].d) = (f32::from_bits(0x3cdd_2f1b), f32::from_bits(0x3e99_999a));
+    (j[REC2].k, j[REC2].d) = (f32::from_bits(0x3cdd_2f1b), f32::from_bits(0x3e99_999a));
+    let lean = h.boots.lean_angle;
+    let (head, neck) = match seq_b {
+        0x31 | 0x4a => (add_rot(f32::from_bits(0xbf51_ff7e), lean), add_rot(f32::from_bits(0x3f3b_a866), lean / 1.7)),
+        0x4b => (add_rot(f32::from_bits(0x3e0e_fa35), lean), add_rot(f32::from_bits(0xbd8e_fa35), lean * 0.5)),
+        _ => return,
+    };
+    j[HEAD].target[2] = head;
+    j[NECK].target[2] = neck;
+    j[REC2].target[2] = neck;
 }
 
 fn xyz(p: spline::Point) -> V3 { [p[0], p[1], p[2]] }

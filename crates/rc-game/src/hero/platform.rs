@@ -177,78 +177,13 @@ impl std::fmt::Debug for Carry {
 }
 
 // ------------------------------------------------------------------------------------------------
-// Rotations: `EulerToMatrix` 0x221980 (R = X·Y·Z, row-vector convention: rows = images of the axes) and
-// `MatrixToEuler` 0x2721f0 (z = atan2(m01, m00), then y, then x of what is left), in f64.
-
-type M3 = [[f64; 3]; 3];
-
-fn euler_matrix(e: [f32; 3]) -> M3 {
-    let (sx, cx) = (e[0] as f64).sin_cos();
-    let (sy, cy) = (e[1] as f64).sin_cos();
-    let (sz, cz) = (e[2] as f64).sin_cos();
-    let x = [[1.0, 0.0, 0.0], [0.0, cx, sx], [0.0, -sx, cx]];
-    let y = [[cy, 0.0, -sy], [0.0, 1.0, 0.0], [sy, 0.0, cy]];
-    let z = [[cz, sz, 0.0], [-sz, cz, 0.0], [0.0, 0.0, 1.0]];
-    mul(&mul(&x, &y), &z)
-}
-
-/// `a·b` (row i of the result = row i of `a` through `b`).
-fn mul(a: &M3, b: &M3) -> M3 { std::array::from_fn(|i| std::array::from_fn(|k| (0..3).map(|j| a[i][j] * b[j][k]).sum())) }
-
-fn transpose(a: &M3) -> M3 { std::array::from_fn(|i| std::array::from_fn(|k| a[k][i])) }
-
-fn matrix_euler(m: &M3) -> [f32; 3] {
-    let z = m[0][1].atan2(m[0][0]);
-    let m1 = mul(m, &euler_matrix([0.0, 0.0, -z as f32]));
-    let y = (-m1[0][2]).atan2(m1[0][0]);
-    let m2 = mul(&m1, &euler_matrix([0.0, -y as f32, 0.0]));
-    let x = m2[1][2].atan2(m2[1][1]);
-    [x as f32, y as f32, z as f32]
-}
-
-fn rows64(c: &Carrier) -> M3 { c.rows.map(|r| r.map(|x| x as f64)) }
+// The platform functions `FUN_002752c0` (carried), `FUN_00275528` (to local space) and `FUN_002753b0` (back to the
+// world) are the moby side's (`crate::moby_update::triggers`): the same engine functions carry Ratchet and every
+// moby that rides another.
+use triggers::{carried, from_local, to_local};
 
 fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
-fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
 fn len3(a: [f32; 3]) -> f32 { (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt() }
-
-/// `FUN_002752c0(p, rot)`: where a point and a rotation riding the carrier go this tick.
-fn carried(c: &Carrier, p: [f32; 3], rot: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    let d = &c.delta;
-    let q = add3(p, [d.displacement[0], d.displacement[1], d.displacement[2]]);
-    if d.rotation == [0.0; 3] { return (q, rot); }
-    let md = euler_matrix(d.rotation);
-    let v = sub3(q, c.position).map(|x| x as f64);
-    let r: [f32; 3] = std::array::from_fn(|k| (v[0] * md[0][k] + v[1] * md[1][k] + v[2] * md[2][k]) as f32);
-    (add3(r, c.position), matrix_euler(&mul(&euler_matrix(rot), &md)))
-}
-
-/// `FUN_00275528(p, rot)`: the point and rotation in the carrier's local space.
-fn to_local(c: &Carrier, p: [f32; 3], rot: [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    let d = sub3(p, c.position);
-    let l = c.rows.map(|r| d[0] * r[0] + d[1] * r[1] + d[2] * r[2]);
-    (l, matrix_euler(&mul(&euler_matrix(rot), &transpose(&rows64(c)))))
-}
-
-/// `FUN_002753b0(l, lrot)`: a local point and rotation back in the world (and the update-order / bit-2
-/// corrections; with block flag bit 2 the local pair is re-recorded).
-fn from_local(c: &Carrier, hero_slot: u8, l: &mut [f32; 3], lrot: &mut [f32; 3]) -> ([f32; 3], [f32; 3]) {
-    let r = &c.rows;
-    let mut p: [f32; 3] = std::array::from_fn(|k| l[0] * r[0][k] + l[1] * r[1][k] + l[2] * r[2][k]);
-    p = add3(p, c.position);
-    let rot = matrix_euler(&mul(&euler_matrix(*lrot), &rows64(c)));
-    let d = [c.delta.displacement[0], c.delta.displacement[1], c.delta.displacement[2]];
-    if c.delta.flags & 4 != 0 {
-        p = add3(p, d);
-        (*l, *lrot) = to_local(c, p, rot);
-    } else if hero_slot != 0 && hero_slot < c.class_slot {
-        // ClampLen(Δ, 1) 0x2745f0.
-        let n = len3(d);
-        let d = if 1.0 < n { d.map(|x| x * (1.0 / n)) } else { d };
-        p = add3(p, d);
-    }
-    (p, rot)
-}
 
 /// `Approach(0, step, &x)` on a non-negative length / signed value.
 fn approach_zero(x: f32, step: f32) -> f32 {
@@ -409,6 +344,10 @@ fn fast_add_rot(a: f32, b: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::hero::physics::V0;
+
+    use crate::moby_update::triggers::{euler_matrix, matrix_euler};
+
+    fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
     use crate::pad::PadState;
     use rc_formats::collision::Collision;
 

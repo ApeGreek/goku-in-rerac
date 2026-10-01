@@ -186,3 +186,55 @@ Corrections found while porting (checked in the disassembly of 0x20e0e0 and agai
 - Environment: `RC_ANIM=0` (identity palette), `RC_MOBY_CPU_LIGHT=1` (bit-exact CPU colours, bind pose only), `RC_MOBY_LIGHT_CHECK=1`.
 
 **Not ported yet** (as of 2026-09-26; all of it ported since — blends `hero/anim.rs` / `moby_anim`, the class updates `rc_game::moby_update`, pose layers and joint modifiers, `anim_sound`, the sequence sphere, low LOD `moby_lod.rs`, the metal pass; leftovers: G-HERO-009, G-CLS-019, G-REN-018)**:** sequence changes and blends (`fun_00212ed8` / `fun_00212f90` / `fun_002130d8`, the snapshot re-encode `fun_0020ede8`, seq A = 0xff); the per-class update functions that override sequence 0; pose layers (+0x60 / +0x64); sound triggers and loop sounds; the animated bounding sphere (`fun_0020e098`, needed for culling); the low LOD and its joint count (class byte 9); the metal pass's skinning (entries 0x111/0x121/0x12d).
+
+## 9. Manipulators on class mobys (W3 lane 1, 2026-09-30; G-HERO-009 class side)
+
+**System or not: a shared system.** [H: disassembly of L01 0x264370, 0x2643e8, 0x2777d8, 0x221e38, 0x2bb128; L16
+0x2e1088; L05 0x30c0a8; L04 0x2cdda0; the census `units.tsv` call lists] Evidence:
+* **One list, one link pair.** `AttachManipulator` 0x264370 (Lombyte exact boot match 0x20cb10; one copy per overlay)
+  and `DetachManipulator` 0x2643e8 are the only writers of moby +0x64 (§6.4, hero_gameplay.md §7). In level01 alone 20
+  functions call `AttachManipulator` (Ratchet's joint records 0x227050, his blink 0x227590, Clank 0x2278c0, the
+  hand / feet items, the big-head cheats 0x278720 / 0x2fac80 / 0x2fb4b8 / 0x2ff028, the vendor 0x2bb128, the vendor
+  menu 0x2aee20, the NPC look-at 0x2777d8, 0x2f2280, 0x309990); the census finds it in 60 more units' class code on the
+  other levels. Every pose evaluation reads the list (MobyProc 0x268b00, the chain evaluator 0x268ee8).
+* **Shared record writers.** `FUN_00221e38(a, out, axis)` writes a rotation quaternion into a node's +0x10 (called
+  directly by the vendor, 1143, 823, the Visibomb missile 172 and 20 more units, and by `FUN_0026ee30` = Euler x ⊗ y ⊗ z).
+  `FUN_002777d8(k, d, moby, rec, list)` (f12, f13, a0, a1, a2) is **the NPC look-at record update**, one function in
+  every overlay called by 40 units: a 0x80-byte record whose first 0x40 bytes are the node, +0x40 Euler angles, +0x50
+  their spring velocities, +0x60 this tick's target angles, +0x70 the scale, +0x78 the moby it is linked into.
+* **Per-owner parts** stay per class: where the record lives (the owner's pvars), which list, which angles.
+* **The gap in the port** was data, not code: `Services::joint_lists` kept only a list's first byte list (the joint
+  points of `0x2645a8`); the node's target (`AttachManipulator`: `pb[pb[0] + 4]`, the second byte list's first entry)
+  was loaded for Ratchet only (`Hero::joint_targets`).
+
+**Step 0 (reuse plan).** Built on: `rc_formats::moby_anim::{JointModifier, list_target, evaluate_posed}` (the node
+and the evaluator), `Moby::joint_mods` (the list, read by the dynamic-moby palette, the shadows and the attachments),
+`hero::idle::{axis_quat, euler_quat}` (0x221e38 / 0x26ee30 in native `f32`), `hero::physics::turn_spring` (0x270b58),
+`class_joint_lists_where` (the loader of `Services::joint_lists`), `units::PORTS` (the unit rows). New: the list's
+node keys on the moby (`Moby::joint_mod_keys`, parallel to `joint_mods`: which owner record a node is), the loaded
+targets (`Services::joint_targets`), `moby_update::manip` (attach / detach / the record writers), the static-moby
+palette reading `joint_mods` (it evaluated without them). Retired: `rc-engine` `vendor_render`'s own logo draw.
+
+**In the port** (`rc_game::moby_update::manip`; coverage tables in its module doc and in each consumer's):
+* `attach` / `detach` / `sync` / `set_axis` (`FUN_00221e38` into the record) / `look` (`FUN_002777d8`): the record's
+  bytes at the game's pvar offsets, the node mirrored into the target's `Moby::joint_mods` under its key
+  (`Moby::joint_mod_keys`). The loader fills `Services::joint_targets` beside `Services::joint_lists` for the classes
+  `LevelPorts::needs_joint_lists` names (the vendor's hologram through `ClassUpdate::reads_joints_of`).
+* The static-moby palette (`rc-engine` `moby_anim::MobyAnim::mods`, driven from the table) and `World::joint_point`
+  (`MobyAnimEvalChain` applies +0x64) read the list; the dynamic-moby palette already did.
+* Consumers: the vendor 11 → its hologram 1143 (lists 0 / 1, z spin; `rc-engine` `vendor_render` draws the beam only,
+  the logo is the dynamic moby with its metal pass); the logo 1143's own update (U514, every level: its list 1 against
+  its yaw); the talking NPC 774's head look-at (two `look` records, glances and Ratchet); the searchlights 823 (U180:
+  list 0 tilt, the beam callback 0x30c220 through `Callback::UnitQuads`); the floats 481 (U155: three `look` records as
+  spinning parts); the Visibomb missile 172's fins (lists 0 / 1, `0x221e38` axis 1).
+* First-tick note [H]: a `look` record whose +0x70 is 0 in the placed data (the NPC 774's are) is active on its first
+  update with scale 0 (the node shrinks the joint for that tick), as the game's code does.
+* Tests: `manip::tests` (3), `vendor::tests`, `talking_npc::tests::head_looks_at_ratchet_and_glances`,
+  `hologram_logo`, `sweep_light`, `spinner_float`, `visibomb::tests::fins_tilt_against_the_steering`; on the level data
+  `tests/classes/manipulators.rs` (6: the loaded targets, Novalis' vendor and NPC, Kalebo's logos, Rilgar's lights,
+  Eudora's floats). Frames (two runs identical): the Novalis vendor with its chrome hologram above it; the Water Pump
+  Worker after the talk scene, his head toward Ratchet.
+* Left (gaps G-HERO-009): U540 347 (17) and U197 447 / 920 (05, 07, 13) are cheap now (only this blocked them); the
+  units that call `0x2777d8` behind other blockers (the big-head cheat, G-SAV-006: 638, 238, 623, 1382, 44, 574, 427,
+  717, 631, 556; G-CLS-026: 221, 1356; the `memcard_Save` NPCs, G-SAV-002); `MobyAnimBlendEx` 0x26c7a8, `0x27b9c0`,
+  `0x2b52a8` (census `anim`: 4 units / 65 created, all behind the cheat or the save).

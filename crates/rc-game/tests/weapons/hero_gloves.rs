@@ -513,7 +513,8 @@ fn mine_story(rows: &[Row], m: usize) -> (Vec<u8>, Option<usize>, Option<usize>)
     (st, target, gone)
 }
 
-/// Novalis, the Mine Glove (item 17, class 190) 7 units east of critter group 2: ○ throws a mine 74 (0x23, one ammo,
+/// Novalis, the Mine Glove (item 17, class 190) 9 units east of critter group 2 (7 before the Water Pump Worker's head
+/// look drew from the stream, 2026-09-30): ○ throws a mine 74 (0x23, one ammo,
 /// the glove reticle while it is held); it lobs, lands (armed at once: the arming timer is cleared on the ground), and
 /// the critter coming down for Ratchet is sought (0x10, hopping at it) and blown up (its death flight 99).
 #[test]
@@ -521,7 +522,7 @@ fn novalis_mine_seeks_a_critter() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
     assert_eq!(lv.items.defs[17].o_class, 190, "item 17 is the Mine Glove (class 190)");
     let b = instance_of(&lv, 592);
-    let at = facing(&lv, b, 7.0, 0.0);
+    let at = facing(&lv, b, 9.0, 0.0);
     let s = Setup { item: 17, at, watch: &[b], sound_ticks: 0, record: None, then: None, lose_held: false };
     let input = tap(&[40]);
     let rows = run(&lv, &s, &input, 400);

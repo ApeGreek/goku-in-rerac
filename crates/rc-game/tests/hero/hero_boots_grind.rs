@@ -195,3 +195,64 @@ fn kalebo_long_grind() {
     let again = ride(&lv, 16, at, yaw, 1200, |_, _| PadInput::neutral());
     assert!(recs.iter().zip(&again).all(|(a, b)| a == b), "deterministic");
 }
+
+/// Per tick on the rail: state, record 0's angles (x: the displacement's pitch, y: the body lean into the rail's bend
+/// ahead), records 3 / 1 / 2's z (the gun lean) and Ratchet's sequence B.
+type PoseRec = (i32, [f32; 3], [f32; 3], u8);
+
+/// [`ride`] recording the grind's joint records (L00 0x21ce0c..0x21d1b0, `hero::boots`'s `grind_lean`), with `gun`: a
+/// gun in the hand slot's id (0x140408; definition +0x18 ≠ 0).
+fn ride_pose(lv: &Lv, n: i32, at: [f32; 3], yaw: f32, ticks: u32, gun: bool) -> Vec<PoseRec> {
+    use rc_game::hero::idle::joint::{HEAD, NECK, REC0, REC2};
+    let class = ClassInfo { scale: 1.0, ..Default::default() };
+    let mut m = Moby::init_instance(0, 0, Some(&class));
+    m.position = [at[0], at[1], at[2], 1.0];
+    m.rotation = [0.0, 0.0, yaw, 0.0];
+    let mut g = Game::new(&lv.mesh, MobyTable::new(vec![m], 16), 0, GameOptions::default(), lv.death_z);
+    g.finish_load();
+    g.hero.idle.level = n;
+    g.hero.grant_items(&[GRIND_BOOTS]);
+    g.grind_paths = std::sync::Arc::new(lv.paths.clone());
+    if gun {
+        let mut defs = vec![rc_game::hero::items::WeaponDef::default(); 40];
+        defs[15].w18 = 1;
+        g.hero.weapons.defs = defs;
+        g.hero.items.slot.id = 15;
+    }
+    let mut anim = RatchetAnim::new(&lv.ratchet);
+    let mut mobys = |_: &mut MobyTable, _: &rc_game::hero::Hero, _: &mut rc_game::rng::Rng, _: &rc_game::follow_camera::CameraView, _: &collision::Collision, _: u64| {};
+    let mut parts = |_: &rc_game::hero::Hero, _: &rc_game::follow_camera::CameraView, _: &mut rc_game::rng::Rng, _: u64| {};
+    let mut hooks = TickHooks { mobys: &mut mobys, particles: &mut parts, world: None };
+    let mut out = Vec::new();
+    for _ in 0..ticks {
+        g.tick(Some(&PadInput::neutral().bytes()), &lv.mesh, &mut anim.ctl(&lv.ratchet), &mut hooks);
+        let j = &g.hero.idle.joints;
+        out.push((g.hero.state, j[REC0].cur, [j[HEAD].cur[2], j[NECK].cur[2], j[REC2].cur[2]], anim.state.seq_b));
+    }
+    out
+}
+
+/// Kalebo III's long rail: record 0 x follows the rail's pitch from the start, the body lean y only after 90 ticks on
+/// the rail (then into the bends: both signs over the course); without a gun records 1..3 keep no z. With a gun in
+/// hand on sequence 0x31: record 3 z → −47° (+ the aim lean 0x13f920, 0 here), records 1 / 2 z → 42°.
+#[test]
+fn kalebo_grind_leans() {
+    let Some(lv) = level_data(16) else { eprintln!("skipped: no extracted/levels/16"); return };
+    let rail = &lv.paths[1];
+    let (start, yaw) = along(rail, 2.0);
+    let at = [start[0], start[1], start[2] + 0.3];
+    let recs = ride_pose(&lv, 16, at, yaw, 900, false);
+    let on = recs.iter().position(|r| r.0 == 0x28).expect("onto the rail");
+    assert!(recs[on..].iter().any(|r| 0.005 < r.1[0].abs()), "the pitch lean");
+    assert!(recs[on..on + 80].iter().all(|r| r.1[1].abs() < 0.005), "no body lean in the first 90 ticks");
+    let late = &recs[on + 100..];
+    assert!(late.iter().any(|r| 0.02 < r.1[1]) && late.iter().any(|r| r.1[1] < -0.02), "the lean into both ways' bends");
+    assert!(late.iter().all(|r| r.1[1].abs() <= std::f32::consts::FRAC_PI_4 + 0.1));
+    assert!(recs.iter().all(|r| r.2 == [0.0; 3]), "no gun lean");
+    let gun = ride_pose(&lv, 16, at, yaw, 300, true);
+    // The end of the first 60-tick stretch on sequence 0x31 (the springs settled).
+    let k = (60..gun.len()).find(|&k| gun[k - 60..=k].iter().all(|r| r.0 == 0x28 && r.3 == 0x31)).expect("60 ticks grinding on 0x31");
+    let last = &gun[k];
+    assert!((last.2[0] - f32::from_bits(0xbf51_ff7e)).abs() < 0.03, "{:?}", last.2);
+    assert!((last.2[1] - f32::from_bits(0x3f3b_a866)).abs() < 0.01 && (last.2[2] - last.2[1]).abs() < 0.02, "{:?}", last.2);
+}

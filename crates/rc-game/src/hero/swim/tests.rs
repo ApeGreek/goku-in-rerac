@@ -391,8 +391,14 @@ fn wading_and_shallow_water_splash() {
         // A jump out of the water: the small splash in the jump's entry.
         r.tick(&coll, PadInput::neutral().press(button::CROSS));
         assert_eq!(r.hero.group, 4, "jumped");
+        // The jump tick's physics still ran the walk / wade prologue (0x23a2e4), so its spray `0x22af48(2, 4)` may
+        // add one drop (0.1 above the water, the splash's are at or below it) when its counter, restarted at
+        // `randi(2)`, runs out this tick — which it does depends on the rand stream (the initial landing's foot motes,
+        // `0x248920` → `0x22c5c0`'s type-28 draws, shift it). Count the splash's drops alone.
         let q = queued(&r);
-        assert_eq!((q.rings45, q.drops, q.splashes), (3, 16, 0), "jump splash at depth {depth}");
+        let splash_drops = r.hero.fx.parts.iter().filter(|p| matches!(p, PartSpawn::Drop35 { pos, .. } if pos[2] <= WATER)).count();
+        assert!(q.drops - splash_drops <= 1, "{q:?}");
+        assert_eq!((q.rings45, splash_drops, q.splashes), (3, 16, 0), "jump splash at depth {depth}");
         // Landing back in it: the voice 0x11 and the big splash.
         let mut landed = None;
         for _ in 0..90 {
@@ -404,4 +410,32 @@ fn wading_and_shallow_water_splash() {
         assert_eq!((q.rings45, q.drops), (3, 24));
         assert!(r.hero.swim.events.contains(&SwimEvent::Played(0x11)));
     }
+}
+
+/// The swim lean (0x238634..): diving, the pitch keeps changing, so the neck record leans in y by 47·Δpitch (within
+/// ±50°) and the feet kick by 40·Δpitch, with the swim springs; the neck's node reaches Ratchet's joint-modifier list.
+#[test]
+fn diving_leans_the_neck_and_kicks_the_feet() {
+    use crate::hero::idle::joint::{FOOT_L, FOOT_R, NECK};
+    let (coll, mut r) = floating();
+    run(&mut r, &coll, PadInput::neutral(), 2);
+    run(&mut r, &coll, PadInput::neutral().press(button::SQUARE), 1);
+    let p0 = r.hero.rot[1];
+    run(&mut r, &coll, PadInput::neutral().press(button::SQUARE), 1);
+    assert_eq!(r.hero.state, id::UNDERWATER);
+    let dp = f(fast_subtract_rotations(r.hero.rot[1], p0));
+    assert!(dp > 0.0, "pitching down");
+    let j = &r.hero.idle.joints;
+    // Targets are cleared by the record springs after the tick: check the springs moved the angles that way and
+    // the constants.
+    assert_eq!((j[NECK].k, j[NECK].d), (f32::from_bits(0x3c13_74bc), f32::from_bits(0x3e61_47ae)));
+    assert_eq!((j[FOOT_L].k, j[FOOT_R].d), (f32::from_bits(0x3cf5_c28f), f32::from_bits(0x3e61_47ae)));
+    assert!(j[NECK].cur[1] > 0.0 && j[FOOT_L].cur[1] > 0.0 && j[FOOT_R].cur[1] > 0.0, "{:?} {:?}", j[NECK].cur, j[FOOT_L].cur);
+    assert!(j[NECK].attached);
+    // Direct: the targets the lean writes.
+    let mut h = crate::hero::Hero::new();
+    h.swim_lean(0.2, 0.05);
+    let j = &h.idle.joints;
+    assert_eq!(j[NECK].target, [0.2 * f32::from_bits(0x3fb3_3333), f32::from_bits(0x3f5f_66f3), 0.2 * 1.5]);
+    assert_eq!(j[FOOT_R].target, [0.0, 0.05 * 40.0, 0.2 * f32::from_bits(0x3f8c_cccd)]);
 }

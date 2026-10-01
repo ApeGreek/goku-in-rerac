@@ -557,29 +557,9 @@ impl Hero {
         let rate = 0.209_439_52;
         let fy = add_rot(self.ledge_blk.yaw, PI_F);
         let d = [fy.cos(), fy.sin(), 0.0];
-        Some((rate, ledge_yaw_input(d, cam_off, up)))
-    }
-}
-
-/// `0x313888(0, camera, dir)`: the follow camera's scripted yaw input (D+0x1c4) toward the direction `dir` from its
-/// offset `cam_off` about `up` (the ledge's turn behind the hanging hero, the first-person camera's entry turn).
-pub fn ledge_yaw_input(d: [f32; 3], cam_off: [f32; 3], up: [f32; 3]) -> f32 {
-    {
-        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        let flat = |v: [f32; 3]| {
-            let k = dot(v, up);
-            [v[0] - up[0] * k, v[1] - up[1] * k, v[2] - up[2] * k]
-        };
-        let (dc, cc) = (flat(d), flat(cam_off));
-        let (ld, lc) = (dot(dc, dc).sqrt(), dot(cc, cc).sqrt());
-        if ld == 0.0 || ld * lc == 0.0 { return 0.0; }
-        let s = (dot(dc, cc) / (ld * lc)).clamp(-1.0, 1.0).asin();
-        // `FastVecCross(out, d, u)` 0x2212d0 is u × d (`vopmula ACC, u, d; vopmsub out, d, u`).
-        let cross = [up[1] * dc[2] - up[2] * dc[1], up[2] * dc[0] - up[0] * dc[2], up[0] * dc[1] - up[1] * dc[0]];
-        let sign = if 0.0 <= dot(cross, cc) { 1.0 } else { -1.0 };
-        let a = wrap(PI_F - (FRAC_PI_2 - s));
-        let t = (a / FRAC_PI_2).min(1.0);
-        sign * (2.0 * t - t * t)
+        // `0x313888(0, cam, dir)`: the camera's scripted yaw input with tolerance 0 (a degenerate direction writes
+        // nothing: the camera's reset left D+0x1c4 at 0).
+        Some((rate, crate::follow_camera::yaw_input_toward(d, cam_off, up, 0.0).unwrap_or(0.0)))
     }
 }
 

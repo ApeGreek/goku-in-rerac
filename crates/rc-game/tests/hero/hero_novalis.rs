@@ -368,10 +368,18 @@ fn novalis_hero_digest() {
             // The first-person camera and the switch blend (weapons + first person) while idle.
             text = text.replace(&format!(", first_person: {:?}", rc_game::follow_camera::FirstPerson::default()), "");
             text = text.replace(&format!(", blend: {:?}", rc_game::follow_camera::CamBlend::default()), "");
+            // The blend's orbit kind (the Swingshot camera's blend) while unused, inside a running blend too.
+            text = text.replace(&format!(", kind: 0, running: 0, orbit_len: 0, orbit: {:?}", rc_game::follow_camera::OrbitBlend::default()), "");
             // The script camera (cinematics) while idle.
             text = text.replace(&format!(", script: {:?}", rc_game::follow_camera::script::ScriptCamera::default()), "");
             // The type-6 camera (the Visibomb's missile view) while idle.
             text = text.replace(&format!(", type6: {:?}", rc_game::follow_camera::type6::Type6::default()), "");
+            // The level's camera slots (the level camera system) while no records are loaded.
+            text = text.replace(&format!(", level_cams: {:?}", rc_game::follow_camera::level::LevelCameras::default()), "");
+            // The Swingshot camera and the Swingshot targets' look-up hint (camera classes) while idle.
+            text = text.replace(&format!(", swing: {:?}", rc_game::follow_camera::swing::SwingCamera::default()), "");
+            text = text.replace(&format!(", hint: {:?}", rc_game::follow_camera::swing::LookHint::default()), "");
+            text = text.replace(&format!(", world: {:?}", rc_game::follow_camera::CamWorld::default()), "");
             // The hand slot's hand point 0x1403c0 (the thrown wrench's target; no hand item in these runs).
             text = text.replace(", hand_point: [0.0, 0.0, 0.0]", "");
             // The water effects (hero water pass): the effect counters 0x13fc54..58 and the breath timer 0x13fc40 while

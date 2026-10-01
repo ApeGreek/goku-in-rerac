@@ -9,7 +9,7 @@
 //! 0x80000000`. Then by state:
 //! * **0** (init): state 1, V+0 = V+4 = 0; `CreateMoby(1143)` → V+0xc, its mode |= 2, draw distance 64, position =
 //!   the vendor's + (0, 0, 2.95), +0x73 = 32, V+0x90 = 0, `AttachManipulator(child, i, V+0x10 + 0x40·i)` for i = 0, 1
-//!   (not ported: counted), `MobyBuildMatrix(child)`.
+//!   ([`manip::attach`]: the hologram's joint lists 0 / 1), `MobyBuildMatrix(child)`.
 //! * **1** (far): V+0x90 −= 0.1 while > 0; ≤ 0 hides the hologram (mode |= 1). Every 8th tick (0x15f5cc & 7 = 0):
 //!   XY distance to the hero (`VecDistance2`) ≤ 16 and |Δz| ≤ 8 → state 2, seq 1 (blend 10) unless already on it,
 //!   the hologram shown. Then the common tail.
@@ -21,11 +21,15 @@
 //! * **3** (vendor open; `VendorExit` sets 1 again): V+0x90 = 0, the hologram's scale 0.
 //! * **Tail** (states 1 and 2): `RegisterDrawCallback2(0x2ba9c0, vendor)` (the beam and the four glow points; drawn by
 //!   `rc-engine`: [`super::draw_callbacks::Callback::VendorBeam`]),
-//!   the manipulators' z rotations `FUN_00221e38(V+0x20, 2, a)` / `(V+0x60, 2, b)` (counted), a += 0.01, b −= 0.01,
-//!   the hologram's scale = V+0x90 · class scale · 2.5, `MobyBuildMatrix(child)`.
+//!   the manipulators' z rotations `FUN_00221e38(a, V+0x20, 2)` / `(b, V+0x60, 2)` ([`manip::set_axis`]), a += 0.01,
+//!   b −= 0.01, the hologram's scale = V+0x90 · class scale · 2.5, `MobyBuildMatrix(child)`.
+//!
+//! The hologram is the dynamic moby it is in the game (drawn with its metal pass, its two joints turned by the
+//! vendor's nodes in its list; docs/plan/moby_animation.md §9); `rc-engine`'s vendor render keeps the beam only.
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::interact::{self, add_rot, owner, Handoff, HeroView};
+use crate::moby_update::manip;
 use crate::moby_update::services::{pvar as p, World};
 
 /// The update address in the level01 class table (not a Ghidra function).
@@ -39,10 +43,8 @@ pub const PROMPT: i32 = 21475;
 const CHILD: usize = 0x0c;
 const SCALE: usize = 0x90;
 const PVAR_SIZE: usize = 0x94;
-/// Whether the hologram moby is un-hidden when Ratchet comes near (the game: yes). The port keeps its mode bit set
-/// and the engine draws it (crate::vendor_render in rc-engine: its chrome packets and the beam callback 0x2ba9c0) from
-/// [`hologram`], since the dynamic-moby path has no metal pass.
-const SHOW_HOLOGRAM: bool = false;
+/// V+0x10 / V+0x50: the manipulator records on the hologram's joint lists 0 / 1.
+const MANIPS: [usize; 2] = [0x10, 0x50];
 
 /// The hologram as the game draws it: (child moby, scale V+0x90 · class scale · 2.5 applied, shown), with the
 /// manipulator phases (0x16139c / 0x1613a0). Shown while the vendor is in state 1 or 2 with V+0x90 > 0.
@@ -88,12 +90,12 @@ pub fn update(w: &mut World, id: MobyId) {
             if let Some(c) = c {
                 let pos = w.m(id).position;
                 let m = w.mm(c);
-                m.mode |= 2 | if SHOW_HOLOGRAM { 0 } else { 1 };
+                m.mode |= 2;
                 m.draw_dist = 64;
                 m.position = [pos[0], pos[1], pos[2] + 2.95, pos[3]];
                 m.b73 = 32;
                 p::set_ff(&mut w.mm(id).pvars, SCALE, 0.0);
-                w.svc.unported("vendor: hologram manipulators (AttachManipulator)");
+                for (i, ofs) in MANIPS.into_iter().enumerate() { manip::attach(w, c, i as u8, id, ofs); }
                 w.build_matrix(c);
             }
         }
@@ -117,11 +119,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 if st == 1 && xy <= interact::VENDOR_NEAR.0 && dz <= interact::VENDOR_NEAR.1 {
                     w.mm(id).state = 2;
                     if w.m(id).anim.seq_b != 1 { w.anim_blend(id, 1, 0, 10); }
-                    // The game shows the hologram here; its glass / additive draw (with the cone callback 0x2ba9c0)
-                    // is not ported and the opaque moby path draws it as a black ball, so the port keeps it hidden.
-                    if let Some(c) = child(w, id) {
-                        if SHOW_HOLOGRAM { w.mm(c).mode &= !1; } else { w.svc.unported("vendor: hologram draw (kept hidden)"); }
-                    }
+                    if let Some(c) = child(w, id) { w.mm(c).mode &= !1; }
                 } else if st == 2 && (interact::VENDOR_FAR.0 < xy || interact::VENDOR_FAR.1 < dz) {
                     w.mm(id).state = 1;
                     if w.m(id).anim.seq_b != 0 { w.anim_blend(id, 0, 0, 10); }
@@ -158,7 +156,10 @@ pub fn update(w: &mut World, id: MobyId) {
 /// The common tail of states 1 and 2 (module docs).
 fn tail(w: &mut World, id: MobyId) {
     w.svc.draw_callbacks.register2(super::draw_callbacks::Callback::VendorBeam, id);
-    w.svc.unported("vendor: hologram manipulator spin");
+    let spin = w.svc.interact.vendor.spin;
+    if let Some(c) = child(w, id) {
+        for (ofs, a) in MANIPS.into_iter().zip(spin) { manip::set_axis(w, c, id, ofs, a, 2); }
+    }
     let g = &mut w.svc.interact.vendor;
     g.spin[0] = add_rot(g.spin[0], 0.01);
     g.spin[1] = add_rot(g.spin[1], -0.01);
@@ -173,4 +174,44 @@ fn tail(w: &mut World, id: MobyId) {
 /// `VendorExit` 0x2ae660's write to the vendor: state 1.
 pub fn on_exit(table: &mut crate::moby_runtime::MobyTable, id: MobyId) {
     if let Some(m) = table.mobys.get_mut(id) { m.state = 1; }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::moby_runtime::{Moby, MobyTable};
+
+    /// State 0 creates the hologram and links the two manipulators into its lists 0 / 1 (list 1's node in front);
+    /// the tail of state 1 turns them about z by the phases (a, b) of this tick, then a += 0.01, b −= 0.01; far away
+    /// with the scale at 0 the hologram is hidden (mode bit 1), near it shows.
+    #[test]
+    fn hologram_manipulators_spin_its_joints() {
+        let v = Moby { o_class: 11, state: 0, pvars: vec![0; PVAR_SIZE], ..Moby::default() };
+        let mut t = MobyTable::new(vec![v], 4);
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        let mut classes = crate::moby_update::ClassTable::default();
+        classes.classes.insert(HOLOGRAM, (crate::moby_runtime::ClassInfo { scale: 1.0, ..Default::default() }, None));
+        let mut svc = crate::moby_update::Services::new();
+        svc.joint_targets.insert(HOLOGRAM, vec![4, 6]);
+        svc.interact.vendor.spin = [0.2, -0.1];
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 1);
+        update(&mut w, 0);
+        let c = child(&w, 0).expect("the hologram");
+        assert_eq!(w.m(c).o_class, HOLOGRAM);
+        assert_eq!(w.m(c).joint_mods.iter().map(|m| m.joint).collect::<Vec<_>>(), vec![6, 4]);
+        assert_eq!(w.m(c).mode & 1, 0, "created shown (scale 0)");
+        // State 1, Ratchet far away (the hero sits at the origin: move the vendor), not a distance tick.
+        w.mm(0).position = [100.0, 0.0, 0.0, 1.0];
+        update(&mut w, 0);
+        assert_eq!(w.m(c).joint_mods[1].quat, crate::hero::idle::axis_quat(0.2, 2));
+        assert_eq!(w.m(c).joint_mods[0].quat, crate::hero::idle::axis_quat(-0.1, 2));
+        assert_eq!(w.svc.interact.vendor.spin, [interact::add_rot(0.2, 0.01), interact::add_rot(-0.1, -0.01)]);
+        assert_eq!(w.m(c).mode & 1, 1, "scale 0 far away: hidden");
+        // Near on a distance tick: state 2, shown.
+        w.mm(0).position = [2.0, 0.0, 0.0, 1.0];
+        w.counter = 8;
+        update(&mut w, 0);
+        assert_eq!((w.m(0).state, w.m(c).mode & 1), (2, 0));
+    }
 }

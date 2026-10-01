@@ -8,7 +8,7 @@
 //! **Pvars** (the game's layout): +0x00 the gun (the hand item: not a table moby in the port), +0x04 the speed, +0x10
 //! the flight timer (`ticks(3000)` at the launch; −1 / −`ticks(100)` after the explosion, counting down to
 //! −`ticks(100)`), +0x14 the camera (1 while the type-6 camera is ours), +0x18 / +0x1c the smoothed stick x / y,
-//! +0x20 the glow (moby + 1), +0x24 / +0x28 the fins' joint manipulators (not ported: G-WPN-004), +0x2c the loop
+//! +0x20 the glow (moby + 1), +0x24 / +0x28 the fins' joint manipulators ([`fins`]), +0x2c the loop
 //! voice, +0x30..+0x42 the saved fog (kept by the engine, [`View`]), +0x44 the height above the ground (0.4), +0x48
 //! the target speed. Moby +0xbc: explode now (1 a face or ○, 2 a moby).
 //!
@@ -53,6 +53,7 @@ use crate::follow_camera::type6::{Call, Orbit, Target};
 use crate::menus::screen_static::StaticDraw;
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{atan, fx, turn::approach};
+use crate::moby_update::manip;
 use crate::moby_update::services::{self as sv, pvar as p, HitTemplate, World};
 use crate::ps2v::Pf;
 use crate::targeting::polar;
@@ -75,6 +76,10 @@ pub mod pv {
     pub const VOICE: usize = 0x2c;
     pub const HEIGHT: usize = 0x44;
     pub const TARGET_SPEED: usize = 0x48;
+    /// The fins' two manipulator records: the game keeps them in a global pair (+0x24 / +0x28 point at base + 0x1f60 /
+    /// + 0x1fa0); the port keeps them past the game's block (one missile flies at a time).
+    pub const FINS: [usize; 2] = [0x50, 0x90];
+    pub const SIZE: usize = 0xd0;
 }
 
 /// gp−0x573c / gp−0x5738: the cruise and the ✕ speeds (u/s); gp−0x5734 / gp−0x5730 their easing; gp−0x5740 the pitch
@@ -234,8 +239,13 @@ pub fn launch(w: &mut World, yaw: f32, pitch: f32, gun: [f32; 3], point: [f32; 3
     let t = target(w, id, t3000);
     crate::cinematic::camera_type6(w, Call::Switch(t));
     p::set_i32(&mut w.mm(id).pvars, pv::CAMERA, 1);
-    // SetState(0x1d, 1): made by the gun right after its update (crate::hero::visibomb). The fins' manipulators
-    // (AttachManipulator on lists 0 / 1): not ported (G-WPN-004).
+    // SetState(0x1d, 1): made by the gun right after its update (crate::hero::visibomb). The fins' records cleared
+    // (`0x220f50(rec, 0, 0x40)`) and attached on the joint lists 0 / 1.
+    if w.m(id).pvars.len() < pv::SIZE { w.mm(id).pvars.resize(pv::SIZE, 0); }
+    for (list, ofs) in pv::FINS.into_iter().enumerate() {
+        w.mm(id).pvars[ofs..ofs + manip::rec::NODE].fill(0);
+        manip::attach(w, id, list as u8, id, ofs);
+    }
     if let Some(g) = w.create_moby(super::pyro_glow::CLASS) {
         let rows = w.m(id).rows;
         super::pyro_glow::init(w.mm(g), [0, 1, 2].map(|i| [rows[i][0], rows[i][1], rows[i][2]]), None);
@@ -363,6 +373,20 @@ pub fn end_flight(w: &mut World, id: MobyId) {
     w.delete_moby(id);
 }
 
+/// The fins in flight (0x2cc324..0x2cc3ec, after the glow): with the smoothed stick (x +0x18, y +0x1c) and the roll
+/// (moby +0x40), `FUN_00221e38(−0.7·(0.5·y + |x/3| ± 1.1·(x − roll)), fin + 0x10, 1)` for the fins on lists 0 (+) and
+/// 1 (−): they tilt about y against the steering.
+pub fn fins(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < pv::SIZE { w.mm(id).pvars.resize(pv::SIZE, 0); }
+    let m = w.m(id);
+    let (x, y, roll) = (p::ff(&m.pvars, pv::STICK_X), p::ff(&m.pvars, pv::STICK_Y), m.rotation[0]);
+    let (half, k, s) = (0.5f32, f32::from_bits(0x3f8c_cccd), f32::from_bits(0x3f33_3333));
+    for (ofs, sign) in pv::FINS.into_iter().zip([1.0f32, -1.0]) {
+        let a = -((y * half + (x / 3.0).abs()) + sign * ((x - roll) * k)) * s;
+        manip::set_axis(w, id, id, ofs, a, 1);
+    }
+}
+
 /// `0x2cbda8` (module docs).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x80 { w.mm(id).pvars.resize(0x80, 0); }
@@ -455,6 +479,7 @@ pub fn update(w: &mut World, id: MobyId) {
         return;
     }
     glow_frame(w, id);
+    fins(w, id);
     // The path.
     let n = crate::hero::guns::with_len(vel, 1.0);
     let tmpl = HitTemplate { dir: [Pf::f(n[0]), Pf::f(n[1]), Pf::ONE, Pf::b(0x45af_df66)], attacker: Some(id), flags: 0x83_0000, b18: 3, b19: 2, h1a: CLASS as u16, damage: Pf::f(6.0), w20: 1 };
@@ -571,6 +596,30 @@ mod tests {
         // (24dt − 2.4)·100 at cruise (−199.99…, truncated), (34dt − 2.4)·100 flat out.
         let f = |ts: f32| ((ts - (CRUISE * DT) / (BOOST * DT - CRUISE * DT)) * 100.0) as i32;
         assert_eq!((f(CRUISE * DT), f(BOOST * DT)), (-199, -183));
+    }
+
+    /// The fins: attached on lists 0 / 1 (list 1's node first), turned about y by −0.7·(0.5·y + |x/3| ± 1.1·(x − roll)).
+    #[test]
+    fn fins_tilt_against_the_steering() {
+        use crate::moby_runtime::{Moby, MobyTable};
+        let mut m = Moby { o_class: CLASS, pvars: vec![0; pv::SIZE], rotation: [0.1, 0.0, 0.0, 0.0], ..Moby::default() };
+        p::set_ff(&mut m.pvars, pv::STICK_X, 0.6);
+        p::set_ff(&mut m.pvars, pv::STICK_Y, -0.4);
+        let mut t = MobyTable::new(vec![m], 4);
+        let hero = crate::hero::Hero::new();
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = crate::moby_update::Services::new();
+        svc.joint_targets.insert(CLASS, vec![2, 3]);
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
+        for (list, ofs) in pv::FINS.into_iter().enumerate() { manip::attach(&mut w, 0, list as u8, 0, ofs); }
+        fins(&mut w, 0);
+        let (k, s) = (f32::from_bits(0x3f8c_cccd), f32::from_bits(0x3f33_3333));
+        let a0 = -((-0.4 * 0.5 + (0.6f32 / 3.0).abs()) + (0.6 - 0.1) * k) * s;
+        let a1 = -((-0.4 * 0.5 + (0.6f32 / 3.0).abs()) - (0.6 - 0.1) * k) * s;
+        let mods = &w.m(0).joint_mods;
+        assert_eq!(mods.iter().map(|m| m.joint).collect::<Vec<_>>(), vec![3, 2]);
+        assert_eq!((mods[1].quat, mods[0].quat), (crate::hero::idle::axis_quat(a0, 1), crate::hero::idle::axis_quat(a1, 1)));
     }
 
     #[test]

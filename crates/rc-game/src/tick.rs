@@ -118,6 +118,8 @@ pub trait MobySystem {
     fn run_list(&self, _table: &MobyTable, _camera: crate::hero::physics::V4) -> Option<Vec<MobyId>> { None }
     /// The level's volume sections (the cuboids the Swingshot targets' records name); None: none.
     fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { None }
+    /// The moby ids of group `g` (`0x1abcc0[g]`, list order; none for `g < 0`): the Swingshot camera's group look.
+    fn group(&self, _g: i8) -> Vec<MobyId> { Vec::new() }
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -233,8 +235,9 @@ impl Game {
         carriers.grind = self.grind_paths.clone();
         // The Swingshot targets of the moby loop's run list (hero::swingshot, the weapon check's searches).
         carriers.targets = self.swing_targets(hooks.world.as_deref());
-        // The melee aim search's targets (0x1abe80, hero::melee::aim_search), with a hand item out.
-        if self.hero.items.slot.item.is_some() { carriers.melee = crate::hero::melee::melee_targets(&self.mobys, &self.target_list(hooks.world.as_deref())); }
+        // The target list 0x1abe80 for the melee aim search (hero::melee::aim_search) and the head's look target
+        // (`HeroScanTargets`, hero::pose: every tick, with or without a hand item).
+        carriers.melee = crate::hero::melee::melee_targets(&self.mobys, &self.target_list(hooks.world.as_deref()));
         // The weapon's target (0x13fda0) where the moby loop left it (SetState 0x23 aims at it).
         crate::hero::weapons::refresh_aim(&mut self.hero, &self.mobys);
         let hero_tick = {
@@ -326,6 +329,50 @@ impl Game {
             if let Some(f) = sound { f(&self.mobys, &self.hero, &self.camera.out, &mut self.rng, self.counter); }
             self.counter += 1;
             return TickReport { hero: hero_tick, camera: self.camera.out, camera_reset: false };
+        }
+        // The Swingshot camera's look along the swung-on target's moby group (`0x3182c8`, levels 14 / 7 / 9): the
+        // target's group byte +0x21, position and its group's members as the camera update reads them.
+        self.camera.world.swing_group = match (self.hero.state, self.hero.swing.on) {
+            (0x2c, Some(on)) => self.mobys.mobys.get(on).map(|m| {
+                let p3 = |p: [f32; 4]| [p[0], p[1], p[2]];
+                let ids = hooks.world.as_deref().map(|w| w.group(m.group)).unwrap_or_default();
+                let members = ids
+                    .iter()
+                    .filter_map(|&id| self.mobys.mobys.get(id).map(|x| crate::follow_camera::swing::GroupMember { id, class: x.o_class, pos: p3(x.position) }))
+                    .collect();
+                crate::follow_camera::swing::SwingGroup { group: m.group, on_pos: p3(m.position), members }
+            }),
+            _ => None,
+        };
+        // The follow camera's focus scan candidates (`0x3111d8`): mobys whose target record's byte +0x0d is set.
+        let me = self.hero_moby;
+        self.camera.world.focus = self
+            .mobys
+            .mobys
+            .iter()
+            .enumerate()
+            .filter(|&(id, m)| id != me && crate::moby_update::triggers::pvar_record(m).is_some_and(|o| m.pvars[o + 0xd] != 0))
+            .map(|(id, _)| id)
+            .collect();
+        // The class-18 regions' mobys and groups (`0x2fb9c8`: their moby or their group's first live member).
+        {
+            let (mut mobys, mut groups) = (std::collections::BTreeMap::new(), std::collections::BTreeMap::new());
+            let mut add = |id: usize| {
+                if let Some(m) = self.mobys.mobys.get(id) {
+                    mobys.insert(id, crate::follow_camera::focus::CamMoby { state: m.state, pos: [m.position[0], m.position[1], m.position[2]] });
+                }
+            };
+            for f in self.camera.level_cams.slots.iter().filter_map(|s| s.focus) {
+                if f.group < 0 {
+                    if let Ok(id) = usize::try_from(f.moby) { add(id); }
+                } else if let Ok(g) = i8::try_from(f.group) {
+                    let ids = hooks.world.as_deref().map(|w| w.group(g)).unwrap_or_default();
+                    for &id in &ids { add(id); }
+                    groups.insert(f.group, ids);
+                }
+            }
+            self.camera.world.mobys = mobys;
+            self.camera.world.groups = groups;
         }
         // The camera's queries see the table after the hero's write-back (Ratchet re-registered).
         let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));

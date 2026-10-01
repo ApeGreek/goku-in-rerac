@@ -249,6 +249,7 @@ impl Camera {
         if blend {
             self.blend.next_rot_rate = BLEND_RATE;
             self.blend.next_pos_rate = BLEND_RATE;
+            self.blend.kind = 0;
             self.blend.mode = if self.blend.mode == 0 { 1 } else { 2 };
         }
         // FUN_0020d110(follow) and the type-0 init: the snap behind Ratchet.

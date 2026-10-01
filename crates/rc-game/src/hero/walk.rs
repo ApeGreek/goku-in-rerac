@@ -92,6 +92,7 @@ impl Hero {
             }
         }
         self.lean(); // HeroLean 0x235638 after the turn: super::idle.
+        self.clank_sway(); // 0x235e60: Clank's sway on the back (record 18), super::pose.
         let acc = (DT2 * Pf::b(0x40f0_0000)) * f;
         let mut dec = DT2 * Pf::b(0x4108_0000);
         if self.sharp_turn != 0 {

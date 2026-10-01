@@ -206,7 +206,10 @@ fn parts(lv: &Lv, ty: u8) -> u64 { lv.svc.fx.part_spawns.get(&ty).copied().unwra
 // ---------------------------------------------------------------------------------------------------
 // U334: the path scout 1196 (#622: path 2, waiting area 111, wakes 1202 #653 / #652 / #651)
 
-fn scout_run(ticks: usize) -> Option<(Lv, Hero, Vec<Vec<u8>>, Vec<(u8, [u8; 3])>)> {
+/// A scout run: the level, Ratchet, the scout's states and its wake calls (its state, the three brawlers').
+type ScoutRun = (Lv, Hero, Vec<Vec<u8>>, Vec<(u8, [u8; 3])>);
+
+fn scout_run(ticks: usize) -> Option<ScoutRun> {
     let (mut lv, _) = level_at(10, [0.0, 0.0, -100.0])?;
     let near = lv.table.mobys[622].position;
     let at = inside(&mut lv, 111, near)?;
@@ -470,6 +473,37 @@ fn a_falling_brawler_dies() {
     assert!(lv.svc.save.death.contains(&(10, lv.table.mobys[672].spawn_id)));
 }
 
+/// Falling (0xc) into a hazard surface (`CollType` > 1 and ≠ 3, within the probe's 0.5 above it): the death flight
+/// (0xb: flash 0xfa, not targetable, `SetDeathBits(m, 0, −1)`, sequence 0xd), then the death's explosion.
+#[test]
+fn a_brawler_falling_into_a_hazard_takes_the_death_flight() {
+    let Some((mut lv, hero)) = level_at(10, [276.0, 300.0, 40.0]) else { eprintln!("skipped: no extracted/"); return };
+    lv.tick(&hero);
+    let mut spot = None;
+    'find: for x in (0..256).map(|k| 4.0 * k as f32) {
+        for y in (0..256).map(|k| 4.0 * k as f32) {
+            let w = lv.world(&hero);
+            let g = rc_game::moby_update::creature::ground::ground(&w, [x, y, 500.0, 1.0], 0.5, 0);
+            if g.hit && 1 < g.surface && g.surface != 3 { spot = Some((x, y, g.z, g.surface)); break 'find; }
+        }
+    }
+    let Some((x, y, z, surface)) = spot else { panic!("no hazard surface on level 10") };
+    eprintln!("hazard surface {surface} at ({x}, {y}, {z})");
+    let b = 672;
+    lv.table.mobys[b].state = ob::st::FALL;
+    lv.table.mobys[b].position = [x, y, z - 0.25, 1.0];
+    for o in 0..0xc { lv.table.mobys[b].pvars[ob::pv::K + o] = 0; }
+    lv.tick(&hero);
+    let m = &lv.table.mobys[b];
+    eprintln!("state {} flash {:#x} mode {:#x}", m.state, m.pvars[ob::pv::FLASH + 7], m.mode);
+    assert_eq!(m.state, ob::st::DEAD, "the death flight");
+    assert_eq!(m.pvars[ob::pv::FLASH + 7], 0xfa);
+    assert_eq!(m.mode & rc_game::moby_runtime::mode::TARGETABLE, 0);
+    assert!(lv.svc.save.death.contains(&(10, m.spawn_id)));
+    for _ in 0..300 { lv.tick(&hero); if lv.table.mobys[b].state >= 0x80 { break; } }
+    assert!(lv.table.mobys[b].state >= 0x80, "then the death");
+}
+
 // ---------------------------------------------------------------------------------------------------
 // U406: Gemlik's turret 29 (#9: home yaw π, cuboid 0), its rider 36 and shot 1238
 
@@ -564,9 +598,7 @@ fn a_turret_without_its_rider_blows_up() {
     let Some((mut lv, hero)) = level_at(13, [0.0, 0.0, -100.0]) else { eprintln!("skipped: no extracted/"); return };
     lv.tick(&hero);
     let r = (p::i32(&lv.table.mobys[10].pvars, gt::pv::RIDER) - 1) as usize;
-    let mut w = lv.world(&hero);
-    w.delete_moby(r);
-    drop(w);
+    lv.world(&hero).delete_moby(r);
     let seen = run(&mut lv, &hero, &[10], 5);
     assert_eq!(&seen[0][..2], &[gt::st::ORPHAN, gt::st::DEAD]);
     assert!(lv.table.mobys[10].state >= 0x80);

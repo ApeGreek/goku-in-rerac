@@ -35,8 +35,9 @@
 //!
 //! **Camera**: at the latch the script camera (`crate::cinematic`: `CameraScript(camera, Euler, 3, ticks(180), 0)`,
 //! targets at cuboid +0x20), at the end `CameraScript2(4)` (blend back); `SetMissionDone` goes out as the cinematic
-//! layer's engine request. **Not ported** (counted with `Services::unported`): the camera swing's parameters
-//! `0x316e88(+0x28, +0x2c)`, the visit-state save of the progress `0x29b0a0`, and the tail's two Novalis global flags
+//! layer's engine request; the swing's curve `0x316e88(+0x28, +0x2c)` goes with it (the script camera's mode 3 is the
+//! timed swing, `crate::follow_camera::script`). **Not ported** (counted with `Services::unported`): the visit-state
+//! save of the progress `0x29b0a0`, and the tail's two Novalis global flags
 //! (`0x13d394` / `0x13d395` = 1 once the cranks with spawn ids 0x34 / 0x35 are done).
 //!
 //! Novalis: crank #296 (spawn id 0x34, (172.85, 90.59, 62.0)) drives the door pair 665 #683 / #684; crank #297 (spawn

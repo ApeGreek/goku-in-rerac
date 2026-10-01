@@ -445,13 +445,22 @@ fn apply(rows: &[V; 3], v: V) -> V {
 }
 
 /// `BreakFxB(g, parent, class, pos, rot, timer, flags, vel, spin, sphere)` 0x278ad8 with the zero vectors the
-/// creatures pass (random velocity, spin and the class sphere): a piece moby of `class` at `pos`, rows from `rot`,
-/// scale `class scale · parent scale / parent class scale`, the parent's light word and ambient, state 1, update
-/// distance 0xff, draw distance 0x80, no collision; pvars: +0x30 timer `trunc(randf(60, 120))` (when `timer` is 0),
-/// +0x34 flags (1 fade instead of exploding, 2 the other explosion), +0x38 gravity `randf(10, 15)·dt²` (when `g` is 0),
-/// +0x00 velocity `(cos a, sin a)·randf(2, 4)·dt, randf(5, 8)·dt` (a = `rand_angle`), +0x10 spin `rand_vec(dt·π,
-/// dt·2π)`, +0x20 the collision sphere (class sphere · scale / 1024). 8 draws.
+/// creatures pass (random velocity, spin and the class sphere): [`break_piece_with`].
 pub fn break_piece(w: &mut World, parent: MobyId, class: i16, p: V, rot: V, timer: i32, flags: u32) -> Option<MobyId> {
+    break_piece_with(w, parent, class, p, rot, timer, flags, [0.0; 4], [0.0; 4], [0.0; 4])
+}
+
+/// `BreakFxB(g, parent, class, pos, rot, timer, flags, vel, spin, sphere)` 0x278ad8 (the same code in all 19
+/// overlays: masked overlay-diff; on levels 00, 05–07, 13–16, 18 its words hash as cluster 494499ccf189, with two
+/// padding words after `jr ra`): a piece moby of `class` at `pos`, rows from `rot`, scale `class scale · parent scale
+/// / parent class scale`, the parent's light word and ambient, state 1, update distance 0xff, draw distance 0x80, no
+/// collision; pvars: +0x30 timer (`timer`, or `trunc(randf(60, 120))` when 0), +0x34 flags (1 fade instead of
+/// exploding, 2 the other explosion), +0x38 gravity `randf(10, 15)·dt²` (the game tests the new block's +0x38, always
+/// 0, so `g` is never used), +0x00 velocity (`vel`, or `(cos a, sin a)·randf(2, 4)·dt, randf(5, 8)·dt` with a =
+/// `rand_angle` when |vel| = 0), +0x10 spin (`spin`, or `rand_vec(dt·π, dt·2π)` when |spin| = 0), +0x20 the collision
+/// sphere (`sphere`, or the class sphere · scale / 1024 when its length and w are 0). 3 to 8 draws.
+#[allow(clippy::too_many_arguments)]
+pub fn break_piece_with(w: &mut World, parent: MobyId, class: i16, p: V, rot: V, timer: i32, flags: u32, vel: V, spin: V, sphere: V) -> Option<MobyId> {
     let m = w.create_moby(class)?;
     let (pscale, pclass, light, ambient) = { let q = w.m(parent); (q.scale, q.o_class, q.light, q.ambient) };
     let pcs = w.classes.info(pclass).map(|c| c.scale).unwrap_or(1.0);
@@ -463,12 +472,22 @@ pub fn break_piece(w: &mut World, parent: MobyId, class: i16, p: V, rot: V, time
         timer
     };
     let g = w.rng.randf(10.0, 15.0) * super::DT2;
-    let a = w.rng.rand_angle();
-    let s = w.rng.randf(2.0, 4.0) * super::DT;
-    let (c, sn) = cs(a);
-    let vz = w.rng.randf(5.0, 8.0) * super::DT;
-    let spin = w.rng.rand_vec(super::DT * std::f32::consts::PI, super::DT * 2.0 * std::f32::consts::PI);
-    let sphere = class_sphere(w, class);
+    let v = if super::len3(vel) == 0.0 {
+        let a = w.rng.rand_angle();
+        let s = w.rng.randf(2.0, 4.0) * super::DT;
+        let (c, sn) = cs(a);
+        let vz = w.rng.randf(5.0, 8.0) * super::DT;
+        [c * s, sn * s, vz, 0.0]
+    } else {
+        vel
+    };
+    let sp = if super::len3(spin) == 0.0 {
+        let r = w.rng.rand_vec(super::DT * std::f32::consts::PI, super::DT * 2.0 * std::f32::consts::PI);
+        [r[0], r[1], r[2], 0.0]
+    } else {
+        spin
+    };
+    let class_sph = (super::len3(sphere) == 0.0 && sphere[3] == 0.0).then(|| class_sphere(w, class));
     let mo = w.mm(m);
     mo.visible = 1;
     mo.mode |= mode::KEEP_ROWS;
@@ -487,9 +506,10 @@ pub fn break_piece(w: &mut World, parent: MobyId, class: i16, p: V, rot: V, time
     pvar::set_i32(pv_, 0x30, t);
     pvar::set_u32(pv_, 0x34, flags);
     pvar::set_ff(pv_, 0x38, g);
-    pvar::set_v4f(pv_, 0, [c * s, sn * s, vz, 0.0]);
-    pvar::set_v4f(pv_, 0x10, [spin[0], spin[1], spin[2], 0.0]);
-    pvar::set_v4f(pv_, 0x20, [sphere[0] * k, sphere[1] * k, sphere[2] * k, sphere[3] * k]);
+    pvar::set_v4f(pv_, 0, v);
+    pvar::set_v4f(pv_, 0x10, sp);
+    let sph = match class_sph { Some(s) => [s[0] * k, s[1] * k, s[2] * k, s[3] * k], None => sphere };
+    pvar::set_v4f(pv_, 0x20, sph);
     w.build_matrix(m);
     Some(m)
 }

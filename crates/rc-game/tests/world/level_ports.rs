@@ -27,6 +27,14 @@ fn novalis_ports_are_the_class_number_registry() {
             assert_eq!(p.get(oc), Some(ClassUpdate::MissionNpc));
             continue;
         }
+        if oc == 1143 {
+            // The Gadgetron logo (the vendor's hologram, created, not placed): its update is the same code as Kalebo's
+            // placed logos, the unit port `units::hologram_logo` (U514), found by its code on every level.
+            assert!(!placed.contains(&oc));
+            let row = rc_game::moby_update::classes::units::PORTS.iter().position(|u| u.unit == "U514 1143").unwrap() as u16;
+            assert_eq!(p.get(oc), Some(ClassUpdate::Unit(row)));
+            continue;
+        }
         assert_eq!(p.get(oc), for_class(oc), "level 01 class {oc} (update {:#x})", e.update);
     }
 }

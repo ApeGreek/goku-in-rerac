@@ -300,6 +300,7 @@ impl Camera {
         if let Some(r) = rate {
             self.blend.next_rot_rate = r;
             self.blend.next_pos_rate = r;
+            self.blend.kind = 0;
             self.blend.mode = if self.blend.mode == 0 { 1 } else { 2 };
         }
         self.init(inp);

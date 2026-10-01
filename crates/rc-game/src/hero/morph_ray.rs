@@ -29,12 +29,28 @@
 //! **The beam** ([`Beam`]): twelve points `range/12` apart bending from the last tick's shape toward the aim (a lerp of
 //! `0.9 − 0.5·i/12`; from point 7 on also toward the target), a ring of 20 around each (radius `0.05 + 1.184·i/12`),
 //! two helix strands (radius `0.01 + 0.49·i/12`, phase `+0.2007` a tick, `0.39968` a point), sparkle pairs (type 53) at
-//! the strands' ends, sparks along the beam (type 78: not ported, counted), and three pulses (a new one every 45 ticks)
+//! the strands' ends, homing sparks along the beam (type 78, `crate::particles::type78`), and three pulses (a new one every 45 ticks)
 //! running out along it at 8 u/s, growing from 0.1 to 1.5 and fading in their last 30 ticks. Its length is the target's
 //! distance, else the line's (flags 0x14) up to the range 8. **The draw** ([`Beam::quads`]): the tube (FX 13, two
 //! counter-scrolling layers, back faces culled, the far ring transparent), the strands (FX 14 core 0.05 wide and FX 16
 //! glow 0.4 wide, colours 0x7f2020 / 0x20207f), the pulses (FX 8) and the muzzle glow (FX 0xb, 0.4 coloured and 0.1
 //! white); all additive, colour 0x407f207f (gold 0x60007f00).
+//!
+//! **The beam's sparks** (`0x2d2d08`, 0x2d3388..0x2d35e8; `PartType78Spawn` 0x28ad08, `crate::particles::type78`):
+//!
+//! | address | what it does | port |
+//! |---|---|---|
+//! | 0x2d3388 | `randi(2)`: 1 → no sparks this tick | [`beam`] |
+//! | 0x2d33a0..0x2d33c4 | the step: `pts[1] − pts[0]` at 0.2 (gp−0x549c × 0x15ed60); the start: `pts[0]` + the item's row 1 (+0xd0) at −0.25 (gp−0x5490) | [`beam`] |
+//! | 0x2d33c8..0x2d34fc | the colour: `randi(5)` into the table 0x20ab10 ([`SPARK_RGBA`]) | [`beam`] |
+//! | 0x2d34f8..0x2d3544 | `randf_sym(0, 15°)` twice (a1, a2); the step turned by a2 about the gravity 0x13f5e0 (`0x274ac8`), then by a1 about step × gravity (`FastVecCross` 0x2212d0) | [`beam`] |
+//! | 0x2d3548..0x2d3580 | life = trunc(1.2 · beam length / 0.2), ×3 with a target (+0x10) | [`beam`] |
+//! | 0x2d35a0 | spark 1: `(0.1·s, s, start, life, colour, mode 0, spin sgn, vel, target)` (s, sgn: the sparkles' draws above) | [`beam`] → `super::fx::PartSpawn::Spark78` |
+//! | 0x2d35e4 | spark 2: `(0.07·s, 0.7·s, start, life, 0x7f7f7f7f, mode 1, −sgn, vel, target)` | [`beam`] → `PartSpawn::Spark78` |
+//! | `PartType78Spawn` | a record (none when the pool is full); modes 0 / 1: no draw; +0x38 the target, +0x3c its record +0x10 | `crate::particles::type78::spawn` (created by the particle hook, `super::fx::create_particles`) |
+//! | `UpdateParts` type 78 | homing on the target's position, around the gravity 0x13f5e0 | `type78::update`; the hook writes `Particles::gravity` from `Hero::gravity_dir` |
+//!
+//! Side effects: the two particle records only (no sound, light, HUD or hit; the target is only read).
 //!
 //! **The light** (`WritePointLight_A(7.5, 0, …, 0x207f7f)`): 0.5 behind the muzzle along the item's row 1, radius 7.5,
 //! colour (1, 1, 0.25)·127/128; after the firing it fades over 20 ticks and is freed (also when put away). **The sound**:
@@ -124,7 +140,7 @@ pub struct Beam {
     pub gold: bool,
     /// The tick the draw callback was registered for (`RegisterDrawCallback2(0x2d38b8, item)`).
     pub drawn: Option<u64>,
-    /// Type-78 spawns (the particle type is not ported: counted).
+    /// Type-78 sparks queued (`super::fx::PartSpawn::Spark78`), a count for the tests.
     pub sparks78: u32,
 }
 
@@ -689,14 +705,30 @@ fn beam(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn Hi
     let m = &mut hero.weapons.reactive.morph;
     let dir = with_len(sub3(m.beam.pts[1], m.beam.pts[0]), 0.2);
     if rng.randi(2) == 0 {
-        let _c = SPARK_RGBA[rng.randi(5) as usize];
+        // The sparks (0x2d3388..0x2d35e8): from 0.25 ahead of the first point along the item's −row 1, the beam's step
+        // turned by ±15° about the gravity and about beam × gravity, a colour of the table 0x20ab10; life = the
+        // beam's length / its step ×1.2 (×3 with a target); a coloured one (mode 0, spin sgn) and a white core (mode
+        // 1, −sgn), both homing on the target.
+        let pos = add3(m.beam.pts[0], with_len(row1, -0.25));
+        let c = SPARK_RGBA[rng.randi(5) as usize];
         let a1 = rng.randf_sym(0.0, f32::from_bits(0x3e86_0a92));
         let a2 = rng.randf_sym(0.0, f32::from_bits(0x3e86_0a92));
         let d2 = rotate(dir, a2, gravity);
-        let _d2 = rotate(d2, a1, cross3(dir, gravity));
-        // Two PartType78Spawn (`0x28ad08`, no draws with a3 0 / 1): the type is not ported.
+        let vel = rotate(d2, a1, cross3(dir, gravity));
+        let tgt = target.map(|t| t.0);
+        let mut life = ((len * 1.2) / 0.2) as i32;
+        if tgt.is_some() { life *= 3; }
+        let word = tgt.and_then(|t| table.mobys.get(t)).and_then(targeting::aim_height).map_or(0, f32::to_bits);
+        let pos = [pos[0], pos[1], pos[2], 1.0];
+        let spark = |s1: f32, s2: f32, rgba: u32, mode: i32, spin: i8| super::fx::PartSpawn::Spark78 {
+            s1, s2, pos, life: life as i16, rgba, mode, spin: spin as u8, vel, target: tgt, target_word: word,
+        };
+        hero.fx.parts.push(spark(s * 0.1, s, c, 0, sgn));
+        hero.fx.parts.push(spark(s * 0.07, s * 0.7, 0x7f7f_7f7f, 1, -sgn));
+        let m = &mut hero.weapons.reactive.morph;
         m.beam.sparks78 += 2;
     }
+    let m = &mut hero.weapons.reactive.morph;
     m.beam.pulses_step();
     m.beam.glow_at = add3(m.beam.pts[0], with_len(row1, -0.5));
     m.beam.step_scrolls();

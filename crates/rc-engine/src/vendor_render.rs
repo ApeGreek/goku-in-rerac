@@ -1,9 +1,8 @@
 //! What the Gadgetron vendor draws (docs/plan/interaction.md §9), from the state crate::interact_render keeps:
 //!
-//! * **The hologram on approach** (class 11 states 1 / 2, level01 0x2bb128): the Gadgetron logo, class 1143 (its
-//!   chrome packets need the metal pass the dynamic-moby path lacks, so it is drawn here, from the child moby's
-//!   position, rows and scale), its two joints turning ±0.01 rad per tick about z (`AttachManipulator` records
-//!   rewritten by `FUN_00221e38`), lit with its own light word and ambient; and the class's draw callback 0x2ba9c0:
+//! * **The hologram's beam on approach** (class 11 states 1 / 2, level01 0x2bb128; the Gadgetron logo itself, class
+//!   1143, is the dynamic moby the vendor creates, drawn with its metal pass by the dynamic-moby path, its two joints
+//!   turned by the vendor's manipulators: `rc_game::moby_update::manip`): the class's draw callback 0x2ba9c0,
 //!   the projector beam, 4 FX quads over the 9 vertices of 0x1d77e0 (x / y scaled by the hologram's size), V scrolled
 //!   +0.01 per draw, turned to face the camera [M: the callback's rotation and texture are lost in the decompile; FX 0x18
 //!   as the menu's cone].
@@ -34,7 +33,7 @@ use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
 use rc_formats::moby::LevelMobyClass;
-use rc_formats::moby_anim::{self, AnimState, JointModifier, MobyAnimClass, Rows};
+use rc_formats::moby_anim::{self, AnimState, MobyAnimClass, Rows};
 use rc_formats::moby_light::{self, V4};
 use rc_game::menus::vendor::{self as vendor, screens, ScreenMoby};
 use rc_game::menus::MenuDraw;
@@ -45,14 +44,10 @@ const SLOT_BACKDROP: u32 = 1;
 const SLOT_SALESMAN: u32 = 2;
 const SLOT_HOLO: u32 = 3;
 const SLOT_POPUP: u32 = 4;
-const SLOT_LOGO: u32 = 5;
-/// Vendors per level whose logo can show at once.
-const LOGOS: u32 = 3;
-const SLOTS: u32 = SLOT_LOGO + LOGOS;
+const SLOTS: u32 = SLOT_POPUP + 1;
 /// Palette entries per slot (the salesman has 92 joints).
 const JOINTS: u32 = 128;
-/// The hologram class and the FX textures.
-const LOGO_CLASS: i16 = 1143;
+/// The FX textures.
 const CONE_FX: usize = 0x18;
 /// Light set 14 and the screen mobys' light word.
 const LIGHT_SET: usize = 14;
@@ -72,8 +67,6 @@ struct VendorGfx {
     /// The beam's V scroll 0x161394 and the tick it last advanced.
     beam_scroll: f32,
     beam_tick: Option<u64>,
-    /// The logo's joint-list targets (its manipulators on lists 0 and 1).
-    logo_joints: [Option<u8>; 2],
     /// FX 0x19's size (the glass quads' texels).
     glass_size: (i32, i32),
 }
@@ -113,12 +106,8 @@ fn setup(
     let extra = ExtraMobys::new(lv, records, crate::moby_anim::identity_palette(SLOTS * JOINTS), &mut buffers);
     let item_canvas = canvases.create(&mut commands, &mut images, "vendor item panel");
     let salesman_canvas = canvases.create(&mut commands, &mut images, "vendor salesman");
-    let logo_joints = match crate::interact_render::class_blob(LOGO_CLASS as i32).and_then(|b| Ok((rc_formats::moby::parse_moby_class(&b)?, b))) {
-        Ok((c, b)) => [0, 1].map(|l| rc_formats::gadget::joint_list(&b, &c.header, l).ok().and_then(|(_, second)| moby_anim::list_target(&second))),
-        Err(_) => [None, None],
-    };
     let glass_size = lv.hud.as_ref().and_then(|h| h.fx.get(screens::GLASS_FX).cloned().flatten()).map_or((64, 64), |t| (t.width as i32, t.height as i32));
-    println!("vendor render: {} gadget classes, logo manipulator joints {logo_joints:?}, glass FX {glass_size:?}", gadgets.len());
+    println!("vendor render: {} gadget classes, glass FX {glass_size:?}", gadgets.len());
     commands.insert_resource(VendorGfx {
         extra,
         ents: HashMap::default(),
@@ -129,7 +118,6 @@ fn setup(
         cone: Default::default(),
         beam_scroll: 0.0,
         beam_tick: None,
-        logo_joints,
         glass_size,
     });
 }
@@ -323,27 +311,12 @@ fn draw(
     if let Some(m) = &d.scene.salesman { screen_moby(SLOT_SALESMAN, m, 0); }
     if let Some(m) = &d.scene.hologram { screen_moby(SLOT_HOLO, m, 1); }
     if let Some(m) = &d.scene.popup { screen_moby(SLOT_POPUP, m, 0); }
-    // The logos of the vendors near Ratchet.
+    // The beams of the vendors whose hologram shows (the draw callback 0x2ba9c0 the vendor registers).
     let table = &play.game.mobys;
-    let spin = play.svc.interact.vendor.spin;
-    let mut logos: Vec<([f32; 3], f32)> = Vec::new();
-    for (id, m) in table.mobys.iter().enumerate() {
-        if m.o_class != vendor::VENDOR_CLASS || m.state >= 0x80 { continue; }
-        let Some((c, s, shown)) = rc_game::moby_update::classes::vendor::hologram(table, id) else { continue };
-        if !shown || logos.len() as u32 >= LOGOS { continue; }
-        let child = &table.mobys[c];
-        let Some((class, anim)) = find_class(lv, &gadgets, None, LOGO_CLASS) else { continue };
-        let mods: Vec<JointModifier> = gfx.logo_joints.iter().zip(spin).filter_map(|(j, a)| {
-            let q = rc_game::moby_update::services::axis_quat(rc_game::ps2v::Pf::f(a), 2);
-            j.map(|j| JointModifier { quat: q.map(|x| x.to_f32()), ..JointModifier::compose(j) })
-        }).collect();
-        let st = child.anim;
-        let pose = moby_anim::evaluate_posed(anim, &st, play.svc.snapshots.get(c).and_then(|x| x.as_ref()), &[], &mods);
-        let rows = [0, 1, 2].map(|i| [child.rows[i][0], child.rows[i][1], child.rows[i][2]]);
-        let slot = SLOT_LOGO + logos.len() as u32;
-        want.push((slot, SlotDraw { class, rows, pos: [child.position[0], child.position[1], child.position[2]], scale: child.scale, pose, light: child.light, ambient: [child.ambient[0], child.ambient[1], child.ambient[2]] }));
-        logos.push(([m.position[0], m.position[1], m.position[2]], s));
-    }
+    let logos: Vec<([f32; 3], f32)> = table.mobys.iter().enumerate()
+        .filter(|(_, m)| m.o_class == vendor::VENDOR_CLASS && m.state < 0x80)
+        .filter_map(|(id, m)| rc_game::moby_update::classes::vendor::hologram(table, id).filter(|h| h.2).map(|(_, s, _)| ([m.position[0], m.position[1], m.position[2]], s)))
+        .collect();
     // Records, palettes, entities.
     let mut palette = buffers.get(&gfx.extra.palette).and_then(|b| b.data.clone()).unwrap_or_default();
     let mut records = buffers.get(&gfx.extra.instances).and_then(|b| b.data.clone()).unwrap_or_default();
@@ -356,8 +329,8 @@ fn draw(
         if !gfx.ents.contains_key(&key) {
             let ents = gfx.extra.spawn(&mut commands, lv, s.class, *slot, Transform::IDENTITY, "vendor screen moby", &mut meshes, &mut images, &mut materials);
             // Mode 5's `DrawMobyList` batch: its last list (the salesman or the popup) has no glow packets, so no screen
-            // moby is recoloured (`ExtraMobys::clear_glow`); the logos are world mobys of the main pass.
-            if *slot < SLOT_LOGO { gfx.extra.clear_glow(&mut commands, *slot); }
+            // moby is recoloured (`ExtraMobys::clear_glow`).
+            gfx.extra.clear_glow(&mut commands, *slot);
             let layer = match *slot {
                 SLOT_ITEM | SLOT_BACKDROP => Some(canvases.layer(gfx.item_canvas)),
                 SLOT_SALESMAN => Some(canvases.layer(gfx.salesman_canvas)),

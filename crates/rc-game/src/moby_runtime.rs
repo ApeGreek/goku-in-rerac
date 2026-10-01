@@ -143,6 +143,9 @@ pub struct Moby {
     /// +0x64: the runtime joint-modifier list, head first, with each node's target joint resolved
     /// (`rc_formats::moby_anim::JointModifier`; written by the moby's owner, read by every pose evaluation).
     pub joint_mods: Vec<rc_formats::moby_anim::JointModifier>,
+    /// Per node of [`Moby::joint_mods`] (same order): the owner record a class manipulator node is
+    /// (`crate::moby_update::manip::key`); empty while the list is written whole (Ratchet's write-back).
+    pub joint_mod_keys: Vec<u32>,
 }
 
 impl Default for Moby {
@@ -161,6 +164,7 @@ impl Moby {
             has_collision: false, coll_disable: 0, ba0: [0; 4], hit_slot: 0, o_class: 0, uid_hi: 0, index: 0,
             mission: 0, spawn_flag: 0, spawn_id: 0, b4: 0, b6: 0, parent: None, cmd: 0, bbd: 0, rows: [[0.0; 4]; 4], delete_tick: 0,
             joint_mods: Vec::new(),
+            joint_mod_keys: Vec::new(),
         }
     }
 

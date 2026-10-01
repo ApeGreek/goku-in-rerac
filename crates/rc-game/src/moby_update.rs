@@ -6,6 +6,7 @@ pub mod anim_sound;
 pub mod classes;
 pub mod creature;
 pub mod interact;
+pub mod manip;
 pub mod scheduler;
 pub mod services;
 pub mod triggers;

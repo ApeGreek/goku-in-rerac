@@ -75,14 +75,14 @@ const NO_VIEW_TEST: i16 = 0x336;
 const DEAD: u8 = 0x65;
 
 const PI: f32 = std::f32::consts::PI;
-const TWO_PI: f32 = 6.283_185_5;
+pub(crate) const TWO_PI: f32 = 6.283_185_5;
 /// π/180 as the code loads it (0x3c8efa35).
-const DEG: f32 = 0.017_453_292;
+pub(crate) const DEG: f32 = 0.017_453_292;
 /// `0x15ed60`: the NTSC speed scale (1.0).
-const K: f32 = 1.0;
+pub(crate) const K: f32 = 1.0;
 /// `0x15ed6c` dt and `0x15ed70` dt².
-const DT: f32 = 1.0 / 60.0;
-const DT2: f32 = 1.0 / 3600.0;
+pub(crate) const DT: f32 = 1.0 / 60.0;
+pub(crate) const DT2: f32 = 1.0 / 3600.0;
 /// gp−0x510c / −0x5108 / −0x5104: the distance factor's minimum, far and near distances.
 const SCALE_MIN: f32 = 0.5;
 const SCALE_FAR: f32 = 200.0;
@@ -106,15 +106,15 @@ const P_SPARK: usize = 0x121;
 const P_SCALE0: usize = 0x170;
 const P_SPEED0: usize = 0x174;
 
-fn sub3(a: [f32; 4], b: [f32; 4]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
-fn len3(v: [f32; 3]) -> f32 { (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt() }
-fn dist(a: [f32; 4], b: [f32; 4]) -> f32 { len3(sub3(a, b)) }
+pub(crate) fn sub3(a: [f32; 4], b: [f32; 4]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+pub(crate) fn len3(v: [f32; 3]) -> f32 { (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt() }
+pub(crate) fn dist(a: [f32; 4], b: [f32; 4]) -> f32 { len3(sub3(a, b)) }
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
 
 /// `fast_add_rotations` 0x221ff8: `a + b` wrapped once into [−π, π) (the lower test on the unwrapped sum).
-fn add_rot(a: f32, b: f32) -> f32 { wrap_once(a + b) }
+pub(crate) fn add_rot(a: f32, b: f32) -> f32 { wrap_once(a + b) }
 /// `fast_subtract_rotations` 0x222040: `a − b`, wrapped the same way.
-fn sub_rot(a: f32, b: f32) -> f32 { wrap_once(a - b) }
+pub(crate) fn sub_rot(a: f32, b: f32) -> f32 { wrap_once(a - b) }
 fn wrap_once(s: f32) -> f32 {
     let below = s < -PI;
     if !(s < PI) { return (s - PI) - PI; }
@@ -122,16 +122,16 @@ fn wrap_once(s: f32) -> f32 {
     s
 }
 /// `FUN_002731d0`: `x` into [−π, π) through the fraction of `(x + π)/2π` (`modf`, truncating).
-fn wrap_frac(x: f32) -> f32 {
+pub(crate) fn wrap_frac(x: f32) -> f32 {
     let t = (x + PI) / TWO_PI;
     (t - t.trunc()) * TWO_PI - PI
 }
 /// `FastArcTan(a, b)` 0x2217c0 = atan2(b, a).
-fn atan(a: f32, b: f32) -> f32 { if a == 0.0 && b == 0.0 { 0.0 } else { b.atan2(a) } }
+pub(crate) fn atan(a: f32, b: f32) -> f32 { if a == 0.0 && b == 0.0 { 0.0 } else { b.atan2(a) } }
 
 /// `SpringTurn(cur, target, acc, damp, max, &vel)` 0x26cef0: `d = wrap(target − cur)`, `x = clamp(d/(π/20), −1, 1)`,
 /// `vel += acc·x − damp·vel`, `|vel| ≤ max` (when max ≠ 0) and `≤ |d|`; returns `wrap(cur + vel)`.
-fn spring_turn(cur: f32, target: f32, acc: f32, damp: f32, max: f32, vel: &mut f32) -> f32 {
+pub(crate) fn spring_turn(cur: f32, target: f32, acc: f32, damp: f32, max: f32, vel: &mut f32) -> f32 {
     let d = sub_rot(target, cur);
     let x = (d / f32::from_bits(0x3e20_d97c)).clamp(-1.0, 1.0);
     *vel += acc * x - damp * *vel;
@@ -148,21 +148,21 @@ fn spring_turn(cur: f32, target: f32, acc: f32, damp: f32, max: f32, vel: &mut f
 
 /// The flyer's spline index and loop flag, with the spline's point count (`*0x1b0930[i]`).
 #[derive(Clone, Copy)]
-struct Path {
-    spline: usize,
-    looped: bool,
-    count: i32,
+pub(crate) struct Path {
+    pub(crate) spline: usize,
+    pub(crate) looped: bool,
+    pub(crate) count: i32,
 }
 
 impl Path {
-    fn of(w: &World, id: MobyId) -> Option<Path> {
+    pub(crate) fn of(w: &World, id: MobyId) -> Option<Path> {
         let pv = &w.m(id).pvars;
         let s = usize::try_from(p::i32(pv, P_SPLINE)).ok()?;
         let count = w.svc.splines.get(s)?.len() as i32;
         Some(Path { spline: s, looped: (pv[P_LOOP] as i8) >= 0, count })
     }
     fn on(pts: &[[u32; 4]], looped: bool) -> Path { Path { spline: 0, looped, count: pts.len() as i32 } }
-    fn pts<'a>(&self, w: &'a World) -> &'a [[u32; 4]] { &w.svc.splines[self.spline] }
+    pub(crate) fn pts<'a>(&self, w: &'a World) -> &'a [[u32; 4]] { &w.svc.splines[self.spline] }
     /// The last index the path addresses: `count − 1` when it loops, else 0.
     fn max(&self) -> i32 { if self.looped { self.count - 1 } else { 0 } }
     /// `FUN_0028b7b0(path, i)`: the point `i` wrapped (i < 0 → max + 1 + i; i > max → i mod (max + 1)).
@@ -172,22 +172,22 @@ impl Path {
         k.max(0) as usize
     }
     /// `FUN_0028b828(path, i)`: the index `i` wrapped (i < 0 → max + i, the game's one-off).
-    fn wrap_index(&self, i: i32) -> i32 {
+    pub(crate) fn wrap_index(&self, i: i32) -> i32 {
         let m = self.max();
         if i < 0 { m + i } else if i <= m { i } else { i.rem_euclid(m + 1) }
     }
     /// `FUN_0028b878(path)`: the point after `idx`, wrapped.
-    fn next_index(&self, idx: i32) -> i32 {
+    pub(crate) fn next_index(&self, idx: i32) -> i32 {
         let (m, i) = (self.max(), idx + 1);
         if m < i { if m + 1 == 0 { 0 } else { i.rem_euclid(m + 1) } } else { i }
     }
-    fn pt(&self, pts: &[[u32; 4]], i: usize) -> [f32; 4] { pts.get(i).map(|q| q.map(f32::from_bits)).unwrap_or([0.0; 4]) }
+    pub(crate) fn pt(&self, pts: &[[u32; 4]], i: usize) -> [f32; 4] { pts.get(i).map(|q| q.map(f32::from_bits)).unwrap_or([0.0; 4]) }
     fn set_w(&self, w: &mut World, i: usize, x: f32) {
         if let Some(q) = w.svc.splines[self.spline].get_mut(i) { q[3] = x.to_bits(); }
     }
     /// `FUN_0028b8c8(T, B, out, path, k)`: the Kochanek–Bartels tangent at point `idx + k`: `a = (p − p₋)·(1−T)(1+B)/2`,
     /// `b = (p₊ − p)·(1−T)(1−B)/2`, `a + b` limited to 1.1 × the shorter neighbouring chord. (w: 0.)
-    fn tangent(&self, pts: &[[u32; 4]], idx: i32, k: i32, tension: f32, bias: f32) -> [f32; 4] {
+    pub(crate) fn tangent(&self, pts: &[[u32; 4]], idx: i32, k: i32, tension: f32, bias: f32) -> [f32; 4] {
         let i = idx + k;
         let (pm, p0, pp) = (self.pt(pts, self.ref_index(i - 1)), self.pt(pts, self.ref_index(i)), self.pt(pts, self.ref_index(i + 1)));
         let s_b = ((1.0 - tension) * (1.0 - bias)) * 0.5;
@@ -218,7 +218,7 @@ pub fn segment(pts: &[[u32; 4]], looped: bool, idx: i32, tension: f32, bias: f32
 pub fn curve_point(t: f32, seg: &[[f32; 4]; 4]) -> [f32; 4] { hermite(t, seg[0], seg[1], seg[2], seg[3]) }
 
 /// `FUN_0028ba80(t, out, p0, p1, m0, m1)`: the cubic Hermite point (`h00·p0 + h10·m0 + h11·m1 + h01·p1`; w = p0.w).
-fn hermite(t: f32, p0: [f32; 4], p1: [f32; 4], m0: [f32; 4], m1: [f32; 4]) -> [f32; 4] {
+pub(crate) fn hermite(t: f32, p0: [f32; 4], p1: [f32; 4], m0: [f32; 4], m1: [f32; 4]) -> [f32; 4] {
     let t2 = t * t;
     let t3 = t2 * t;
     let (h00, h10, h11, h01) = ((t3 + t3 - t2 * 3.0) + 1.0, (t3 - (t2 + t2)) + t, t3 - t2, t2 * 3.0 - (t3 + t3));
@@ -229,7 +229,7 @@ fn hermite(t: f32, p0: [f32; 4], p1: [f32; 4], m0: [f32; 4], m1: [f32; 4]) -> [f
 /// `FUN_0028b410(path)` (the spline part): per point `w = |p_i − p_(i+1 mod count)|` and `z = (z + 0.5) − 0.5`,
 /// in point order (a point's chord is measured before its own z is rewritten; the last one's uses the rewritten
 /// first point).
-fn chord_lengths(w: &mut World, path: &Path) {
+pub(crate) fn chord_lengths(w: &mut World, path: &Path) {
     for i in 0..path.count.max(0) as usize {
         let (a, b) = (path.pt(path.pts(w), i), path.pt(path.pts(w), (i + 1) % path.count as usize));
         let d = dist(a, b);
@@ -246,7 +246,7 @@ fn chord_lengths(w: &mut World, path: &Path) {
 /// lands at t = 0.99999946 and is taken; IEEE rounding would reach 1.0000001 after 19 and drop the last chord
 /// (5 % of every segment). The port samples t = 0.05·k, k = 1..=20, the PS2's result
 /// (`hardware_fidelity_layers.md` "Native reproductions").
-fn arc_lengths(w: &mut World, path: &Path, tension: f32, bias: f32) {
+pub(crate) fn arc_lengths(w: &mut World, path: &Path, tension: f32, bias: f32) {
     let mut m1 = path.tangent(path.pts(w), 0, 0, tension, bias);
     let mut p1 = path.pt(path.pts(w), 0);
     for i in 0..path.count.max(0) {
@@ -266,15 +266,18 @@ fn arc_lengths(w: &mut World, path: &Path, tension: f32, bias: f32) {
 
 /// `FUN_0028b510(0, pos, spline)`: the first point with the smallest distance to `pos` (the same function as the
 /// other overlays' `0x264558` / `0x2a0260`: `crate::path::nearest_at_distance`).
-fn nearest(w: &World, path: &Path, pos: [f32; 4]) -> i32 {
+pub(crate) fn nearest(w: &World, path: &Path, pos: [f32; 4]) -> i32 {
     crate::path::nearest_at_distance(&path.pts(w)[..path.count.max(0) as usize], 0.0, pos)
 }
 
 /// `FUN_002f5040(m, v)`: the lateral / vertical offset: with `f` = row 0 of the moby's Euler rows,
 /// `e = (f − ẑ) × f`, `d = e × f`, `v += e·P.130 + d·P.134`.
-fn lateral(w: &mut World, id: MobyId) {
+fn lateral(w: &mut World, id: MobyId) { lateral_at(w, id, 0x130) }
+
+/// [`lateral`] with the two offsets at pvar `o`, `o + 4` (level03's copy `0x29c8a8` reads +0x140 / +0x144).
+pub(crate) fn lateral_at(w: &mut World, id: MobyId, o: usize) {
     let m = w.m(id);
-    let (a, b) = (p::ff(&m.pvars, 0x130), p::ff(&m.pvars, 0x134));
+    let (a, b) = (p::ff(&m.pvars, o), p::ff(&m.pvars, o + 4));
     if a == 0.0 && b == 0.0 { return; }
     let r0 = rc_formats::moby_light::rotation_rows([m.rotation[0], m.rotation[1], m.rotation[2]])[0].map(f32::from_bits);
     let f = [r0[0], r0[1], r0[2]];
@@ -288,7 +291,7 @@ fn lateral(w: &mut World, id: MobyId) {
 
 /// `FUN_00275690(dd, m)`: `FastBSphereCheck((f32)draw distance, bsphere · 1/1024) == −1`. No view (the load
 /// pass: the game's view is all zero before the first render) culls.
-fn culled(w: &World, id: MobyId) -> bool {
+pub(crate) fn culled(w: &World, id: MobyId) -> bool {
     let m = w.m(id);
     match w.view {
         None => true,

@@ -47,6 +47,9 @@ pub enum CinematicCall {
     /// The type-6 camera's switch `0x317d88`, tracking `0x317aa0` and hand-back `0x317e70` (the Visibomb's missile:
     /// [`crate::follow_camera::type6`]).
     Type6(crate::follow_camera::type6::Call),
+    /// A Swingshot target's call into the follow camera's look-up hint (`0x2eb3d0` / `0x2eb4c0`:
+    /// [`crate::follow_camera::swing::LookHint`]).
+    LookHint(crate::follow_camera::swing::HintCall),
 }
 
 /// What the engine has to do for the moby loop (outside the gameplay tick).
@@ -152,6 +155,9 @@ pub fn hero_teleport(w: &mut World, pos: [f32; 3], euler: [f32; 3], state: i32, 
 /// A call into the type-6 camera (`0x317d88` / `0x317aa0` / `0x317e70`).
 pub fn camera_type6(w: &mut World, c: crate::follow_camera::type6::Call) { w.svc.cinematic.calls.push(CinematicCall::Type6(c)); }
 
+/// A Swingshot target's hint call (`0x2eb3d0` reset / `0x2eb4c0` offer), applied to the camera before its update.
+pub fn look_hint(w: &mut World, c: crate::follow_camera::swing::HintCall) { w.svc.cinematic.calls.push(CinematicCall::LookHint(c)); }
+
 /// `DialogStreamStart(k)`.
 pub fn start_scene(w: &mut World, scene: usize, arrival: bool) {
     // DialogStreamStart 0x2ac330 closes the help box at once (`FUN_002258b0`).
@@ -251,6 +257,7 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             CinematicCall::CameraResetBehindHero => cam.reset(inp),
             CinematicCall::HeroState { .. } => {}
             CinematicCall::Type6(c) => cam.type6_call(&c, inp),
+            CinematicCall::LookHint(c) => cam.look_hint(c, inp.pad.ry.to_f32()),
         }
     }
 }

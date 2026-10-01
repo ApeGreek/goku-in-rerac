@@ -7,7 +7,7 @@
 //! | address | what | port |
 //! |---|---|---|
 //! | state 0 | → 1 | [`update`] |
-//! | state 1 | `CarryRiders(+0x20, pos − +0x60, +0x70, rot)` (L01 0x2755f8) | `triggers::carry_riders` (a rotation change is counted: the port's carry is translation-only, `triggers.rs`) |
+//! | state 1 | `CarryRiders(+0x20, pos − +0x60, +0x70, rot)` (L01 0x2755f8) | `triggers::carry_riders` (with the rotation change, G-CLS-024) |
 //! | every state | +0xbc ≠ 0, +0x80 ≠ 0, no attachment (+0x84): `CreateMoby(1892)`: the draw distance, drawn, the light word and ambient (+0x38), scale · (own scale / own class scale) | [`update`] |
 //! | | +0x60 = pos, +0x70 = rot; the attachment: pos, rot, `MobyBuildMatrix` (effect on the other moby) | [`update`] |
 //! | | no sound, particle, save flag | n/a |
@@ -37,8 +37,7 @@ pub fn update(w: &mut World, id: MobyId) {
         1 => {
             let d = c::sub(c::pos(w, id), c::pv4(w, id, OLD_POS));
             let (old, new) = (c::pv4(w, id, OLD_ROT), w.m(id).rotation);
-            if old[..3] != new[..3] { w.svc.unported("1584 carrier: CarryRiders with a rotation change"); }
-            triggers::carry_riders(&mut w.mm(id).pvars, BLOCK, d, new, new);
+            triggers::carry_riders(&mut w.mm(id).pvars, BLOCK, d, old, new);
         }
         _ => {}
     }

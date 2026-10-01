@@ -321,6 +321,7 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn take_cinematic(&mut self) -> Vec<rc_game::cinematic::CinematicCall> { self.world.take_cinematic() }
     fn run_list(&self, table: &MobyTable, camera: [rc_game::ps2v::Pf; 4]) -> Option<Vec<MobyId>> { self.world.run_list(table, camera) }
     fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { self.world.volumes() }
+    fn group(&self, g: i8) -> Vec<MobyId> { self.world.group(g) }
 }
 
 /// The hero's hit sink: the moby system's hit log and moby collision (borrowed per call: the moby hook borrows
@@ -673,6 +674,21 @@ fn map_tick(p: &mut Play, report: &rc_game::tick::TickReport, gs: Option<&GameSt
     p.svc.map.reveal(&inp, &flags);
 }
 
+/// The loaded level's ported camera classes (`rc_game::follow_camera::level::CameraPorts`: the level's `lvl.camvtbl`
+/// against the reference levels' code). Built once per process; the default (level 01's) without the overlays.
+pub fn camera_ports() -> &'static rc_game::follow_camera::level::CameraPorts {
+    use rc_formats::level_overlay::LevelOverlay;
+    static P: std::sync::OnceLock<rc_game::follow_camera::level::CameraPorts> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+        let overlay = |l: u32| -> Option<LevelOverlay> { LevelOverlay::parse(&crate::disc_source::level_file(&root, l, "overlay.bin").ok()?).ok() };
+        match (overlay(index), overlay(1)) {
+            (Some(t), Some(_)) => rc_game::follow_camera::level::CameraPorts::from_overlays(&t, &|l| overlay(l).map(std::sync::Arc::new)),
+            _ => Default::default(),
+        }
+    })
+}
+
 /// The loaded level's ported class reaction tables (`rc_game::moby_update::creature::react::tables_from_overlays`: the
 /// level's `lvl.vtbl` third words against level 01's tables and the ones reversed on other levels). Built once per process; empty without the overlays (the
 /// class-number fallback).
@@ -749,8 +765,12 @@ fn class_table(lv: &crate::level_load::LoadedLevel, ext: &dyn Fn(i16) -> Option<
 
 /// The joint lists of the classes whose update reads joint points (`rc_game::moby_update::classes::needs_joint_lists`,
 /// `Services::joint_lists`), from their blobs in the level core (as `menu_render::load_frame_class`).
-fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
-    class_joint_lists_where(lv, |o| level_ports().needs_joint_lists(o))
+/// With them, per class, each list's manipulator target joint (`Services::joint_targets`, `rc_game::moby_update::manip`).
+type JointLists = (HashMap<i16, Vec<Vec<u8>>>, HashMap<i16, Vec<u8>>);
+fn class_joint_lists(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<JointLists> {
+    let both = class_joint_data_where(lv, |o| level_ports().needs_joint_lists(o))?;
+    let targets = both.iter().map(|(o, l)| (*o, l.iter().map(|(_, s)| rc_formats::moby_anim::list_target(s).unwrap_or(0xff)).collect())).collect();
+    Ok((both.into_iter().map(|(o, l)| (o, l.into_iter().map(|(a, _)| a).collect())).collect(), targets))
 }
 
 /// [`class_joint_lists`] for the level's classes `want` picks.
@@ -769,6 +789,13 @@ fn hold_classes() -> [Option<std::sync::Arc<rc_game::hero::anim::HoldClass>>; 2]
 }
 
 fn class_joint_lists_where(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16) -> bool) -> anyhow::Result<HashMap<i16, Vec<Vec<u8>>>> {
+    Ok(class_joint_data_where(lv, want)?.into_iter().map(|(o, l)| (o, l.into_iter().map(|(a, _)| a).collect())).collect())
+}
+
+/// Per class `want` picks: each joint list's two byte lists (`rc_formats::gadget::joint_list`).
+/// A class's joint lists: (first byte list, second byte list) per list.
+type ClassLists = HashMap<i16, Vec<(Vec<u8>, Vec<u8>)>>;
+fn class_joint_data_where(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16) -> bool) -> anyhow::Result<ClassLists> {
     use anyhow::{anyhow, Context};
     let wanted: Vec<&rc_formats::moby::LevelMobyClass> = lv.mobys.classes.iter().filter(|c| want(c.o_class as i16)).collect();
     let mut out = HashMap::new();
@@ -781,7 +808,7 @@ fn class_joint_lists_where(lv: &crate::level_load::LoadedLevel, want: impl Fn(i1
         let name = format!("moby_class/{:04}", c.o_class);
         let blk = core.blocks.iter().find(|b| b.name == name).ok_or_else(|| anyhow!("no {name} block"))?;
         let blob = data.get(blk.offset..blk.offset + blk.size).ok_or_else(|| anyhow!("{name} out of range"))?;
-        let lists = (0..16).map_while(|l| rc_formats::gadget::joint_list(blob, &c.class.header, l).ok().map(|(a, _)| a)).collect();
+        let lists = (0..16).map_while(|l| rc_formats::gadget::joint_list(blob, &c.class.header, l).ok()).collect();
         out.insert(c.o_class as i16, lists);
     }
     Ok(out)
@@ -982,7 +1009,7 @@ fn setup(
     let back_classes = back_classes(lv, item_data.as_ref());
     match &back_classes {
         None => eprintln!("gameplay: no pack / Clank (601) classes on this level: no back items (no Clank fidgets)"),
-        Some((packs, _, heads)) => println!(
+        Some((packs, _, heads, _)) => println!(
             "gameplay: back packs (item, class) {:?} and Clank 601; head items {:?}",
             packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>(),
             heads.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>()
@@ -1012,8 +1039,24 @@ fn setup(
         }
         Err(e) => eprintln!("gameplay: no trigger volumes ({e}): every volume test is false"),
     }
+    // The level's camera records (rc_game::follow_camera::level: the slots, the class-17 regions) on its shapes.
+    // RC_LEVEL_CAMERAS=0: without them (the follow camera alone, as before the level camera system).
+    let use_cams = std::env::var("RC_LEVEL_CAMERAS").map_or(true, |v| v != "0");
+    match rc_formats::cameras::parse_level_cameras(&lv.gameplay) {
+        Ok(_) if !use_cams => println!("gameplay: RC_LEVEL_CAMERAS=0: the level's camera records not loaded"),
+        Ok(mut c) => {
+            // The loader's moby-link fixups on the camera blocks (class 18's moby) through this load's instance map.
+            if let Err(e) = rc_formats::cameras::remap_moby_links(&mut c, &lv.gameplay, &|i| statics.instance_to_moby.get(i).copied().flatten()) {
+                eprintln!("gameplay: camera moby links not remapped ({e})");
+            }
+            let lc = rc_game::follow_camera::level::LevelCameras::new(level_index, &c, Some(svc.volumes.clone()), *camera_ports());
+            println!("gameplay: {} camera records, {} class-17 regions (ported: {})", c.len(), lc.slots.iter().filter(|s| s.region.is_some()).count(), lc.ports.region);
+            game.camera.set_level(lc);
+        }
+        Err(e) => eprintln!("gameplay: no camera records ({e}): the follow camera only"),
+    }
     match class_joint_lists(lv) {
-        Ok(j) => svc.joint_lists = j,
+        Ok((j, t)) => (svc.joint_lists, svc.joint_targets) = (j, t),
         Err(e) => eprintln!("gameplay: no class joint lists ({e:#}): the Blarg flyers' exhaust sits at the flyer origin"),
     }
     let n_static = game.mobys.first_dynamic;
@@ -1166,8 +1209,8 @@ fn setup(
 }
 
 /// The back items' classes: `(back item id, o_class, class)` per pack, and Clank; the head items' (5..7, their
-/// put-away animation: rc_game::hero::worn).
-type BackPacks = (Vec<(i32, i16, MobyAnimClass)>, MobyAnimClass, rc_game::hero::worn::HeadClasses);
+/// put-away animation: rc_game::hero::worn), and Clank's class scale.
+type BackPacks = (Vec<(i32, i16, MobyAnimClass)>, MobyAnimClass, rc_game::hero::worn::HeadClasses, Option<f32>);
 
 /// The back items' anim classes on this level: the pack moby of each back item 2 / 3 / 4 (the item definitions'
 /// class +0x10: Heli-Pack 607, Thruster-Pack 608, Hydro-Pack 609; those values without the definitions) that the
@@ -1180,15 +1223,23 @@ fn back_classes(lv: &crate::level_load::LoadedLevel, items: Option<&ItemData>) -
         [(2, 607), (3, 608), (4, 609)].into_iter().filter_map(|(id, o)| { let o = class_of(id, o); Some((id, o as i16, anim(o)?)) }).collect();
     if !packs.iter().any(|p| p.0 == 2) { return None; }
     let heads = [(5, 433), (6, 1289), (7, 1290)].into_iter().filter_map(|(id, o)| { let o = class_of(id, o); Some((id, o as i16, anim(o)?)) }).collect();
-    Some((packs, anim(class_of(1, 601))?, heads))
+    Some((packs, anim(class_of(1, 601))?, heads, clank_scale(lv, items)))
+}
+
+/// Clank's class scale (item 1's class, 601 without the definitions): his moby's +0x2c (`rc_game::hero::pose`'s record 18).
+fn clank_scale(lv: &crate::level_load::LoadedLevel, items: Option<&ItemData>) -> Option<f32> {
+    let o = items.map(|d| d.def(1).o_class).filter(|&o| o > 0).unwrap_or(601);
+    lv.mobys.classes.iter().find(|c| c.o_class == o).map(|c| c.class.header.scale)
 }
 
 /// What the hero code needs from the level after `HeroInit` (load and respawn): the back items' classes and
 /// the level index 0x15ed84.
 fn hero_level_setup(hero: &mut Hero, back: Option<&BackPacks>, level: u32) {
-    if let Some((packs, clank, heads)) = back {
+    if let Some((packs, clank, heads, clank_scale)) = back {
         hero.set_back_packs(packs.clone(), clank.clone());
         hero.set_head_classes(heads.clone());
+        // Clank's +0x2c for record 18's sway (rc_game::hero::pose).
+        if let Some(s) = clank_scale { hero.set_clank_scale(*s); }
     }
     hero.idle.level = level as i32;
 }
@@ -1215,7 +1266,7 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
         occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73 });
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
-            a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()));
+            a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()), &m.joint_mods);
         }
     }
 }
@@ -1293,6 +1344,8 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
         let cam = rc_game::follow_camera::CamInput { hero: &g.hero, pad: &g.pad, coll, mobys: None, hero_moby: None };
         g.camera = rc_game::follow_camera::Camera::new(&cam, options.camera);
     }
+    // The level's camera slots as the reload makes them (the slot init 0x20ef58).
+    g.camera.set_level(p.game.camera.level_cams.restarted());
     p.game = g;
     let hold = std::mem::take(&mut p.ratchet.hold);
     p.ratchet = RatchetAnim::new(class);
@@ -1386,6 +1439,7 @@ fn tick(
         w.inventory = &inv;
         w.sound = sink.as_mut().map(|s| s as &mut dyn rc_game::moby_update::services::SoundSink);
         w.camera = cam.pos;
+        w.camera_yaw = cam.yaw().to_f32();
         w.coll = Some(coll);
         w.particles = parts.as_deref_mut().map(|p| &mut p.sys);
         w.view = view_cull.as_ref();

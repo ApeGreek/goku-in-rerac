@@ -524,6 +524,9 @@ pub trait SoundSink {
     /// `PlayLevelSoundAtMoby(index, flags, moby)` 0x2a1770: a level-bank def (0 help box, 1 skill point) at the moby
     /// `at` (id, position), or 2-D at the listener for None (every caller on the disc). Default: −1.
     fn play_level_sound(&mut self, _index: i32, _flags: u32, _at: Option<(MobyId, [f32; 3])>, _tick: u64, _rng: &mut Rng) -> i32 { -1 }
+    /// Level03's `0x27a618(index, flags, moby)`: level def `index + 0x15f574` (past the two moby defs; below the level def
+    /// count 0x15f5f0) at the moby, `SoundSlotAlloc(def, flags, moby, 0, 0x400)` (Kerwan's air-traffic wreck). Default: −1.
+    fn play_level_def(&mut self, _index: i32, _flags: u32, _at: Option<(MobyId, [f32; 3])>, _tick: u64, _rng: &mut Rng) -> i32 { -1 }
     /// `HeroTeleport` 0x2368e0 moved Ratchet to `pos` (its `EnvNearestSamplePoint`: reverb and music track). Default:
     /// nothing.
     fn hero_teleported(&mut self, _pos: [f32; 3]) {}
@@ -759,8 +762,6 @@ pub struct FxStats {
     pub debris: u64,
     pub flashes: u64,
     pub pickups: u64,
-    /// `BoltBurst` with flags 4 on a dropper with a mode-0x20 pvar header (base velocity not ported).
-    pub unported_base: u64,
     /// Class states / branches the ported updates reached but do not port (combat, teleports, dialogs …), by
     /// name ([`Services::unported`]).
     pub unported: std::collections::BTreeMap<&'static str, u64>,
@@ -783,6 +784,8 @@ pub struct Services {
     pub frame_load: [Pf; 2],
     pub hits: HitLog,
     pub sounds: Vec<SoundEvent>,
+    /// The level-def plays of level03's `0x27a618` ([`World::play_level_def`]): (index, moby), in order (a test log).
+    pub level_defs_played: Vec<(i32, MobyId)>,
     pub glints: Glints,
     pub save: SaveBits,
     pub counters: GameCounters,
@@ -814,6 +817,10 @@ pub struct Services {
     /// for `FUN_002645a8(moby, list, out)` ([`World::joint_point`]). Filled for the classes whose update needs
     /// it ([`crate::moby_update::classes::needs_joint_lists`]).
     pub joint_lists: HashMap<i16, Vec<Vec<u8>>>,
+    /// Per class: each joint list's manipulator target joint (the second byte list's first entry,
+    /// `rc_formats::moby_anim::list_target`; 0xff: none), for `AttachManipulator` on that class's mobys
+    /// ([`crate::moby_update::manip`]). Filled with [`Services::joint_lists`] for the same classes.
+    pub joint_targets: HashMap<i16, Vec<u8>>,
     /// The level's volume sections (cuboids 0x1600ec, spheres, cylinders, pills, paths, grind paths) for the
     /// trigger tests ([`crate::moby_update::triggers`], [`Services::set_volumes`]).
     pub volumes: Arc<rc_formats::volumes::Volumes>,
@@ -888,6 +895,7 @@ impl Services {
             frame_load: [Pf::ZERO; 2],
             hits: HitLog::default(),
             sounds: Vec::new(),
+            level_defs_played: Vec::new(),
             glints: Glints::default(),
             save: SaveBits::default(),
             counters: GameCounters::default(),
@@ -903,6 +911,7 @@ impl Services {
             coll_classes: Arc::new(HashMap::new()),
             pose_cache: Arc::new(Mutex::new(PoseCache::default())),
             joint_lists: HashMap::new(),
+            joint_targets: HashMap::new(),
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
             hero_writes: None,
             camera_shakes: Vec::new(),
@@ -1168,6 +1177,8 @@ pub struct World<'a> {
     pub hero_moby: Option<MobyId>,
     /// `0x167240`: camera position (written by the previous tick's camera update).
     pub camera: V4,
+    /// `0x167258`: the camera's yaw (the previous tick's; level18's copy of the camera block has it at 0x1677d8).
+    pub camera_yaw: f32,
     /// `0x16d140..`: the view the crate respawn's `FastBSphereCheck` uses (None: never out of view).
     pub view: Option<&'a BSphereView>,
     /// The game's one `rand` stream (shared with the particles and the hero).
@@ -1233,6 +1244,7 @@ impl<'a> World<'a> {
             hero,
             hero_moby,
             camera: hero.pos,
+            camera_yaw: 0.0,
             view: None,
             rng,
             coll: None,
@@ -1340,6 +1352,17 @@ impl<'a> World<'a> {
         let tick = self.counter;
         match self.sound.as_deref_mut() {
             Some(s) => s.play_level_sound(index, flags, at, tick, self.rng),
+            None => -1,
+        }
+    }
+
+    /// Level03 `0x27a618(index, flags, moby)` ([`SoundSink::play_level_def`]): recorded in [`Services::level_defs_played`].
+    pub fn play_level_def(&mut self, index: i32, flags: u32, id: MobyId) -> i32 {
+        let p = self.table.mobys[id].position;
+        self.svc.level_defs_played.push((index, id));
+        let tick = self.counter;
+        match self.sound.as_deref_mut() {
+            Some(s) => s.play_level_def(index, flags, Some((id, [p[0], p[1], p[2]])), tick, self.rng),
             None => -1,
         }
     }
@@ -1466,7 +1489,8 @@ impl<'a> World<'a> {
         let t = match (self.classes.anim(m.o_class), chain) {
             (Some(class), Some(chain)) => {
                 let snap = self.svc.snapshots.get(id).and_then(|s| s.as_ref());
-                rc_formats::moby_anim::evaluate_chain(class, &m.anim, snap, chain)[3]
+                // With the moby's joint-modifier list (`MobyAnimEvalChain` 0x268ee8 applies +0x64; empty for most).
+                rc_formats::moby_anim::evaluate_chains_posed(class, &m.anim, snap, &[chain.as_slice()], &[], &m.joint_mods)[0][3]
             }
             _ => [0.0, 0.0, 0.0, 1.0],
         };
@@ -1865,6 +1889,10 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     }
     fn volumes(&self) -> Option<Arc<rc_formats::volumes::Volumes>> { Some(self.svc.borrow().volumes.clone()) }
     fn water(&self) -> Option<&dyn crate::hero::swim::WaterQuery> { Some(self) }
+    fn group(&self, g: i8) -> Vec<MobyId> {
+        if g < 0 { return Vec::new(); }
+        self.svc.borrow().groups.lists.get(g as usize).and_then(|l| l.clone()).map(|l| l.into_iter().map(|m| m as MobyId).collect()).unwrap_or_default()
+    }
 }
 
 /// `SetWaterLevel` 0x26ed38 over the level's water (`Services::water`, borrowed per query).

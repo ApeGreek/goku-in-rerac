@@ -31,7 +31,9 @@
 //! with their random draws there (docs/plan/hero_states.md "Swim effects"); the ripple disturbances and the splash
 //! records go to the engine as [`SwimEvent`]s; the voices play at their call points ([`super::states::Ctx::voice`]).
 //!
-//! **Not ported**: the joint-modifier lean, the ✕-tap stats records, the oxygen HUD meter (`queue_animation_update(4, …)`; [`Swim::oxygen`] holds the value) and the water currents
+//! **The lean** ([`Hero::swim_lean`], 0x33..0x35): the neck and feet joint records from the roll and the pitch change.
+//!
+//! **Not ported**: the ✕-tap stats records, the oxygen HUD meter (`queue_animation_update(4, …)`; [`Swim::oxygen`] holds the value) and the water currents
 //! (classes 613 / 679: they write 0x13f528 and push the hero).
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // FPU-style compare order kept from the original.
 
@@ -432,7 +434,10 @@ impl Hero {
         }
         if s == id::UNDERWATER_IDLE { tgt = 0.0; }
         let (mut pitch, mut pv) = (self.rot[1], self.swim.pitch_vel);
+        let pitch0 = pitch;
         turn_spring(p(tgt), Pf::f(0.015), Pf::f(0.2), p(rate), &mut pitch, &mut pv, 0);
+        // 0x237f18: this tick's pitch change (`fast_subtract_rotations`), the lean's input below.
+        let dpitch = f(fast_subtract_rotations(pitch, pitch0));
         self.rot[1] = pitch;
         self.swim.pitch_vel = pv;
         self.stick_target(env, Pf::ONE);
@@ -490,6 +495,29 @@ impl Hero {
         turn_spring(p(roll), Pf::b(0x3be5_6042), Pf::b(0x3e2e_147b), p(DTF * 1.221_730_5), &mut r, &mut rv, 0);
         self.rot[0] = r;
         self.swim.roll_vel = rv;
+        self.swim_lean(roll, dpitch);
+    }
+
+    /// The swim lean (0x238634..0x2386f8, the joint records 0x17ab00: `crate::hero::idle`): the springs of records 1 / 2
+    /// / 3 (`0x22b5e0(0.009, 0.22)`, `0x22b5f8(0.04, 0.2)`, `0x22b610(0.02, 0.2)`); record 1 (the neck, list 10) leans
+    /// by the roll target and the pitch change: (1.4·roll, 47·Δpitch within ±50°, 1.5·roll); the feet (records 4 / 5)
+    /// kick with (0, 40·Δpitch, 1.1·roll) on springs (0.03, 0.22).
+    pub(super) fn swim_lean(&mut self, roll: f32, dpitch: f32) {
+        use super::idle::joint::{FOOT_L, FOOT_R, HEAD, NECK, REC2};
+        let j = &mut self.idle.joints;
+        let kd = |b: u32| f32::from_bits(b);
+        (j[NECK].k, j[NECK].d) = (kd(0x3c13_74bc), kd(0x3e61_47ae));
+        (j[REC2].k, j[REC2].d) = (kd(0x3d23_d70a), kd(0x3e4c_cccd));
+        (j[HEAD].k, j[HEAD].d) = (kd(0x3ca3_d70a), kd(0x3e4c_cccd));
+        let lim = kd(0x3f5f_66f3);
+        j[NECK].target[1] = (dpitch * 47.0).clamp(-lim, lim);
+        j[NECK].target[2] = roll * 1.5;
+        j[NECK].target[0] = roll * kd(0x3fb3_3333);
+        for k in [FOOT_L, FOOT_R] {
+            j[k].target[1] = dpitch * 40.0;
+            j[k].target[2] = roll * kd(0x3f8c_cccd);
+            (j[k].k, j[k].d) = (kd(0x3cf5_c28f), kd(0x3e61_47ae));
+        }
     }
 
     fn set_vel3(&mut self, v: [f32; 3]) {

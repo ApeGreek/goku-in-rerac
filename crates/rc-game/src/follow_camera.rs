@@ -17,10 +17,18 @@
 //! its queries (or nudges the offset ±1° away from the classes of `NUDGE_CLASSES`); a crate blocking its line gets
 //! a hit ([`Camera::hit`]).
 //!
-//! Not modelled (no data for them in the port): the 15-unit `coll_sphere_mobys` of 0x3111d8 (it only feeds the
-//! focus-object auto-yaw), the level's camera pass-through volumes (0x20fdb0: treated as absent), camera switches
-//! / blends (a lone type-0 camera), scripted focus and auto-yaw, and the Euler pitch/roll (0x2721f0; only the yaw
-//! feeds gameplay — pitch and roll are derived here from the rows with the same FastArcTan).
+//! **The level camera system** ([`level`]): the level's camera records as slots, the per-tick choice of the camera
+//! (`UpdateAllCameras` 0x20d620 / `Camera_ActivationCheckPriority` 0x20d410) and the class-17 regions that retune this
+//! camera through its setters (`0x313560`..`0x313af0`, [`Camera::set_distance`] …). The camera-collision grid
+//! (`0x20fdb0`: pass-through volumes `0x30f468`, the push-out `0x30f358`) is empty on all 19 levels, so its users
+//! never find a primitive (the port has no grid). The avoidance's level branches are ported (level 15 with body 2,
+//! level 13 in state 0x7b).
+//!
+//! The level's other camera classes: the Swingshot camera ([`swing`], class 7), the placed view (class 23) and the
+//! moby focus ([`focus`], class 18); the Swingshot targets' look-up hint ([`swing::LookHint`]) and the focus scan of
+//! 0x3111d8 (+0x230 = 1) feed the follow camera. Not modelled: the scripted focus moby 0x16735c and its auto-yaw
+//! (G-HERO-026), and the Euler pitch/roll (0x2721f0; only the yaw feeds gameplay — pitch and roll are
+//! derived here from the rows with the same FastArcTan).
 //!
 //! **Camera shake** ([`Shake`], [`ShakeRequest`]): the two shake records 0x167260 (along the camera's up row) and
 //! 0x167270 (along its forward row) that `CameraUpdate` applies to the published position 0x167240 after the Euler
@@ -40,7 +48,10 @@ use crate::pad::{fast_arctan, PadState};
 use crate::ps2v::Pf;
 use rc_formats::collision::Collision;
 
+pub mod focus;
+pub mod level;
 pub mod script;
+pub mod swing;
 pub mod type6;
 
 const K_PI: Pf = Pf::b(0x4049_0fdb);
@@ -256,6 +267,29 @@ pub struct Camera {
     pub script: script::ScriptCamera,
     /// The type-6 camera ([`type6::Type6`]: the Visibomb's missile view).
     pub type6: type6::Type6,
+    /// The level's camera slots, the class-17 regions and the follow camera's lock words ([`level::LevelCameras`]).
+    pub level_cams: level::LevelCameras,
+    /// The Swingshot camera (class 7, [`swing::SwingCamera`]).
+    pub swing: swing::SwingCamera,
+    /// The Swingshot targets' look-up hint for the follow camera ([`swing::LookHint`]).
+    pub hint: swing::LookHint,
+    /// What the tick feeds the camera from the moby world each tick ([`CamWorld`]).
+    pub world: CamWorld,
+}
+
+/// The moby-world facts the camera code reads beyond the collision queries, fed by the tick before each camera
+/// update (`crate::tick`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CamWorld {
+    /// While Ratchet swings (0x2c): the swung-on target's moby group (the Swingshot camera's look, `0x3182c8`).
+    pub swing_group: Option<swing::SwingGroup>,
+    /// The mobys whose target record (`FUN_002711f8`: mode 0x20, the pvar record) has its byte +0x0d set, Ratchet
+    /// excluded: the candidates of the follow camera's focus scan (`0x3111d8`, D+0x230 = 1).
+    pub focus: Vec<usize>,
+    /// The mobys the class-18 regions name (their moby +0x28, their group's members): state and position.
+    pub mobys: std::collections::BTreeMap<usize, focus::CamMoby>,
+    /// The class-18 regions' moby groups (`0x1abcc0[g]`, list order).
+    pub groups: std::collections::BTreeMap<i32, Vec<usize>>,
 }
 
 /// Which shake record a request writes: 0x167260 moves the camera along its up row, 0x167270 along its forward row.
@@ -498,7 +532,13 @@ impl Camera {
     }
 
     /// Type-0 init 0x311f38 (not switched in: target reset + snap).
-    fn init(&mut self, inp: &CamInput) {
+    fn init(&mut self, inp: &CamInput) { self.init_from(inp, None); }
+
+    /// Type-0 init 0x311f38; `pose`: switched in with the previous camera's pose copied (+0x7d = 2, `FUN_0020d110`
+    /// for the release kinds 3 / 5 or the blend kinds 3 / 6) and whether that camera was the Swingshot's with
+    /// Ratchet on the ground: `0x311dd0` places the target, pivot and look about Ratchet under the copied camera
+    /// instead of the snap, and the row blend D+0x20 runs 90 ticks (0 after the Swingshot camera on the ground).
+    fn init_from(&mut self, inp: &CamInput, pose: Option<bool>) {
         let h = inp.hero;
         let d = &mut self.cam;
         d.target = h.pos;
@@ -558,8 +598,21 @@ impl Camera {
         d.sph_step = Pf::b(0x3dcc_cccd);
         d.sph_scale = Pf::ONE;
         d.sph_count = Pf::b(0x4100_0000);
-        self.target_reset(inp);
-        self.snap(inp);
+        // D+0x220 (the class-17 region lock) and D+0x230 cleared.
+        self.level_cams.owner = None;
+        self.level_cams.focus = 0;
+        match pose {
+            None => {
+                self.target_reset(inp);
+                self.snap(inp);
+            }
+            Some(swing_on_ground) => {
+                self.place_under_pose(inp);
+                let d = &mut self.cam;
+                d.saved_fwd = d.rows[0];
+                d.row_blend = if swing_on_ground { 0 } else { t(90) as i16 };
+            }
+        }
         let d = &mut self.cam;
         d.off = vsub(d.pos, d.pivot);
         d.placed = d.off;
@@ -572,6 +625,30 @@ impl Camera {
         if d.red < Pf::b(0xbdcc_cccd) { d.fast_rec = 1; }
         d.pivot_h_s = d.pivot_h;
         d.look_h_s = d.look_h;
+    }
+
+    /// `0x311dd0` (the follow camera switched in with a copied pose): target T = S = Ratchet, the vertical target
+    /// along −gravity, the springs' velocities cleared, the pivot and look at their heights above T along −gravity,
+    /// the offsets from the copied position, D+0x00 = the position, D+0x1f0 = pivot + offset, the region lock D+0x220
+    /// cleared.
+    fn place_under_pose(&mut self, inp: &CamInput) {
+        let h = inp.hero;
+        let up = vscale(h.gravity_dir, Pf::b(0xbf80_0000));
+        let d = &mut self.cam;
+        d.target = h.pos;
+        d.smooth = d.target;
+        d.vtarget = vscale(up, dot(d.target, up));
+        d.vel_h = [Pf::ZERO; 3];
+        d.vel_v = [Pf::ZERO; 3];
+        d.look_s_vel = [Pf::ZERO; 3];
+        d.pivot = vadd(vscale(up, d.pivot_h), d.target);
+        d.look_s = vadd(vscale(up, d.look_h), d.target);
+        d.look = d.look_s;
+        d.off = vsub(d.pos, d.pivot);
+        d.placed = d.off;
+        d.desired = d.pos;
+        d.end_cand = vadd(d.pivot, d.off);
+        self.level_cams.owner = None;
     }
 
     /// GetTarget 0x30f498 (flag 0 / 1): the hero, or the ground under it while airborne.
@@ -701,25 +778,31 @@ impl Camera {
         // one), the switch `0x20d110` with the new type's init, then the active type's update.
         // The script camera (type 5) never yields to an activation check; `CameraScript2` releases it (script.rs).
         // The type-6 camera (the missile view) likewise holds until its hand-back `0x317e70` (type6.rs).
+        // With another camera current the loop's checks still run (class 17's regions see it and leave).
+        if !self.follow_is_current() && !self.swing.active { self.activation_loop(inp); }
         let prev = if self.type6.active {
             self.type6_frame(inp)
         } else if self.script.active {
             self.script_frame(inp)
+        } else if self.swing.active {
+            self.swing_frame(inp)
         } else {
             self.switch_cameras(inp)
         };
-        if self.type6.active || self.script.active {
-            // Its update ran in type6_frame / script_frame.
+        if self.type6.active || self.script.active || self.swing.active {
+            // Its update ran in type6_frame / script_frame / swing_frame.
         } else if self.first_person.active {
             self.first_person_update(inp);
         } else {
             self.update_type0(inp);
             self.cam.prev_pos = self.cam.pos;
         }
+        // `ExecuteCamPostUpdFuncs` 0x20cd88 (the end of `UpdateAllCameras`): the hint's post-update.
+        self.look_hint_post();
         let (rows, pos) = self.active_view();
         // CameraUpdate: the blend's capture of the previous camera (`fun_001ec8a0`, 0x167370 = 1 / 2) and the blend
         // (`fun_001ed2b0`, 0x167370 = 3); else the active camera as it is.
-        let (rows, pos) = self.blend.step(prev, rows, pos, crate::hero::physics::to_f32x3(inp.hero.plat_applied));
+        let (rows, pos) = self.blend.step(prev, rows, pos, crate::hero::physics::to_f32x3(inp.hero.plat_applied), &BlendHero::of(inp.hero));
         self.out.pos = pos;
         self.out.rows = rows;
         let f = self.out.rows[0];
@@ -795,7 +878,9 @@ impl Camera {
         // the scripted yaw input D+0x1c4 (`0x313af0(0.2094, 0, dir(ledge yaw + π))` → `0x313888`,
         // `Hero::ledge_camera_yaw`), and the look flag D+0x116 = 1 (`0x313820`). Not modelled: the camera data's
         // +0x230 = 0x14d exception and the script lock +0x86 (the camera has no script).
-        if let Some((rate, yaw_in)) = inp.hero.ledge_camera_yaw(to_f32x3(self.cam.off), to_f32x3(self.g.up_s)) {
+        // Not while a class-17 region of mode 10 holds +0x230 = 0x14d.
+        let ledge = if self.level_cams.focus != 0x14d { inp.hero.ledge_camera_yaw(to_f32x3(self.cam.off), to_f32x3(self.g.up_s)) } else { None };
+        if let Some((rate, yaw_in)) = ledge {
             let d = &mut self.cam;
             d.yaw_rate = Pf::f(rate);
             d.script_yaw = Pf::f(yaw_in);
@@ -812,13 +897,21 @@ impl Camera {
             _ => None,
         };
         if let Some(tgt) = ph {
-            let d = &mut self.cam;
-            d.look_h = Pf::b(0x3e80_0000);
-            d.ph_ovr = 1;
-            d.ph_tgt = tgt;
-            d.ph_rate = Pf::b(0x3b44_9ba6);
+            self.cam.look_h = Pf::b(0x3e80_0000);
+            self.set_pivot_height(tgt.to_f32(), f32::from_bits(0x3b44_9ba6));
         }
         if inp.hero.group == 0x10 { self.cam.look_h = Pf::b(0x3e80_0000); }
+        // The Swingshot targets' look-up hint's callback (record 0x167490: `0x2eb408`, swing.rs).
+        self.look_hint_callback();
+        // 0x3111d8: no focus moby (0x16735c = 0: its writers, classes 1422 / 1470 / 1051, are not ported, G-HERO-026) →
+        // +0x230 = 0; then `coll_sphere_mobys(15, Ratchet's feet, 1, Ratchet)`: a listed moby whose target record's
+        // byte +0x0d is set → +0x230 = 1 (class 17's modes 6 / 8 read it next tick).
+        self.level_cams.focus = 0;
+        if let Some(sc) = inp.mobys {
+            let feet = to_f32x3(inp.hero.pos);
+            let near = coll_sphere_mobys(sc, feet, 15.0, QueryFlags(1), inp.hero_moby);
+            if near.iter().any(|id| self.world.focus.contains(id)) { self.level_cams.focus = 1; }
+        }
         self.targets(inp);
         self.leash();
         let (yi, pi) = self.stick_read(inp);
@@ -1134,7 +1227,11 @@ impl Camera {
         // coll_sphere_mobys(((dist − red) + 1.5)·0.5, pivot + (0x167240 − pivot)·0.5, 1, Ratchet): the listed mobys
         // with collision but no triangle mesh (FUN_0026e7b0: blob +8 = 0) are switched off (+0x94 = 0) for the rest
         // of the avoidance, reset included, and restored at its end; the NUDGE_CLASSES instead turn the offset.
-        // (Level 15 also switches off meshed ones while 0x1413f4 == 2: not modelled, not reachable on Novalis.)
+        // On level 15 (0x15ed84 = 0xf) with body 2 (0x1413f4, Giant Clank) the meshed ones are listed too.
+        // Level 13 (0xd) in state 0x7b (sinking, no health) skips the sphere chain and the line, as state 0x7f does.
+        let level = self.level_cams.level;
+        let all_listed = level == 0xf && h.mode == 2;
+        let no_line = h.state == 0x7f || (level == 0xd && h.state == 0x7b);
         let mut off_ids: Vec<usize> = Vec::new();
         if let Some(sc) = inp.mobys {
             let d = &self.cam;
@@ -1142,7 +1239,7 @@ impl Camera {
             let c = vlerp(d.pivot, self.out.pos, Pf::b(0x3f00_0000));
             for id in coll_sphere_mobys(sc, to_f32x3(c), r.to_f32(), QueryFlags(1), inp.hero_moby) {
                 let Some(m) = sc.mobys.moby(id) else { continue };
-                if !m.collision || sc.classes.get(&m.o_class).is_some_and(|b| !b.faces.is_empty()) { continue; }
+                if !m.collision || (!all_listed && sc.classes.get(&m.o_class).is_some_and(|b| !b.faces.is_empty())) { continue; }
                 if NUDGE_CLASSES.contains(&m.o_class) { self.nudge(m.position.map(Pf)) } else { off_ids.push(id) }
             }
         }
@@ -1150,7 +1247,7 @@ impl Camera {
         let masked_scene = inp.mobys.zip(masked.as_ref()).map(|(sc, m)| MobyScene { mobys: m, grid: sc.grid, classes: sc.classes, cache: sc.cache });
         let inp = &CamInput { mobys: masked_scene.as_ref(), ..*inp };
         let mut blocked = false;
-        if h.state != 0x7f && self.sphere_chain(inp) { blocked = true; }
+        if !no_line && self.sphere_chain(inp) { blocked = true; }
         if self.end_sphere(inp) { blocked = true; }
         let d = &mut self.cam;
         if d.dist - d.red < Pf::b(0x3fc0_0000) {
@@ -1179,9 +1276,10 @@ impl Camera {
         }
         d.off = norm(d.off, d.dist - d.red);
         let e = vadd(d.off, d.pivot);
-        if h.state != 0x7f {
+        if !no_line {
             if let Some(o) = line_out(inp, d.pivot, e, self.line_flags, inp.hero_moby) {
-                // InVolume (pass-through volumes): none in the port.
+                // InVolume `0x30f468` (the camera-collision grid's pass-through volumes): the grid is empty on all 19
+                // levels (docs/plan/player_controller.md §15), so never.
                 // A crate in the way (FUN_00273278: classes 500..=540) is hit: FUN_0026e808(20, tmpl, Ratchet,
                 // 0x800000, dir) → 0x26e968, dir = the horizontal unit vector camera 0x167240 → crate, w 5627.9
                 // (delivered by the tick, [`Camera::hit`]).
@@ -1516,6 +1614,145 @@ impl Camera {
         d.pull_max = Pf::b(0x40c0_0000);
         d.toward_lock = 0;
     }
+
+    // --------------------------------------------------------------------------------------------
+    // The follow camera's setters (level01 0x313560..0x313b48): what other code writes into the follow camera's data
+    // for one tick (the spring-back 0x311010 undoes it), each a no-op unless the follow camera is current
+    // (0x167280 +0x86 = 0). Callers: the class-17 regions (`level`), the hero-state tweaks of `update_type0`
+    // (`0x3111d8`), the first-person camera's entry turn. Native `f32` arguments.
+
+    /// `0x313628(d, rate, base)`: the distance target (D+0x16c = 1, +0x170, rate +0x178; `base`: also the base
+    /// distance +0x188).
+    pub fn set_distance(&mut self, dist: f32, rate: f32, base: bool) {
+        if !self.follow_is_current() { return; }
+        let d = &mut self.cam;
+        d.dist_ovr = 1;
+        d.dist_rate = Pf::f(rate);
+        d.dist_tgt = Pf::f(dist);
+        if base { d.base_dist = Pf::f(dist); }
+    }
+
+    /// `0x313668(v)`: the pull-back maximum D+0x22c.
+    pub fn set_pull_max(&mut self, v: f32) {
+        if self.follow_is_current() { self.cam.pull_max = Pf::f(v); }
+    }
+
+    /// `0x313690(h, rate)`: the pivot-height target (D+0x16e = 1, +0x17c, rate +0x184).
+    pub fn set_pivot_height(&mut self, h: f32, rate: f32) {
+        if !self.follow_is_current() { return; }
+        let d = &mut self.cam;
+        d.ph_rate = Pf::f(rate);
+        d.ph_ovr = 1;
+        d.ph_tgt = Pf::f(h);
+    }
+
+    /// `0x3136c8(h, rate, add)`: the look-height target (D+0x11a = 1, rate +0xf8, +0xf4 = `h`, or D0's look height
+    /// + `h` when `add`).
+    pub fn set_look_height(&mut self, h: f32, rate: f32, add: bool) {
+        if !self.follow_is_current() { return; }
+        let base = self.d0.look_h;
+        let d = &mut self.cam;
+        d.look_h_ovr = 1;
+        d.look_h_rate = Pf::f(rate);
+        d.look_h_tgt = if add { base + Pf::f(h) } else { Pf::f(h) };
+    }
+
+    /// `0x313718(p)`: the scripted pitch D+0x1cc (radians).
+    pub fn set_script_pitch(&mut self, p: f32) {
+        if self.follow_is_current() { self.cam.script_pitch = Pf::f(p); }
+    }
+
+    /// `0x313740(v)`: the leash D+0x10.
+    pub fn set_leash(&mut self, v: i16) {
+        if self.follow_is_current() { self.cam.leash = v; }
+    }
+
+    /// `0x313768(k, d)`: the horizontal spring D+0x11c / +0x120 (a zero argument leaves its field).
+    pub fn set_h_spring(&mut self, k: f32, dd: f32) {
+        if !self.follow_is_current() { return; }
+        if k != 0.0 { self.cam.kh = Pf::f(k); }
+        if dd != 0.0 { self.cam.dh = Pf::f(dd); }
+    }
+
+    /// `0x3137b0(k, d)`: the vertical spring D+0x124 / +0x128 (a zero argument leaves its field).
+    pub fn set_v_spring(&mut self, k: f32, dd: f32) {
+        if !self.follow_is_current() { return; }
+        if k != 0.0 { self.cam.kv = Pf::f(k); }
+        if dd != 0.0 { self.cam.dv = Pf::f(dd); }
+    }
+
+    /// `0x3137f8()`: the run-toward lock D+0x226 = 1 (DistRate's pull-back off).
+    pub fn lock_toward(&mut self) {
+        if self.follow_is_current() { self.cam.toward_lock = 1; }
+    }
+
+    /// `0x313820()`: D+0x116 = 1 (the look point from the smoothed target).
+    pub fn look_from_smoothed(&mut self) {
+        if self.follow_is_current() { self.cam.look_from_s = 1; }
+    }
+
+    /// `0x313858()`: the stick off (D+0x1b8 |= 3).
+    pub fn stick_off(&mut self) {
+        if self.follow_is_current() { self.cam.script |= 3; }
+    }
+
+    /// `0x313af0(rate, tolerance, dir)`: turn toward `dir` at `rate` per tick (D+0x1bc) through the scripted yaw input
+    /// D+0x1c4 (`0x313888`, [`yaw_input_toward`]); nothing when `rate` is 0.
+    pub fn turn_toward(&mut self, rate: f32, tolerance: f32, dir: [f32; 3]) {
+        if !self.follow_is_current() || rate == 0.0 { return; }
+        self.cam.yaw_rate = Pf::f(rate);
+        if let Some(y) = yaw_input_toward(dir, to_f32x3(self.cam.off), to_f32x3(self.g.up_s), tolerance) { self.cam.script_yaw = Pf::f(y); }
+    }
+
+    /// `0x313b48(rate, tolerance, point)`: [`Camera::turn_toward`] toward `point` from the follow camera's target T
+    /// (`0x313aa0`: `point − D+0x40`), without the zero-rate check.
+    pub fn turn_toward_point(&mut self, rate: f32, tolerance: f32, point: [f32; 3]) {
+        if !self.follow_is_current() { return; }
+        self.cam.yaw_rate = Pf::f(rate);
+        let t = to_f32x3(self.cam.target);
+        let dir = [point[0] - t[0], point[1] - t[1], point[2] - t[2]];
+        if let Some(y) = yaw_input_toward(dir, to_f32x3(self.cam.off), to_f32x3(self.g.up_s), tolerance) { self.cam.script_yaw = Pf::f(y); }
+    }
+
+    /// The end-sphere flags D+0x218 (level02 `0x2f6570`; level 01 has no copy: no caller there).
+    pub fn set_end_flags(&mut self, v: u32) {
+        if self.follow_is_current() { self.cam.end_flags = v; }
+    }
+
+    /// The sphere chain's scale D+0x20c, count D+0x210 and step D+0x214, each only while it is not 0 (level02
+    /// `0x2f6598`; no level-01 copy).
+    pub fn set_sphere_chain(&mut self, scale: f32, count: f32, step: f32) {
+        if !self.follow_is_current() { return; }
+        let d = &mut self.cam;
+        if d.sph_scale != Pf::ZERO { d.sph_scale = Pf::f(scale); }
+        if d.sph_count != Pf::ZERO { d.sph_count = Pf::f(count); }
+        if d.sph_step != Pf::ZERO { d.sph_step = Pf::f(step); }
+    }
+}
+
+/// `0x313888(tolerance, camera, dir)`: the scripted yaw input toward `dir` from the camera offset `off` about `up`: the
+/// angle `a` between the flattened offset and the flattened reverse of `dir` (the camera behind), `t = min(a / 90°, 1)`,
+/// the input `±(2t − t²)` (`0x26cc00(−1, 0, 1, 0, t)`), signed by the side; None (D+0x1c4 kept) when a vector is flat
+/// to nothing or when `tolerance` is not 0 and `|a|` is more than it. The hero's ledge turn calls it with tolerance 0
+/// (`Hero::ledge_camera_yaw`).
+pub fn yaw_input_toward(d: [f32; 3], off: [f32; 3], up: [f32; 3], tolerance: f32) -> Option<f32> {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let dotf = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let flat = |v: [f32; 3]| {
+        let k = dotf(v, up);
+        [v[0] - up[0] * k, v[1] - up[1] * k, v[2] - up[2] * k]
+    };
+    let (dc, cc) = (flat(d), flat(off));
+    let (ld, lc) = (dotf(dc, dc).sqrt(), dotf(cc, cc).sqrt());
+    if ld == 0.0 || ld * lc == 0.0 { return None; }
+    let s = (dotf(dc, cc) / (ld * lc)).clamp(-1.0, 1.0).asin();
+    let cross = [up[1] * dc[2] - up[2] * dc[1], up[2] * dc[0] - up[0] * dc[2], up[0] * dc[1] - up[1] * dc[0]];
+    let sign = if 0.0 <= dotf(cross, cc) { 1.0 } else { -1.0 };
+    let mut a = PI - (FRAC_PI_2 - s);
+    if PI <= a { a -= 2.0 * PI; } else if a < -PI { a += 2.0 * PI; }
+    if tolerance != 0.0 && tolerance < a.abs() { return None; }
+    let t = (a / FRAC_PI_2).min(1.0);
+    Some(sign * (2.0 * t - t * t))
 }
 
 /// SegDist 0x272b98: distance from `q` to the segment a–b and the closest point.
@@ -1584,7 +1821,70 @@ pub struct CamBlend {
     /// 0x1673c0 / 0x1673d0: the captured previous camera.
     pub cap_pos: [f32; 3],
     pub cap_q: [f32; 4],
+    /// 0x167373: the kind of the next blend (0 the rates blend above, 2 the orbit about Ratchet; 1: no ported writer),
+    /// set by the camera that asks for the blend; 0x167372: the running blend's.
+    pub kind: u8,
+    pub running: u8,
+    /// 0x1673f4: the orbit blend's length in ticks (the capture adds 1).
+    pub orbit_len: i32,
+    /// The orbit blend's record 0x1673e0.
+    pub orbit: OrbitBlend,
 }
+
+/// The orbit blend (`0x167373` = 2; record 0x1673e0, capture `fun_001ec8a0` / `fun_001ec710`, step `fun_001eccd8`): the
+/// blended camera is kept as (yaw, pitch, distance) about Ratchet in his frame at the capture and eased each tick
+/// toward the new camera's by `1 / CosInterp(1, n, left / n)` of the rest (the last tick lands), its rotation turned by
+/// the same share of the yaw and pitch between them. Only the Swingshot camera asks for it. Native `f32`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct OrbitBlend {
+    /// +0x00: (yaw, pitch, distance) of the blended position.
+    pub sph: [f32; 3],
+    /// +0x0c ticks left, +0x10 1 / length.
+    pub left: i32,
+    pub inv: f32,
+    /// +0x20 / +0x30: Ratchet's forward and up rows at the capture (normalised).
+    pub fwd: [f32; 3],
+    pub up: [f32; 3],
+    /// +0x40: the blended rotation; +0x50 the blended position; +0x60 the rotation published last (a quaternion).
+    pub q: [f32; 4],
+    pub pos: [f32; 3],
+    pub q_out: [f32; 4],
+}
+
+/// What the orbit blend reads of Ratchet: his position 0x13f3d0, his moby's rows (+0xc0 / +0xd0 / +0xe0) and the
+/// gravity 0x13f5e0.
+#[derive(Clone, Copy, Debug)]
+pub struct BlendHero {
+    pub pos: [f32; 3],
+    pub rows: R3,
+    pub grav: [f32; 3],
+}
+
+impl BlendHero {
+    pub fn of(h: &Hero) -> BlendHero {
+        BlendHero { pos: to_f32x3(h.pos), rows: [to_f32x3(h.moby_rows[0]), to_f32x3(h.moby_rows[1]), to_f32x3(h.moby_rows[2])], grav: to_f32x3(h.gravity_dir) }
+    }
+}
+
+/// `fun_001ec530(out, p, c, f, l, u)`: (yaw, pitch, distance) of `p` about `c` in the frame (f, l, u).
+fn orbit_coords(p: [f32; 3], c: [f32; 3], f: [f32; 3], l: [f32; 3], u: [f32; 3]) -> [f32; 3] {
+    use std::f32::consts::FRAC_PI_2;
+    let d = fsub(p, c);
+    let flat = fsub(d, fnorm(u, fdot(d, u)));
+    let mut lf = fdot(flat, flat).sqrt();
+    if lf == 0.0 { lf = 0.0001; }
+    let mut yaw = FRAC_PI_2 - (fdot(f, flat) / lf).clamp(-1.0, 1.0).asin();
+    if fdot(l, fnorm(flat, 1.0)) < 0.0 { yaw = -yaw; }
+    let r = frot(f, yaw, u);
+    let ld = fdot(d, d).sqrt();
+    let ldz = if ld == 0.0 { 0.0001 } else { ld };
+    let mut pitch = FRAC_PI_2 - (fdot(r, d) / ldz).clamp(-1.0, 1.0).asin();
+    if 0.0 <= fdot(u, fnorm(d, 1.0)) { pitch = -pitch; }
+    [yaw, pitch, ld]
+}
+
+/// `FastVecCross(out, a, b)` = b × a, native.
+fn vcross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { fcross(b, a) }
 
 type R3 = [[f32; 3]; 3];
 
@@ -1687,25 +1987,65 @@ fn rows_f(r: [V4; 3]) -> R3 { r.map(to_f32x3) }
 fn rows_pf(r: R3) -> [V4; 3] { r.map(crate::hero::physics::from_f32x3) }
 
 impl CamBlend {
-    /// The capture (`fun_001ec8a0`) and the blend step (`fun_001ed2b0` → `fun_001ecaf8`); `prev` = the camera the
-    /// last switch left (rows, position), `plat` = the platform displacement 0x13f490 (the start moves with it).
-    fn step(&mut self, prev: Option<([V4; 3], V4)>, rows: [V4; 3], pos: V4, plat: [f32; 3]) -> ([V4; 3], V4) {
+    /// The capture (`fun_001ec8a0`) and the blend step (`fun_001ed2b0` → `fun_001ecaf8`, or `fun_001eccd8` for the
+    /// orbit); `prev` = the camera the last switch left (rows, position), `plat` = the platform displacement 0x13f490
+    /// (the start moves with it), `hero` Ratchet for the orbit.
+    fn step(&mut self, prev: Option<([V4; 3], V4)>, rows: [V4; 3], pos: V4, plat: [f32; 3], hero: &BlendHero) -> ([V4; 3], V4) {
         if self.mode == 1 || self.mode == 2 {
             if self.mode == 1 {
                 if let Some((r, p)) = prev {
-                    self.cap_pos = to_f32x3(p);
-                    self.cap_q = rows_quat(rows_f(r));
+                    if self.kind == 2 {
+                        self.orbit.pos = to_f32x3(p);
+                        self.orbit.q_out = rows_quat(rows_f(r));
+                        self.orbit_capture(hero);
+                    } else {
+                        // Kind 0 (kind 1, the camera's own pose about Ratchet: no ported writer).
+                        self.cap_pos = to_f32x3(p);
+                        self.cap_q = rows_quat(rows_f(r));
+                    }
                 }
+            } else if self.kind == 2 {
+                // `fun_001ec7f0`: a running rates blend's capture becomes the orbit's start (moved with the platform).
+                if self.running == 0 {
+                    self.orbit.pos = fadd(self.cap_pos, plat);
+                    self.orbit.q_out = self.cap_q;
+                }
+                self.orbit_capture(hero);
+            } else if self.kind == 0 && self.running != 0 {
+                // `fun_001ec868`: a running orbit's pose becomes the rates blend's capture.
+                self.cap_pos = self.orbit.pos;
+                self.cap_q = self.orbit.q_out;
             }
             self.mode = 3;
-            self.t_pos = 0.0;
-            self.pos_rate = self.next_pos_rate;
-            self.start_pos = self.cap_pos;
-            self.t_rot = 0.0;
-            self.rot_rate = self.next_rot_rate;
-            self.start_q = self.cap_q;
+            self.running = self.kind;
+            if self.kind == 0 {
+                self.t_pos = 0.0;
+                self.pos_rate = self.next_pos_rate;
+                self.start_pos = self.cap_pos;
+                self.t_rot = 0.0;
+                self.rot_rate = self.next_rot_rate;
+                self.start_q = self.cap_q;
+            } else {
+                self.orbit_len += 1;
+                self.orbit.left = self.orbit_len;
+                self.orbit.inv = 1.0 / self.orbit_len as f32;
+            }
         }
         if self.mode != 3 { return (rows, pos); }
+        if self.running != 0 {
+            return match self.orbit_step(rows_f(rows), to_f32x3(pos), hero) {
+                Some((r, p)) => {
+                    let mut pos_out = crate::hero::physics::from_f32x3(p);
+                    pos_out[3] = pos[3];
+                    (rows_pf(r), pos_out)
+                }
+                None => {
+                    self.running = 0;
+                    self.mode = 0;
+                    (rows, pos)
+                }
+            };
+        }
         if self.t_pos == 1.0 && self.t_rot == 1.0 {
             self.mode = 0;
             return (rows, pos);
@@ -1724,6 +2064,77 @@ impl CamBlend {
     }
 }
 
+impl CamBlend {
+    /// `fun_001ec710`: Ratchet's frame now, the captured position's (yaw, pitch, distance) in it; +0x40 = +0x60.
+    fn orbit_capture(&mut self, h: &BlendHero) {
+        let o = &mut self.orbit;
+        o.fwd = fnorm(h.rows[0], 1.0);
+        let left = fnorm(h.rows[1], 1.0);
+        o.up = fnorm(h.rows[2], 1.0);
+        o.sph = orbit_coords(o.pos, h.pos, o.fwd, left, o.up);
+        o.q = o.q_out;
+    }
+
+    /// `fun_001eccd8(camera, 0x1673e0)`: one orbit step toward the camera (`rows`, `pos`); None when no tick is left
+    /// (the camera's own view is published and the blend ends).
+    fn orbit_step(&mut self, rows: R3, pos: [f32; 3], h: &BlendHero) -> Option<(R3, [f32; 3])> {
+        use std::f32::consts::{FRAC_PI_2, TAU};
+        let o = &mut self.orbit;
+        if o.left < 1 { return None; }
+        let f = 1.0 / fcos_interp_ab(1.0, self.orbit_len as f32, o.left as f32 * o.inv);
+        let (fwd, up) = (o.fwd, o.up);
+        let left = vcross(fwd, up);
+        let t = orbit_coords(pos, h.pos, fwd, left, up);
+        let dyaw = fwrap1(t[0] - o.sph[0]);
+        o.sph[0] = fwrap1(o.sph[0] + dyaw * f);
+        o.sph[1] = fwrap1(o.sph[1] + fwrap1(t[1] - o.sph[1]) * f);
+        o.sph[2] += (t[2] - o.sph[2]) * f;
+        let v = frot(fnorm(fwd, o.sph[2]), o.sph[0], up);
+        let l2 = fnorm(vcross(v, up), 1.0);
+        let v = frot(v, o.sph[1], l2);
+        o.pos = fadd(h.pos, v);
+        // The rotation: the blended frame turned about its up by the share of the flat angle to the camera's forward
+        // (the long way round when that disagrees with the yaw step's side), then pitched toward it by the same share.
+        let [sf, sl, su] = quat_rows(o.q);
+        let cf = rows[0];
+        let proj = fsub(cf, fscale(su, fdot(su, cf)));
+        let lp = fdot(proj, proj).sqrt();
+        let mut a = FRAC_PI_2 - (fdot(sf, proj) / lp).clamp(-1.0, 1.0).asin();
+        let side = if 0.0 <= fdot(proj, sl) { 1.0 } else { -1.0 };
+        a *= side;
+        if FRAC_PI_2 < dyaw.abs() && ((0.0 <= dyaw) != (0.0 <= side)) {
+            a = if a < 0.0 { a + TAU } else { a - TAU };
+        }
+        let st = a * f;
+        let (bf, bl) = if st.abs() < 1e-5 { (sf, sl) } else { (frot(sf, st, su), frot(sl, st, su)) };
+        let full = if a.abs() < 1e-5 { sf } else { frot(sf, a, su) };
+        let mut p = FRAC_PI_2 - fdot(full, cf).clamp(-1.0, 1.0).asin();
+        if fdot(full, rows[2]) < 0.0 { p = -p; }
+        let bf = frot(bf, p * f, bl);
+        let fwd_o = fnorm(bf, 1.0);
+        let left_o = fnorm(vcross(fwd_o, h.grav), -1.0);
+        let up_o = vcross(left_o, fwd_o);
+        let out = [fwd_o, left_o, up_o];
+        o.q = rows_quat(out);
+        o.q_out = o.q;
+        o.left -= 1;
+        Some((out, o.pos))
+    }
+}
+
+/// `CosInterp(a, b, t)` 0x26cc38, native.
+fn fcos_interp_ab(a: f32, b: f32, t: f32) -> f32 {
+    if t == 0.0 { return a; }
+    if t == 1.0 { return b; }
+    a + (b - a) * ((1.0 - (t * std::f32::consts::PI).cos()) * 0.5)
+}
+
+/// `fast_add_rotations` / `fast_subtract_rotations`: wrapped once into [−π, π).
+fn fwrap1(a: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    if a >= PI { a - TAU } else if a < -PI { a + TAU } else { a }
+}
+
 /// The release of the first-person camera (`0x316c08`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Release {
@@ -1737,6 +2148,10 @@ impl Camera {
     fn active_view(&self) -> ([V4; 3], V4) {
         if self.type6.active { return self.type6_view(); }
         if self.script.active { return self.script_view(); }
+        if self.swing.active {
+            let (r, p) = self.swing_view();
+            return (rows_pf(r), level::pos4(p));
+        }
         if self.first_person.active {
             let mut p = crate::hero::physics::from_f32x3(self.first_person.pos);
             p[3] = Pf::ONE;
@@ -1762,7 +2177,21 @@ impl Camera {
             self.g.since_switch = 0;
             return Some(prev);
         }
-        if !self.first_person_activation(inp) { return None; }
+        // The follow camera is current: every slot's check (class 17's regions, the first-person camera's own), then
+        // the switch to the winner the port runs (the first-person and the Swingshot cameras); another is recorded.
+        match self.activation_loop(inp) {
+            Some(level::CLASS_FIRST_PERSON) => {}
+            Some(c) if c == swing::CLASS_SWING && self.level_cams.ports.swing => {
+                let prev = self.active_view();
+                self.swing_switch_in(inp, prev);
+                return Some(prev);
+            }
+            Some(c) => {
+                self.level_cams.wanted = Some(c);
+                return None;
+            }
+            None => return None,
+        }
         let prev = self.active_view();
         self.first_person.active = true;
         self.g.since_switch = 0;
@@ -1810,17 +2239,13 @@ impl Camera {
 
     /// `0x313af0(rate, 0, dir)` on the follow camera: the scripted yaw input toward `dir` at `rate` per tick (the
     /// ledge's turn uses the same, `Hero::ledge_camera_yaw`).
-    fn scripted_turn(&mut self, _inp: &CamInput, rate: f32, dir: [f32; 3]) {
-        if rate == 0.0 { return; }
-        let yaw_in = crate::hero::ledge_yaw_input(dir, to_f32x3(self.cam.off), to_f32x3(self.g.up_s));
-        self.cam.yaw_rate = Pf::f(rate);
-        self.cam.script_yaw = Pf::f(yaw_in);
-    }
+    fn scripted_turn(&mut self, _inp: &CamInput, rate: f32, dir: [f32; 3]) { self.turn_toward(rate, 0.0, dir); }
 
     /// The init `0x316b98` (→ `0x3162e8`, `0x3161c8`): the blend in (0x167370 = 1, or 2 during a blend; rates 0.05),
     /// the data cleared, the eye, the rows from the previous camera's forward about Ratchet's up.
     fn first_person_init(&mut self, inp: &CamInput, prev_fwd: [f32; 3]) {
         self.blend.mode = if self.blend.mode == 0 { 1 } else { 2 };
+        self.blend.kind = 0;
         self.blend.next_rot_rate = f32::from_bits(0x3d4c_cccd);
         self.blend.next_pos_rate = f32::from_bits(0x3d4c_cccd);
         let h = inp.hero;
@@ -1843,6 +2268,7 @@ impl Camera {
                 return Release::Cut;
             }
         }
+        self.blend.kind = 0;
         self.blend.next_rot_rate = f32::from_bits(0x3c93_74bc);
         self.blend.next_pos_rate = f32::from_bits(0x3c93_74bc);
         Release::Blend

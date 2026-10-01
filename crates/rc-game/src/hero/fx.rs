@@ -80,6 +80,12 @@ pub enum PartSpawn {
     /// `PartType21Spawn(size, pos, vel, c1, c2, life, split)` 0x281c10 (the Devastator's muzzle sparks); `rot` = its
     /// `rand()` (made at the call).
     Spark21 { size: f32, pos: [f32; 4], vel: [f32; 4], c1: u32, c2: u32, life: i32, split: i16, rot: u8 },
+    /// `PartType28Spawn(spread, pos, rows)` 0x282ef0: a foot mote (`0x22c5c0`, `super::pose`); `rng` = the stream at
+    /// the spawner's first draw (its 7 / 9 draws were made at the call: [`reserve`]).
+    Mote28 { spread: f32, pos: [f32; 4], rows: Option<[[f32; 3]; 3]>, rng: Rng },
+    /// `PartType78Spawn(s1, s2, pos, life, rgba, mode, spin, vel, target)` 0x28ad08: a Morph-o-Ray beam spark
+    /// (`super::morph_ray`; modes 0 / 1: no draw); `target_word` = the target's record +0x10.
+    Spark78 { s1: f32, s2: f32, pos: [f32; 4], life: i16, rgba: u32, mode: i32, spin: u8, vel: [f32; 3], target: Option<usize>, target_word: u32 },
 }
 
 /// A moby the hero code created this tick (`CreateMoby` inside the hero update), with the creator's draws already made.
@@ -298,6 +304,8 @@ pub fn create_particles(h: &Hero, sys: &mut Particles) {
     let gold = h.weapons.gold[super::pyrocitor::PYROCITOR as usize];
     sys.gold = gold;
     sys.hero_plat = crate::hero::physics::to_f32x3(h.plat_applied);
+    // 0x13f5e0, the gravity direction type 78 homes around.
+    sys.gravity = crate::hero::physics::to_f32x3(h.gravity_dir);
     for s in &h.fx.parts { create_one(sys, s, gold); }
 }
 
@@ -328,6 +336,12 @@ pub fn create_one(sys: &mut Particles, s: &PartSpawn, gold: u8) {
         }
         PartSpawn::Smoke44 { spawn, rot } => { crate::particles::type44::spawn(sys, &spawn, rot); }
         PartSpawn::Spark21 { size, pos, vel, c1, c2, life, split, rot } => { crate::particles::type21::spawn(sys, size, pos, vel, c1, c2, life, split, rot); }
+        PartSpawn::Mote28 { spread, pos, rows, mut rng } => { crate::particles::type28::spawn(sys, &mut rng, spread, pos, rows); }
+        PartSpawn::Spark78 { s1, s2, pos, life, rgba, mode, spin, vel, target, target_word } => {
+            // The beam's modes 0 / 1 draw nothing (the spawner's `randi(255)` is for the other modes).
+            let mut rng = Rng::new();
+            crate::particles::type78::spawn(sys, &mut rng, crate::particles::type78::Spawn { s1, s2, pos, life, rgba, mode, spin, vel, target, target_word });
+        }
         PartSpawn::Puff23 { jitter, lo, hi, size, pos, spin, vel, rgba, life, alpha, normal, mut rng } => {
             if let Some(i) = crate::particles::type23::spawn(sys, &mut rng, jitter, lo, hi, size, pos, spin, vel, rgba) {
                 let r = &mut sys.pool.recs[i];

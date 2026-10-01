@@ -5,6 +5,7 @@
 mod common;
 
 pub mod all_levels_smoke; // pub: its `Outcome` fields are public API, as when the file was its own crate root
+mod camera_levels;
 mod cutscene_novalis;
 mod level_ports;
 mod moby_collision_novalis;

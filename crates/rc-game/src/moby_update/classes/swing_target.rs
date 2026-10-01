@@ -13,8 +13,9 @@
 //! * **1** (active): a swing target (803) turns to face the hero (`0x24a848`: accel / decel 2π·dt², at most
 //!   4π·dt, velocity in +0x38) and, every other tick while it was drawn last frame, spawns a glint (type 60:
 //!   1.0 along its row 1, alternating side every 4 ticks, drifting back across over 30 ticks, size 1.25, colour
-//!   0x60408080, a `randi(0xff)` rotation byte). While the hero is not swinging (0x2c) it offers itself as the
-//!   camera's look-at hint `0x2eb4c0` (not ported: the follow camera has no hint record).
+//!   0x60408080, a `randi(0xff)` rotation byte). While the hero is not swinging (0x2c) it offers itself to the
+//!   follow camera's look-up hint `0x2eb4c0` (`crate::follow_camera::swing::LookHint`; state 0 → 1 resets the hint,
+//!   `0x2eb3d0`).
 //!
 //! The glint is a type-60 particle (`crate::particles::type60`, through `World::part60`).
 
@@ -94,8 +95,9 @@ pub fn update(w: &mut World, id: MobyId) {
                 m.ambient[0] = 0xc0;
                 m.ambient[1] = 0xc0;
                 m.ambient[2] = 0xc0;
-                // FUN_002eb3d0: the camera hint's reset (not ported).
-                m.state = 1;
+                // FUN_002eb3d0: the camera hint's reset.
+                crate::cinematic::look_hint(w, crate::follow_camera::swing::HintCall::Reset);
+                w.mm(id).state = 1;
                 return;
             }
             let m = w.mm(id);
@@ -130,7 +132,12 @@ pub fn update(w: &mut World, id: MobyId) {
                     w.part60(1.25, pos, vel, 0x6040_8080, life as u16, rot, 0);
                 }
             }
-            // FUN_002eb4c0 (the camera look-at hint) while the hero is not swinging: not ported.
+            // FUN_002eb4c0: the camera's look-up hint while the hero is not swinging.
+            if w.hero.state != 0x2c {
+                let pos = { let p = w.m(id).position; [p[0], p[1], p[2]] };
+                let hero = crate::hero::physics::to_f32x3(w.hero.pos);
+                crate::cinematic::look_hint(w, crate::follow_camera::swing::HintCall::Offer { target: id, pos, hero });
+            }
         }
         2 => {
             let (gate, link) = { let pv = &w.m(id).pvars; (p::i32(pv, 0x30), p::i32(pv, 0x3c)) };

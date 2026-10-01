@@ -678,3 +678,63 @@ bite template's type bytes are stack leftovers (0 here); 1202's capsule contact 
   along its path past two sleeping (curled, red) brawlers.
 - Level 13, `RC_HERO_AT=572.5,411,304.35,0.6`, frame 70 (`l13_turret_final_1.png`): the turret's glass booth with its
   rider firing orange shots down at Ratchet (hurt pose, an orb gone); the missed shots' green type-51 puffs.
+
+## 12. W3 lane 2: the hit flash and the break pieces of the other levels (G-REN-024, G-CLS-026, 2026-09-30)
+
+Two census "systems" turned out to be ported engine functions whose level copies hash differently: the census
+clusters hash the whole extent up to the next function, and on some overlays the linker left two zero words of
+alignment padding after `jr ra`. The masked overlay diff (`rc-trace overlay-diff`, which compares the reference
+function's own words) finds the copies identical on all 19 levels.
+
+| census key | what the census called it | what it is (evidence) | port |
+|---|---|---|---|
+| `C:5d1f33c5603a` L02 0x25fb60, L11 0x2833d8 (624 bytes) | "point-light flicker", G-REN-024 | L01 0x2723f8, the hit flash on the moby's ambient colour (616 bytes + 2 zero words; overlay-diff `=` on 00–18); its 0x252960 is L01 0x2650d0 (the ambient bytes), not a point light | `creature::flash::update` (unchanged) |
+| `C:494499ccf189` L05 0x28dee8 and 8 other levels (848 bytes) | "effect-moby spawner", G-CLS-026 | L01 0x278ad8 `BreakFxB` (840 bytes + 2 zero words; overlay-diff `=` on 00–18) | `creature::fx::break_piece_with` (now with the caller's velocity, spin and sphere; `break_piece` passes zeros) |
+
+The other G-CLS-026 functions are level code of one class family each (no L01 / L00 copy, callers on one or two
+levels): L06 0x300c60 / L10 0x2dd0e0 (debris 1085–1088 at 0.1 scale with the update 0x300b90 / 0x2dd010; callers 1068
+and 1083), L09 0x2ef868 (class 0x140 + n; callers 276 / 1298 / 1299 and 1285–1288), L08 0x2e1c98 and 0x2de3e0
+(callers 444, 462, 463). Not a shared system: each is ported with its callers (tagged `family` in the census).
+The "level-private explosion" of G-CLS-028, level03 0x24ce98, is `SpawnBeamExplosion` (overlay-diff `=` against L01
+0x273310; its cluster a77d276a6118 on 02 / 15 is the same function with padding): G-CLS-028 needs no new explosion,
+only its family's calls (its class-235 exhaust moby `0x2bad40` was not examined here).
+
+**Consumers freed** (census 2026-09-30): by the flash, 580 (82) / 668 (7) / 612 (15) / 1231 (7) / 1246 (126, also
+G-CLS-024), 668 now cheap, the others conditional on the big-head cheat (G-SAV-006) only; 615 (19) waits on the
+camera (G-HERO-026). By `BreakFxB`: cheap 79 (05: 30), 1511 (05: 26, 14: 22), 1885, 1041, 1805, 455, 625, 1454;
+conditional 623 (51), 541 (29), 491, 1068; with the anim helper 221, 1356.
+
+**Ported consumer: 1511** (the light fixtures of Rilgar and Quartu, `units::light_fixture`; coverage table in its
+module doc): three `BreakFxB` pieces, two with a given velocity, `BreakFxA`'s bolts, 24 bursts of type-53 sparks and
+type-23 smoke, the bare base 1514 left behind, and the camera-facing glow quad (FX 11). Not ported: the glow's
+flicker (a `randi(8)` the game draws in its render pass).
+
+## 13. W3 creature units: the classes lane 2 freed (2026-10-01)
+
+Four units whose only open blocker was the big-head cheat (G-SAV-006, conditional): the normal path is ported, the
+cheat manipulator call is a `NOT ported (G-SAV-006)` row of each coverage table. Each unit is registered by code
+identity (`units::PORTS`); the coverage tables (every call and branch of the updates, their ticks and private
+helpers, with the side effects) are the module docs. Tests: `crates/rc-game/tests/classes/creatures_w3.rs`.
+
+| unit | port | what it is |
+|---|---|---|
+| U375 1246 (11: 126) | `units::pokitaru_biter` | Pokitaru's biters: 95 graze their beaches (area paths) and bite in a sphere every tick of their bite state; 30 wait hidden for the boats 1075 and jump aboard (at most five of a group), one swims a path loop; knocked into the sea they bubble (type 34) and are lost |
+| U95 / U101 580, 668 (02: 82, 7) | `units::aridia_sandshark` | Aridia's sand sharks: swim under the sand with the fin up (type-2 puffs), surface near a target (class sound 4) and bite; one hit kills them (the death flight, the body's dust: 44 type-23 puffs, `SetDeathBits`), then they wait in a nest 668 of their group, which relaunches them; ambushes from a nest when Ratchet enters a cuboid; the Suck Cannon's table with a respawn |
+| U96 612 (02: 15) | `units::aridia_flamer` | Aridia's flame sentries: asleep (smoke, type 21) until Ratchet nears their post, then rise, walk to it and spray fire (their own copy of the Pyrocitor emitter: type-12 flames, the kept flames hit every moby they touch, damage 1, type 5) |
+| U373 1231, 1297 (11: 7) | `units::pokitaru_thrower` | Pokitaru's ball throwers: grow an energy ball 1297 in the hand (50 converging sparkles, a four-sprite type-59 glow) and throw it; it blows up on contact (the beam explosion with its damage sphere, damage 2) |
+
+**System or not.** Nothing here is a new shared system: the flame emitter `0x264e70` / its hits `0x2651d0` are
+called only by 612 (the Pyrocitor's are inline in its hero code; the numbers match: level02 0x1600d0 = level01
+0x161544); the ball 1297 only by 1231; the sharks' dust / puffs, nests and pack alert only by 580 / 668. The
+reaction tables are two new wrapper shapes of the shared layer: `react::POKITARU_1246` (held 0x14, taken only in
+its walking states, the replaced state saved in +0xbc) and `react::ARIDIA_580` (the level-01 shape with a swallow
+hook and a respawn instead of `DeleteMoby`).
+
+**The game's, noted:** the 1246 swimmer's +0x254 is the tide water 1158: the boarders' sea test fires in its state
+too and it blows up on its first tick (the tide is above its path); the boats 1075 are not ported (U363), so the
+boarders stay hidden at sea; a 1231 on a start path would stay in state 1 (no case; none on the disc).
+
+**Frame** (`RC_AUDIO=0 RC_SCENE=0 RC_LEVEL=2 RC_HERO_AT=226,97,25,3.14`, frame 300, two runs byte-identical): Ratchet
+in his hurt pose among group 5's sand sharks, two surfaced beside him with their jaws open, the dive puffs on the sand.
+
+**Not ported:** the cheat branch of each (G-SAV-006). Not taken (time): 574 (U130, 03: 17) and 452 (U280, 08: 3).

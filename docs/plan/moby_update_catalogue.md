@@ -631,7 +631,7 @@ Code: `crates/rc-game/src/moby_update.rs` (module root and unit tests), `moby_up
 * **Novalis.**
   - 240 crates: 82 stacked on another crate (resting on its collision blob, collision_queries.md §7), 204 with a bolt drop, none
     with a path.
-  - Multi-hit classes 0x1fb–0x1fd and crates on moving platforms are not ported; there are none on Novalis.
+  - Multi-hit classes 0x1fb–0x1fd are not ported: no level's class table has them (G-CLS-009, dead code). Crates on moving platforms: ported 2026-09-30 (triggers.md §5b).
 
 ### Grass 724 / 725 (`GrassUpdate` 0x2fa720)
 
@@ -690,7 +690,7 @@ Code: `crates/rc-game/src/moby_update.rs` (module root and unit tests), `moby_up
 * Moby collision: ported (collision_queries.md §7). Not modelled there: Ratchet's per-tick collision
   primitives (`FUN_00263cb8` from HeroSyncMoby rewrites his two cylinders from the hero capsule; the port keeps
   the class blob's), the camera moby 0x3ef.
-* Multi-hit crates.
+* ~~Multi-hit crates.~~ (dead code: on no level's class table, G-CLS-009.)
 * Platforms.
 * Snapshot sphere of `fun_0020def8`.
 * Mission and inventory state.

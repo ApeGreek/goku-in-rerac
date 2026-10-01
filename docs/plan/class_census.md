@@ -130,15 +130,15 @@ marked; `C:` rows cite one level copy (the others: `clusters.tsv`).
 | Big-head cheat manipulator and flag [conditional] (`cheat`) | missing | G-SAV-006 | 57 | 48 | 1,497 | 827 (155); 1246 (126); 749 (106); 193 (93) | `L01:00278720` FUN_00278720×35; `C:ec9f80c602e5` FUN_00251d70×8; `G:0015edb7=00000000` cheat_bighead_flag×4; `C:606d87e75d7d` FUN_0025ea60×2 |
 | Path helpers not linked on Novalis (`path`) | partly | G-CLS-025 | 1 (was 53) | 1 (was 31) | 2 (was 1,108) | 947 (2) (was 75/115/116 (246); 827 (155); 749 (106); 1564 (92)) | `L01:00277260` FUN_00277260×1 (2026-09-29 W1: `C:c4c12687d93c` FUN_00262e40, `C:49a176c9f6de` FUN_00270d00, `C:17a7139ba6a7` FUN_00263710, `C:aeb1c69a6e0e` FUN_00264558, `L01:00277d40`, `C:a3bbdace838c` FUN_002a0260 are has: `rc_game::path`) |
 | Hero scripted states, bodies and the branches on them (`herostate`) | partly | G-HERO-005, G-HERO-008 (~~G-HERO-002~~ closed 2026-09-29), G-LVL-002 (H2) | 96 | 68 | 880 (2026-09-29 after G-HERO-002: 34 units / 52 class-levels / 487 created; the state-0x32 branches and the level `SetState` copies are has) | 827 (155); 193 (93); 638 (64); 1843 (60) | `G:001413d4=00000032` hero_state_0x32×14; `G:001413f4=00000002` body_giant_clank×13; `G:001413f4=00000001` body_clank×12; `C:8a18636e69bd` FUN_002223f8×11; `C:ea215dba76e7` FUN_002356a0×5; `C:2f2e9be4c73e` FUN_00230b38×4 |
-| NPC look-at manipulators and animation leftovers (`anim`) | partly | G-HERO-009 | 47 | 42 | 422 | 638 (64); 238 (54); 623 (51); 294 (40) | `L01:002777d8` FUN_002777d8×40; `C:94cf214dfe7f` FUN_0027b9c0×2; `L01:0026c7a8` MobyAnimBlendEx×2; `L01:002b52a8` FUN_002b52a8×1 |
+| NPC look-at manipulators and animation leftovers (`anim`) | partly (0x2777d8 has, 2026-09-30) | G-HERO-009 | 4 (was 47) | 4 (was 42) | 65 (was 422) | 294 (40); 1059 (14); 563 (10); 282 (1) (was 638 (64); 238 (54); 623 (51); 294 (40)) | `C:94cf214dfe7f` FUN_0027b9c0×2; `L01:0026c7a8` MobyAnimBlendEx×2; `L01:002b52a8` FUN_002b52a8×1 (`L01:002777d8` ported: `moby_update::manip::look`) |
 | Creature-layer copies not linked on Novalis (`creature`) | has (2026-09-29) | ~~G-ENM-009~~ | 0 (was 23) | 0 (was 22) | 0 (was 363) | (was 238 (54); 294 (40); 1023 (40); 1112 (31)) | the three clusters re-tagged has / ported ("In the port: creature units") |
-| Effect-moby spawners not linked on Novalis (`fxmoby`) | partly | G-CLS-026 | 31 | 21 | 276 | 623 (51); 79 (30); 541 (29); 1511 (26) | `C:494499ccf189` FUN_0028dee8×15; `C:01476b25f86a` FUN_002de3e0×3; `C:60ae58782f11` FUN_002e1c98×3; `C:48e5de3f3f27` FUN_00300c60×2; `C:a0194c2bd0e8` FUN_002ef868×2 |
-| Point-light flicker (`light`) | partly | G-REN-024 | 12 | 6 | 256 | 1246 (126); 580 (82); 615 (19); 612 (15) | `C:5d1f33c5603a` FUN_0025fb60×6 |
-| Moby platforms and riders (`platform`) | partly | G-CLS-024 | 7 | 7 | 181 | 1246 (126); 812 (25); 574 (17); 1381 (8) | `L01:002753b0` FUN_002753b0×3; `C:584a926e540b` FUN_00265358×2; `L01:00275290` FUN_00275290×2; `L01:002752c0` FUN_002752c0×2; `L01:00275528` FUN_00275528×2 |
+| Effect-moby spawners not linked on Novalis (`fxmoby`) | has (2026-09-30) | ~~G-CLS-026~~ | 0 (was 31) | 0 (was 21) | 0 (was 276) | (was 623 (51); 79 (30); 541 (29); 1511 (26)) | `C:494499ccf189` = L01 `BreakFxB` 0x278ad8 (padding in the hash); the L06 / L08 / L09 / L10 spawners re-tagged `family` (creatures.md §12) |
+| Point-light flicker (`light`) | not a system (2026-09-30) | ~~G-REN-024~~ | 0 (was 12) | 0 (was 6) | 0 (was 256) | (was 1246 (126); 580 (82); 615 (19); 612 (15)) | `C:5d1f33c5603a` = L01 0x2723f8, the hit flash (`creature`, has; creatures.md §12) |
+| Moby platforms and riders (`platform`) | has (2026-09-30) | ~~G-CLS-024~~ | 0 (was 7) | 0 (was 7) | 0 (was 181) | (was 1246 (126); 812 (25); 574 (17); 1381 (8)) | `L01:002752c0` / `002753b0` / `00275528` / `00275290` / `002755f8` and `C:584a926e540b` / `C:6e3b7a963b84`: `triggers.rs` (triggers.md §5b) |
 | Ship-combat mode [override] (`shipmode`) | missing | G-LVL-009 | 2 | 2 | 112 | 1843 (60); 1319 (52) | `X:1319` fighter_1319×1; `X:1843` fighter_1843×1 |
 | Particle types not ported (`ptype`) | missing | G-PRT-001 | 18 | 14 | 90 | 28 (43); 1139 (12); 1440 (9); 170 (5) | `C:1fa9adb9d4ec` FUN_00274948×5; `L01:002780b0` SpawnImpactSparks×2; `C:dd572bc43542` FUN_0029b8d8×1; `L01:0027e750` PartType05Spawn×1; `L01:00282ef0` PartType28Spawn×1; `L01:00284d88` PartType40Spawn×1 — **2026-09-29**: every tagged spawner but types 40 / 58 (`PartType40Spawn`, `PartType58Spawn`: G-PRT-008) is ported and re-tagged `particles has` (particles.md "Update types, 2026-09-29"); a census re-run moves those units off `ptype` |
 | Break-effect variant (`breakfx`) | partly | G-CLS-014 | 5 | 5 | 87 | 1382 (34); 573 (27); 1048 (20); 556 (5) | `C:6e363a2f7f51` FUN_00251f08×5 |
-| Follow / script camera settings from mobys (`camera`) | partly | G-HERO-026 | 38 | 29 | 74 | 615 (19); 351/1301 (10); 877 (6); 1380 (4) | `C:3b375f0ab07b` FUN_002e9758×24; `C:33058002480b` FUN_002f89b0×4; `L01:00313740` FUN_00313740×3; `L01:00313768` FUN_00313768×3; `L01:00313820` FUN_00313820×3; `L01:00313b48` FUN_00313b48×3 |
+| Follow / script camera settings from mobys (`camera`) | partly (2026-09-30) | G-HERO-026 | 3 (was 38) | 3 (was 29) | 3 (was 74) | 1422 (1); 1470 (1); 1051 (1) (was 615 (19); 351/1301 (10); 877 (6); 1380 (4)) | `L01:00313b48` FUN_00313b48×3 — **W3 lane 3 2026-09-30** (player_controller.md §15): `C:3b375f0ab07b` FUN_002e9758 (×24) and `C:33058002480b` FUN_002f89b0 (×4) are the script camera's Euler-target setter `0x316e28` (the same code, the camera pointer through `$gp`: `Camera::camera_script_targets`, has); the follow camera's setters 0x313560..0x3137f8 ported (`Camera::set_*`, the class-17 regions their first consumer) and re-tagged has. The units still need their own code; `0x313b48` (3 units) is a one-line setter left for its first ported caller |
 | Blob shadows (`shadow`) | partly | G-REN-025 | 7 | 7 | 70 | 1112 (31); 1269 (20); 1110 (12); 871 (4) | `C:bd2754fc3a9b` FUN_00259fe8×6; `L01:0026eec8` FUN_0026eec8×1 |
 | Save bytes variant [L] (`death`) | partly | G-SAV-003 | 4 | 3 | 45 | 44 (21); 44 (17); 78 (7) | `C:641f527e8cd4` FUN_002a35d8×3 |
 | Level sound on a slot (`lsound`) | partly | G-AUD-007 | 14 | 4 | 41 | 466/480/485 (38); 1118 (1); 1109 (1); 1108 (1) | `C:8d520530637e` FUN_0029aec0×3; `C:bcf4ccdaa994` FUN_0027eca0×1 — **W2 2026-09-29**: L04 `0x27eca0` is `PlayLevelSoundAtMoby`'s copy (has); the 466 family (38) is cheap |
@@ -456,6 +456,110 @@ Census before → after (both `cargo run -p rc-trace -- class-census`; the "afte
 of the same afternoon): 393 units / 3,325 created (cheap 217 / 1,532) → **375 units / 2,955 created** (cheap 223 /
 1,365, missing 125 / 1,432, partly 20 / 147, unknown 7 / 11). This round: 13 unit rows, 253 created instances.
 
+### In the port: cheap wins round 3 (2026-10-01, G-CLS-027)
+
+Taken in the census's order by created instances (unit ids of the 2026-09-30 run), skipping the other lanes' units
+(platforms and carry, flicker, crates, effect spawners, manipulators, the camera) and the deferred big ones. The
+coverage table of every ported function is the module doc of its port; tests `rc-game/tests/classes/cheap_classes_d.rs`
+(the resolution on exactly the levels whose table runs the code, with the created counts, and one behaviour test per
+unit on its side effects; the turret headless on level 14, the rest on synthetic tables).
+
+| unit | classes (levels: created) | reference | port | notes |
+|---|---|---|---|---|
+| U440 | 30 pop-up turrets (14: 27) + their shot 681 | level14 0x2b3bf0 / 0x2ece00 | `units::popup_turret` | the hit handler 0x2b4340 (resolver, flash, `SetDeathBits`), rise / wake / sweep / fire, beam explosion; the shot's line test passes class 0xfc, impact sparks, sound 0, type-51 fizzle |
+| U212 (+ U544) | 1021 petal doors (06: 11; 17: 2, 18: 1 run the same code and constants) | level06 0x2f4f00 | `units::petal_door` | creates its seven petals (the same class); `turn::turn_toward`; sound 0 |
+| U203 | 1139 hoverboard sparkles (05, 16: 12) | level05 0x31abe0 | `units::board_sparkle` | three type-67 sparks a tick in view on the board (movement group 0x16) |
+| U390 | 339 animated idlers (12: 9) | level12 0x2ec1d0 | `units::anim_idler` | blends only |
+| U329 | 1015 / 1282 trip blocks (10: 9) | level10 0x2d90a8 | `units::trip_block` | the box test 0x2d9000; its global flag `0x13d3d4[i]` |
+| U162 | 1101 / 1102 / 1531 / 1532 switched movers (04: 8) | level04 0x2e17d8 | `units::switched_mover` | death bits by hand; 1101's sounds (`PlayClassSoundByClass`) |
+| U248 | 1013 / 1014 / 1064 / 1065 panels (07: 6) | level07 0x30cf90 | `units::linked_slider` | the map zone flags `0x184528[i]`: G-UI-001, as `linked_mover` |
+| U487 (part 2) | 1209 pressure pads (15: 9, 17: 6) | level15 0x2e5958 | `units::pressure_pad` | the group's leader clock (sounds 0 tick / 1 solved / 2 reset / 3 press), ambient green / white blink, group states 3 / 4, the collected byte and death bits |
+| U211 (part 2) | 911 flame jets (06: 14) | level06 0x2f3ad8 | `units::flame_jet` | sweeping or timed; loop sound 0 (flags 4), two type-2 puffs a tick near Ratchet, hit lines (damage 1, 0x10001; 0x10000 with head item 6) |
+| U542 (part 2) | 669 underwater laser spinners (17: 15) | level17 0x2d77f0 / draw 0x2d7cf0 | `units::water_laser` | only while Ratchet is in the water (`help::hero_in_water`); 3 × 5 hit lines (flags 9, 0x10001), type-60 particles on the fan edges, six FX 0x28 additive quads (`Callback::UnitQuads`) |
+| U349 (part 2) | 1544 particle vents (10: 14) | level10 0x2ea1f0 | `units::orxon_vent` | kinds puffs / drips / column at the vent or each spline point; drips write the ground z into the spline's point w (as the game); type-2 blobs only |
+
+**Not cheap after all** (reached, not ported): U560 (587, 18: 28: the platform carry `0x2755f8` and the stood-on moby
+0x13f64c, then `0x227dd0(0x77, 1)` a hero state: G-CLS-024 lane / hero), U459 (1224, 14: 24) and U394 (1259, 12: 18)
+(electric arcs: each builds its bolt in a large pvar block, 0x624 / 0x2300 bytes, and draws it in its own GS callback,
+level14 0x301fa8, level12 0x302c58: census `fxdraw`, not tagged on these), U416 (224 / 228, 13: 16: the ship pickups add
+to the ship's ammo and shield words 0x140946 / 0x14094c and test hero state 0x32 against the ship moby 0x140940:
+G-LVL-009), U253 (1069, 07: 16) and U125 (868 / 905 / 928, 03: 12) (`CarryRiders` 0x2755f8: the platform lane).
+Already known: U127 (G-CLS-028), U513 (933, G-HERO-033), U171 (133, G-HERO-008), U344 (1378, G-HERO-032), U491 / U535
+(sprite callbacks). **Open cheap units next** (not reached this round): U487 (1209, 15 / 17: 15, pressure pads: group
+state, the collected byte and death bits), U540 (669, 17: 15, has a draw callback), U211 (911, 06: 14), U347 (1544, 10:
+14), U518 (1401, 16: 14), U223 (1066, 06: 6), U311 (1206, 09: 9), U374 (1248, 11: 6).
+
+Census before → after (both `cargo run -p rc-trace -- class-census`; the after run includes the other lanes' ports of
+the same session): 480 unported class-levels / 3,188 placed / 2,955 created, 375 units, 224 cheap → **455 / 3,040 /
+2,807, 361 units** (cheap 227 / 1,388: the other lanes' re-tags moved units into the cheap list). This round: 9 unit
+rows (8 census units), 85 created instances. **Part 2** (2026-10-01, tests `cheap_classes_e.rs`, the level runs headless on 06 / 10 / 15 / 17): the four rows
+above, 58 created instances (census 450 / 2,963 / 2,730, 357 units → 447 / 2,933 / 2,700, 354 units; 235 cheap / 1,344
+left). Not reached: U129 (Kerwan's air traffic 75 / 115–120 / 132 / 795, 246: now cheap, the largest; its driver is a
+variant of the flyer driver), U172 (79, 05: 30; Ghidra has no function at 0x2d7140, disassembly only), U562 (587, 18:
+28: the carry is ported now and the death fall is `HeroCall::SetState(0x77)`; `fun_0022da68(1, 0, m)` still to
+identify), U127 (868 / 905 / 928, 03: 12), U255 (1069, 07: 16), U520 (1401, 16: 14).
+
+**Round 4** (2026-10-01, tests `cheap_classes_f.rs`, headless on 03): U128 (census 2026-10-01 id; was U129) Kerwan's
+air traffic 75 / 115–120 / 132 / 795 (246) with its exhaust trail 235 (`units::air_traffic`, level 03's own copy of the
+flyer driver; closes G-CLS-028; 795's skill point stays G-SAV-007) and U126 868 / 905 / 928 (12, `units::kerwan_mover`).
+Census 447 / 2,933 / 2,700, 354 units → 434 / 2,549 / 2,316, 351 units (with the other lanes' ports of the day; cheap
+233 / 1,086 left). Skipped: 1069 (07: the rocking float writes Ratchet's position 0x13f3d0 and platform delta 0x13f440
+while he rides it (`0x288968`): a hero-side seam, `hero/**` was off-limits); 587 (18: `fun_0022da68` is
+`PlayClassSound` (level01 0x2a1618, `World::play_sound`); its difficulty word 0x1623a8 is written only by the boss 1422's
+`0x2f5e18` (unported: 0 until then); not reached for time), 1401 (16: the class-933 spawner `0x2de298` and knock-back;
+not reached).
+
+### In the port: W3 lane 2, moby services (2026-09-30, triggers.md §5b, creatures.md §12)
+
+The lane's four systems: G-REN-024 and G-CLS-026 were ported engine functions under other hashes (the hit flash,
+`BreakFxB`: two padding words after `jr ra` change the cluster hash; the masked overlay diff finds them identical),
+G-CLS-009 is dead code (no class table has 503–510), G-CLS-024 is ported (`triggers.rs`' moby side). Tests: the
+module tests of `triggers`, `bolt`, `crate_`, `infobot`, `units::carriers`, `units::falling_platform`,
+`units::light_fixture`.
+
+| unit (2026-09-29 ids) | classes (levels: created) | reference | port | notes |
+|---|---|---|---|---|
+| U102 | 707 / 734 turntables (02: 4) | level02 0x2ddc00 / 0x2df8c0 | `units::carriers::turntable` | 5°/s, `CarryRiders` with the turn |
+| U126 | 1210 joint-carried platform (03: 5) | level03 0x2953f8 | `units::carriers::joint_platform` | the class never leaves state 0 |
+| U179 | 812 pinned platforms (05: 25) | level05 0x30bf98 | `units::carriers::pinned_platform` | pinned to the carrier +0x80 (`to_local` / `from_local`) |
+| U565 | 1381 falling platforms (18: 8) | level18 0x2f16f0 | `units::falling_platform` | its carriers 1584 as children (`record_children` / `place_children`); the boss 1422 starts it |
+| U207, U472 | 1511 light fixtures (05: 26, 14: 22) | level05 0x31c8e0, level14 0x307ad8 | `units::light_fixture` | `BreakFxB` pieces with a velocity; glow quad (FX 11) |
+
+Freed for the class ports (G-CLS-027 round 3; census 2026-09-30 ids): cheap 668 (U101, 02: 7, the nests of 580),
+79 (U172, 05: 30), 587 (U562, 18: 28), 1069 (U255, 07: 16), 868 / 905 / 928 (U127, 03: 12), 1885, 1041, 1805,
+455, 625, 1454; conditional on the cheat only: 1246 (U375, 11: 126), 580 (U95, 02: 82), 612 (U96, 02: 15), 1231
+(U373, 11: 7), 574, 452, 623, 541. Census before → after (the after run includes the other lanes' ports of the same
+session): 2,955 → 2,730 created unported; the systems `light` (256), `platform` (181) and `fxmoby` (276) block
+nothing now; this lane ported 90 created instances (6 unit rows).
+
+### In the port: W3 lane 1, the manipulators (2026-09-30, moby_animation.md §9, hero_gameplay.md §19)
+
+The shared manipulator records (`moby_update::manip`: `AttachManipulator` / `DetachManipulator` on class mobys with the
+loaded list targets, `FUN_00221e38`, the NPC look-at `0x2777d8`) and their consumers: U510 / U514 1143 (every level's
+vendor hologram and Kalebo's 10 logos, `units::hologram_logo`), U180 823 (8, `units::sweep_light`, with its beam
+callback), U155 481 (4, `units::spinner_float`), the vendor 11 and the talking NPC 774 (already ported classes: their
+manipulators), the Visibomb 172's fins. Census after (with the other lanes' ports of the day): 2,714 unported created
+(was 2,955); `anim` 4 units / 65 created (was 42 / 422). Freed: 347 (8) and 447 / 920 (3) are cheap now (not ported
+here for size: 347 is 1,138 words, 447 / 920 two functions of 388 words with a talk and scene family); the other `0x2777d8` callers
+wait on the cheat (G-SAV-006), the effect mobys or the save (G-SAV-002).
+
+
+### In the port: W3 creature units, the classes freed by lane 2 (2026-10-01, creatures.md §13)
+
+The creature units whose only blocker left was the big-head cheat (G-SAV-006, conditional: each ports its normal
+path and lists the cheat branch as NOT ported). Tests: `crates/rc-game/tests/classes/creatures_w3.rs`.
+
+| unit (2026-10-01 ids) | classes (levels: created) | reference | port | notes |
+|---|---|---|---|---|
+| U375 | 1246 biters (11: 126) | level11 0x314318 | `units::pokitaru_biter` | beach / swimmer / boat boarders; the boats 1075 (U363) are not ported: the 30 boarders stay hidden |
+| U95, U101 | 580 sand sharks (02: 82), their nests 668 (02: 7) | level02 0x2d3e50, 0x2dcb38 | `units::aridia_sandshark` | the nests relaunch killed sharks; its own reaction table (`react::ARIDIA_580`) |
+| U96 | 612 flame-throwing sentries (02: 15) | level02 0x2d7748 | `units::aridia_flamer` | its own type-12 flame emitter (level02 0x264e70) and the kept flames' hits |
+| U373, U378 | 1231 ball throwers (11: 7), their ball 1297 (created) | level11 0x310180, 0x318b30 | `units::pokitaru_thrower` | the ball's glow (type 59), trail (type 2), blast (damage 2) |
+
+Census before → after (both `cargo run -p rc-trace -- class-census`; the after run includes the other lanes' ports
+of the day): 447 unported class-levels / 2,700 created → 430 / 2,205; the `cheat` system 37 units / 965 created →
+33 / 735 (these four units: 237 created instances). Not taken (time): 574 (U130, 03: 17) and 452 (U280, 08: 3).
+
 ## Unique classes: the ones that need something no other class needs
 
 A blocking function (missing or partly) that exactly one unit calls:
@@ -645,7 +749,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U306 | 1172 | 09 | 10/10 | L09:303d10 | 2/294 | cheap | — | creature death hit math moby sound |
 | U320 | 351, 1301 | 10 | 10/10 | L10:2be858 | 1/484 | missing | missing: camera; partly: herostate | cine math particles sound |
 | U476 | 196, 197, 1958 | 15 17 | 10/10 | L15:2bddb0, L17:2c0f00 | 1/192 | cheap | — | math moby sound trig |
-| U510 | 1143 | 16 | 10/10 | L16:2e1088 | 1/54 | cheap | — | anim math |
+| U510 | 1143 | 16 | 10/10 | L16:2e1088 | 1/54 | ported (2026-09-30, `units::hologram_logo`) | — | anim math |
 | U33 | 1440 | 00 | 9/9 | L00:2e0b88 | 12/1972 | missing | missing: cheat,ptype | anim breakfx coll creature death fxdraw hit light math moby shadow |
 | U59 | 695 | 01 | 9/9 | L01:2f8268 | 2/218 | cheap | — | creature math water |
 | U117 | 1212 | 02 09 | 9/9 | L02:2ec4b8, L09:305dc0 | 3/542 | missing | missing: path | anim creature fxdraw group hit hud lsound math moby particles sound |
@@ -656,7 +760,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U405 | 29 | 13 | 9/9 | L13:2b41b8 | 5/630 | missing | missing: cheat | anim creature death math moby trig |
 | U315 | 1885 | 09 13 | 8/9 | L09:30ab80, L13:30d550 | 7/686 | missing | missing: fxmoby | anim creature death group hit math moby |
 | U162 | 1101, 1102, 1531, 1532 | 04 | 8/8 | L04:2e17d8 | 2/170 | cheap | — | math sound |
-| U180 | 823 | 05 07 | 8/8 | L05:30c0a8, L07:304738 | 1/94 | cheap | — | anim fxdraw math moby |
+| U180 | 823 | 05 07 | 8/8 | L05:30c0a8, L07:304738 | 1/94 | ported (2026-09-30, `units::sweep_light`) | — | anim fxdraw math moby |
 | U249 | 1041 | 07 | 8/8 | L07:30d4d8 | 2/516 | missing | missing: creature,fxmoby | anim creature death hit math moby shadow sound |
 | U253 | 1080 | 07 | 8/8 | L07:311bc8 | 2/208 | cheap | — | math moby platform sound |
 | U271 | 333 | 08 | 8/8 | L08:2dabf0 | 7/1612 | missing | missing: cheat,creature | anim creature death hit math moby particles shadow |
@@ -667,7 +771,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U463 | 1417 | 14 | 8/8 | L14:306ee0 | 4/742 | cheap | — | anim creature hit math moby path sound trig |
 | U468 | 67 | 15 | 8/8 | L15:29aff0 | 1/296 | cheap | — | math sound trig |
 | U497 | 470 | 16 | 8/8 | L16:2c9480 | 3/254 | cheap | — | creature math particles |
-| U535 | 347 | 17 | 8/8 | L17:2cb310 | 6/1138 | partly | partly: anim,herostate | anim coll creature hit math moby particles sound |
+| U535 | 347 | 17 | 8/8 | L17:2cb310 | 6/1138 | cheap (2026-09-30 census: `0x2777d8` ported) | — | anim coll creature hit math moby particles sound |
 | U561 | 1381 | 18 | 8/8 | L18:2f16f0 | 4/546 | missing | missing: platform | camera math moby |
 | U100 | 668 | 02 | 7/7 | L02:2dcb38 | 4/568 | partly | partly: light | anim creature death hit math moby shadow |
 | U189 | 855 | 05 | 7/7 | L05:3150f0 | 2/458 | missing | missing: voicehand | group math particles sound |
@@ -715,7 +819,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U102 | 707, 734 | 02 | 4/4 | L02:2ddc00, L02:2df8c0 | 1/34 | cheap | — | math platform |
 | U138 | 899 | 03 | 4/4 | L03:2db280 | 2/186 | cheap | — | math moby sound |
 | U152 | 432, 1052 | 04 | 4/4 | L04:2c6858 | 1/214 | cheap | — | anim math moby sound |
-| U155 | 481 | 04 | 4/4 | L04:2cdda0 | 1/176 | partly | partly: anim | anim math moby platform |
+| U155 | 481 | 04 | 4/4 | L04:2cdda0 | 1/176 | ported (2026-09-30, `units::spinner_float`) | — | anim math moby platform |
 | U160 | 617 | 04 | 4/4 | L04:2d6f68 | 1/82 | cheap | — | math |
 | U176 | 625 | 05 | 4/4 | L05:304320 | 4/1492 | missing | missing: creature,fxmoby | anim coll creature death hit math moby particles shadow sound |
 | U177 | 717 | 05 | 4/4 | L05:307910 | 10/1446 | missing | missing: cheat,path; partly: anim | anim coll creature group hit math moby path shadow |
@@ -760,7 +864,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U159 | 584 | 04 | 3/3 | L04:2d3580 | 1/42 | cheap | — | math platform |
 | U186 | 844 | 05 | 3/3 | L05:30e7f8 | 5/1036 | cheap | — | coll creature hit math moby particles platform sound |
 | U187 | 846 | 05 | 3/3 | L05:30f5c8 | 3/406 | cheap | — | hit math moby particles sound |
-| U196 | 447, 920 | 05 07 13 | 3/3 | L05:317aa0, L07:2f61c0, L13:2edbe8 | 2/388 | partly | partly: anim | anim cine math moby shadow talk trig |
+| U196 | 447, 920 | 05 07 13 | 3/3 | L05:317aa0, L07:2f61c0, L13:2edbe8 | 2/388 | cheap (2026-09-30: `0x2777d8` ported) | — | anim cine math moby shadow talk trig |
 | U242 | 529 | 07 | 3/3 | L07:2fbdb8 | 1/14 | cheap | — | fxdraw |
 | U277 | 452 | 08 | 3/3 | L08:2e2df0 | 6/2680 | missing | missing: cheat; partly: platform; untagged ×1 | anim camera coll creature death fxdraw hit hud math moby particles shadow sound target |
 | U286 | 671 | 08 | 3/3 | L08:2f70a0 | 4/1558 | cheap | — | fxdraw light math moby particles |

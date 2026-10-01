@@ -20,11 +20,25 @@
 //! * **3**: `DeleteMoby`.
 //! * **4 / 5** (Batalia's turret guy; state 5 moves Ratchet to a fixed point): not ported (counted).
 //!
-//! The head look-at (manipulators `FUN_002777d8` toward the hero within 8 units, random glances every 180..300
-//! ticks) is not ported (counted).
+//! **The head look-at** (every state but 3; [`look_at`], docs/plan/moby_animation.md §9), coverage of 0x2ff3d0..0x2ff734:
+//!
+//! | address | what it does | port |
+//! |---|---|---|
+//! | 0x2ff3d0 | only while sequence B (+0x53) is 0 (not talking): the targets below; else the records only spring back | [`look_at`] |
+//! | 0x2ff3f4..0x2ff4b8 | XY distance to Ratchet (0x13f3d0) < 8 and his body point (0x13f420) within π/2 of the yaw (`FastDiffRots`): P+0x164 = `ticks(120)` while he moves (\|0x13f450\| > 0.01), else `FastDecTimer(P+0x164)` | [`look_at`] |
+//! | 0x2ff4bc..0x2ff4d8 | otherwise, P+0x164 ≠ 0: P+0x164 = 0, P+0x150 = his body point (the last place he was seen) | [`look_at`] |
+//! | 0x2ff4dc..0x2ff57c | `FastDecTimer(P+0x168)` out: P+0x168 = (int)(`randf(180, 300)`·0x15ed68); a glance point 6 units away at yaw + `randf(−90, 90)`° and pitch `randf(0, 30)`° (`0x277b50`), + the NPC's position → P+0x150 (3 draws) | [`look_at`] |
+//! | 0x2ff580..0x2ff5c0 | P+0x164 ≠ 0: look at his body point, k 0.04; else at P+0x150, k 0.02 (d 0.3) | [`look_at`] |
+//! | 0x2ff5cc..0x2ff6d4 | from the eye (position + 1 z): yaw rel. to the NPC's (±π/2), pitch −atan2(z, xy) (±π/6); P+0x138 (list 1 z) = yaw/2, P+0xb4 (list 0 y) = pitch·1.25, P+0xb8 (list 0 z) = yaw/2 | [`look_at`] |
+//! | 0x2ff6d8..0x2ff6fc | the big-head cheat 0x15edb0: P+0xc0 (list 0's scale) = 2.75 | NOT ported (G-SAV-006, conditional; cheats off) |
+//! | 0x2ff700..0x2ff734 | `FUN_002777d8(k, d, npc, P+0x50, 0)`, `(k, d, npc, P+0xd0, 1)` (k, d × 0x15ed64 = 1) | [`crate::moby_update::manip::look`] |
+//!
+//! Not ported besides: `FUN_002ff028` at the top (the big-head cheat's manipulator on the scene actors: G-SAV-006).
 
 use crate::moby_runtime::MobyId;
+use crate::moby_update::creature as c;
 use crate::moby_update::interact::{self, talk, GameWrite};
+use crate::moby_update::manip;
 use crate::moby_update::services::{pvar as p, World};
 
 pub const UPDATE_FN: u32 = 0x2ff118;
@@ -69,7 +83,7 @@ pub fn update(w: &mut World, id: MobyId) {
             }
         }
         2 => {
-            if w.svc.interact.talker == Some(id) { return; }
+            if w.svc.interact.talker == Some(id) { return look_at(w, id); }
             let mission = w.m(id).mission;
             if mission != 0xff && w.missions.mission_done(w.svc.level, mission) != 0xff {
                 crate::cinematic::set_mission_done(w, mission);
@@ -87,10 +101,70 @@ pub fn update(w: &mut World, id: MobyId) {
                 w.svc.interact.writes.push(GameWrite::Save);
             }
         }
-        3 => w.delete_moby(id),
+        3 => return w.delete_moby(id),
         _ => w.svc.unported("talking npc: Batalia turret guy states 4/5"),
     }
-    w.svc.unported("talking npc: head look-at");
+    look_at(w, id);
+}
+
+/// P+0x50 / P+0xd0: the look records on joint lists 0 (head) and 1 (neck); P+0x150 the glance point, P+0x164 the
+/// "seen Ratchet" timer, P+0x168 the glance timer.
+const LOOK: [usize; 2] = [0x50, 0xd0];
+const GLANCE: usize = 0x150;
+const SEEN: usize = 0x164;
+const GLANCE_TIMER: usize = 0x168;
+
+/// The head look-at tail of `TalkingNpcUpdate` (module doc table).
+pub fn look_at(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < 0x170 { w.mm(id).pvars.resize(0x170, 0); }
+    let (mut k, d) = (f32::from_bits(0x3ca3_d70a), f32::from_bits(0x3e99_999a));
+    if w.m(id).anim.seq_b == 0 {
+        let h = w.hero;
+        let hp = h.pos.map(|x| x.to_f32());
+        let body = h.body_point.map(|x| x.to_f32());
+        let pos = c::pos(w, id);
+        let mut near = c::dist2(pos, hp) < 8.0;
+        if near {
+            let a = c::atan(body[0] - pos[0], body[1] - pos[1]);
+            near = c::diff_rots(c::yaw(w, id), a) < std::f32::consts::FRAC_PI_2;
+        }
+        if near {
+            if c::len3(h.disp.map(|x| x.to_f32())) > 0.01 {
+                let t = c::ticks(w, 120);
+                c::set_pi32(w, id, SEEN, t);
+            } else {
+                c::dec_timer_pvar_i32(w, id, SEEN);
+            }
+        } else if c::pi32(w, id, SEEN) != 0 {
+            c::set_pi32(w, id, SEEN, 0);
+            c::set_pv4(w, id, GLANCE, body);
+        }
+        if c::dec_timer_pvar_i32(w, id, GLANCE_TIMER) != 0 {
+            let t = w.svc.timing.scale(crate::ps2v::Pf::f(w.rng.randf(180.0, 300.0))).to_f32() as i32;
+            c::set_pi32(w, id, GLANCE_TIMER, t);
+            let deg = f32::from_bits(0x3c8e_fa35);
+            let yaw = c::add_rot(c::yaw(w, id), w.rng.randf(-90.0, 90.0) * deg);
+            let pitch = w.rng.randf(0.0, 30.0) * deg;
+            let g = [6.0 * yaw.cos() * pitch.cos(), 6.0 * yaw.sin() * pitch.cos(), 6.0 * pitch.sin(), 0.0];
+            c::set_pv4(w, id, GLANCE, c::add(g, [pos[0], pos[1], pos[2], 0.0]));
+        }
+        let target = if c::pi32(w, id, SEEN) != 0 {
+            k = f32::from_bits(0x3d23_d70a);
+            body
+        } else {
+            c::pv4(w, id, GLANCE)
+        };
+        let eye = [pos[0], pos[1], pos[2] + 1.0, pos[3]];
+        let v = c::sub(target, eye);
+        let half_pi = std::f32::consts::FRAC_PI_2;
+        let yaw = c::sub_rot(c::atan(v[0], v[1]), c::yaw(w, id)).clamp(-half_pi, half_pi);
+        let lim = f32::from_bits(0x3f06_0a92);
+        let pitch = (-c::atan(c::len2(v), v[2])).clamp(-lim, lim);
+        c::set_pf(w, id, 0x138, yaw * 0.5);
+        c::set_pf(w, id, 0xb4, pitch * 1.25);
+        c::set_pf(w, id, 0xb8, yaw * 0.5);
+    }
+    for (list, ofs) in LOOK.into_iter().enumerate() { manip::look(w, id, id, ofs, list as u8, k, d); }
 }
 
 #[cfg(test)]
@@ -99,6 +173,55 @@ mod tests {
     use crate::cinematic::EngineRequest;
     use crate::moby_runtime::{Moby, MobyTable};
     use crate::moby_update::services::LevelMissions;
+
+    /// The head look-at: the first tick draws a glance (timer + 3 `randf`), Ratchet near, in front and moving sets the
+    /// "seen" timer and the NPC looks at his body point with k 0.04 (both records linked, list 0 in pitch and yaw,
+    /// list 1 in yaw); away, the last place he was seen becomes the glance point; talking (seq B ≠ 0) writes no
+    /// targets.
+    #[test]
+    fn head_looks_at_ratchet_and_glances() {
+        let mut m = Moby { o_class: 774, state: 7, pvars: vec![0; 0x170], ..Moby::default() };
+        for o in [0x50, 0xd0] { p::set_ff(&mut m.pvars, o + manip::rec::REC_SCALE, 1.0); }
+        let mut t = MobyTable::new(vec![m], 4);
+        let mut hero = crate::hero::Hero::new();
+        let v = |x: f32, y: f32, z: f32| crate::hero::physics::v4(x, y, z);
+        hero.pos = v(3.0, 0.0, 0.0);
+        hero.body_point = v(3.0, 0.0, 1.5);
+        hero.disp = v(0.1, 0.0, 0.0);
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = crate::moby_update::Services::new();
+        svc.joint_targets.insert(774, vec![8, 9]);
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 0);
+        let mut r = *w.rng;
+        look_at(&mut w, 0);
+        // The glance: timer, yaw offset, pitch (no other draw).
+        let n = r.randf(180.0, 300.0) as i32;
+        r.randf(-90.0, 90.0);
+        r.randf(0.0, 30.0);
+        assert_eq!(w.rng.state, r.state);
+        assert_eq!(c::pi32(&w, 0, GLANCE_TIMER), n);
+        assert_eq!(c::pi32(&w, 0, SEEN), 120);
+        // Looking at the body point from the eye (0, 0, 1): yaw 0, pitch −atan2(0.5, 3); k 0.04 → the spring's first step.
+        let pitch = -(0.5f32).atan2(3.0);
+        let mut a = crate::ps2v::Pf::ZERO;
+        let mut vv = crate::ps2v::Pf::ZERO;
+        crate::hero::physics::turn_spring(crate::ps2v::Pf::f(pitch * 1.25), crate::ps2v::Pf::f(0.04), crate::ps2v::Pf::f(0.3), crate::ps2v::Pf::ZERO, &mut a, &mut vv, 0);
+        assert_eq!(c::pf(&w, 0, 0x50 + manip::rec::ANGLES + 4), a.to_f32());
+        assert_eq!(w.m(0).joint_mods.iter().map(|m| m.joint).collect::<Vec<_>>(), vec![8], "list 1 has no yaw target yet");
+        // Ratchet behind the NPC (yaw 0 faces +x): the seen timer is cleared, his body point (where he is now) becomes
+        // the glance point.
+        hero.pos = v(-3.0, 0.0, 0.0);
+        hero.body_point = v(-3.0, 0.0, 1.5);
+        let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 1);
+        look_at(&mut w, 0);
+        assert_eq!(c::pi32(&w, 0, SEEN), 0);
+        assert_eq!(c::pv4(&w, 0, GLANCE), [-3.0, 0.0, 1.5, 0.0]);
+        // Talking: no targets written (the records only spring).
+        w.mm(0).anim.seq_b = 3;
+        look_at(&mut w, 0);
+        assert_eq!(c::pf(&w, 0, 0xb8), 0.0, "cleared by the record update, not rewritten");
+    }
 
     /// State 2 after the talker's scene: its open mission is set done through the one mission writer and its
     /// checkpoint cuboid (+0x4c) becomes the checkpoint record (`FUN_0029ac10(centre, Euler)`); once done, nothing.

@@ -347,10 +347,11 @@ code: no per-level code.
   0x73's end → 0x66 (blend 0x1e); more than 5 ticks off the end → fall 6 with 0x13f534 = 8. **No jump-off**: the
   case reads no pad; the prologue's checks (hit intake, the weapon check: group 0x1a is neither on foot nor in the
   air list) do not leave it either.
-- **Camera**: no hero-state tweak (0x3111d8 has none for 0x1a / 3). Kerwan's camera records 10..12 (class 17) have
-  the region flag +0x2c = 2 ("while in group 0x1a", 0x318c40) with priority +0x2e = 0: part of the level camera
-  system, not ported for any level.
-- **Not ported / left**: the level cameras above; the help message 0xbbf and the 0x1418c8 stat (Kerwan's script moby,
+- **Camera**: no hero-state tweak (0x3111d8 has none for 0x1a / 3). Kerwan's camera records 10..12 (class 17, mode
+  +0x2c = 2 "while in group 0x1a", priority +0x1c = 4; +0x2e is the region's counter) retune the follow camera for the
+  whole slide: distance 6.5, pivot 2.0, look −0.5, the stick off, a 1° / 4° turn (ported 2026-09-30,
+  player_controller.md §15; `tests/world/camera_levels.rs`).
+- **Not ported / left**: the help message 0xbbf and the 0x1418c8 stat (Kerwan's script moby,
   unported); the hit intake while hanging uses the ported generic path.
 - **Tests**: `boots::tests` `a_rising_jump_catches_the_cable`, `square_is_the_wrench_grab_not_the_jump_attack`,
   `ride_to_the_end_no_jump_off`, `cable_slide` (distilled Kerwan numbers); `tests/hero/hero_cable_kerwan.rs` (Kerwan's 3

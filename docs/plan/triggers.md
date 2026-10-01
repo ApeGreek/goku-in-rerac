@@ -98,7 +98,8 @@ All tests subtract the centre (`VecSub` 0x2211b8, xyz) and apply the inverse row
 The port additionally returns false for an out-of-range index (the game would read outside the table).
 0x20ff18 is reached only through the camera-collision grid lookup 0x20fdb0 (cell `(x/16, y/16)`, primitive
 bounding circle `|c − b.xy| < b.r + r` first); its callers are the camera (0x30f358 sphere push-out, 0x30f468,
-0x316880). It is ported as a test; the camera collision itself is not part of this work.
+0x316880). It is ported as a test; the grid itself is empty on all 19 levels (every cell 0: player_controller.md §15), so
+the camera's grid users never find a primitive.
 
 ### Callers (level01)
 
@@ -123,7 +124,7 @@ moby's position. Offsets are in the caller's pvar block.
 | 0x2f2eb8 `NearestAreaMarkerUpdate` | — | polygon, cuboid | a candidate point | path, +0x14 |
 | 0x302648 `RcRangeLimiterUpdate` | 832 | polygon, cuboid | the RC vehicle | path, +0x0c |
 | 0x274df8 / 0x274b78 target select | (enemy AI) | cuboid list (first n−1) or polygon | H and candidate mobys | caller's list |
-| 0x318c40 camera region test (14 levels) | camera records (0x15ef50 + i·0x20, pvar +0x1c) | cuboid +0x0c, cuboid +0x4c, cylinder +0x10, sphere +0x08, polygon path +0x14, in that order, any → inside | H | camera pvars |
+| 0x318c40 camera region test (14 levels) | camera records (0x15ef50 + i·0x20, pvar +0x1c) | cuboid +0x0c, cuboid +0x4c, cylinder +0x10, sphere +0x08, polygon path +0x14, in that order, any → inside | H | class-17 pvars (ported 2026-09-30: `follow_camera::level`, player_controller.md §15) |
 
 Cuboids are also read as **placement markers** (centre +0x30, Euler +0x70, never tested): 737 (camera and
 teleport targets), 730/790 (drop-in points), 760 (FX field extent), 688, 750, 459, `GameStateUpdate`,
@@ -149,10 +150,12 @@ The helpers return "inside now"; nothing in the engine remembers the previous an
 - **Carrier:** moby mode bit 0x20 (instance mode bits 0x20, Wrench's `HAS_SUB_VARS`) and pvar+0x08 = the
   platform block (a relative pointer fixed up by the loader; the port keeps the block-relative offset, 0x60 for
   726 / 703 / 715). `FUN_00275290(m)` returns it (0 = not a carrier). Port: `triggers::platform_block`.
-- **Publish:** `CarryRiders(block, delta, rot_old, rot_new)` 0x2755f8: block +0x00 = Euler of
-  `EulerToMatrix(rot_old)ᵀ · EulerToMatrix(rot_new)` (`FUN_002721f0`), +0x10 = `delta` (4 words). Callers pass
-  `pos − old_pos` and their own +0x40 twice, so the rotation part is the identity: Euler (0, 0, 0).
-  Port: `triggers::carry_riders`, read back with `triggers::platform_delta`.
+- **Publish:** `CarryRiders(block, delta, rot_old, rot_new)` 0x2755f8: block +0x00 = the Euler angles
+  (`FUN_002721f0`) of `D = E(rot_new)·E(rot_old)ᵀ` (the product `0x221ce8(out, A, B)` is `B·A`; the transpose is
+  0x221c08), +0x10 = `delta` (4 words). The lifts, elevators and belts pass their own +0x40 twice (`D = I`, Euler
+  (0, 0, 0)); the turntables 707 / 734, the pinned platforms 812, the joint-carried platform 1210 and the Veldin
+  carriers 1584 turn (§5b). Port: `triggers::carry_riders` (general since 2026-09-30), read back with
+  `triggers::platform_delta`.
 - **Ride test:** `HeroOnMoby(m)` 0x277fb8: in group 3 or state 0x1c, `0x13f848 == m` (the ledge moby probe B
   records, `Hero::ledge_blk.moby`); otherwise `0x13f65e == 0 && 0x13f64c == m`. Port: `World::hero_on_moby`.
 - **Hero side (ported: `rc-game/src/hero/platform.rs`):** `HeroPlatformUpdate` 0x249618, called from the move pipeline
@@ -183,6 +186,55 @@ The helpers return "inside now"; nothing in the engine remembers the previous an
 - **Moby ledges:** probe B accepts a ledge top on a moby when its pvar record (`FUN_002711f8`: pvar+0x00, a
   block-relative pointer) has bit 0 of the u16 at +0x1e, or its platform block's flags +0x3c bit 0
   (`triggers::record_ledge_flag`, `HeroWorld::moby_ledge_flag`).
+
+## 5b. Mobys riding mobys (G-CLS-024, 2026-09-30)
+
+**System or not.** The four engine functions the hero's carry uses are called with a moby as the rider by
+engine code on every level: `BoltUpdate` 0x2bb758 / `0x2bc768`, the crate stacking `0x2eac18` and physics
+`0x2ec388`, `InfobotUpdate` 0x2fbf80, the Bomb Glove's bombs (0x2c3300, 0x2c27a8, 0x2c2be0), the mines
+(0x2bf7d8, 0x2bfa78, 0x2bfe40), the Doom bots 0x2d5c10, the decoys (0x2d94f0, 0x2d9760, 0x2d9fe8), 0x2de0a8 /
+0x2ddf58 / 0x2de650 and `CameraCollLineFix` 0x2cb540, plus class code on other levels (level05 812). One shared
+system: ported once in `triggers.rs` (the moby side, beside the hero's copy in `hero/platform.rs`, which is the
+same algebra and can be merged into it), with its consumers below. The level-12 / 18 pair `0x265250` /
+`0x265358` (children recorded in a parent's frame and placed by it every tick; clusters 6e3b7a963b84 /
+584a926e540b) is the same algebra with one parent and many children: ported beside them.
+
+Argument order `(rider, carrier, p_in, rot_in, p_out, rot_out)`; the functions return 0 (and write nothing) when
+the carrier has no block. Rotations: `EulerToMatrix` 0x221980 (rows, R = X·Y·Z) and `MatrixToEuler` 0x2721f0 in
+`f64`, no VU rounding.
+
+| address | what it does | port |
+|---|---|---|
+| 0x275290 | the block: mode 0x20 and pvar+0x08 ≠ 0 | `triggers::platform_block`, `carrier` (the `hero::platform::Carrier` view) |
+| 0x2755f8 | +0x00 = Euler(`E(new)·E(old)ᵀ`) (exactly 0 when the two are equal), +0x10 = delta | `triggers::carry_riders`, `carry_rotation` |
+| 0x2752c0 | `p' = ((p + Δ) − c)·D + c`, `rot' = Euler(E(rot)·D)`, D = E(block+0) | `triggers::carried` (`carry_point`) |
+| 0x275528 | `l = (p − c)·rowsᵀ`, `lrot = Euler(E(rot)·rowsᵀ)` | `triggers::to_local` |
+| 0x2753b0 | `p = l·rows + c`, `rot = Euler(E(lrot)·rows)`; block flag bit 2: `+ Δ` and the local pair re-recorded (0x275528); else a rider whose class slot is non-zero and below the carrier's: `+ ClampLen(Δ, 1)` | `triggers::from_local` |
+| L18 0x265250 | each child record (0x30: offset, Euler, index; −1 skipped): `offset = (child − parent)·Rᵀ` (w: the w difference), `euler = Euler(E(child)·Rᵀ)` | `triggers::record_children` |
+| L18 0x265358 | each child: `pos = parent + offset·R` (+ offset.w into w), `rot = Euler(E(euler)·R)`, `MobyBuildMatrix` | `triggers::place_children` |
+
+**Consumers ported** (each with its test):
+
+| consumer | what the platform functions do there | port |
+|---|---|---|
+| bolts `BoltUpdate` (init and the fall's settle) | a hit moby (`0x1742d8`) that is a carrier: +0x5c = it, the rest pose +0x00 / +0x10 into its frame (0x275528) | `bolt::attach` |
+| bolts `0x2bc768` (the idle pose) | on a carrier: the rest pose through its rows now (0x2753b0); state 3 with no hop left, the carrier deleted or nothing touching the sphere (`coll_sphere(r, pos, 0x22, bolt)`): falls off (state 1, spin the identity, velocity = the block's displacement + dt·unit(rest up) + dt·unit(row 0), +0x5c = 0) | `bolt::pose` |
+| `BoltBurst` flag 4 | the base velocity every coin starts with: the dropper's pvar record (`FUN_002711f8`) +0x20 | `crate_::bolt_burst` |
+| `BoltSpawn` light | a mode-0x20 dropper with a hit-flash record (+0x0c): the record's saved ambient (+4..+6) via 0x2650d0, the bolt's own light word; else the dropper's light word and ambient | `bolt::spawn` |
+| crates `0x2eac18` (the stacking init) | a crate settling on a carrier: occlusion 0x7f80, its pose in the carrier's frame (+0xd0 / +0xe0), +0xf4 = 0, +0xf0 = the carrier, flags \| 8; up the stack: update distance 0xff, flags \| 8, the pose copied, +0xf4 = below + 1 | `crate_::attach_platform`, `inherit_platform` |
+| crates `0x2ec388` (the physics) | on a carrier: +0xf4 approaches 0 (or below + 1) by \|+0x4c\| with +0x4c −= 10·dt² (0 once there); the pose (+0xd0 raised by +0xf4, +0xe0) through the carrier (0x2753b0; bit 2 re-records +0xd0); velocity +0x40 = the move (w = +0x4c); `CarryRiders(+0x60, …)`: a crate on a carrier carries | `crate_::ride_platform` |
+| `InfobotUpdate` (the ride placement) | a class-822 ride that is a carrier moves the attach cuboid's centre itself (0x2752c0 in place on the level's cuboid record) | `infobot::ride_place` |
+| 707 / 734 (L02), 1210 (L03), 812 (L05) | the turntables, the joint-carried platform, the pinned platform (0x275528 / 0x2753b0 on its carrier +0x80) | `units::carriers` |
+| 1381 (L18) | the arena's falling platforms and their Veldin carriers 1584 (0x265250 / 0x265358) | `units::falling_platform` |
+| 1584 (L18) | the carrier now publishes its turn | `units::veldin_carrier` |
+
+**Not ported** (filed under G-CLS-024): the weapon objects that ride Ratchet's platform (bombs, mines, decoys,
+Doom bots, 0x2de0a8 / 0x2ddf58 / 0x2de650) and the camera's `CameraCollLineFix` (lane 3's follow camera); the
+creatures that call the functions from class code (1246 on 11, 574 on 03, 452 on 08: their only other blocker is
+the big-head cheat, G-SAV-006, conditional: class ports); the boss 1422's calls into 1381 (its handlers
+`falling_platform::start` / `reset` are there; the grind-path cut 0x2f1d08 and the group command 0x2fa888 are
+the boss's). Dead in the game: the crate that loses its carrier (+0xf0 no longer a carrier) would read a null
+block; the port leaves its pose.
 
 ## 5a. Crank-driven objects (a third mechanism: a progress link)
 
@@ -259,8 +311,8 @@ plateau's edge).
 ## 8. Not ported / open
 
 - ~~`HeroOnMoby`'s attach-moby branch~~ (ported: the ledge moby `Hero::ledge_blk.moby`).
-- The camera-collision grid and its users (0x20fdb0, 0x30f358, 0x318c40), the grind rails.
-- `CarryRiders` with a real rotation change (no caller has one).
+- ~~The camera-collision grid and its users (0x20fdb0, 0x30f358, 0x318c40)~~ (2026-09-30: the grid is empty on every level; the region test 0x318c40 is ported, player_controller.md §15), the grind rails.
+- ~~`CarryRiders` with a real rotation change~~ (ported 2026-09-30, §5b).
 - The sound voice table: a voice counts as alive until released; without a sound sink the lift requests its
   loop sound every moving tick.
 - Every other consumer in §3 (their classes are not ported yet); they call `World::in_cuboid` & co. when they

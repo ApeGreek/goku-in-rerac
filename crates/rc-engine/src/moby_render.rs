@@ -1687,6 +1687,15 @@ impl ExtraMobys {
         });
     }
 
+    /// Writes slot `slot`'s glow word (`moby_lod::glow_word` of the moby's mode and +0x90), for an owner that rewrites
+    /// +0x90 every frame (Clank's pulse, crate::moby_attach).
+    pub fn set_glow(&self, commands: &mut Commands, slot: u32, word: u32) {
+        let h = self.lods.clone();
+        commands.queue(move |world: &mut World| {
+            set_lod_bytes(&mut world.resource_mut::<Assets<ShaderBuffer>>(), &h, slot as usize, 12, &word.to_le_bytes());
+        });
+    }
+
     /// The metal entities of `class` for record `slot` (one per metal texture and GS pass), with `tracked` when
     /// update_extra_metal owns their shine. The caller only lends the regular material store, so the metal materials
     /// are added by a queued command.

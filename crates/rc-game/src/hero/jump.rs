@@ -577,6 +577,8 @@ impl Hero {
             self.jump.landed += 1;
         } else if self.air_ticks == 0 && self.jump.descending != 0 && !hold_land {
             self.jump.landed = ticks(1);
+            // `0x248920`: the landing's foot motes (super::pose).
+            self.land_motes(super::pose::motes::LAND);
             let f = self.jump.f_land.to_i32();
             if Pf::f(v.frame) < self.jump.f_hold - Pf::b(0x3fc0_0000) {
                 self.set_anim(c.anim, c.rng, blend(7), v.seq_b, f + 2);

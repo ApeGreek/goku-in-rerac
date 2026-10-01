@@ -22,7 +22,7 @@
 //! **Moving platforms.** A carrier is a moby with mode `0x20` whose pvar+0x08 holds the offset of its
 //! *platform block* (a relative pointer fixed up by the loader; the port keeps it block-relative):
 //! [`platform_block`] = `FUN_00275290`. Each tick the carrier's update calls `CarryRiders` 0x2755f8 with its
-//! displacement and rotation change ([`carry_riders`]): block +0x00 = Euler of `R_oldᵀ·R_new`, +0x10 = the
+//! displacement and rotation change ([`carry_riders`]): block +0x00 = Euler of `E(rot_new)·E(rot_old)ᵀ`, +0x10 = the
 //! displacement. `HeroPlatformUpdate` 0x249618 (hero code) reads the block of the moby he stands on and moves
 //! him with it ([`carry_point`] is its point transform `FUN_002752c0`). [`World::hero_on_moby`] = `HeroOnMoby`
 //! 0x277fb8.
@@ -186,7 +186,7 @@ pub fn record_ledge_flag(m: &Moby) -> bool {
 /// The platform block as the hero code reads it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct PlatformDelta {
-    /// +0x00: Euler angles of this tick's rotation change `R_oldᵀ·R_new`.
+    /// +0x00: Euler angles of this tick's rotation change `E(rot_new)·E(rot_old)ᵀ`.
     pub rotation: [f32; 3],
     /// +0x10: this tick's displacement (w copied from the caller's vector).
     pub displacement: [f32; 4],
@@ -206,33 +206,192 @@ pub fn platform_delta(m: &Moby) -> Option<PlatformDelta> {
     })
 }
 
-/// `CarryRiders(block, delta, rot_old, rot_new)` 0x2755f8, writing into `pvars[block..]`: +0x00 = Euler of
-/// `EulerToMatrix(rot_old)ᵀ · EulerToMatrix(rot_new)` (`FUN_002721f0`), +0x10 = `delta` (all four words).
+/// `CarryRiders(block, delta, rot_old, rot_new)` 0x2755f8, writing into `pvars[block..]`: +0x00 = the Euler angles
+/// ([`matrix_euler`], `FUN_002721f0`) of the rotation change `D = E(rot_new)·E(rot_old)ᵀ` (`EulerToMatrix`
+/// 0x221980 twice, the transpose 0x221c08, the product 0x221ce8(out, A, B) = B·A), +0x10 = `delta` (all four
+/// words). `D·E(rot_old) = E(rot_new)`; the riders apply it as `p·D` and `E(rot)·D` ([`carried`]), which is the
+/// carrier's turn exactly for a turn about z (the turntables 707 / 734), and the game's product otherwise; a yaw-only turn
+/// of θ gives (0, 0, θ).
 ///
-/// Every caller (lift 726, elevators 703 / 715) passes its own +0x40 for both rotations, so the product is
-/// `Rᵀ·R = I` and the Euler angles are (0, 0, 0): that is what the port writes (the VU product can be off the
-/// identity by an ulp, i.e. angles ≲ 1e-7 rad, which nothing can see). A caller with a real rotation change
-/// would need the general extraction; there is none.
+/// The lifts, elevators and belts pass the same rotation twice: `D = I` and the angles are exactly 0 (the port
+/// skips the extraction then, so their riders move by the displacement alone); the turntables 707 / 734
+/// (level02), the joint-carried platform 1210 (level03), the carrier 1584 (level18) and the attached platforms
+/// 812 (level05) turn.
 pub fn carry_riders(pvars: &mut [u8], block: usize, delta: [f32; 4], rot_old: [f32; 4], rot_new: [f32; 4]) {
-    debug_assert!(rot_old[..3] == rot_new[..3], "CarryRiders with a rotation change is not ported");
-    for k in 0..3 { pvars[block + 4 * k..block + 4 * k + 4].copy_from_slice(&0f32.to_le_bytes()); }
+    let r = carry_rotation([rot_old[0], rot_old[1], rot_old[2]], [rot_new[0], rot_new[1], rot_new[2]]);
+    for (k, a) in r.iter().enumerate() { pvars[block + 4 * k..block + 4 * k + 4].copy_from_slice(&a.to_le_bytes()); }
     for (k, d) in delta.iter().enumerate() {
         pvars[block + 0x10 + 4 * k..block + 0x14 + 4 * k].copy_from_slice(&d.to_le_bytes());
     }
 }
 
+/// The Euler angles `CarryRiders` writes for a turn from `old` to `new` (see [`carry_riders`]): (0, 0, 0) exactly
+/// when they are equal.
+pub fn carry_rotation(old: [f32; 3], new: [f32; 3]) -> [f32; 3] {
+    if old == new { return [0.0; 3]; }
+    matrix_euler(&mul(&euler_matrix(new), &transpose(&euler_matrix(old))))
+}
+
 /// `FUN_002752c0`'s point transform: where a point riding the carrier goes this tick,
-/// `R(Δrot)·((p + Δ) − c) + c` with `c` the carrier's position after its move. With Δrot = 0 (every carrier
-/// on the disc) this is `p + Δ`. None: not a carrier. (The hero side of the carry, `HeroPlatformUpdate`, is
-/// hero code: triggers.md §5.)
-pub fn carry_point(m: &Moby, p: [f32; 3]) -> Option<[f32; 3]> {
-    let d = platform_delta(m)?;
-    let q = [p[0] + d.displacement[0], p[1] + d.displacement[1], p[2] + d.displacement[2]];
-    if d.rotation == [0.0; 3] { return Some(q); }
-    let c = [m.position[0], m.position[1], m.position[2]];
-    let r = rc_formats::moby_light::rotation_rows(d.rotation).map(|row| row.map(f32::from_bits));
-    let v = [q[0] - c[0], q[1] - c[1], q[2] - c[2]];
-    Some(std::array::from_fn(|k| v[0] * r[0][k] + v[1] * r[1][k] + v[2] * r[2][k] + c[k]))
+/// `((p + Δ) − c)·D + c` with `c` the carrier's position after its move ([`carried`]). None: not a carrier.
+/// (The hero side of the carry, `HeroPlatformUpdate`, is hero code: triggers.md §5.)
+pub fn carry_point(m: &Moby, p: [f32; 3]) -> Option<[f32; 3]> { carrier(m).map(|c| carried(&c, p, [0.0; 3]).0) }
+
+// ---------------------------------------------------------------------------------------------------------
+// Mobys riding mobys: the moby side of the platform functions (docs/plan/triggers.md §5, G-CLS-024)
+//
+// The same four engine functions carry Ratchet (`HeroPlatformUpdate`, hero/platform.rs) and every moby that rides
+// another: bolts resting on a carrier (`BoltUpdate` 0x2bb758 / 0x2bc768), crates stacked on one (0x2eac18 /
+// 0x2ec388), the Bomb Glove's bombs, mines, decoys and Doom bots, the infobot's ride, and the classes that pin
+// themselves to a carrier (level05 812, …). Their argument order is `(rider, carrier, p_in, rot_in, p_out,
+// rot_out)`; the rider is read only for its class slot (+0x22, [`from_local`]).
+//
+// Rotations: `EulerToMatrix` 0x221980 (R = X·Y·Z in the row-vector convention: rows are the images of the axes)
+// and `MatrixToEuler` 0x2721f0 (z = atan2(m01, m00), then y, then x of what is left), composed in `f64` (the VU
+// rounding is not modelled: docs/plan/hardware_fidelity_layers.md). hero/platform.rs keeps its own copy of the
+// same algebra (lane 1's file at the time of writing; the two are the same functions and can be merged).
+
+/// A carrier as the platform functions read it: `FUN_00275290`'s block and the moby's position, rotation rows
+/// and class slot (the same record the hero reads, [`crate::hero::platform::Carrier`]).
+pub use crate::hero::platform::Carrier;
+
+/// The carrier view of moby `m` (None: not a carrier, `FUN_00275290(m) == 0`).
+pub fn carrier(m: &Moby) -> Option<Carrier> {
+    let delta = platform_delta(m)?;
+    Some(Carrier {
+        position: [m.position[0], m.position[1], m.position[2]],
+        rows: [0, 1, 2].map(|k| [m.rows[k][0], m.rows[k][1], m.rows[k][2]]),
+        class_slot: m.class_slot,
+        delta,
+    })
+}
+
+type M3 = [[f64; 3]; 3];
+
+/// `EulerToMatrix` 0x221980 (rows; R = X·Y·Z).
+pub fn euler_matrix(e: [f32; 3]) -> M3 {
+    let (sx, cx) = (e[0] as f64).sin_cos();
+    let (sy, cy) = (e[1] as f64).sin_cos();
+    let (sz, cz) = (e[2] as f64).sin_cos();
+    let x = [[1.0, 0.0, 0.0], [0.0, cx, sx], [0.0, -sx, cx]];
+    let y = [[cy, 0.0, -sy], [0.0, 1.0, 0.0], [sy, 0.0, cy]];
+    let z = [[cz, sz, 0.0], [-sz, cz, 0.0], [0.0, 0.0, 1.0]];
+    mul(&mul(&x, &y), &z)
+}
+
+/// `a·b` (row i of the result = row i of `a` through `b`).
+fn mul(a: &M3, b: &M3) -> M3 { std::array::from_fn(|i| std::array::from_fn(|k| (0..3).map(|j| a[i][j] * b[j][k]).sum())) }
+
+/// 0x221c08: the transpose of the rotation rows.
+fn transpose(a: &M3) -> M3 { std::array::from_fn(|i| std::array::from_fn(|k| a[k][i])) }
+
+/// `MatrixToEuler` 0x2721f0.
+pub fn matrix_euler(m: &M3) -> [f32; 3] {
+    let z = m[0][1].atan2(m[0][0]);
+    let m1 = mul(m, &euler_matrix([0.0, 0.0, -z as f32]));
+    let y = (-m1[0][2]).atan2(m1[0][0]);
+    let m2 = mul(&m1, &euler_matrix([0.0, -y as f32, 0.0]));
+    let x = m2[1][2].atan2(m2[1][1]);
+    [x as f32, y as f32, z as f32]
+}
+
+fn rows64(c: &Carrier) -> M3 { c.rows.map(|r| r.map(|x| x as f64)) }
+fn add3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
+fn sub3(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+
+/// `FUN_002752c0(rider, carrier, p, rot, &p_out, &rot_out)` (true when the carrier has a block): where a point and a
+/// rotation riding the carrier go this tick. `p_out = ((p + Δ) − c)·D + c` (`VecAdd`, `VecSub`, `MatrixMulVec3`
+/// 0x2215e0 with `D = E(block+0)`, `VecAdd`); `rot_out = Euler(E(rot)·D)`. Without a turn (`D = I`) the point
+/// moves by Δ and the rotation is returned as it is.
+pub fn carried(c: &Carrier, p: [f32; 3], rot: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let d = &c.delta;
+    let q = add3(p, [d.displacement[0], d.displacement[1], d.displacement[2]]);
+    if d.rotation == [0.0; 3] { return (q, rot); }
+    let md = euler_matrix(d.rotation);
+    let v = sub3(q, c.position).map(|x| x as f64);
+    let r: [f32; 3] = std::array::from_fn(|k| (v[0] * md[0][k] + v[1] * md[1][k] + v[2] * md[2][k]) as f32);
+    (add3(r, c.position), matrix_euler(&mul(&euler_matrix(rot), &md)))
+}
+
+/// `FUN_00275528(rider, carrier, p, rot, &l_out, &lrot_out)`: the point and rotation in the carrier's local space,
+/// `l = (p − c)·rowsᵀ` and `lrot = Euler(E(rot)·rowsᵀ)`.
+pub fn to_local(c: &Carrier, p: [f32; 3], rot: [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let d = sub3(p, c.position);
+    let l = c.rows.map(|r| d[0] * r[0] + d[1] * r[1] + d[2] * r[2]);
+    (l, matrix_euler(&mul(&euler_matrix(rot), &transpose(&rows64(c)))))
+}
+
+/// `FUN_002753b0(rider, carrier, l, lrot, &p_out, &rot_out)`: a local point and rotation back in the world,
+/// `p = l·rows + c` (`MatrixMulVec3`, `VecAdd`), `rot = Euler(E(lrot)·rows)` (0x221bc8, 0x221ce8, 0x2721f0); then
+/// with block flag bit 2 `p += Δ` and the local pair re-recorded from the result ([`to_local`], 0x275528); without
+/// it, a rider whose class slot is non-zero and below the carrier's (it updated before the carrier this tick) gets
+/// `ClampLen(Δ, 1)` (0x2745f0) added.
+pub fn from_local(c: &Carrier, rider_slot: u8, l: &mut [f32; 3], lrot: &mut [f32; 3]) -> ([f32; 3], [f32; 3]) {
+    let r = &c.rows;
+    let mut p: [f32; 3] = std::array::from_fn(|k| l[0] * r[0][k] + l[1] * r[1][k] + l[2] * r[2][k]);
+    p = add3(p, c.position);
+    let rot = matrix_euler(&mul(&euler_matrix(*lrot), &rows64(c)));
+    let d = [c.delta.displacement[0], c.delta.displacement[1], c.delta.displacement[2]];
+    if c.delta.flags & 4 != 0 {
+        p = add3(p, d);
+        (*l, *lrot) = to_local(c, p, rot);
+    } else if rider_slot != 0 && rider_slot < c.class_slot {
+        let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        let d = if 1.0 < n { d.map(|x| x * (1.0 / n)) } else { d };
+        p = add3(p, d);
+    }
+    (p, rot)
+}
+
+/// One child record of [`record_children`] / [`place_children`] (0x30 bytes in the parent's pvars): +0x00 the child's
+/// offset in the parent's frame, +0x10 its Euler angles in it, +0x20 the child's moby index (−1: none).
+pub const CHILD_RECORD: usize = 0x30;
+
+/// Level18 `0x265250(parent, records, n)` (the same code on level12, `0x27b268`; cluster 6e3b7a963b84): each child's
+/// pose in the parent's frame, `offset = (child.pos − parent.pos)·Rᵀ` (0x221608 with the transpose 0x221c08 of
+/// `R = E(parent rot)`, 0x221960) and `euler = Euler(E(child rot)·Rᵀ)` (0x221ce8, 0x2721f0). Records whose index is
+/// −1 (or outside the table) are skipped. The offset's w is `child.w − parent.w` (row 3 of the transpose is
+/// (0, 0, 0, 1)); the Euler record's w is left as it is.
+pub fn record_children(w: &mut World, parent: MobyId, at: usize, n: usize) {
+    use crate::moby_update::services::pvar as p;
+    let (ppos, prot) = { let m = w.m(parent); (m.position, m.rotation) };
+    let rt = transpose(&euler_matrix([prot[0], prot[1], prot[2]]));
+    for k in 0..n {
+        let o = at + k * CHILD_RECORD;
+        if o + CHILD_RECORD > w.m(parent).pvars.len() { break; }
+        let idx = p::i32(&w.m(parent).pvars, o + 0x20);
+        let Some(c) = usize::try_from(idx).ok().filter(|&i| i < w.table.mobys.len()) else { continue };
+        let (cpos, crot) = { let m = w.m(c); (m.position, m.rotation) };
+        let d = [(cpos[0] - ppos[0]) as f64, (cpos[1] - ppos[1]) as f64, (cpos[2] - ppos[2]) as f64];
+        let l: [f32; 3] = std::array::from_fn(|j| (d[0] * rt[0][j] + d[1] * rt[1][j] + d[2] * rt[2][j]) as f32);
+        let e = matrix_euler(&mul(&euler_matrix([crot[0], crot[1], crot[2]]), &rt));
+        let pv = &mut w.mm(parent).pvars;
+        let ew = p::ff(pv, o + 0x1c);
+        p::set_v4f(pv, o, [l[0], l[1], l[2], cpos[3] - ppos[3]]);
+        p::set_v4f(pv, o + 0x10, [e[0], e[1], e[2], ew]);
+    }
+}
+
+/// Level18 `0x265358(parent, records, n)` (level12 `0x27b370`; cluster 584a926e540b): each recorded child placed by
+/// the parent's matrix now, `child.pos = parent.pos + offset·R` (0x221608: `offset.xyz·R` plus `(0, 0, 0, offset.w)`
+/// from R's row 3), `child.rot = Euler(E(euler)·R)` (0x221ce8, 0x2721f0), then `MobyBuildMatrix(child)`.
+pub fn place_children(w: &mut World, parent: MobyId, at: usize, n: usize) {
+    use crate::moby_update::services::pvar as p;
+    let (ppos, prot) = { let m = w.m(parent); (m.position, m.rotation) };
+    let r = euler_matrix([prot[0], prot[1], prot[2]]);
+    for k in 0..n {
+        let o = at + k * CHILD_RECORD;
+        let pv = &w.m(parent).pvars;
+        if o + CHILD_RECORD > pv.len() { break; }
+        let (l, e, idx) = (p::v4f(pv, o), p::v4f(pv, o + 0x10), p::i32(pv, o + 0x20));
+        let Some(c) = usize::try_from(idx).ok().filter(|&i| i < w.table.mobys.len()) else { continue };
+        let q: [f32; 3] = std::array::from_fn(|j| (l[0] as f64 * r[0][j] + l[1] as f64 * r[1][j] + l[2] as f64 * r[2][j]) as f32);
+        let rot = matrix_euler(&mul(&euler_matrix([e[0], e[1], e[2]]), &r));
+        let m = w.mm(c);
+        m.position = [ppos[0] + q[0], ppos[1] + q[1], ppos[2] + q[2], ppos[3] + l[3]];
+        m.rotation[..3].copy_from_slice(&rot);
+        w.build_matrix(c);
+    }
 }
 
 #[cfg(test)]
@@ -340,6 +499,55 @@ mod tests {
         assert_eq!(d.rotation, [0.0; 3]);
         assert_eq!(d.displacement, [0.25, -0.5, 1.0, -1.0]);
         assert_eq!(carry_point(&m, [1.0, 2.0, 3.0]), Some([1.25, 1.5, 4.0]));
+    }
+
+    fn close(a: [f32; 3], b: [f32; 3]) -> bool { (0..3).all(|k| (a[k] - b[k]).abs() < 1e-5) }
+
+    fn carrier_at(pos: [f32; 3], rot: [f32; 3], slot: u8, delta: PlatformDelta) -> Carrier {
+        let r = euler_matrix(rot);
+        Carrier { position: pos, rows: r.map(|row| row.map(|x| x as f32)), class_slot: slot, delta }
+    }
+
+    /// `CarryRiders` with a turn: D = E(new)·E(old)ᵀ, so E(old) carried by D is E(new); a yaw-only turn is (0, 0, θ).
+    #[test]
+    fn carry_rotation_is_the_turn_between_the_frames() {
+        assert_eq!(carry_rotation([0.1, 0.2, 0.3], [0.1, 0.2, 0.3]), [0.0; 3]);
+        let d = carry_rotation([0.0, 0.0, 0.5], [0.0, 0.0, 0.75]);
+        assert!(close(d, [0.0, 0.0, 0.25]), "{d:?}");
+        let (old, new) = ([0.2, -0.3, 1.0], [0.25, 0.1, 1.4]);
+        let d = carry_rotation(old, new);
+        // D·E(old) = E(new): D is the turn in the order the game multiplies (0x221ce8(out, A, B) = B·A).
+        assert!(close(matrix_euler(&mul(&euler_matrix(d), &euler_matrix(old))), new));
+        // A rider's rotation is carried as E(rot)·D (`FUN_002752c0`): for a yaw-only turn that is the carrier's turn.
+        let c = carrier_at([0.0; 3], [0.0, 0.0, 0.75], 0, PlatformDelta { rotation: carry_rotation([0.0, 0.0, 0.5], [0.0, 0.0, 0.75]), ..Default::default() });
+        assert!(close(carried(&c, [0.0; 3], [0.0, 0.0, 0.5]).1, [0.0, 0.0, 0.75]));
+        let mut pv = vec![0u8; 0x40];
+        carry_riders(&mut pv, 0, [1.0, 2.0, 3.0, 4.0], [old[0], old[1], old[2], 0.0], [new[0], new[1], new[2], 0.0]);
+        assert_eq!(f32::from_le_bytes(pv[8..12].try_into().unwrap()), d[2]);
+        assert_eq!(f32::from_le_bytes(pv[0x1c..0x20].try_into().unwrap()), 4.0);
+    }
+
+    /// `FUN_00275528` then `FUN_002753b0` on an unmoved carrier gives the pose back; with block flag bit 2 the move
+    /// is added and the local pose re-recorded; a rider that updated before the carrier (slot below it) gets
+    /// `ClampLen(Δ, 1)`.
+    #[test]
+    fn local_pose_round_trip_and_the_corrections() {
+        let delta = PlatformDelta { displacement: [3.0, 0.0, 0.0, 0.0], ..Default::default() };
+        let c = carrier_at([10.0, 5.0, 1.0], [0.0, 0.0, 0.6], 7, delta);
+        let (p, r) = ([12.0, 4.0, 2.5], [0.0, 0.1, -0.4]);
+        let (mut l, mut lr) = to_local(&c, p, r);
+        let (q, qr) = from_local(&c, 9, &mut l, &mut lr);
+        assert!(close(q, p) && close(qr, r), "{q:?} {qr:?}");
+        // Slot 3 < 7: + Δ clamped to length 1.
+        let (q, _) = from_local(&c, 3, &mut l, &mut lr);
+        assert!(close(q, [13.0, 4.0, 2.5]), "{q:?}");
+        // Slot 0: no correction.
+        assert!(close(from_local(&c, 0, &mut l, &mut lr).0, p));
+        // Flag bit 2: + Δ in full, and the local point now holds the moved pose.
+        let c4 = Carrier { delta: PlatformDelta { flags: 4, ..delta }, ..c };
+        let (q, _) = from_local(&c4, 3, &mut l, &mut lr);
+        assert!(close(q, [15.0, 4.0, 2.5]), "{q:?}");
+        assert!(close(to_local(&c4, q, r).0, l));
     }
 
     /// Novalis (from `extracted/`): the checkpoint / mission cuboids the classes name, tested at Ratchet's

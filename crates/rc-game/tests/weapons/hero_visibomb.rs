@@ -652,13 +652,14 @@ fn novalis_steering_and_circle() {
     assert_eq!(rows, run(&lv, &s, &input, 200), "deterministic");
 }
 
-/// At a critter 577 in the pit: the missile flies into it; the critter is hit (the path's record and the blast) and
+/// At a critter 577 in the pit (8 units away since the Water Pump Worker's head look draws from the stream,
+/// 2026-09-30): the missile flies into it; the critter is hit (the path's record and the blast) and
 /// reacts.
 #[test]
 fn novalis_explosion_hits_a_critter() {
     let Some(lv) = load() else { eprintln!("skipped: no extracted/"); return };
     let (a, b) = (instance_of(&lv, 590), instance_of(&lv, 592));
-    let at = facing_moby(&lv, b, 6.0, std::f32::consts::PI);
+    let at = facing_moby(&lv, b, 8.0, std::f32::consts::PI);
     let s = Setup { at, watch: &[a, b] };
     let input = press_at(&[60]);
     let rows = run(&lv, &s, &input, 220);

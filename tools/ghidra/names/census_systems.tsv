@@ -140,7 +140,7 @@ L01:002646d0	MobyEvalAttachLists	anim	has	V
 L01:00265d78	MobyAnimSphereLerp	anim	has	L	MobyAnimSphereLerp (named, not cited in the port)
 L01:0026c7a8	MobyAnimBlendEx	anim	partly	L	MobyAnimBlendEx: documented in moby_animation.md, no port citation
 L01:00247a90	SetAnim	anim	has	V	SetAnim (hero)
-L01:002777d8	FUN_002777d8	anim	partly	V	NPC look-at manipulators: talking_npc.rs cites them; G-HERO-009 lists the NPC manipulators as not ported
+L01:002777d8	FUN_002777d8	anim	has	V	NPC look-at record (moby_update::manip::look; talking_npc, spinner_float; G-HERO-009 2026-09-30)
 L01:00278720	FUN_00278720	cheat	missing	V	big-head manipulator (cheat flag 0x15edb7), not modelled (path_enemy.rs)
 C:ec9f80c602e5	FUN_00251d70	cheat	missing	V	big-head scale (cheat 0x15edb7), level copy
 C:606d87e75d7d	FUN_0025ea60	cheat	missing	V	big-head scale (cheat 0x15edb7), level copy
@@ -295,21 +295,21 @@ L01:002783a8	FUN_002783a8	cine	has	V
 L01:002ad0c0	StartPssMovie	cine	has	V	StartPssMovie
 L01:002ad050	PlayMovieB	cine	has	V	
 L01:002a2450	FUN_002a2450	cine	has	V	ship hide / show
-C:3b375f0ab07b	FUN_002e9758	camera	missing	L	script camera (type 5) focus point +0x90, not on L01
-C:33058002480b	FUN_002f89b0	camera	missing	L	script camera focus point, other copy
-L01:00313740	FUN_00313740	camera	missing	V	follow camera (type 0) field +0x10 set by mobys: no port citation
-L01:00313768	FUN_00313768	camera	missing	V	follow camera +0x11c / +0x120
-L01:00313858	FUN_00313858	camera	missing	V	follow camera flags +0x1b8 or-equals 3
-L01:00313820	FUN_00313820	camera	missing	V	look flag D+0x116: not modelled (follow_camera.rs)
-L01:00313560	FUN_00313560	camera	missing	V	camera owner lock +0x220
-L01:00313598	FUN_00313598	camera	missing	V	camera owner lock +0x220
-L01:003137f8	FUN_003137f8	camera	missing	V	+0x226
-L01:00313b48	FUN_00313b48	camera	missing	V	+0x1bc
-L01:003137b0	FUN_003137b0	camera	missing	L	
-L01:00313628	FUN_00313628	camera	has	V	props.rs
-L01:00313690	FUN_00313690	camera	has	V	
-L01:003136c8	FUN_003136c8	camera	has	L	
-L01:00313af0	FUN_00313af0	camera	has	V	
+C:3b375f0ab07b	FUN_002e9758	camera	has	V	the script camera's Euler target D+0x90 (`0x316e28` on L01, the same code with the camera pointer through $gp): `Camera::camera_script_targets` (follow_camera/script.rs; W3 lane 3 2026-09-30)
+C:33058002480b	FUN_002f89b0	camera	has	V	the same Euler target setter (L02 copy): `Camera::camera_script_targets`
+L01:00313740	FUN_00313740	camera	has	V	the leash D+0x10: `Camera::set_leash` (follow_camera.rs setters)
+L01:00313768	FUN_00313768	camera	has	V	the horizontal spring D+0x11c / +0x120: `Camera::set_h_spring`
+L01:00313858	FUN_00313858	camera	has	V	the stick off D+0x1b8 |= 3: `Camera::stick_off`
+L01:00313820	FUN_00313820	camera	has	V	D+0x116 = 1: `Camera::look_from_smoothed`
+L01:00313560	FUN_00313560	camera	has	V	the region lock D+0x220 release: `Camera::release_owner` (follow_camera/level.rs)
+L01:00313598	FUN_00313598	camera	has	V	the region lock D+0x220 claim: `Camera::claim_owner`
+L01:003137f8	FUN_003137f8	camera	has	V	the run-toward lock D+0x226: `Camera::lock_toward`
+L01:00313b48	FUN_00313b48	camera	missing	V	+0x1bc = rate, then the empty 0x313aa0 (a one-line setter; no ported caller yet: G-HERO-026)
+L01:003137b0	FUN_003137b0	camera	has	V	the vertical spring D+0x124 / +0x128: `Camera::set_v_spring`
+L01:00313628	FUN_00313628	camera	has	V	the distance target: `Camera::set_distance`
+L01:00313690	FUN_00313690	camera	has	V	the pivot-height target: `Camera::set_pivot_height`
+L01:003136c8	FUN_003136c8	camera	has	V	the look-height target: `Camera::set_look_height`
+L01:00313af0	FUN_00313af0	camera	has	V	the scripted turn (0x313888): `Camera::turn_toward`
 L01:002721f0	FUN_002721f0	camera	has	V	Euler pitch / roll (follow_camera.rs)
 L01:0020fb60	FUN_0020fb60	target	has	V	screen markers (marker_render.rs)
 L01:002711f8	FUN_002711f8	target	has	V	target record
@@ -342,12 +342,13 @@ L01:00225a28	FUN_00225a28	help	has	V	help suspend: help.rs `suspend`
 L01:00225a88	FUN_00225a88	help	has	V	help resume: help.rs `resume`
 L01:00261448	memcard_Save__Fii	save	missing	V	memcard_Save: logged only (G-SAV-002)
 L01:00260e80	memcard_MakeWholeSave	save	missing	L	memcard_MakeWholeSave
-L01:002755f8	CarryRiders	platform	has	V	CarryRiders (hero riding)
-L01:002752c0	FUN_002752c0	platform	partly	V	carry point: hero ported, mobys on a platform not (infobot.rs, G-CLS-024)
-L01:00275290	FUN_00275290	platform	partly	V	platform block: bolts / crates on platforms not ported
-L01:002753b0	FUN_002753b0	platform	partly	V	
-L01:00275528	FUN_00275528	platform	partly	V	moby attaches to a platform (bolt.rs: not ported)
-C:584a926e540b	FUN_00265358	platform	missing	L	child mobys placed by the parent's matrix every tick, not on L01
+L01:002755f8	CarryRiders	platform	has	V	CarryRiders with the rotation change (triggers::carry_riders, G-CLS-024 2026-09-30)
+L01:002752c0	FUN_002752c0	platform	has	V	carry point: hero/platform.rs, mobys triggers::carried (infobot ride; G-CLS-024 2026-09-30)
+L01:00275290	FUN_00275290	platform	has	V	platform block: triggers::platform_block / carrier (bolts, crates on carriers: G-CLS-024 2026-09-30)
+L01:002753b0	FUN_002753b0	platform	has	V	local pose back through the carrier: triggers::from_local (G-CLS-024 2026-09-30)
+L01:00275528	FUN_00275528	platform	has	V	pose in the carrier's frame: triggers::to_local (bolt.rs, crate_.rs; G-CLS-024 2026-09-30)
+C:584a926e540b	FUN_00265358	platform	has	V	child mobys placed by the parent's matrix every tick (levels 12, 18): triggers::place_children (G-CLS-024 2026-09-30)
+C:6e3b7a963b84	FUN_00265250	platform	has	V	the children recorded in the parent's frame (levels 12, 18): triggers::record_children (G-CLS-024 2026-09-30)
 L01:00277fb8	HeroOnMoby	platform	has	V	HeroOnMoby
 L01:00308b28		teleport	missing	V	teleporter pad states: not ported (teleporter.rs)
 L01:00309898		menu	has	V	MenuMobyUpdate
@@ -374,7 +375,7 @@ L01:00277260	FUN_00277260	path	missing	L	point at distance along a segment list
 L01:00252850	FreePointLight	light	has	V	FreePointLight
 L01:00252750	WritePointLight_B	light	has	V	WritePointLight_B
 L01:002525f8	WritePointLight_A	light	has	V	WritePointLight_A
-C:5d1f33c5603a	FUN_0025fb60	light	partly	L	timed flicker of a point light (0x252960), not on L01
+C:5d1f33c5603a	FUN_0025fb60	creature	has	V	= L01 0x2723f8 the creature hit flash on the ambient colour (0x252960 = L01 0x2650d0), creature::flash::update; masked overlay-diff identical on 02 / 11, the hash differs only by 2 padding words after jr ra (G-REN-024 closed 2026-09-30)
 L01:00265080	SetMissionDone	mission	has	V	SetMissionDone
 L01:00275760	GiveItem	mission	has	V	GiveItem
 L01:002756d0	UnlockPlanet	mission	has	V	UnlockPlanet
@@ -409,8 +410,8 @@ L01:002c20e0	FUN_002c20e0	fxmoby	has	V	FlashSpawn
 L01:00309a68	FUN_00309a68	fxmoby	has	V	flash class 1192
 L01:002f8530	SpawnDebrisMoby	fxmoby	has	V	SpawnDebrisMoby (gunship.rs)
 L01:002f3570	FUN_002f3570	fxmoby	has	V	explosion light
-C:494499ccf189	FUN_0028dee8	fxmoby	missing	L	child moby spawn with scale / spin / random velocity, not on L01
-C:48e5de3f3f27	FUN_00300c60	fxmoby	missing	L	random-class debris spawn, not on L01
+C:494499ccf189	FUN_0028dee8	fxmoby	has	V	= L01 0x278ad8 BreakFxB (creature::fx::break_piece_with): masked overlay-diff identical on all 19 levels; this 9-level hash only differs by 2 padding words after jr ra (G-CLS-026 2026-09-30)
+C:48e5de3f3f27	FUN_00300c60	family	family	V	random-class debris (1085-1088, scale 0.1, update 0x300b90) of levels 06 / 10: level code of its two callers 1068 and 1083, ported with them (G-CLS-026 2026-09-30: not a shared system)
 L01:002e2cc0	FUN_002e2cc0	fxmoby	has	V	class-428 feather spawner: classes/chicken.rs 0x2e2cc0
 L01:0026fba0	FUN_0026fba0	breakfx	has	V	volume points
 C:6e363a2f7f51	FUN_00251f08	breakfx	partly	L	break pieces + volume points variant, not on L01
@@ -473,10 +474,10 @@ C:8d520530637e	FUN_0029aec0	lsound	partly	L	level sound on a slot (0x15f574 base
 C:40920504317a	FUN_002f9948	group	partly	L	group command variant: members → state 0x12, +0x94 = 0, flags |= 1 & ~0x1000 (scheduler::group_cmd sets the command byte only)
 C:bcbd2dbe1730	FUN_002f99b0	group	partly	L	group command variant: members in 0x12 → state 0, +0x94 = the class colour, flags (as 0x2f9948)
 C:9c39817b4fe9	FUN_002e9ea0	group	trivial	V	every 827 of the group in state 0x10 or dead (−2 / −3) test
-C:a0194c2bd0e8	FUN_002ef868	fxmoby	missing	L	debris child moby (class 0x140 + n) with random rotation, spin and life, L09 copy of the effect-moby spawner family (G-CLS-026)
+C:a0194c2bd0e8	FUN_002ef868	family	family	V	debris child moby (class 0x140 + n) with random rotation, spin and life, L09 copy of the effect-moby spawner family (G-CLS-026); level code of its callers only (G-CLS-026 2026-09-30: not a shared system, ported with them)
 C:b376dbd21da4	FUN_00272cb8	particles	has	L	type-0 rain streak spawner of three kinds (particles::type00), not on L01
-C:60ae58782f11	FUN_002e1c98	fxmoby	missing	L	child moby between two joint points (draw distance 0xff, flag 0x4000), not on L01 (G-CLS-026)
-C:01476b25f86a	FUN_002de3e0	fxmoby	missing	L	class-435 shot spawned toward the camera position 0x1675c0, not on L01 (G-CLS-026)
+C:60ae58782f11	FUN_002e1c98	family	family	V	child moby between two joint points (draw distance 0xff, flag 0x4000), not on L01 (G-CLS-026); level code of its callers only (G-CLS-026 2026-09-30: not a shared system, ported with them)
+C:01476b25f86a	FUN_002de3e0	family	family	V	class-435 shot spawned toward the camera position 0x1675c0, not on L01 (G-CLS-026); level code of its callers only (G-CLS-026 2026-09-30: not a shared system, ported with them)
 L01:002a2360	FUN_002a2360	cine	partly	L	registers the ship moby 0x13e030 with its draw callback 0x2a1c40 and the level-13 constants (the port has the loader's ship and its hide / show only)
 L01:0025dd98	FUN_0025dd98	map	has	V	map tile cache (8-slot LRU at 0x1846a0; rc-game map.rs decodes the tiles once)
 L01:00218838	FUN_00218838	fxdraw	has	L	world point → GS screen coordinates (×16 + 2048, z / 1024) through the view matrix 0x167140 (the port's screen projection; not compared)

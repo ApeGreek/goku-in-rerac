@@ -17,7 +17,7 @@
 //! | 0x54 | u8 | set: the init does not snap to the ground |
 //! | 0x55 | u8 | bit 0: spin direction (`randi(2) == 0` at init) |
 //! | 0x56 / 0x57 | u8 | hop length / hop ticks left |
-//! | 0x5c | ptr | moby the bolt rests on (set on a moby hit when `FUN_00275290(moby)`: mode 0x20 and pvar +8 ≠ 0; not ported) |
+//! | 0x5c | ptr | the carrier the bolt rests on (moby index + 1; set on a moby hit when `FUN_00275290(moby)`: mode 0x20 and pvar +8 ≠ 0; +0x00 / +0x10 then hold the rest pose in its frame, [`attach`]) |
 //! | 0x60 | ptr | fly-to target (the hero moby) |
 //! | 0x64 | f32 | fly speed (approaches 48·dt by 16·dt² per tick); the pickup happens within it |
 //! | 0x68 | f32 | z at init (a falling bolt 2 below it and below the hero flies to the hero) |
@@ -31,6 +31,7 @@ use crate::moby_update::services::HitTemplate;
 use crate::hero::physics::{self as ph, V4};
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::services::{self as sv, pvar as p, pv, fv, World, DEG, DT, DT2, QUARTER_PI};
+use crate::moby_update::triggers;
 use crate::pad::fast_arctan as atan;
 use crate::ps2v::Pf;
 
@@ -158,8 +159,6 @@ fn init(w: &mut World, id: MobyId) {
             Some(h) if !no_snap => {
                 p::set_v4(&mut m.pvars, 0, hit_point(&h));
                 rest_euler(&mut m.pvars, hit_normal(&h));
-                // A moby hit (0x1742d8) attaches (+0x5c, FUN_00275528) when FUN_00275290 allows it (mode 0x20
-                // and pvar +8): not ported; crates do not qualify.
             }
             _ => {
                 p::set_v4(&mut m.pvars, 0, pos);
@@ -167,6 +166,7 @@ fn init(w: &mut World, id: MobyId) {
             }
         }
     }
+    if let Some(h) = hit.as_ref().filter(|_| !no_snap) { attach(w, id, h); }
     let a1 = Pf(w.rng.rand_angle_bits());
     let a2 = Pf(w.rng.rand_angle_bits());
     let t600 = w.ticks(600);
@@ -235,7 +235,8 @@ fn fall(w: &mut World, id: MobyId) {
     let m = w.mm(id);
     m.pvars[0x56] = k;
     m.pvars[0x57] = k;
-    // (0x1742d8 attach: not ported, see `init`.)
+    attach(w, id, &h);
+    let m = w.mm(id);
     let e = sv::rows_euler(&rows4(m));
     p::set_v4(&mut m.pvars, 0x30, sv::euler_quat(e));
 }
@@ -341,14 +342,48 @@ fn idle(w: &mut World, id: MobyId) {
     p::set_i16(&mut w.mm(id).pvars, 0x6e, wait as i16);
 }
 
-/// `FUN_002bc768(m, base_out, euler_out)`: the idle pose. Spins the angles (bit 0 of +0x55 picks the
-/// direction), rows = spin rows (x = +0x50, y = tilt, z = +0x58) × rest rows (+0x10), position = rest +
-/// rest_up·k1 + row0·k2. Returns the rest position (+0x00). (The +0x5c "resting on a moby" branch needs a
-/// moby collision hit and never runs here.)
-fn pose(w: &mut World, id: MobyId, _want_base: bool) -> V4 {
+/// The carrier moby the bolt rests on (+0x5c; None: none, or the index is outside the table).
+fn resting_on(w: &World, id: MobyId) -> Option<MobyId> {
+    let v = p::i32(&w.m(id).pvars, 0x5c);
+    usize::try_from(v - 1).ok().filter(|&i| v > 0 && i < w.table.mobys.len())
+}
+
+/// A settle on a moby (the collision's hit moby `0x1742d8`): when it is a carrier (`FUN_00275290`), +0x5c = it and
+/// the rest pose +0x00 / +0x10 goes into its frame (`FUN_00275528(bolt, carrier, +0x00, +0x10, +0x00, +0x10)`).
+/// Level01 `BoltUpdate` 0x2bb758, the init (after the ground probe) and the fall's settle.
+fn attach(w: &mut World, id: MobyId, h: &CollOutput) {
+    let Some(mid) = h.moby else { return };
+    let Some(c) = w.table.mobys.get(mid).and_then(triggers::carrier) else { return };
     let m = w.mm(id);
-    let base = p::v4(&m.pvars, 0);
-    let base_euler = p::v4(&m.pvars, 0x10);
+    let (b, e) = (p::v4(&m.pvars, 0), p::v4(&m.pvars, 0x10));
+    let (l, lr) = triggers::to_local(&c, [sv::fl(b[0]), sv::fl(b[1]), sv::fl(b[2])], [sv::fl(e[0]), sv::fl(e[1]), sv::fl(e[2])]);
+    p::set_v4(&mut m.pvars, 0, [sv::pf(l[0]), sv::pf(l[1]), sv::pf(l[2]), b[3]]);
+    p::set_v4(&mut m.pvars, 0x10, [sv::pf(lr[0]), sv::pf(lr[1]), sv::pf(lr[2]), e[3]]);
+    p::set_i32(&mut m.pvars, 0x5c, mid as i32 + 1);
+}
+
+/// `FUN_002bc768(m, base_out, euler_out)`: the idle pose. The rest pose is +0x00 / +0x10, or, resting on a carrier
+/// (+0x5c), that pose mapped out of the carrier's frame now (`FUN_002753b0`, [`triggers::from_local`]). Spins the
+/// angles (bit 0 of +0x55 picks the direction), rows = spin rows (x = +0x50, y = tilt, z = +0x58) × rest rows,
+/// position = rest + rest_up·k1 + row0·k2. Returns the rest position. In state 3 on a carrier with no hop left, the
+/// bolt falls off (state 1) when the carrier is deleted or nothing touches its sphere any more
+/// (`coll_sphere(r, pos, 0x22, bolt)`): spin 0, +0x3c = 1, velocity = the carrier's block displacement (0 without a
+/// block) + `dt·unit(rest_up)` + `dt·unit(row 0)`, position += velocity, +0x5c = 0.
+fn pose(w: &mut World, id: MobyId, _want_base: bool) -> V4 {
+    let on = resting_on(w, id);
+    let (mut base, mut base_euler) = { let m = w.m(id); (p::v4(&m.pvars, 0), p::v4(&m.pvars, 0x10)) };
+    if let Some(c) = on.and_then(|k| triggers::carrier(w.m(k))) {
+        let slot = w.m(id).class_slot;
+        let mut l = [sv::fl(base[0]), sv::fl(base[1]), sv::fl(base[2])];
+        let mut lr = [sv::fl(base_euler[0]), sv::fl(base_euler[1]), sv::fl(base_euler[2])];
+        let (q, qr) = triggers::from_local(&c, slot, &mut l, &mut lr);
+        let m = w.mm(id);
+        p::set_v4(&mut m.pvars, 0, [sv::pf(l[0]), sv::pf(l[1]), sv::pf(l[2]), base[3]]);
+        p::set_v4(&mut m.pvars, 0x10, [sv::pf(lr[0]), sv::pf(lr[1]), sv::pf(lr[2]), base_euler[3]]);
+        base = [sv::pf(q[0]), sv::pf(q[1]), sv::pf(q[2]), base[3]];
+        base_euler = [sv::pf(qr[0]), sv::pf(qr[1]), sv::pf(qr[2]), base_euler[3]];
+    }
+    let m = w.mm(id);
     let (step, tilt, k_up, k_row0, _r) = pose_consts(m.o_class);
     let (a50, a58) = (p::f(&m.pvars, 0x50), p::f(&m.pvars, 0x58));
     let small = Pf::b(0xbc4c_cccd);
@@ -369,6 +404,25 @@ fn pose(w: &mut World, id: MobyId, _want_base: bool) -> V4 {
     let b = sv::scale3(rows[0], k_row0);
     let pos = ph::vadd(ph::vadd(a, b), base);
     m.position = fv(pos);
+    if let Some(k) = on {
+        if m.state == 3 && m.pvars[0x57] == 0 {
+            let r = pose_consts(m.o_class).4;
+            let off = w.m(k).is_deleted() || w.coll_sphere(pos, r, 0x22, Some(id)).is_none();
+            if off {
+                let carried = triggers::platform_delta(w.m(k)).map_or([0.0; 4], |d| d.displacement);
+                let (up, row0) = (rest[2], rows[0]);
+                let m = w.mm(id);
+                m.state = 1;
+                p::set_v4(&mut m.pvars, 0x30, [Pf::ZERO; 4]);
+                p::set_f(&mut m.pvars, 0x3c, Pf::ONE);
+                let v = ph::vadd(ph::set_len3(up, DT), ph::set_len3(row0, DT));
+                let vel = ph::vadd(pv(carried), v);
+                p::set_v4(&mut m.pvars, 0x20, vel);
+                m.position = fv(ph::vadd(pv(m.position), vel));
+                p::set_i32(&mut m.pvars, 0x5c, 0);
+            }
+        }
+    }
     base
 }
 
@@ -538,7 +592,14 @@ pub fn spawn(w: &mut World, src: MobyId, pos: V4, vel: V4, flags: u32, value: i3
         while let Some(p) = w.m(root).parent { root = p; }
     }
     let cs = w.class_scale(class);
-    let (src_mode, src_light, src_amb, src_pos) = { let s = w.m(src); (s.mode, s.light, s.ambient, pv(s.position)) };
+    let (src_light, src_amb, src_pos) = { let s = w.m(src); (s.light, s.ambient, pv(s.position)) };
+    // A dropper with the mode-0x20 pvar header and a hit-flash record (+0x0c): the flash record's saved ambient
+    // (+4..+6, the colour before any flash) through `FUN_002650d0`; otherwise its light word and ambient (+0x38).
+    let flash_ambient = {
+        let s = w.m(src);
+        let f = if s.mode & 0x20 != 0 && s.pvars.len() >= 0x10 { p::u32(&s.pvars, 0xc) as usize } else { 0 };
+        (f != 0 && f + 7 <= s.pvars.len()).then(|| [s.pvars[f + 4], s.pvars[f + 5], s.pvars[f + 6]])
+    };
     {
         let m = w.mm(b);
         m.pvars[0x40] = dc;
@@ -552,11 +613,14 @@ pub fn spawn(w: &mut World, src: MobyId, pos: V4, vel: V4, flags: u32, value: i3
         m.scale = sv::fl(cs * k);
         let r = sv::euler_rows(pv(m.rotation));
         set_rows3(m, [r[0], r[1], r[2]]);
-        // src mode 0x20 (a pvar header with a colour at +0xc) is not ported: the light word is copied.
-        m.light = src_light;
-        m.ambient = src_amb;
+        match flash_ambient {
+            Some(a) => m.ambient = [a[0], a[1], a[2], 0],
+            None => {
+                m.light = src_light;
+                m.ambient = src_amb;
+            }
+        }
     }
-    if src_mode & 0x20 != 0 { w.svc.fx.unported_base += 1; }
     let t600 = w.ticks(600);
     let wait = w.rng.rand_range(0, t600);
     {
@@ -593,4 +657,81 @@ pub fn spawn(w: &mut World, src: MobyId, pos: V4, vel: V4, flags: u32, value: i3
     }
     w.build_matrix(b);
     Some(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::moby_runtime::{Moby, MobyTable};
+    use crate::moby_update::services::Services;
+
+    /// A carrier at the origin (yaw 0, block at +0x20) and a class-13 bolt resting on it at local (2, 0, 1).
+    fn scene() -> MobyTable {
+        let mut k = Moby { o_class: 707, pvars: vec![0; 0x80], ..Moby::default() };
+        k.mode |= 0x20;
+        p::set_i32(&mut k.pvars, 8, 0x20);
+        for i in 0..3 { k.rows[i][i] = 1.0; }
+        let mut b = Moby { o_class: 13, state: 3, pvars: vec![0; 0x80], ..Moby::default() };
+        p::set_v4f(&mut b.pvars, 0, [2.0, 0.0, 1.0, 0.0]);
+        p::set_i32(&mut b.pvars, 0x5c, 1);
+        p::set_i16(&mut b.pvars, 0x6e, 100);
+        p::set_i16(&mut b.pvars, 0x6c, -1);
+        b.visible = 1;
+        MobyTable::new(vec![k, b], 4)
+    }
+
+    fn tick(t: &mut MobyTable, f: impl Fn(&mut World)) {
+        let mut hero = crate::hero::Hero::new();
+        hero.pos[0] = Pf::b(0x4480_0000); // far away: no pickup
+        let mut rng = crate::rng::Rng::new();
+        let classes = crate::moby_update::ClassTable::default();
+        let mut svc = Services::new();
+        let mut w = World::new(t, &hero, &mut rng, &classes, &mut svc, 1);
+        f(&mut w);
+    }
+
+    /// A bolt on a carrier: the rest pose follows the carrier's turn and move (`FUN_002753b0`); with a hop left
+    /// it stays on.
+    #[test]
+    fn resting_bolt_rides_its_carrier() {
+        let mut t = scene();
+        t.mobys[1].pvars[0x56] = 10;
+        t.mobys[1].pvars[0x57] = 5;
+        // The carrier turned a quarter about z and moved to (5, 0, 0).
+        let q = std::f32::consts::FRAC_PI_2;
+        let r = triggers::euler_matrix([0.0, 0.0, q]);
+        let k = &mut t.mobys[0];
+        k.position = [5.0, 0.0, 0.0, 1.0];
+        for (row, src) in k.rows.iter_mut().zip(&r) { for (x, y) in row.iter_mut().zip(src) { *x = *y as f32; } }
+        tick(&mut t, |w| { pose(w, 1, false); });
+        let b = &t.mobys[1];
+        let base_x = 5.0 + 2.0 * r[0][0] as f32;
+        let base_y = 2.0 * r[0][1] as f32;
+        assert_eq!(b.state, 3);
+        assert_eq!(p::i32(&b.pvars, 0x5c), 1);
+        // position = rest + rest_up·k1 + row0·k2: the rest point is (5, 2, 1) and the rest yaw the carrier's.
+        let (_, _, k_up, k_row0, _) = pose_consts(13);
+        let expect_x = base_x + b.rows[0][0] * sv::fl(k_row0);
+        assert!((b.position[0] - expect_x).abs() < 1e-4 && (b.position[1] - (base_y + b.rows[0][1] * sv::fl(k_row0))).abs() < 1e-4, "{:?}", b.position);
+        assert!((b.position[2] - (1.0 + sv::fl(k_up) + b.rows[0][2] * sv::fl(k_row0))).abs() < 1e-4);
+        assert_eq!(p::v4f(&b.pvars, 0)[..3], [2.0, 0.0, 1.0], "the local pose is kept (block flag bit 2 clear)");
+    }
+
+    /// No hop left and nothing touching (no collision here): the bolt falls off with the carrier's velocity plus
+    /// `dt` along its rest up and row 0, and forgets the carrier.
+    #[test]
+    fn bolt_falls_off_when_nothing_holds_it() {
+        let mut t = scene();
+        triggers::carry_riders(&mut t.mobys[0].pvars, 0x20, [0.1, 0.0, 0.0, 0.0], [0.0; 4], [0.0; 4]);
+        tick(&mut t, |w| { pose(w, 1, false); });
+        let b = &t.mobys[1];
+        assert_eq!((b.state, p::i32(&b.pvars, 0x5c)), (1, 0));
+        assert_eq!(p::v4f(&b.pvars, 0x30), [0.0, 0.0, 0.0, 1.0], "the spin is the identity quaternion");
+        let v = p::v4f(&b.pvars, 0x20);
+        // The rest rows are the identity (no turn, rest Euler 0): up = z; row 0 is the spun row the pose left.
+        let (dt, r0) = (DT.to_f32(), b.rows[0]);
+        let n = (r0[0] * r0[0] + r0[1] * r0[1] + r0[2] * r0[2]).sqrt();
+        let expect = [0.1 + dt * r0[0] / n, dt * r0[1] / n, dt + dt * r0[2] / n];
+        assert!((0..3).all(|k| (v[k] - expect[k]).abs() < 1e-6), "{v:?} vs {expect:?}");
+    }
 }

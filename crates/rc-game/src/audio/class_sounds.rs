@@ -148,6 +148,25 @@ impl AudioSystem {
     }
 }
 
+impl AudioSystem {
+    /// Level03's `0x27a618(index, flags, moby)`: level def `index + 0x15f574` (= 2 + index: the defs after the two
+    /// [`AudioSystem::play_level_sound_at_moby`] takes, where the footsteps start on the other levels; on Kerwan the
+    /// footsteps begin at def 3) when it is below the level def count 0x15f5f0, `SoundSlotAlloc(def, flags, moby, 0,
+    /// 0x400)`; the slot remembers the def (+0xe) and the owner (+0x18). Its one caller is the air-traffic wreck
+    /// (`classes::units::air_traffic`, index 0, flags 0). A negative index is refused.
+    #[allow(clippy::too_many_arguments)]
+    pub fn play_level_def_at_moby(&mut self, index: i32, flags: u32, at: Option<(MobyId, [f32; 3])>, hero: Option<MobyId>, listener: &Listener, rng: &mut Rng, tick: u64) -> i32 {
+        let Ok(i) = usize::try_from(index) else { return -1 };
+        let idx = i + MOBY_LEVEL_DEFS;
+        let Some(def) = self.data.sounds.level_defs.get(idx).copied() else { return -1 };
+        let owner = at.map(|(id, _)| Owner { id: id as u32, privileged: Some(id) == hero });
+        let k = self.slots.play(&def, flags as u8, owner, at.map(|(_, p)| p), None, 0x400, listener, rng);
+        if k >= 0 { self.slots.slots[k as usize].class_index = idx as u16; }
+        if let Some(log) = self.play_log.as_mut() { log.push((tick, LEVEL_SOUND_LOG_CLASS, idx as i32, flags, k)); }
+        k
+    }
+}
+
 /// The moby loop's [`SoundSink`]: class sounds into `audio` with the listener of the tick (the previous tick's
 /// camera).
 pub struct ClassSoundSink<'a> {
@@ -175,6 +194,9 @@ impl SoundSink for ClassSoundSink<'_> {
     /// `PlayLevelSoundAtMoby(index, flags, moby)` ([`AudioSystem::play_level_sound_at_moby`]).
     fn play_level_sound(&mut self, index: i32, flags: u32, at: Option<(MobyId, [f32; 3])>, tick: u64, rng: &mut Rng) -> i32 {
         self.audio.play_level_sound_at_moby(index, flags, at, self.hero, &self.listener, rng, tick)
+    }
+    fn play_level_def(&mut self, index: i32, flags: u32, at: Option<(MobyId, [f32; 3])>, tick: u64, rng: &mut Rng) -> i32 {
+        self.audio.play_level_def_at_moby(index, flags, at, self.hero, &self.listener, rng, tick)
     }
     /// `HeroTeleport`'s env sample point ([`AudioSystem::hero_teleported`]).
     fn hero_teleported(&mut self, pos: [f32; 3]) { self.audio.hero_teleported(pos); }
