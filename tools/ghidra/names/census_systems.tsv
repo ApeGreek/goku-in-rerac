@@ -141,9 +141,9 @@ L01:00265d78	MobyAnimSphereLerp	anim	has	V	MobyAnimSphereLerp: creature::react::
 L01:0026c7a8	MobyAnimBlendEx	anim	partly	L	MobyAnimBlendEx: documented in moby_animation.md, no port citation
 L01:00247a90	SetAnim	anim	has	V	SetAnim (hero)
 L01:002777d8	FUN_002777d8	anim	has	V	NPC look-at record (moby_update::manip::look; talking_npc, spinner_float; G-HERO-009 2026-09-30)
-L01:00278720	FUN_00278720	cheat	missing	V	big-head manipulator (cheat flag 0x15edb7), not modelled (path_enemy.rs)
-C:ec9f80c602e5	FUN_00251d70	cheat	missing	V	big-head scale (cheat 0x15edb7), level copy
-C:606d87e75d7d	FUN_0025ea60	cheat	missing	V	big-head scale (cheat 0x15edb7), level copy
+L01:00278720	FUN_00278720	cheat	has	V	big-head manipulator (cheat flag 0x15edb7), not modelled (path_enemy.rs) — ported 2026-10-01 (batch 6): rc_game::cheats + manip::big_head / scene_big_head
+C:ec9f80c602e5	FUN_00251d70	cheat	has	V	big-head scale (cheat 0x15edb7), level copy — ported 2026-10-01 (batch 6): rc_game::cheats + manip::big_head / scene_big_head
+C:606d87e75d7d	FUN_0025ea60	cheat	has	V	big-head scale (cheat 0x15edb7), level copy — ported 2026-10-01 (batch 6): rc_game::cheats + manip::big_head / scene_big_head
 C:2bdd99d367de	FUN_0024edc8	anim	has	L	current anim frame (seq / blend / frame at +0x50..0x54), not on L01; the port keeps that state
 C:580a5ea4d4ce	FUN_00263678	anim	has	L	anim frame reached test, not on L01
 C:fb8fab7333a3	FUN_00249618	anim	has	L	sequence frame count from the class table, not on L01
@@ -385,8 +385,8 @@ L01:002319b0	FUN_002319b0	herostate	has	V	death sequence
 L01:002486c0	FUN_002486c0	herostate	has	V	
 L01:002487a8	FUN_002487a8	herostate	has	V	
 L01:0026ebe8	FUN_0026ebe8	herostate	has	V	hand -> head point (melee.rs)
-L01:00231450		herostate	missing	V	control mode 3 exit (vehicles / Hologuise, G-HERO-005)
-L01:00231348	FUN_00231348	herostate	missing	L	body / control-mode switch (0x1413f4), G-HERO-005
+L01:00231450		herostate	has	V	control mode 3 exit (vehicles / Hologuise, G-HERO-005) — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+L01:00231348	FUN_00231348	herostate	has	L	body / control-mode switch (0x1413f4), G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
 L01:00249580	FUN_00249580	herostate	has	L	walk to a point: the states 0x65..0x67 are ported (hero/stance.rs WalkTo); the entry = point 0x140990 + facing 0x14099c + SetState(0x65)
 L01:002495d0	FUN_002495d0	herostate	has	L	hero state in 0x65..0x67 query (hero.state)
 C:8a18636e69bd	FUN_002159d8	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
@@ -395,10 +395,10 @@ C:ea215dba76e7	FUN_002356a0	herostate	has	L	hero SetState, level copy (H2): has 
 C:2f2e9be4c73e	FUN_00230b38	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
 C:8cdb2fd899d9	FUN_0024db50	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
 C:ec679874da9e	FUN_0022b728	herostate	has	L	hero SetState, level copy (H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
-C:f5aa57dd48b9	FUN_00239528	herostate	partly	L	idle state per body (1 Clank 0x43, 2 Giant Clank 0x5a, 3 Hologuise 0x53)
-C:8ee0c630ac3d	FUN_0021ac18	herostate	partly	L	idle state per body, level copy
-C:0e46409356dd	FUN_0022c418	herostate	partly	L	idle state per body, level copy
-C:b664c822083b	FUN_00208ca8	herostate	missing	L	leave body mode 2 (Giant Clank / vehicle): restores Ratchet, deletes the body moby
+C:f5aa57dd48b9	FUN_00239528	herostate	has	L	idle state per body (1 Clank 0x43, 2 Giant Clank 0x5a, 3 Hologuise 0x53) — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+C:8ee0c630ac3d	FUN_0021ac18	herostate	has	L	idle state per body, level copy — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+C:0e46409356dd	FUN_0022c418	herostate	has	L	idle state per body, level copy — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+C:b664c822083b	FUN_00208ca8	herostate	has	L	leave body mode 2 (Giant Clank / vehicle): restores Ratchet, deletes the body moby — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
 L01:00304168	FUN_00304168	react	has	V	Suck Cannon approach: creature/react.rs `approach` (G-WPN-003 closed 2026-09-28)
 L01:00304390	FUN_00304390	react	has	V	Suck Cannon swallow: react.rs `swallow`
 L01:003044a0	FUN_003044a0	react	has	V	Suck Cannon fire-out: react.rs `fire_out`
@@ -449,12 +449,12 @@ C:ef4e6bb0b47f	FUN_0024cee8	herostate	partly	L	hero state machine, level copy (0
 C:4d615d92f5c8	FUN_0021e398	herostate	partly	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2); the Hoverboard states of level 16 (G-HERO-008)
 C:84d6abe16fc6	FUN_002400d0	herostate	has	L	hero state machine, level copy (0x1413d4 / 0x1413dc switch; H2): has since 2026-09-29 G-HERO-002 (every state a class passes it is ported: 0, 6, 0x1e, 0x32, 0x3d, 0x72, 0x77, 0x78, 100; the body idles through the per-body helper are G-HERO-005's)
 G:001413d4=00000032	hero_state_0x32	herostate	has	V	a branch on hero state 0x32, mounted (a turret / vehicle class holds him): ported 2026-09-29 (hero/scripted.rs MOUNTED; G-HERO-002). Its setters are all unported classes (the turrets 440 / 1201, 1267, the ships 1242 / 69 / 1379): the branch runs once they are; a branch that also needs the ship moby 0x140940 is G-LVL-009's
-G:001413d4=00000051	hero_state_0x51	herostate	partly	L	a branch on hero state 0x51 (Clank, body 1): G-HERO-005
+G:001413d4=00000051	hero_state_0x51	herostate	has	L	a branch on hero state 0x51 (Clank, body 1): G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
 G:001413d4=00000065	hero_state_0x65	herostate	has	L	a branch on the walk-to-point state 0x65 (ported: hero/stance.rs)
-G:001413f4=00000001	body_clank	herostate	partly	L	a branch on body 1 (Clank, 0x1413f4 == 1): G-HERO-005
-G:001413f4=00000002	body_giant_clank	herostate	partly	L	a branch on body 2 (Giant Clank): G-HERO-005
-G:001413f4=00000003	body_hologuise	herostate	partly	L	a branch on body 3 (the Hologuise): G-WPN-006 / G-HERO-005
-G:0015edb7=00000000	cheat_bighead_flag	cheat	missing	V	the big-head cheat flag 0x15edb7 read directly (G-SAV-006; conditional, as the manipulator 0x278720)
+G:001413f4=00000001	body_clank	herostate	has	L	a branch on body 1 (Clank, 0x1413f4 == 1): G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+G:001413f4=00000002	body_giant_clank	herostate	has	L	a branch on body 2 (Giant Clank): G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+G:001413f4=00000003	body_hologuise	herostate	has	L	a branch on body 3 (the Hologuise): G-WPN-006 / G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+G:0015edb7=00000000	cheat_bighead_flag	cheat	has	V	the big-head cheat flag 0x15edb7 read directly (G-SAV-006; conditional, as the manipulator 0x278720) — ported 2026-10-01 (batch 6): rc_game::cheats + manip::big_head / scene_big_head
 X:1843	fighter_1843	shipmode	missing	V	override: the fighters' attack states 5 / 6 and the target-list bit run only in the ship-combat mode (hero state 0x32 with the ship moby 0x140940 of class 0x45, read directly): G-LVL-009 (class_units_levels_09_18.md U543)
 X:1319	fighter_1319	shipmode	missing	V	override: the same fighter source compiled for Pokitaru: G-LVL-009 (U370)
 X:838	voice_handoff_838	voicehand	missing	V	override: one looping class voice handed between the group's emitters by rewriting the slot record's owner and position (0x13e5d8 + slot·0x70: a computed store the census cannot see): G-AUD-010
@@ -483,9 +483,9 @@ L01:0025dd98	FUN_0025dd98	map	has	V	map tile cache (8-slot LRU at 0x1846a0; rc-g
 L01:00218838	FUN_00218838	fxdraw	has	L	world point → GS screen coordinates (×16 + 2048, z / 1024) through the view matrix 0x167140 (the port's screen projection; not compared)
 L01:0020cf28	FUN_0020cf28	math	partly	L	angle spring with a velocity clamp (SpringAngle-like with a max rate): not compared with the port's springs
 C:fa408a22bb62	FUN_0020d760	fxdraw	has	L	immediate 4-vertex GS quad packet (tags 0x10000009 / 0x50000009), a FastDrawQuadReal-like emitter
-C:c836aca3587d	FUN_00204070	herostate	missing	L	SwitchCharacter (L00 0x210a08's copy): body 0x1413f4 = mode, the body moby, Clank's health swap, Giant Clank's energy 200, SetState: G-HERO-005
-C:12bb06e65f13	FUN_00204110	herostate	missing	L	leave the body: 0x1413f4 = 0, Ratchet's health back (body 1), the body mobys 0x140970 / 0x140974 / 0x13fddc deleted, the body-2 voice 0x140984 released, SetState(0, 1): G-HERO-005
-C:754a80d04806	FUN_00227cf8	herostate	missing	L	leave the body, L06 copy (no body-2 voice): G-HERO-005
+C:c836aca3587d	FUN_00204070	herostate	has	L	SwitchCharacter (L00 0x210a08's copy): body 0x1413f4 = mode, the body moby, Clank's health swap, Giant Clank's energy 200, SetState: G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+C:12bb06e65f13	FUN_00204110	herostate	has	L	leave the body: 0x1413f4 = 0, Ratchet's health back (body 1), the body mobys 0x140970 / 0x140974 / 0x13fddc deleted, the body-2 voice 0x140984 released, SetState(0, 1): G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
+C:754a80d04806	FUN_00227cf8	herostate	has	L	leave the body, L06 copy (no body-2 voice): G-HERO-005 — ported 2026-10-01 (batch 5 / 6): hero/bodies.rs (SwitchCharacter, leave, per-body idle), bodies/{clank,giant,disguise}.rs
 C:dd572bc43542	FUN_0029b8d8	particles	has	L	CreatePart(0x3d): type 61 spawner (particles::type61), not on L01
 L01:00274738	FUN_00274738	target	has	V	a live Devastator missile already targets t (hero/devastator.rs already_targeted over the list 0x1b0bf0)
 C:e00f1d73700a	FUN_0028ec18	talk	has	V	talk slot i's "talked to" flag 0x13d5bc + 16·i = v (interact.rs)
