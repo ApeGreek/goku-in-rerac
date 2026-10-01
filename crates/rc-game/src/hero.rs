@@ -74,6 +74,7 @@ pub mod crank;
 pub mod scripted;
 pub mod worn;
 pub mod bodies;
+pub mod hoverboard;
 
 use crate::ps2v::Pf;
 pub use ledge::LedgeBlock;
@@ -469,6 +470,8 @@ pub struct Hero {
     pub walloper: walloper::Walloper,
     /// The other bodies' fields (Clank's health, Giant Clank's energy, the body moby; [`bodies`], G-HERO-005).
     pub bodies: bodies::Bodies,
+    /// The Hoverboard's block 0x13fa10..0x13fc1f and its globals ([`hoverboard`], levels 5 / 16).
+    pub board: hoverboard::Board,
     /// The cheat bytes 0x15edb0 as the hero code reads them (the tick copies `GameOptions::cheats` in; `crate::cheats`).
     pub cheats: crate::cheats::Cheats,
     /// The move ring 0x141514[16] / 0x141524 of the cheat entry `0x2285a0` (`crate::cheats::MoveEntry`).
@@ -540,7 +543,7 @@ impl Hero {
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
             joint_targets: Default::default(), help: Default::default(), walloper: Default::default(), bodies: bodies::Bodies::default(),
-            cheats: Default::default(), cheat_moves: Default::default(),
+            cheats: Default::default(), cheat_moves: Default::default(), board: hoverboard::Board::default(),
         }
     }
 
@@ -605,6 +608,40 @@ impl Hero {
             };
             self.back_follow_anim(t, seq, frame, rng);
         }
+        // Levels 5 / 16 (`0x25b538` + `0x2478f8`): the board plays its sequence for this one.
+        hoverboard::link_anim(self, blend, seq, frame);
+    }
+
+    /// `HeroTeleport(pos, euler, state, reset_cam)` 0x2368e0 from the hero code (the Hoverboard's respawns): position and
+    /// Euler (rows, the moby's rows), 0x13f4e0 / 0x13f4e4 = 0, the after-images ended, airborne (0x13f65e = 1), the
+    /// platform carry dropped, the motion block (0x13f430 / 440 / 450 / 460 / 470 / 4a0) and the straightening's
+    /// velocities 0x13f3f0 cleared, the yaw velocity, the hover latch 0x14161a, the pad's 0x13cace / 0x13cad0, a weapon put
+    /// away (`0x22efd8`), the joint records reset (`0x227420`), `SetState(state, 1)` (unless −1), the ground probe, and
+    /// with `reset_cam` the camera reset behind him ([`fx::HeroFx::camera_reset`]). Not here: the anim snap `0x247c78`
+    /// (key A = key B at frame B, t 0) [L], the underwater flag 0x167494 and `EnvNearestSamplePoint` (the caller's).
+    pub fn teleport(&mut self, c: &mut states::Ctx, pos: [f32; 4], euler: [f32; 4], state: i32, reset_cam: bool) {
+        self.pos = pos.map(Pf::f);
+        self.rot = euler.map(Pf::f);
+        self.rows = physics::euler_rows(self.rot);
+        self.moby_rows = self.rows;
+        self.moby_rot = self.rot;
+        (self.target_speed, self.speed) = (Pf::ZERO, Pf::ZERO);
+        self.fx.trails.hero.kill();
+        self.air_ticks = 1;
+        self.carry.flags &= !3;
+        self.carry.moby = None;
+        let z = physics::V0;
+        (self.platform, self.vel, self.disp, self.eff, self.eff_v, self.momentum) = (z, z, z, z, z, z);
+        self.swim.euler_vel = [Pf::ZERO; 2];
+        self.yaw_vel = Pf::ZERO;
+        self.packs.hover_latch = 0;
+        weapons::put_away(self);
+        for j in self.idle.joints.iter_mut() {
+            (j.cur, j.target, j.trans_target, j.scale, j.attached) = ([0.0; 3], [0.0; 3], [0.0; 3], 1.0, false);
+        }
+        if state != -1 { self.set_state(c, state, true); }
+        self.ground_probe(c.env);
+        if reset_cam { self.fx.camera_reset = true; }
     }
     pub fn position(&self) -> [f32; 3] { physics::to_f32x3(self.pos) }
     pub fn grounded(&self) -> bool { self.air_ticks == 0 }
@@ -656,6 +693,8 @@ impl Hero {
         if self.frozen == 0 { self.move_collide(env); }
         // 0x23c458's probes after the move: the wall ahead (every third tick; 0x13f598..0x13f5a5).
         self.wall_ahead_probe(env);
+        // The board under Ratchet's feet (groups 0x15 / 0x16, the tail of level05's 0x24bdc0).
+        hoverboard::carry(self);
         self.post_move(env);
         true
     }
@@ -708,6 +747,9 @@ pub trait HeroSounds {
     /// `release_voice_slot(slot)` when the slot still plays a sound of Ratchet's (`moby`): the stop of a looping
     /// sound the hero started with [`HeroSounds::voice`] (flags 4; [`packs`]).
     fn release(&mut self, _moby: &crate::moby_runtime::Moby, _slot: i32) {}
+    /// `release_voice_slot(slot)` when the slot still plays a sound of moby `id`'s (a hero loop with another owner: the
+    /// Hoverboard's on the board, [`hoverboard`]).
+    fn release_of(&mut self, _id: crate::moby_runtime::MobyId, _slot: i32) {}
     /// `PlayClassSound(index, flags, item)` (0x2a1618) on the hand item (the moby of slot 0x1403e0: class
     /// `o_class` at `pos`), e.g. the Swingshot's fire / hit / pull and the wrench's hit; returns the sound slot (−1:
     /// none). Played by the tick right after the hand item's update ([`gadgets::flush_item_sounds`]).

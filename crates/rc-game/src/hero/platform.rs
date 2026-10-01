@@ -103,6 +103,14 @@ pub trait HeroWorld {
         let _ = id;
         None
     }
+    /// The u16 at +0x1e of moby `id`'s pvar record (`FUN_002711f8`, 0: none): bit 3 makes the ground probe set
+    /// 0x13f65a.
+    fn moby_record_flags(&self, id: usize) -> u16 {
+        let _ = id;
+        0
+    }
+    /// The Hoverboard's view of the world (the board 0x13fbbc's pvars, paths, racers and pickups; None: no board).
+    fn board(&self) -> Option<&super::hoverboard::BoardWorld> { None }
 }
 
 /// The carriers of a moby table as the moby loop left it (built once per tick, before the hero update).
@@ -122,6 +130,10 @@ pub struct Carriers {
     /// The hero's ground moby 0x13f64c `(id, class, position, yaw)` as the moby loop left it ([`HeroWorld::moby_pose`];
     /// the caller sets it, `Carriers::collect` leaves none).
     pub ground: Option<(usize, i16, [f32; 3], f32)>,
+    /// The mobys whose pvar record has flags at +0x1e ([`HeroWorld::moby_record_flags`]).
+    record_flags: Vec<(usize, u16)>,
+    /// The Hoverboard's world ([`HeroWorld::board`]; the caller sets it, `Carriers::collect` leaves none).
+    pub board: Option<super::hoverboard::BoardWorld>,
 }
 
 impl Carriers {
@@ -139,7 +151,8 @@ impl Carriers {
             .collect();
         let hero_slot = table.mobys.get(hero_moby).map_or(0, |m| m.class_slot);
         let ledge_mobys = table.mobys.iter().enumerate().filter(|(_, m)| triggers::record_ledge_flag(m)).map(|(i, _)| i).collect();
-        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new(), ground: None }
+        let record_flags = table.mobys.iter().enumerate().filter_map(|(i, m)| Some((i, triggers::record_flags(m)?)).filter(|(_, f)| *f != 0)).collect();
+        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new(), ground: None, record_flags, board: None }
     }
 }
 
@@ -152,6 +165,8 @@ impl HeroWorld for Carriers {
     fn camera(&self) -> Option<([f32; 3], f32, f32)> { Some((self.targets.camera, self.targets.cam_yaw, self.targets.cam_pitch)) }
     fn melee_targets(&self) -> &[super::melee::MeleeTarget] { &self.melee }
     fn moby_pose(&self, id: usize) -> Option<(i16, [f32; 3], f32)> { self.ground.filter(|g| g.0 == id).map(|g| (g.1, g.2, g.3)) }
+    fn moby_record_flags(&self, id: usize) -> u16 { self.record_flags.iter().find(|(i, _)| *i == id).map_or(0, |(_, f)| *f) }
+    fn board(&self) -> Option<&super::hoverboard::BoardWorld> { self.board.as_ref() }
 }
 
 /// The carry fields of the hero block.

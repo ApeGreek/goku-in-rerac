@@ -137,6 +137,13 @@ pub trait MobySystem {
     /// The game mode 0x15f5c4 as the moby loop left it (the hero code's tests of it: the disguise's timer in
     /// `HeroTickStateTimer`, `FUN_00230770`; `crate::hero::hologuise`). 0: gameplay.
     fn game_mode(&self) -> i32 { 0 }
+    /// The Hoverboard's view of the world around board `board` (`crate::hero::hoverboard::BoardWorld`; None: none).
+    fn board_world(&self, _table: &MobyTable, _board: MobyId) -> Option<crate::hero::hoverboard::BoardWorld> { None }
+    /// The Hoverboard hero code's stores (`crate::hero::hoverboard::BoardCmd`), applied by the next moby loop.
+    fn queue_board(&mut self, _cmds: Vec<crate::hero::hoverboard::BoardCmd>) {}
+    /// The global fade 0x15f3fc (the moby loop's `cinematic::Cinematic::fade`) and its store.
+    fn fade(&self) -> f32 { 0.0 }
+    fn set_fade(&mut self, _v: f32) {}
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -269,6 +276,8 @@ impl Game {
         carriers.melee = crate::hero::melee::melee_targets(&self.mobys, &self.target_list(hooks.world.as_deref()));
         // The ground moby's class and pose (the Hydrodisplacer's poses 0x38..0x3a read the pad's: hero::hydrodisplacer).
         carriers.ground = self.hero.ground_moby.and_then(|g| self.mobys.mobys.get(g).map(|m| (g, m.o_class, [m.position[0], m.position[1], m.position[2]], m.rotation[2])));
+        // The Hoverboard's board, its paths, racers and pickups (hero::hoverboard).
+        carriers.board = self.hero.board.moby.and_then(|b| hooks.world.as_deref().and_then(|w| w.board_world(&self.mobys, b)));
         // The weapon's target (0x13fda0) where the moby loop left it (SetState 0x23 aims at it).
         crate::hero::weapons::refresh_aim(&mut self.hero, &self.mobys);
         let hero_tick = {
@@ -333,6 +342,18 @@ impl Game {
             for id in crate::hero::fx::create_mobys(&mut self.hero, &mut self.mobys, self.hero_moby, hits, self.counter) {
                 if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, id); }
             }
+        }
+        // The Hoverboard: the board carried under Ratchet's feet (level05 0x24bdc0's tail) and the hero code's stores into
+        // other mobys and the game state, applied by the next moby loop (hero::hoverboard).
+        if let (Some((pos, rows)), Some(b)) = (self.hero.board.carry.take(), self.hero.board.moby) {
+            if let Some(m) = self.mobys.mobys.get_mut(b) {
+                m.position = pos;
+                m.rows[..3].copy_from_slice(&rows);
+            }
+        }
+        let board_cmds = std::mem::take(&mut self.hero.board.cmds);
+        if !board_cmds.is_empty() {
+            if let Some(w) = hooks.world.as_deref_mut() { w.queue_board(board_cmds); }
         }
         // The hero's camera shakes (the stomp's landing, …: its stores into 0x167260 / 0x167270 during the update).
         for r in std::mem::take(&mut self.hero.fx.shakes) { self.camera.request_shake(r); }
@@ -406,6 +427,14 @@ impl Game {
                 // update.
                 crate::hero::gadgets::flush_item_sounds(&mut self.hero, &self.mobys.mobys[self.hero_moby], hero_sounds, &mut self.rng);
             }
+            // `0x229348`: the hero's fade of 0x15f3fc (the Hoverboard's wrong-way respawn).
+            if self.hero.board.fade.on {
+                if let Some(w) = hooks.world.as_deref_mut() {
+                    let mut v = w.fade();
+                    self.hero.board.fade.step(&mut v);
+                    w.set_fade(v);
+                }
+            }
             // `0x229158` (after HeroItemsUpdate): the Hologuise's squash on Ratchet's moby and the hand item.
             crate::hero::hologuise::squash(&mut self.hero, &mut self.mobys.mobys[self.hero_moby]);
             crate::hero::hologuise::squash_hand(&mut self.hero);
@@ -423,7 +452,9 @@ impl Game {
         }
         // The camera calls the hand items' updates made through the moby world (the Visibomb's launch switches the
         // type-6 camera in, `0x317d88`), applied before this tick's camera update as the game's direct calls are.
-        let cine = hooks.world.as_deref_mut().map(|w| w.take_cinematic()).unwrap_or_default();
+        let mut cine = hooks.world.as_deref_mut().map(|w| w.take_cinematic()).unwrap_or_default();
+        // A hero-side `HeroTeleport`'s camera reset (the Hoverboard's respawns: hero::Hero::teleport).
+        if std::mem::take(&mut self.hero.fx.camera_reset) { cine.insert(0, crate::cinematic::CinematicCall::CameraResetBehindHero); }
         if !cine.is_empty() { crate::cinematic::apply_camera_calls(&mut self.camera, &cine, &CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: None, hero_moby }); }
         (hooks.particles)(&self.hero, &self.camera.out, &mut self.rng, self.counter);
         let resets = self.camera.resets;

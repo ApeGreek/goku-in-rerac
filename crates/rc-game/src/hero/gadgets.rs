@@ -343,6 +343,8 @@ pub fn flush_item_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sounds:
             super::packs::SoundCmd::Loop { n, sound } => h.packs.loops[n] = sounds.voice(moby, sound, 4, rng),
             super::packs::SoundCmd::Voice { index, flags } => { sounds.voice(moby, index, flags, rng); }
             super::packs::SoundCmd::Release { slot } => sounds.release(moby, slot),
+            super::packs::SoundCmd::MobyLoop { n, moby: m, o_class, pos, sound } => h.packs.loops[n] = sounds.moby_sound(m, o_class, pos, sound, 4, rng),
+            super::packs::SoundCmd::ReleaseOf { slot, moby: m } => sounds.release_of(m, slot),
             super::packs::SoundCmd::ItemLoop { n, index, flags } => {
                 let alive = h.fx.item_loops[n].is_some_and(|s| sounds.alive(s));
                 if let (false, Some((o_class, pos))) = (alive, item) {

@@ -90,6 +90,12 @@ pub enum SoundCmd {
     Voice { index: i32, flags: u32 },
     /// `release_voice_slot(slot)` when the slot still plays Ratchet's sound.
     Release { slot: i32 },
+    /// `0x236798(n, moby, sound)` with another owner (the Hoverboard's hum and boost on the board, slots 6 / 7):
+    /// class sound `sound` of `moby` looping (flags 4) in hero slot `n` (`pos`: where it starts).
+    MobyLoop { n: usize, moby: crate::moby_runtime::MobyId, o_class: i16, pos: [f32; 3], sound: i32 },
+    /// `release_voice_slot(slot)` when the slot still plays `moby`'s sound (`0x2283a8` with the slot's owner
+    /// 0x141588 + 4·n set).
+    ReleaseOf { slot: i32, moby: crate::moby_runtime::MobyId },
     /// `if !SoundIsAlive(item, loop n) { loop n = PlayClassSound(index, flags, item) }` on the hand item (the
     /// Pyrocitor's flame loop); the slot is kept in `super::fx::HeroFx::item_loops[n]`.
     ItemLoop { n: usize, index: i32, flags: u32 },
@@ -129,8 +135,10 @@ pub struct Packs {
     /// from an R1 press).
     pub tap_on: i32,
     pub tap_off: i32,
-    /// 0x141568 + 4·n: the hero's looping-sound slots (n = 3 the Heli-Pack, 4 the Thruster-Pack; −1 none).
+    /// 0x141568 + 4·n: the hero's looping-sound slots (n = 3 the Heli-Pack, 4 the Thruster-Pack, 6 / 7 the Hoverboard's
+    /// hum and boost; −1 none) and 0x141588 + 4·n their owners (None: Ratchet).
     pub loops: [i32; 8],
+    pub loop_owner: [Option<crate::moby_runtime::MobyId>; 8],
     /// Sounds queued by the hero code, played by [`flush_sounds`].
     pub sounds: Vec<SoundCmd>,
     /// Hits queued by the physics, delivered by [`deliver_hits`].
@@ -141,7 +149,7 @@ impl Default for Packs {
     fn default() -> Self {
         Packs {
             stomp_g: 0.0, stomp_down: false, stomp_eta: 0, stomp_frame: 0.0, stomp_ground: 0, rebound_yaw: 0.0,
-            hover_latch: 0, tap_on: 0, tap_off: 0, loops: [-1; 8], sounds: Vec::new(), hits: Vec::new(),
+            hover_latch: 0, tap_on: 0, tap_off: 0, loops: [-1; 8], loop_owner: [None; 8], sounds: Vec::new(), hits: Vec::new(),
         }
     }
 }
@@ -155,15 +163,30 @@ fn heli_owned(h: &Hero) -> bool { h.owned.has(item::HELI_PACK as usize) }
 
 /// `0x236798(n, Ratchet, sound)`: start the loop in slot `n` unless it runs.
 pub(super) fn loop_sound(h: &mut Hero, n: usize, sound: i32) {
+    h.packs.loop_owner[n] = None;
     if h.packs.loops[n] == -1 && !h.packs.sounds.iter().any(|c| matches!(c, SoundCmd::Loop { n: m, .. } if *m == n)) {
         h.packs.sounds.push(SoundCmd::Loop { n, sound });
     }
 }
 
-/// Release slot `n`'s loop (the game's inline `release_voice_slot` + slot = −1).
+/// `0x236798(n, moby, sound)` with another owner: start the loop in slot `n` unless it runs; `moby` is the slot's owner.
+pub(super) fn loop_sound_on(h: &mut Hero, n: usize, moby: crate::moby_runtime::MobyId, o_class: i16, sound: i32) {
+    h.packs.loop_owner[n] = Some(moby);
+    let queued = h.packs.sounds.iter().any(|c| matches!(c, SoundCmd::MobyLoop { n: m, .. } if *m == n));
+    if h.packs.loops[n] == -1 && !queued {
+        let pos = to_f32x3(h.pos);
+        h.packs.sounds.push(SoundCmd::MobyLoop { n, moby, o_class, pos, sound });
+    }
+}
+
+/// Release slot `n`'s loop (the game's inline `release_voice_slot` + slot = −1), for its owner.
 pub(super) fn release_loop(h: &mut Hero, n: usize) {
     let s = std::mem::replace(&mut h.packs.loops[n], -1);
-    if s != -1 { h.packs.sounds.push(SoundCmd::Release { slot: s }); }
+    if s == -1 { return; }
+    match h.packs.loop_owner[n] {
+        Some(moby) => h.packs.sounds.push(SoundCmd::ReleaseOf { slot: s, moby }),
+        None => h.packs.sounds.push(SoundCmd::Release { slot: s }),
+    }
 }
 
 /// `0x2283a8`: every looping slot released.
@@ -179,6 +202,8 @@ pub(super) fn flush_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sound
             SoundCmd::Loop { n, sound } => h.packs.loops[n] = sounds.voice(moby, sound, 4, rng),
             SoundCmd::Voice { index, flags } => { sounds.voice(moby, index, flags, rng); }
             SoundCmd::Release { slot } => sounds.release(moby, slot),
+            SoundCmd::MobyLoop { n, moby: m, o_class, pos, sound } => h.packs.loops[n] = sounds.moby_sound(m, o_class, pos, sound, 4, rng),
+            SoundCmd::ReleaseOf { slot, moby: m } => sounds.release_of(m, slot),
             // The hand item's loops are flushed with the item sounds (super::gadgets::flush_item_sounds).
             SoundCmd::ItemLoop { .. } | SoundCmd::ItemRelease { .. } | SoundCmd::ItemPitch { .. } | SoundCmd::MobySound { .. } => {}
         }
@@ -207,7 +232,7 @@ pub(super) fn template(env: &Env, damage: f32, flags: u32, dir: V4) -> HitTempla
 }
 
 /// `0x248cf8(fwd, side, up)`: a point in the hero's frame (rows 0x13f350) from the feet.
-fn local(h: &Hero, v: [f32; 3]) -> [f32; 3] {
+pub(super) fn local(h: &Hero, v: [f32; 3]) -> [f32; 3] {
     let r = h.rows.map(to_f32x3);
     let pos = to_f32x3(h.pos);
     std::array::from_fn(|k| ((r[0][k] * v[0] + r[1][k] * v[1]) + r[2][k] * v[2]) + pos[k])

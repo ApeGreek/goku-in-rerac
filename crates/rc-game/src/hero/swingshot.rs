@@ -796,29 +796,8 @@ fn phys_swing_fall(h: &mut Hero) {
     if 1.0 < h.height.to_f32() { h.substate = 1; }
 }
 
-/// `0x22a8d8(ax, ay, az)`: turn the body by the Euler step in its own frame about the point 0.6 up, keeping that
-/// point in place.
-fn turn_body(h: &mut Hero, ax: f32, ay: f32, az: f32) {
-    let rows = |r: V3| -> [V3; 3] {
-        let m = euler_rows(p4(r, Pf::ZERO));
-        std::array::from_fn(|i| f3(m[i]))
-    };
-    let r = rows(f3(h.rot));
-    let d = rows([ax, ay, az]);
-    let mul = |v: V3, m: &[V3; 3]| -> V3 { std::array::from_fn(|k| v[0] * m[0][k] + v[1] * m[1][k] + v[2] * m[2][k]) };
-    let pivot = [0.0, 0.0, 0.6];
-    let p0 = mul(pivot, &r);
-    let r2: [V3; 3] = std::array::from_fn(|i| mul(d[i], &r));
-    let p1 = mul(pivot, &r2);
-    let pos = add(f3(h.pos), sub(p0, p1));
-    h.pos = p4(pos, h.pos[3]);
-    let z = r2[0][1].atan2(r2[0][0]);
-    let y = (-r2[0][2]).atan2((r2[0][0] * r2[0][0] + r2[0][1] * r2[0][1]).sqrt());
-    let x = r2[1][2].atan2(r2[2][2]);
-    h.rot[0] = pf(x);
-    h.rot[1] = pf(y);
-    h.rot[2] = pf(z);
-}
+/// `0x22a8d8(ax, ay, az)`: the body turned about the point 0.6 up ([`Hero::turn_about`]).
+fn turn_body(h: &mut Hero, ax: f32, ay: f32, az: f32) { h.turn_about([ax, ay, az], [0.0, 0.0, 0.6]); }
 
 // ------------------------------------------------------------------------------------------------
 // Transitions 0x229b70 (level00).

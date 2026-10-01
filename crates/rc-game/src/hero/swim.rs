@@ -214,6 +214,8 @@ impl Hero {
     /// under its surface: the hero stands submerged → 0x34. Returns whether the state changed.
     pub fn water_entry_check(&mut self, c: &mut Ctx) -> bool {
         if self.state == id::DROWN { return false; }
+        // The Hoverboard's groups and crash states never enter the water this way (levels 5 / 16: `0x2515d0`).
+        if matches!(self.group, 0x15 | 0x16) || matches!(self.state, 0x6d..=0x6f) { return false; }
         let (w, z) = (f(self.water_level), f(self.pos[2]));
         let dz = f(self.disp[2]);
         let descending = self.jump.descending != 0;

@@ -348,6 +348,11 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn group(&self, g: i8) -> Vec<MobyId> { self.world.group(g) }
     fn create_moby(&mut self, table: &mut MobyTable, o_class: i16, counter: u64) -> Option<MobyId> { self.world.create_moby(table, o_class, counter) }
     fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) { self.world.delete_moby(table, id, counter) }
+    fn game_mode(&self) -> i32 { self.world.game_mode() }
+    fn board_world(&self, table: &MobyTable, board: MobyId) -> Option<rc_game::hero::hoverboard::BoardWorld> { self.world.board_world(table, board) }
+    fn queue_board(&mut self, cmds: Vec<rc_game::hero::hoverboard::BoardCmd>) { self.world.queue_board(cmds) }
+    fn fade(&self) -> f32 { self.world.fade() }
+    fn set_fade(&mut self, v: f32) { self.world.set_fade(v) }
 }
 
 /// The hero's hit sink: the moby system's hit log and moby collision (borrowed per call: the moby hook borrows

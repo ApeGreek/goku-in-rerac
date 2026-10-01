@@ -822,6 +822,10 @@ fn menu_frame(
         crate::interact_render::feed_idle(&mut feed);
         crate::interact_render::after_tick(&mut vr, &mut play, gs, &mut mm.state, frame, Some(&mut feed), audio.as_deref_mut(), Some(&rt.assets));
     }
+    // The race's end (`mode_freezeInit(0, 0)` from the Hoverboard's race, rc_game::hero::hoverboard).
+    if mm.state.mode != Mode::Freeze && std::mem::take(&mut play.game.hero.board.freeze) {
+        open_freeze(rt, &mut mm, &mut play, audio.as_deref_mut(), rc_game::menus::freeze::KIND_RACE, 0, frame);
+    }
     // The card monitor's failed auto-save (status 22: `mode_freezeInit(3, 0)`; crate::saves).
     if mm.state.mode != Mode::Freeze && crate::saves::with_card(|c| c.take_freeze_request()).unwrap_or(false) {
         open_freeze(rt, &mut mm, &mut play, audio.as_deref_mut(), rc_game::menus::freeze::KIND_CARD, 0, frame);
@@ -1079,6 +1083,14 @@ fn freeze_frame(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, gs: &mut rc
     // values (stage, place, time, score, sound, records) come from the race classes (not ported: G-UI-019).
     f.ctx.level = level;
     f.ctx.hero_state_ticks = play.game.hero.f4ec;
+    // The Hoverboard's race (rc_game::hero::hoverboard): the stage 0x13fbea, place, time, score, the HUD handle 0x13fbd0,
+    // the records.
+    {
+        let b = &play.game.hero.board;
+        let r = &play.svc.board.records;
+        (f.ctx.race_stage, f.ctx.place, f.ctx.time, f.ctx.score, f.ctx.sound) = (b.lap, b.place, b.race_ticks, b.score, b.hud);
+        (f.ctx.best_time, f.ctx.best_score) = (r.best_time, r.best_score);
+    }
     // The kinds without the card (0, 1, 2, 4, 6) run without one set up too.
     let out = crate::saves::with_card(|c| f.update(pressed, c, level)).unwrap_or_else(|| f.update(pressed, &mut rc_game::memcard::MemCard::absent(), level));
     if let Some(t) = out.target {
@@ -1128,9 +1140,18 @@ fn freeze_effects(play: &mut Play, out: &rc_game::menus::freeze::FreezeOut, fram
         let mut f = HeroFields::of(&play.game.hero);
         teleport_entry(play, &mut f);
         play.svc.hero_writes = Some((play.game.counter, f));
-        println!("menus: frame {frame}: Quit Race: race sound {:?} stopped, quits counter {:?} (0x15ee38 / 0x15ee3c), update_resource_counter, HeroTeleport(entry pose)", q.stop_sound, q.count);
+        // The HUD handle 0x13fbd0 stopped (the freeze set its copy to −1) and the finished counter (0x15ee38 / 0x15ee3c).
+        if q.stop_sound.is_some() { play.game.hero.board.hud = -1; }
+        if let Some(k) = q.count { play.svc.board.records.finished[k] += 1; }
+        println!("menus: frame {frame}: Quit Race: HUD handle {:?} stopped, finished counter {:?}, update_resource_counter, HeroTeleport(entry pose)", q.stop_sound, q.count);
     }
-    if out.race_rewind { println!("menus: frame {frame}: Quit Race? no: the race stage − 1, the race moby +0xbc = 3 (the race classes: G-UI-019)"); }
+    if out.race_rewind {
+        // The race stage 0x13fbea − 1 and the race moby 0x13fbe0 +0xbc = 3 (Rilgar's race girl restarts the race).
+        let b = &mut play.game.hero.board;
+        b.lap -= 1;
+        if let Some(m) = b.host.and_then(|h| play.game.mobys.mobys.get_mut(h)) { m.cmd = 3; }
+        println!("menus: frame {frame}: Quit Race? no: the race stage − 1, the race moby +0xbc = 3");
+    }
     if out.vehicle_quit {
         play.svc.vehicle.request_quit();
         println!("menus: frame {frame}: Quit? yes: 0x14095f |= 1");

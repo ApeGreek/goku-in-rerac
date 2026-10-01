@@ -207,6 +207,8 @@ pub struct HeroFx {
     pub back: BackFrame,
     /// The after-image records 0x1409c0 (Ratchet) and 0x140b00 (the thrown wrench): `crate::afterimage`.
     pub trails: crate::afterimage::Trails,
+    /// `CameraResetBehindHero` asked for by a hero-side `HeroTeleport` ([`super::Hero::teleport`]); the tick applies it.
+    pub camera_reset: bool,
     /// Ratchet's anim keys and key time as the hero update left them ([`end`]): what the moby loop of the next tick
     /// reads from his moby (+0x50..+0x55) and 0x13fdf8 (the Thruster flames' test, `crate::moby_update::classes::thruster_flame`).
     pub view: super::AnimView,

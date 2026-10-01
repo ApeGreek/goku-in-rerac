@@ -684,9 +684,12 @@ impl Hero {
         let old = self.pos;
         let mut off = V0;
         if self.group != 0x11 {
-            if self.gravity_mode == 0 && self.f548 == 0 {
+            if self.group == super::hoverboard::GROUP {
+                // The Hoverboard: the sphere's centre 0.7 up the body (`0x248cf8(0, 0, 0.7)` − the feet).
+                off = vsub(from_f32x3(super::packs::local(self, [0.0, 0.0, 0.7])), self.pos);
+            } else if self.gravity_mode == 0 && self.f548 == 0 {
                 off[2] = self.cap_bottom;
-            } else if self.gravity_mode == 1 || self.f548 != 0 {
+            } else if self.gravity_mode == 1 || self.f548 != 0 || self.group == 0x15 {
                 off[2] = off[2] + Pf::b(0x3f19_999a);
             } else {
                 off[2] = off[2] - (-self.cap_bottom);
@@ -704,6 +707,8 @@ impl Hero {
                     coll_sphere_m(env.coll, sc, to_f32x3(self.pos), (SCALE60 * Pf::b(0x3ecc_cccd)).to_f32(), flags, ig)
                 } else if self.group == 0x11 {
                     coll_sphere_m(env.coll, sc, to_f32x3(self.pos), 0.6, flags, ig)
+                } else if self.group == super::hoverboard::GROUP {
+                    coll_sphere_m(env.coll, sc, to_f32x3(self.pos), (SCALE60 * Pf::b(0x3f00_0000)).to_f32(), flags, ig)
                 } else if self.group == 0xf {
                     // Grinding (level00 0x2133a8; level01 has no grind): a 0.45 sphere (super::boots).
                     coll_sphere_m(env.coll, sc, to_f32x3(self.pos), (SCALE60 * Pf::b(0x3ee6_6666)).to_f32(), flags, ig)
@@ -792,6 +797,15 @@ impl Hero {
             if self.surface_id == 0xb {
                 self.gravity_frame(env);
                 return;
+            }
+            // A moby under the feet (`0x232dc0`): a crate (classes 500..540, `0x273278`) or a pvar record with bit 3 of +0x1e
+            // sets 0x13f65a; on a crate the Hoverboard's groups take the ground 1 lower (`0x248b68(1, hit, hit)`).
+            if let Some(m) = o.moby {
+                if env.mobys.and_then(|sc| sc.mobys.moby(m)).is_some_and(|x| (500..=540).contains(&x.o_class)) {
+                    self.f65a = 1;
+                    if matches!(self.group, 0x15 | 0x16) { o.point[2] -= 1.0; }
+                }
+                if env.world.is_some_and(|w| w.moby_record_flags(m) & 8 != 0) { self.f65a = 1; }
             }
             if o.kind <= 0 { break 'probe; }
             self.ground_point = from_f32x3(o.point);
@@ -902,6 +916,18 @@ impl Hero {
                 if Pf::ZERO < m { m = Pf::ZERO; }
                 self.vel[2] = m;
             }
+        } else if self.group == super::hoverboard::GROUP {
+            // The Hoverboard (levels 5 / 16, `0x2413e0`): clamped in xy only when a line along the velocity (from the
+            // feet to 0.5 up + vel) hits the world or a moby of class 0x1f6 / 0x59f.
+            let mut b = self.pos;
+            b[2] = self.pos[2] + Pf::b(0x3f00_0000);
+            let b = vadd(b, self.vel);
+            let hit = env.line(self.pos, b, 2).is_some_and(|o| match o.moby {
+                None => true,
+                Some(m) => env.mobys.and_then(|sc| sc.mobys.moby(m)).is_some_and(|x| x.o_class == 0x1f6 || x.o_class == 0x59f),
+            });
+            let l = self.cap_radius - Pf::b(0x3ca3_d70a);
+            if hit && self.no_vel_clamp == 0 && l < len2(self.vel) { self.vel = set_len2(self.vel, l); }
         } else if self.no_vel_clamp == 0 {
             let l = self.cap_radius - Pf::b(0x3ca3_d70a);
             if l < len3(self.vel) { self.vel = set_len3(self.vel, l); }
@@ -1134,6 +1160,31 @@ impl Hero {
         self.platform[0] = fast_cos(yaw) * v;
         self.platform[1] = fast_sin(yaw) * v;
         self.platform[2] = Pf::ZERO;
+    }
+}
+
+impl Hero {
+    /// `0x22a7d0(ax, ay, az, pivot)`: turn the body by the Euler step (ax, ay, az) in its own frame about `pivot` (in the
+    /// body's frame), keeping that point in place (`pos += p₀ − p₁`), and write the new Euler angles (`0x2721f0`;
+    /// standard `atan2` for the game's `FastArcTan`). `0x22a8d8(ax, ay, az)` is it about (0, 0, 0.6).
+    pub(super) fn turn_about(&mut self, e: [f32; 3], pivot: [f32; 3]) {
+        let rows = |r: [f32; 3]| -> [[f32; 3]; 3] {
+            let m = euler_rows([Pf::f(r[0]), Pf::f(r[1]), Pf::f(r[2]), Pf::ZERO]);
+            std::array::from_fn(|i| [m[i][0].to_f32(), m[i][1].to_f32(), m[i][2].to_f32()])
+        };
+        let r = rows(to_f32x3(self.rot));
+        let d = rows(e);
+        let mul = |v: [f32; 3], m: &[[f32; 3]; 3]| -> [f32; 3] { std::array::from_fn(|k| v[0] * m[0][k] + v[1] * m[1][k] + v[2] * m[2][k]) };
+        let p0 = mul(pivot, &r);
+        let r2: [[f32; 3]; 3] = std::array::from_fn(|i| mul(d[i], &r));
+        let p1 = mul(pivot, &r2);
+        for k in 0..3 { self.pos[k] = Pf::f(self.pos[k].to_f32() + (p0[k] - p1[k])); }
+        let z = r2[0][1].atan2(r2[0][0]);
+        let y = (-r2[0][2]).atan2((r2[0][0] * r2[0][0] + r2[0][1] * r2[0][1]).sqrt());
+        let x = r2[1][2].atan2(r2[2][2]);
+        self.rot[0] = Pf::f(x);
+        self.rot[1] = Pf::f(y);
+        self.rot[2] = Pf::f(z);
     }
 }
 

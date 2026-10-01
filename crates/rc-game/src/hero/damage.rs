@@ -524,29 +524,8 @@ pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut
     true
 }
 
-/// `0x22a8d8(ax, ay, az)` → `0x22a7d0`: turn the body by the Euler step (ax, ay, az) in its own frame about the
-/// point 0.6 up the body, keeping that point in place (`pos += p₀ − p₁`), and write the new Euler angles
-/// (`0x2721f0`; standard `atan2` for the game's `FastArcTan`).
-fn tumble(h: &mut Hero, ax: f32, ay: f32, az: f32) {
-    let rows = |r: [f32; 3]| -> [[f32; 3]; 3] {
-        let m = euler_rows([Pf::f(r[0]), Pf::f(r[1]), Pf::f(r[2]), Pf::ZERO]);
-        std::array::from_fn(|i| [m[i][0].to_f32(), m[i][1].to_f32(), m[i][2].to_f32()])
-    };
-    let r = rows(to_f32x3(h.rot));
-    let d = rows([ax, ay, az]);
-    let mul = |v: [f32; 3], m: &[[f32; 3]; 3]| -> [f32; 3] { std::array::from_fn(|k| v[0] * m[0][k] + v[1] * m[1][k] + v[2] * m[2][k]) };
-    let pivot = [0.0, 0.0, 0.6];
-    let p0 = mul(pivot, &r);
-    let r2: [[f32; 3]; 3] = std::array::from_fn(|i| mul(d[i], &r));
-    let p1 = mul(pivot, &r2);
-    for k in 0..3 { h.pos[k] = Pf::f(h.pos[k].to_f32() + (p0[k] - p1[k])); }
-    let z = r2[0][1].atan2(r2[0][0]);
-    let y = (-r2[0][2]).atan2((r2[0][0] * r2[0][0] + r2[0][1] * r2[0][1]).sqrt());
-    let x = r2[1][2].atan2(r2[2][2]);
-    h.rot[0] = Pf::f(x);
-    h.rot[1] = Pf::f(y);
-    h.rot[2] = Pf::f(z);
-}
+/// `0x22a8d8(ax, ay, az)` → `0x22a7d0` about the point 0.6 up the body ([`Hero::turn_about`]).
+fn tumble(h: &mut Hero, ax: f32, ay: f32, az: f32) { h.turn_about([ax, ay, az], [0.0, 0.0, 0.6]); }
 
 // ------------------------------------------------------------------------------------------------
 // Transitions 0x242930.

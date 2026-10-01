@@ -164,7 +164,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x43 idle, 0x44 walk (+0x50), 0x45 / 0x52 fall, 0x46 hurt, 0x47 death, 0x49 / 0x4c jumps (anims 7 / 9), 0x4a / 0x4b / 0x4d / 0x4e ledge (anims 10..0xc), 0x4f glide (0xe), 0x51 kick (group-6 entry in melee.rs), 0x7d burn, 0x48 (physics no-op only) | Clank (body 1; levels 0, 4, 6, 7, 9, 10, 13, 17) | 0..0x14 | Bodies (later) |
 | 0x5a idle, 0x5b walk, 0x5c fall, 0x5d hurt, 0x5e jump (h 4.2), 0x5f..0x61 attacks, 0x62 death | Giant Clank (body 2, **L**; levels 0, 4, 7, 9, 10, 13, 15, 18) | | Bodies (later) |
 | 0x53 idle, 0x54 walk, 0x55 fall, 0x56 hurt, 0x57 death, 0x58 pit fall, 0x59 ○ action | Hologuise disguise (body 3; every level) | | bodies/disguise.rs, hologuise.rs (2026-10-01) |
-| 0x6b ride, 0x6c, 0x6d, 0x6e into water, 0x6f; 0x3e (group 0x15, level 16) | Hoverboard (levels 5, 16) | 0x16 | Hoverboard (later) |
+| 0x6b ride, 0x6c ramp jump, 0x6d crash, 0x6e into water, 0x6f into a wall; 0x3e (group 0x15, level 16) | Hoverboard (levels 5, 16) | 0x16 | hoverboard.rs: 0x6b..0x6f ported 2026-10-01 (with the race tracker, tricks, scoring, pickups; level05's source, which carries level 16's branches); 0x3e not ported (G-HERO-008) |
 | 0x63 / 0x64 | cutscene control / the scene body (mode-2 scenes, the vendor); 100 is the only state group 0x14 accepts (respawn) | 0x18 | scripted.rs: ported 2026-09-28 (hero_gameplay.md §7) |
 | 0x05, 0x7e | no SetState case (0x7e: a walk-case label only) | — | Unused |
 
@@ -703,7 +703,7 @@ readers also test (written only by the ships: G-LVL-009).
 ### Later (not in this push)
 Weapons (0x20, 0x21, the other gloves and guns: see "Weapons + first person"), the gadget poses 0x38..0x3a (with
 the Hydrodisplacer, G-WPN-006; the scripted states are ported: "Scripted control" above), other bodies (Clank, Giant Clank,
-Hologuise), the Hoverboard. Each gets a module when started; the registry already names its rows.
+Hologuise), the Hoverboard (0x6b..0x6f ported 2026-10-01: `hero/hoverboard.rs`). Each gets a module when started; the registry already names its rows.
 
 ## 4. Findings to fix inside the packages (not fixed now: the restructure is behaviour-neutral)
 - **Gravity mode** (`Hero::input_physics_move`): 0x248ad8 returns 1 in state 0 on surface 2 when the Magneboots are

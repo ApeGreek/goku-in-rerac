@@ -801,8 +801,6 @@ pub struct Services {
     /// The level overlays' own mutable words a class keeps between ticks, by address (e.g. Blarg's Clank station's
     /// gp−0x4c88 0x161f78, −1 at load: `classes::units::blarg_clank_lift`). Missing: the load value the class knows.
     pub level_words: HashMap<u32, u32>,
-    /// `0x141402` (u8): the hero flag that makes dropped bolts fly straight to the hero.
-    pub hero_magnet: u8,
     /// `0x15f5d0` / `0x15f5d4`: the frame-load ratios (RCNT1 based) that throttle sparks and flashes. The port
     /// cannot reproduce them; 0 = never throttled.
     pub frame_load: [Pf; 2],
@@ -919,6 +917,8 @@ pub struct Services {
     /// The ship block 0x13e030.. (the ship moby, its index, the take-off flag 0x15f630, mode 6's substate and tick, the
     /// trail): [`crate::travel::ShipGlobals`].
     pub travel: crate::travel::ShipGlobals,
+    /// The Hoverboard's stores queued by the hero code and the race records (`classes::units::hoverboard`).
+    pub board: crate::moby_update::classes::units::hoverboard::Globals,
 }
 
 impl Default for Services {
@@ -938,7 +938,6 @@ impl Services {
             camera_focus: Vec::new(),
             bolt_grabber: false,
             level_words: HashMap::new(),
-            hero_magnet: 0,
             frame_load: [Pf::ZERO; 2],
             hits: HitLog::default(),
             sounds: Vec::new(),
@@ -982,6 +981,7 @@ impl Services {
             visibomb: Default::default(),
             hud: Default::default(),
             travel: Default::default(),
+            board: Default::default(),
             pvar_shared: Vec::new(),
             vehicle: Default::default(),
             occlusion_fallback: None,
@@ -1140,6 +1140,8 @@ pub struct HeroFields {
     /// A class's store of the level's death height 0x15f638 (`Services::death_z` is the moby loop's copy): Kalebo's race
     /// host 1455 (100 / 115, 74 during the race). The tick takes it into `Game::death_z`.
     pub death_z: Option<f32>,
+    /// 0x13fbbc = the board moby (the Hoverboard's class 439 before its `SetState(0x6b, 1)`; `hero::hoverboard`).
+    pub board: Option<MobyId>,
 }
 
 /// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
@@ -1227,6 +1229,7 @@ impl HeroFields {
             clank_hidden: None,
             no_vel_clamp: None,
             death_z: None,
+            board: None,
         }
     }
 
@@ -1283,6 +1286,7 @@ impl HeroFields {
         if let Some(v) = self.head_request { h.head_slot.request = v; }
         if let Some(v) = self.clank_hidden { h.back_slot.clank_hidden = v; }
         if let Some(v) = self.no_vel_clamp { h.no_vel_clamp = v; }
+        if let Some(b) = self.board { h.board.moby = Some(b); }
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
             h.rot[2] = pf(p.yaw);
@@ -2116,6 +2120,12 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { std::mem::take(&mut self.svc.borrow_mut().camera_shakes) }
     fn take_cinematic(&mut self) -> Vec<crate::cinematic::CinematicCall> { crate::cinematic::take_calls(&mut self.svc.borrow_mut()) }
     fn game_mode(&self) -> i32 { self.svc.borrow().game_mode }
+    fn board_world(&self, table: &MobyTable, board: MobyId) -> Option<crate::hero::hoverboard::BoardWorld> {
+        crate::moby_update::classes::units::hoverboard::world(&self.svc.borrow(), table, board)
+    }
+    fn queue_board(&mut self, cmds: Vec<crate::hero::hoverboard::BoardCmd>) { self.svc.borrow_mut().board.cmds.extend(cmds); }
+    fn fade(&self) -> f32 { self.svc.borrow().cinematic.fade }
+    fn set_fade(&mut self, v: f32) { self.svc.borrow_mut().cinematic.fade = v; }
     fn run_list(&self, table: &MobyTable, camera: V4) -> Option<Vec<MobyId>> {
         Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
     }

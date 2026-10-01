@@ -324,6 +324,12 @@ where
         let ours = usize::try_from(slot).ok().and_then(|i| a.slots.slots.get(i)).is_some_and(|s| s.owner.is_some_and(|o| o.id == self.hero as u32));
         if ours { a.slots.release(slot); }
     }
+
+    fn release_of(&mut self, id: MobyId, slot: i32) {
+        let Some(mut a) = (self.audio)() else { return };
+        let ours = usize::try_from(slot).ok().and_then(|i| a.slots.slots.get(i)).is_some_and(|s| s.owner.is_some_and(|o| o.id == id as u32));
+        if ours { a.slots.release(slot); }
+    }
 }
 
 /// The tick's sound step (module docs): [`AudioSystem::tick_with`] with the listener = `cam` (this tick's

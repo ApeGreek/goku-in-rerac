@@ -76,6 +76,8 @@ impl Hero {
             self.frozen = 0;
             self.items.f13f7 = 0;
             self.f13ff = 0;
+            // 0x141402 (the Hoverboard's 0x6b sets it).
+            self.board.f141402 = 0;
             // 0x141630 (the guards' alert on the disguise: super::hologuise) cleared.
             self.gadgets.disguise.alert = 0;
             // 0x277740(0x1409c0): Ratchet's after-images end (crate::afterimage).

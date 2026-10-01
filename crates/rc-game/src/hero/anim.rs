@@ -81,6 +81,8 @@ pub trait AnimCtl {
     /// `(0x13fe00 ≠ −1, 0x13fe04)`: a loop range is set, and the loop end (which outlives the range: a
     /// `clear_loop` only clears the start).
     fn loop_state(&self) -> (bool, i32) { (false, 0) }
+    /// `0x13fe00`: the loop range's start (−1: none).
+    fn loop_start(&self) -> i32 { -1 }
     /// One step of the eased blend curve right away (`moby+0x54 = curve[0x13fdf4++]`, what the hurt entries
     /// 0x16 / 0x75 / 0x76 do after their `SetAnim(−3, …)`); nothing outside a curve blend.
     fn curve_step(&mut self) {}
@@ -441,6 +443,9 @@ impl RatchetAnimRef<'_> {
     pub fn key_rate(&self, seq: u8, frame: u8) -> f32 { self.class.frame(seq, frame).map_or(1.0, |f| f.header.rate) }
 
     pub fn loop_state(&self) -> (bool, i32) { (self.a.loop_range.is_some(), self.a.loop_end) }
+
+    /// `0x13fe00` (−1 without a range).
+    pub fn loop_start(&self) -> i32 { self.a.loop_range.map_or(-1, |r| r.0) }
 }
 
 /// The hero's animation while another body may be the hero moby (`crate::hero::bodies`): every [`AnimCtl`] call goes
@@ -490,6 +495,7 @@ impl AnimCtl for HeroAnimCtl<'_> {
     fn clear_loop(&mut self) { self.with(|a| a.clear_loop()) }
     fn exit_loop(&mut self, to: i32) { self.with(|a| a.exit_loop(to)) }
     fn loop_state(&self) -> (bool, i32) { self.r().loop_state() }
+    fn loop_start(&self) -> i32 { self.r().loop_start() }
     fn curve_step(&mut self) { self.with(|a| a.curve_step()) }
     fn eval_chains(&self, chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> { self.r().eval_chains(chains) }
     fn eval_chains_with(&self, chains: &[&[u8]], layers: &PoseNodes, mods: &[rc_formats::moby_anim::JointModifier]) -> Vec<rc_formats::moby_anim::Rows> {
@@ -664,6 +670,7 @@ impl AnimCtl for RatchetAnimCtl<'_> {
     }
 
     fn loop_state(&self) -> (bool, i32) { self.r().loop_state() }
+    fn loop_start(&self) -> i32 { self.r().loop_start() }
     fn curve_step(&mut self) {
         let a = &mut *self.a;
         if a.curve < 0 || a.state.seq_a == a.state.seq_b { return; }

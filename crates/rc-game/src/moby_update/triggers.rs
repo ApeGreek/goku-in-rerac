@@ -179,9 +179,10 @@ pub fn pvar_record(m: &Moby) -> Option<usize> {
 
 /// Bit 0 of the pvar record's u16 at +0x1e ([`pvar_record`]): a ledge on this moby's top can be grabbed
 /// (`HeroWallLedgeCheckB` 0x22d090, the moby branch).
-pub fn record_ledge_flag(m: &Moby) -> bool {
-    pvar_record(m).is_some_and(|o| u16::from_le_bytes([m.pvars[o + 0x1e], m.pvars[o + 0x1f]]) & 1 != 0)
-}
+pub fn record_ledge_flag(m: &Moby) -> bool { record_flags(m).is_some_and(|f| f & 1 != 0) }
+
+/// The u16 at +0x1e of the moby's pvar record (`FUN_002711f8`, pvar+0x00), None without a record.
+pub fn record_flags(m: &Moby) -> Option<u16> { pvar_record(m).map(|o| u16::from_le_bytes([m.pvars[o + 0x1e], m.pvars[o + 0x1f]])) }
 
 /// The platform block as the hero code reads it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

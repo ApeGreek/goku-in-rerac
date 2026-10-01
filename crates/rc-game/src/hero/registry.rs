@@ -60,7 +60,7 @@ pub enum Module {
     /// `bodies/clank.rs` (body 1: 0x43..0x52, 0x7d), `bodies/giant.rs` (body 2: 0x5a..0x62) and `bodies/disguise.rs` (the
     /// Hologuise disguise, body 3: 0x53..0x59).
     Bodies,
-    /// Later: the Hoverboard (levels 5 and 16).
+    /// `hoverboard.rs`: the Hoverboard (levels 5 and 16): 0x6b..0x6f (level 16's 0x3e is not ported).
     Hoverboard,
     /// No state with this id exists in any level's SetState.
     Unused,
@@ -191,11 +191,11 @@ pub static STATES: [StateInfo; 0x83] = [
     s("sinking liquid, surface 3", 0x19, Surface, true),          // 0x68
     s("jump out of the sinking liquid", 0x19, Surface, true),     // 0x69
     s("drowned", 0x14, Swim, true),                               // 0x6a
-    s("Hoverboard ride", 0x16, Hoverboard, false),                // 0x6b
-    s("Hoverboard 0x6c", 0x16, Hoverboard, false),                // 0x6c
-    s("Hoverboard 0x6d", -1, Hoverboard, false),                  // 0x6d
-    s("Hoverboard into water", -1, Hoverboard, false),            // 0x6e
-    s("Hoverboard 0x6f", -1, Hoverboard, false),                  // 0x6f
+    s("Hoverboard ride", 0x16, Hoverboard, true),                 // 0x6b
+    s("Hoverboard ramp jump", 0x16, Hoverboard, true),            // 0x6c
+    s("Hoverboard crash", -1, Hoverboard, true),                  // 0x6d
+    s("Hoverboard into water", -1, Hoverboard, true),             // 0x6e
+    s("Hoverboard into a wall", -1, Hoverboard, true),            // 0x6f
     s("Magneboots wrench swing", 6, Boots, true),                // 0x70
     s("Magneboots hop", 1, Boots, true),                        // 0x71
     s("scripted hold (cinematics)", 9, Scripted, true),           // 0x72
@@ -266,6 +266,7 @@ impl Hero {
                     super::bodies::clank::entry(self, c, id, play, old_sub)
                 }
             }
+            Hoverboard if implemented(id) => super::hoverboard::entry(self, c, id, play, old_sub),
             Jump | Melee | Weapons | Bodies | Hoverboard | Unused => None,
         }
     }
@@ -317,6 +318,7 @@ impl Hero {
                     super::bodies::clank::physics(self, env, anim, rng)
                 };
             }
+            Hoverboard if implemented(s) => return super::hoverboard::physics(self, env, anim, rng),
             Jump | Weapons | Bodies | Hoverboard | Unused => return false,
         }
         true
@@ -371,6 +373,7 @@ impl Hero {
                     super::bodies::clank::transitions(self, c)
                 }
             }
+            Hoverboard if implemented(s) => super::hoverboard::transitions(self, c),
             Jump | Weapons | Bodies | Hoverboard | Unused => {}
         }
     }
@@ -418,6 +421,8 @@ mod tests {
         want.extend(0x5a..=0x62);
         // The Hologuise disguise (bodies/disguise.rs, G-WPN-006).
         want.extend(0x53..=0x59);
+        // The Hoverboard (hoverboard.rs, G-HERO-008).
+        want.extend(0x6b..=0x6f);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));

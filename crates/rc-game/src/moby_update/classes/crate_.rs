@@ -891,7 +891,7 @@ pub fn set_death_bits(w: &mut World, id: MobyId, fl: u32, path: i32) {
         if f < Pf::ONE { f = Pf::ONE; }
     }
     let mut flags: u32 = if fl & 0x100 != 0 { 5 } else { 1 };
-    if w.svc.hero_magnet != 0 || fl & 0x200 != 0 { flags |= 2; }
+    if w.hero.board.f141402 != 0 || fl & 0x200 != 0 { flags |= 2; }
     if w.hero.state == 0x10 && ph::dist3(w.hero.pos, pv(w.m(id).position)) < Pf::b(0x4080_0000) { flags |= 2; }
     let free = w.table.free_slots;
     if fl & 0x400 != 0 { flags |= 0x10; }
