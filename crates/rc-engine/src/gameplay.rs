@@ -617,11 +617,12 @@ fn help_frame(p: &mut Play, report: &rc_game::tick::TickReport, other_frame: boo
     for cmd in out.voice {
         match cmd {
             VoiceCmd::Load { id } => {
-                let n = p.svc.help.text.lang as i32 * help::VOICE_PER_LANGUAGE + id - help::VOICE_BASE;
+                // `PlayDialogue`'s stream (the help lines, Qwark's boss lines: rc_game::help::dialogue_stream).
+                let file = help::dialogue_stream(id, p.svc.help.text.lang);
                 let root = crate::level_load::extracted_root();
-                let vag = (id >= help::VOICE_BASE).then(|| crate::disc_source::read(&root, &format!("global/help_audio/{n:03}.bin")).ok()).flatten();
+                let vag = file.as_ref().and_then(|f| crate::disc_source::read(&root, f).ok());
                 let len = vag.as_deref().and_then(help::vag_ticks);
-                println!("help: tick {}: voice line {id} (help_audio {n:03}): {}", p.game.counter, len.map_or("missing".to_string(), |t| format!("{t} ticks")));
+                println!("help: tick {}: voice line {id} ({}): {}", p.game.counter, file.as_deref().unwrap_or("no stream"), len.map_or("missing".to_string(), |t| format!("{t} ticks")));
                 p.help_vag = vag.filter(|_| len.is_some()).map(std::sync::Arc::from);
                 p.svc.help.voice_loaded(len);
             }
@@ -1954,7 +1955,11 @@ fn tick(
     publish_anim(p, anim.as_deref_mut());
     let hm = &p.game.mobys.mobys[p.hero_id];
     if let Some(a) = attach.as_mut() { a.set_host(rows_bits(&hm.rows), [hm.position[0], hm.position[1], hm.position[2]]); }
-    if let Some(v) = view.as_mut() { v.view = p.game.camera.out; }
+    if let Some(v) = view.as_mut() {
+        v.view = p.game.camera.out;
+        // 0x16cf70 as the tick's classes left it (`InitViewContext`'s 0.63 unless a vehicle changed it).
+        v.tan_half_fov = p.svc.view_tan_x;
+    }
     if let Some(s) = session.as_mut() { s.0.hp = p.game.hero.health; }
     // The HUD's weapon slot (0x24f9c0): the held item 0x140408 when it has an ammo HUD and the hero is on foot.
     if let Some(hw) = held.as_mut() {

@@ -64,3 +64,4 @@ pub mod path;
 pub mod shadows;
 pub mod targeting;
 pub mod afterimage;
+pub mod vehicle;

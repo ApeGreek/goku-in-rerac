@@ -188,6 +188,12 @@ impl Hud2d {
         self.push(Tex::Frame(frame), [[x, y], [x1, y], [x, y1], [x1, y1]], [[0, 0], [w, 0], [0, h], [w, h]], rgba);
     }
 
+    /// A frame callback's screen primitive (`rc_game`'s `ScreenPrim`: pixels, its corners kept to 1/16 pixel).
+    pub fn screen_prim(&mut self, tex: Tex, pos: [[f32; 2]; 4], uv: [[f32; 2]; 4], rgba: u32) {
+        let pos16 = pos.map(|p| [(p[0] * 16.0) as i32, (p[1] * 16.0) as i32]);
+        self.push_fine(tex, pos16, uv.map(|u| [u[0] as i32, u[1] as i32]), rgba);
+    }
+
     /// `VU1_setScissor(x0, x1, y0, y1)`.
     pub fn set_scissor(&mut self, x0: i32, x1: i32, y0: i32, y1: i32) { self.scissor = [x0, x1, y0, y1]; }
     pub fn reset_scissor(&mut self) { self.scissor = FULL_SCISSOR; }
@@ -223,6 +229,30 @@ impl Hud2d {
     }
 }
 
+/// One FX texture as stored: 8-bit indices and its 256-entry CLUT (CSM1 order).
+pub struct IndexedFx {
+    pub width: u32,
+    pub height: u32,
+    pub indices: Vec<u8>,
+    pub clut: Vec<u8>,
+}
+
+/// The FX texture decoded with the entries of the logical indices from `cut` on opaque black (0x80000000): the CLUT a
+/// vehicle gauge leaves (`rc_game::moby_update::classes::draw_callbacks::ScreenTex::FxCut`). Raw GS alpha, as the atlas.
+pub fn decode_cut(t: &IndexedFx, cut: u8) -> Texture {
+    let n = t.width as usize * t.height as usize;
+    let mut rgba = Vec::with_capacity(n * 4);
+    for &ix in t.indices.iter().take(n) {
+        if ix >= cut {
+            rgba.extend_from_slice(&[0, 0, 0, 0x80]);
+        } else {
+            let e = rc_formats::texture::clut_index(ix as u32) as usize * 4;
+            rgba.extend_from_slice(t.clut.get(e..e + 4).unwrap_or(&[0; 4]));
+        }
+    }
+    Texture { width: t.width, height: t.height, rgba }
+}
+
 /// The level's HUD data.
 pub struct LevelHud {
     pub hud: Hud,
@@ -230,6 +260,8 @@ pub struct LevelHud {
     pub frames: Vec<Texture>,
     /// FX textures (raw alpha), index = `GetEffectTex` argument.
     pub fx: Vec<Option<Texture>>,
+    /// The FX textures' stored indices and CLUTs (the vehicle gauges redraw theirs with a cut CLUT: [`apply_fx_cuts`]).
+    pub fx_indexed: Vec<Option<IndexedFx>>,
     pub glyphs: [GlyphTable; 3],
     pub glyph_addrs: [u32; 3],
     pub messages: Vec<Message>,
@@ -275,9 +307,19 @@ pub fn load(root: &Path, index: u32, core: &rc_formats::level::LevelCore, core_i
             Ok(Some(hud::decode_indexed8_raw(px, e.width as u32, e.height as u32, clut)?))
         })
         .collect::<Result<Vec<_>>>()?;
+    let fx_indexed = fx_entries
+        .iter()
+        .map(|e| {
+            if !e.present() { return None; }
+            let n = e.width as usize * e.height as usize;
+            let indices = fx_bank.get(e.texture as usize..e.texture as usize + n)?.to_vec();
+            let clut = fx_bank.get(e.palette as usize..e.palette as usize + 1024)?.to_vec();
+            Some(IndexedFx { width: e.width as u32, height: e.height as u32, indices, clut })
+        })
+        .collect();
     let lang = language();
     let messages = strings::parse_strings(gameplay, lang).context("level text")?;
-    Ok(LevelHud { hud, frames, fx, glyphs, glyph_addrs, messages, lang })
+    Ok(LevelHud { hud, frames, fx, fx_indexed, glyphs, glyph_addrs, messages, lang })
 }
 
 /// Rectangles of every texture in the atlas.
@@ -459,6 +501,8 @@ struct HudRuntime {
     calls_cursor: Option<u64>,
     /// The calls not applied yet (kept while the HUD loop is frozen: the page menus, scenes).
     pending: Vec<rc_game::hud::Call>,
+    /// The CLUT cut each FX texture's atlas region holds (none: the stored CLUT) ([`apply_fx_cuts`]).
+    fx_cuts: std::collections::HashMap<usize, u8>,
 }
 
 #[derive(Component)]
@@ -524,7 +568,7 @@ impl Plugin for HudPlugin {
         if std::env::var("RC_HUD").is_ok_and(|v| v.trim() == "0") { return; }
         app.add_plugins((Material2dPlugin::<HudMaterial>::default(), UiMaterialPlugin::<HudComposite>::default(), UiMaterialPlugin::<HudStaticComposite>::default()))
             .add_systems(crate::level_switch::LevelStartup, setup)
-            .add_systems(Update, (target_main_camera, tick_and_build).chain().in_set(HudBuild));
+            .add_systems(Update, (target_main_camera, tick_and_build, apply_fx_cuts).chain().in_set(HudBuild));
     }
 }
 
@@ -640,6 +684,7 @@ fn setup(
         reset: 0,
         calls_cursor: None,
         pending: Vec::new(),
+        fx_cuts: Default::default(),
     });
 }
 
@@ -737,6 +782,24 @@ fn tick_and_build(
     // The guns' screen markers (`DrawWorld`'s 2D overlay before the HUD: crate::marker_render).
     if let Some(p) = play.as_deref().filter(|_| !hook.replace_hud && !scene.hide_hud) { rt.hud2d.prims.extend(crate::marker_render::prims(p)); }
     let mut st = crate::text_render::TextState::default();
+    // The moby draw callbacks' 2-D layer (the vehicles' HUDs: rc_game draw_callbacks::screen / screen_texts), drawn by
+    // `DrawWorld` with the mobys' callbacks, before the HUD.
+    if let Some(p) = play.as_deref().filter(|_| !hook.replace_hud && !scene.hide_hud) {
+        use rc_game::moby_update::classes::draw_callbacks::ScreenTex;
+        let cb = &p.svc.draw_callbacks;
+        for q in &cb.screen {
+            let tex = match q.tex {
+                ScreenTex::None => Tex::None,
+                ScreenTex::Fx(n) | ScreenTex::FxCut { fx: n, .. } => Tex::Fx(n),
+            };
+            rt.hud2d.screen_prim(tex, q.pos, q.uv, q.rgba);
+        }
+        let g = rt.glyphs[rc_formats::font::Font::Small as usize];
+        for t in &cb.screen_texts {
+            let width = rc_formats::font::measure_text_width(&t.text, t.len, &g);
+            crate::text_render::font_print(&mut rt.hud2d, &mut st, &g, rc_formats::font::Font::Small, t.x - (width >> 1), t.y, t.rgba, &t.text, t.len);
+        }
+    }
     // HudDraw 0x24fb50 skips the HUD in a frame whose tick set 0x17e988 (the Visibomb's flight: crate::visibomb_view).
     let hud_off = crate::visibomb_view::hud_off(play.as_deref());
     if !hook.replace_hud && !scene.hide_hud && !hud_off { crate::text_render::execute(&mut rt.hud2d, &mut st, &rt.glyphs, &rt.draws); }
@@ -851,6 +914,29 @@ fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], frames: &[[u32; 4
         .with_inserted_attribute(ATTRIBUTE_SCISSOR, VertexAttributeValues::Uint32x4(sc))
         .with_inserted_indices(Indices::U32(idx))
 }
+
+/// The FX textures the frame's screen primitives draw with a cut CLUT (`ScreenTex::FxCut`, the vehicle gauges): their
+/// atlas regions re-decoded when the cut changes. The game's CLUT edit persists, so the other draws of the texture see
+/// it too, as here.
+fn apply_fx_cuts(rt: Option<ResMut<HudRuntime>>, level: Res<crate::Level>, play: Option<Res<crate::gameplay::Play>>, dyn_images: Option<Res<crate::hud_images::HudImages>>, mut images: ResMut<Assets<Image>>) {
+    use rc_game::moby_update::classes::draw_callbacks::ScreenTex;
+    let (Some(mut rt), Some(p), Some(di), Some(lh)) = (rt, play, dyn_images, level.0.hud.as_ref()) else { return };
+    for q in &p.svc.draw_callbacks.screen {
+        let ScreenTex::FxCut { fx, cut } = q.tex else { continue };
+        if rt.fx_cuts.get(&fx) == Some(&cut) { continue; }
+        let (Some(Some(src)), Some(Some([rx, ry, w, h]))) = (lh.fx_indexed.get(fx), rt.atlas_fx.get(fx).copied()) else { continue };
+        let t = decode_cut(src, cut);
+        let Some(mut img) = images.get_mut(&di.atlas) else { return };
+        let Some(data) = img.data.as_mut() else { return };
+        for row in 0..h.min(t.height) {
+            let src_row = &t.rgba[(row * t.width * 4) as usize..((row * t.width + w.min(t.width)) * 4) as usize];
+            let dst = (((ry + row) * ATLAS_W + rx) * 4) as usize;
+            if let Some(d) = data.get_mut(dst..dst + src_row.len()) { d.copy_from_slice(src_row); }
+        }
+        rt.fx_cuts.insert(fx, cut);
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

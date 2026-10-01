@@ -109,6 +109,52 @@ pub struct DrawCallbacks {
     pub rings: Vec<super::units::trespasser_lock::RingPrim>,
     /// The disguise's glow points (0x1410a0..0x1410c0) and colour 0x141634 of this tick ([`Callback::DisguiseGlow`]).
     pub disguise: Option<([[f32; 3]; 3], u32)>,
+    /// The 2-D primitives the last [`run_frame`]'s callbacks laid out in screen pixels (the vehicles' HUDs: Gemlik's
+    /// ship 69, `super::units::gemlik_ship_hud`), in draw order; `rc-engine`'s scene_render draws them over the world.
+    pub screen: Vec<ScreenPrim>,
+    /// The centred small-font texts of those callbacks (`font_print_center_small`), drawn after [`Self::screen`].
+    pub screen_texts: Vec<ScreenText>,
+}
+
+/// The texture of a [`ScreenPrim`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenTex {
+    /// Flat colour (the GS strips without TME).
+    None,
+    /// FX texture n (`GetEffectTex(n)`).
+    Fx(usize),
+    /// FX texture n drawn with its CLUT cut: the entries of the logical indices from `cut` on are opaque black
+    /// (0x80000000), the others the texture's own (the vehicle gauges' palette edit).
+    FxCut { fx: usize, cut: u8 },
+}
+
+/// One screen primitive: four corners in GS strip order (triangles 012, 123; a triangle repeats its last corner),
+/// screen pixels of the 512 × 416 frame, texel UVs, the GS RGBA (0x80 = 1.0).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenPrim {
+    pub tex: ScreenTex,
+    pub pos: [[f32; 2]; 4],
+    pub uv: [[f32; 2]; 4],
+    pub rgba: u32,
+}
+
+impl ScreenPrim {
+    /// A GS triangle strip as primitives (one per triangle).
+    pub fn strip(out: &mut Vec<ScreenPrim>, pts: &[[f32; 2]], rgba: u32) {
+        for t in pts.windows(3) {
+            out.push(ScreenPrim { tex: ScreenTex::None, pos: [t[0], t[1], t[2], t[2]], uv: [[0.0; 2]; 4], rgba });
+        }
+    }
+}
+
+/// `font_print_center_small(x, y, rgba, text, len)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScreenText {
+    pub x: i32,
+    pub y: i32,
+    pub rgba: u32,
+    pub text: Vec<u8>,
+    pub len: i32,
 }
 
 impl DrawCallbacks {

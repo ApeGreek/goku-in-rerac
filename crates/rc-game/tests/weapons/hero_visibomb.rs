@@ -397,7 +397,7 @@ fn run(lv: &Lv, s: &Setup, input: &dyn Fn(u32) -> PadInput, ticks: u32) -> Vec<R
             cur: c6.cur,
             blend: game.camera.blend.mode,
             hud_off: g.hud_off_at == Some(tick),
-            all_visible: g.all_visible_at == Some(tick),
+            all_visible: svc.occlusion_fallback == Some((tick, 1)),
             view: (g.view.overlay, g.view.no_sky, g.view.fog_seq, g.view.short_far),
             help_hold: svc.help.hold,
             prompt: svc.interact.prompt.owner,

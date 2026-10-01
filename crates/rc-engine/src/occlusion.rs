@@ -135,14 +135,19 @@ fn report(level: &LoadedLevel, mode: OcclusionMode, freeze: bool) {
 }
 
 /// `UpdateOcclusion` once per frame, at the camera `tfrag_lod` scales by 1024 (the game's 0x167240).
-/// Fallback 0 (`0x15f608` is cleared at the end of every frame render), 1 in a frame whose tick set it (the Visibomb's
-/// missile: crate::visibomb_view; `UpdateModeFreeze`'s 2 is not ported), debug camera off (`0x16c4ec` = 0 in play).
+/// Fallback 0 (`0x15f608` is cleared at the end of every frame render), else the value a tick set for its frame (1 the
+/// Visibomb's missile, 2 `UpdateModeFreeze` and Gemlik's exploding ship: crate::visibomb_view::occlusion_fallback),
+/// debug camera off (`0x16c4ec` = 0 in play).
 fn update_occlusion(frame: Option<ResMut<OcclusionFrame>>, level: Res<crate::Level>, cams: Query<&Transform, With<Camera3d>>, play: Option<Res<crate::gameplay::Play>>) {
     let (Some(mut f), Some(cam)) = (frame, cams.iter().next()) else { return };
     let eye = crate::game_camera::game_eye(cam);
     let grid = level.0.occlusion.grid.as_ref();
     let mode = f.mode;
-    let fallback = if crate::visibomb_view::all_visible(play.as_deref()) { OcclusionFallback::AllVisible } else { OcclusionFallback::Neighbours };
+    let fallback = match crate::visibomb_view::occlusion_fallback(play.as_deref()) {
+        1 => OcclusionFallback::AllVisible,
+        2 => OcclusionFallback::Octants,
+        _ => OcclusionFallback::Neighbours,
+    };
     f.mask = *f.state.update(grid, mode, fallback, false, eye.to_array());
     if f.freeze_after_first && f.mode == OcclusionMode::Active { f.mode = OcclusionMode::Freeze; }
     f.camera = eye;

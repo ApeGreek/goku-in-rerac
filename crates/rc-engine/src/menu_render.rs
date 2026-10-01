@@ -603,12 +603,12 @@ fn menu_frame(
                 state: h.state,
                 group: h.group,
                 body: h.mode,
-                // 0x1403fc (the hand swap), the ridden moby 0x140940 and the camera's script lock +0x86: not kept by the
-                // port's hero / camera (no vehicle class is ported: G-UI-019).
+                // 0x1403fc (the hand swap) and the camera's script lock +0x86: not kept by the port's hero / camera
+                // (G-UI-019). The ridden moby 0x140940 is the vehicle record's (`rc_game::vehicle`).
                 swap_state: 0,
                 fell: h.fell_out != 0,
                 hp: sess.hp,
-                riding_class: None,
+                riding_class: play.svc.vehicle.moby.and_then(|v| play.game.mobys.mobys.get(v)).map(|m| m.o_class),
                 camera_lock: 0,
                 debug_step: false,
                 c5c4: 0,
@@ -974,16 +974,8 @@ fn menu_sound_frame(play: &mut Play, audio: &mut crate::audio_out::AudioOut) {
     audio.push_frame();
 }
 
-/// The stream a dialogue id plays (`play_dialogue` 0x215970): ≥ 60000 `post_credits_audio[id − 60000]`
-/// (`fun_00215440`), 30000.. `help_audio[language·150 + id − 30000]` (`fun_002156d8`); the other ranges (scenes, the
-/// vendor, space, the Qwark boss) have their own players.
-fn dialogue_stream(id: i32, lang: u32) -> Option<String> {
-    match id {
-        60000.. => Some(format!("global/post_credits_audio/{:03}.bin", id - 60000)),
-        30000..=39999 => Some(format!("global/help_audio/{:03}.bin", lang as i32 * rc_game::help::VOICE_PER_LANGUAGE + id - rc_game::help::VOICE_BASE)),
-        _ => None,
-    }
-}
+/// The stream a dialogue id plays (`rc_game::help::dialogue_stream`).
+fn dialogue_stream(id: i32, lang: u32) -> Option<String> { rc_game::help::dialogue_stream(id, lang) }
 
 /// One menu frame of the dialogue player 0x151720 (`rc_game::help::Voice`): a widget's request (0x1516ec), its
 /// `continue_audio_stream_if_ready` (the line starts at full volume: `fun_00215440` ignores the HelpDesk voice option)
@@ -1121,8 +1113,8 @@ fn freeze_frame(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, gs: &mut rc
 /// The kinds 0 / 1 / 2 / 4 / 6 effects of an `UpdateModeFreeze` frame (rc_game::menus::freeze::FreezeOut).
 fn freeze_effects(play: &mut Play, out: &rc_game::menus::freeze::FreezeOut, frame: u64) {
     use rc_game::moby_update::services::{HeroCall, HeroFields, HeroPose};
-    // 0x15f608 = 2: the occlusion shows everything this frame (the fallback crate::visibomb_view::all_visible reads).
-    if out.all_visible { play.svc.visibomb.all_visible_at = Some(play.game.counter.wrapping_sub(1)); }
+    // 0x15f608 = 2: the occlusion's octant fallback this frame (crate::visibomb_view::occlusion_fallback).
+    if out.all_visible { play.svc.occlusion_fallback = Some((play.game.counter.wrapping_sub(1), 2)); }
     let teleport_entry = |play: &mut Play, f: &mut HeroFields| {
         // HeroTeleport(0x141050, 0x141060, 0, 1): the pose saved where he got in (crate::hero::bodies::Bodies::entry_pose).
         if let Some((pos, euler)) = play.game.hero.bodies.entry_pose {
@@ -1139,7 +1131,10 @@ fn freeze_effects(play: &mut Play, out: &rc_game::menus::freeze::FreezeOut, fram
         println!("menus: frame {frame}: Quit Race: race sound {:?} stopped, quits counter {:?} (0x15ee38 / 0x15ee3c), update_resource_counter, HeroTeleport(entry pose)", q.stop_sound, q.count);
     }
     if out.race_rewind { println!("menus: frame {frame}: Quit Race? no: the race stage − 1, the race moby +0xbc = 3 (the race classes: G-UI-019)"); }
-    if out.vehicle_quit { println!("menus: frame {frame}: Quit? yes: 0x14095f |= 1 (the vehicle classes: G-UI-019)"); }
+    if out.vehicle_quit {
+        play.svc.vehicle.request_quit();
+        println!("menus: frame {frame}: Quit? yes: 0x14095f |= 1");
+    }
     if out.leave_body {
         // The body moby 0x1413d0 hidden, collision off, mode |= 1; the body left (FUN_00231450) and the entry pose.
         if let Some(id) = play.game.hero.bodies.moby {

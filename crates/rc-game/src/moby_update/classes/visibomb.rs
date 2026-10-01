@@ -150,8 +150,6 @@ pub struct Globals {
     pub missile: Option<MobyId>,
     /// 0x17e988 = 1 in the tick with this counter: `HudDraw` skips the HUD (and clears it) that frame.
     pub hud_off_at: Option<u64>,
-    /// 0x15f608 = 1 in the tick with this counter: `UpdateOcclusion` shows everything that frame.
-    pub all_visible_at: Option<u64>,
     pub view: View,
     /// The range limiter's static (`0x302438`), the quads its draw made in the frame of `static_at`.
     pub static_quads: Vec<StaticDraw>,
@@ -206,7 +204,7 @@ pub fn view_off(w: &mut World, full: bool, underwater_off: bool) {
 /// The per-frame flags every missile tick sets (0x15f608, 0x17e988; the help box suspended; the context prompt held).
 fn frame_flags(w: &mut World) {
     let c = w.counter;
-    w.svc.visibomb.all_visible_at = Some(c);
+    w.svc.occlusion_fallback = Some((c, 1));
     w.svc.help.suspend();
     w.svc.visibomb.hud_off_at = Some(c);
     w.svc.interact.force_prompt(6, 0);
@@ -267,7 +265,7 @@ pub fn launch(w: &mut World, yaw: f32, pitch: f32, gun: [f32; 3], point: [f32; 3
         m.cmd = 1;
         m.position = [h.point[0], h.point[1], h.point[2], m.position[3]];
     }
-    w.svc.visibomb.all_visible_at = Some(w.counter);
+    w.svc.occlusion_fallback = Some((w.counter, 1));
     w.svc.interact.force_prompt(6, 0);
     Some(id)
 }

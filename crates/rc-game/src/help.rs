@@ -44,6 +44,25 @@ pub const LOG_IDS: u32 = 0x1798d0;
 pub const VOICE_BASE: i32 = 30000;
 /// `help_audio` entries per language (TOC field 0x1ab8 = 0x139638, `lang·600 + n·4`).
 pub const VOICE_PER_LANGUAGE: i32 = 150;
+/// Qwark's boss lines (Gemlik's ship 388): `PlayDialogue` ids 50000..59999 (`fun_00215518`): the stream
+/// `qwark_boss_audio[(id − 50000)·6 + lang]` (the TOC's 0x138a80, 0x18 bytes an id).
+pub const QWARK_BASE: i32 = 50000;
+/// `qwark_boss_audio` entries per line (one per language).
+pub const QWARK_LANGUAGES: i32 = 6;
+
+/// The extracted file `PlayDialogue` 0x279cd8 streams for dialogue id `id` in language `lang`: ≥ 60000
+/// `post_credits_audio[id − 60000]` (`fun_00215440`), 50000.. `qwark_boss_audio` ([`QWARK_BASE`]), 30000..
+/// `help_audio[lang·150 + id − 30000]` (`fun_002156d8`); None for the ranges with their own players (scenes, the
+/// vendor, space).
+pub fn dialogue_stream(id: i32, lang: u32) -> Option<String> {
+    match id {
+        60000.. => Some(format!("global/post_credits_audio/{:03}.bin", id - 60000)),
+        QWARK_BASE..=59999 => Some(format!("global/qwark_boss_audio/{:03}.bin", (id - QWARK_BASE) * QWARK_LANGUAGES + lang as i32)),
+        VOICE_BASE..=39999 => Some(format!("global/help_audio/{:03}.bin", lang as i32 * VOICE_PER_LANGUAGE + id - VOICE_BASE)),
+        _ => None,
+    }
+}
+
 /// `force_help_message(5, 0)`: the owner id the box holds the context prompt with.
 pub const PROMPT_OWNER: i32 = 5;
 /// `PlayLevelSoundAtMoby(0, 1, 0)`: the opening sound (`crate::audio::class_sounds::level_sound::HELP_OPEN`).
@@ -374,6 +393,15 @@ impl Help {
         self.bx.t = 0;
         self.bx.index = None;
         self.request = -1;
+    }
+
+    /// `continue_audio_stream_if_ready` 0x279e78 from a class (Qwark's ship 388's taunts): a line buffered in the
+    /// player (busy, 0x15172a = 3) starts (state 4). Returns whether it did.
+    pub fn continue_stream(&mut self) -> bool {
+        if !self.voice.busy || self.voice.state != 3 { return false; }
+        self.voice.state = 4;
+        self.out.voice.push(VoiceCmd::Play { audible: true });
+        true
     }
 
     /// `FUN_00225a28`: suspend (the Visibomb's flight). The box closes (`FUN_00225790`) and reopens its message

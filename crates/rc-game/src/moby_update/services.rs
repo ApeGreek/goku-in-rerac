@@ -894,10 +894,17 @@ pub struct Services {
     /// The level's pvar shared data (gameplay section 0x4c, `rc_formats::gameplay::parse_pvar_shared_data`): a pvar
     /// field the loader pointed into it holds the offset here (the lamps' per-group registration tick, …).
     pub pvar_shared: Vec<u8>,
-    /// `0x140940`: the vehicle moby Ratchet rides (the ship-combat record; 0x140944 its class). Written by the flown
-    /// ships 1242 / 69 / 1379, which are not ported (G-LVL-009), so None until they are; read by Gemlik's water
-    /// managers' pause (`crate::water::managers`, level13 `0x309e88`).
-    pub vehicle: Option<MobyId>,
+    /// 0x140940..0x14095f: the ridden vehicle record ([`crate::vehicle`]), written by the flown ships' mounts (Gemlik's
+    /// 69), read by the pause triggers, Gemlik's water managers' pause (`crate::water::managers`) and the ride classes.
+    pub vehicle: crate::vehicle::Record,
+    /// 0x15f608: the occlusion fallback a tick's code set for its frame (`UpdateOcclusion`; cleared after every frame's
+    /// render): (the tick counter, the value: 1 everything visible (the Visibomb's missile), 2 the level's octant
+    /// override (`UpdateModeFreeze`, Gemlik's ship 69 while it explodes)).
+    pub occlusion_fallback: Option<(u64, u8)>,
+    /// The view's horizontal half-angle tangent (level01 0x16cf70, level13 0x16cdf0): `InitViewContext`'s 0.63 at the
+    /// level load; a class that writes it calls `UpdateViewContext` (Gemlik's ship 69's speed FOV); the engine's
+    /// projection follows it.
+    pub view_tan_x: f32,
     /// The help / hint message system (`Help_Request` 0x225818, `Help_Update` 0x225bd0, the records and the log:
     /// [`crate::help`]); the classes request through it, the engine runs its update after the tick.
     pub help: crate::help::Help,
@@ -976,7 +983,9 @@ impl Services {
             hud: Default::default(),
             travel: Default::default(),
             pvar_shared: Vec::new(),
-            vehicle: None,
+            vehicle: Default::default(),
+            occlusion_fallback: None,
+            view_tan_x: 0.63,
         }
     }
 

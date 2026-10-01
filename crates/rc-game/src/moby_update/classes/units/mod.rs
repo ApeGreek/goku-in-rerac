@@ -177,9 +177,13 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U405 | 1267 Hoven's turret mini-game (Gemlik's unlock, planet 13), its HUD 0x304218 and red screen 0x304d98 (12) | level12 0x303540 | [`hoven_turret`] |
+//! | U424 | 69 Gemlik's ship (the base battle: the flight, the guns, the missiles, the vehicle record), its HUD 0x2b97f8 (the lock, the targets left, the gauge) (13) | level13 0x2bb068 | [`gemlik_ship`], [`gemlik_ship_hud`] |
+//! | U434 | 388 Qwark's ship (the Gemlik base battle's boss: paths, phases, tractor beam, shield, taunts), its parts 389..401, shield 352, missile 82 and mine 83 (13) | level13 0x2eb098 | [`qwark_ship`], [`qwark_ship_parts`] |
 //! | — | 458 the ridden turrets' shell (08, 12; created by code: the spawner 0x2ef2e8) | level12 0x2ef648 | [`turret_shell`] |
 //! | U407 | 1274 Hoven's carrier (the turret game's target: 17 parts, five guns, the fall, scene 7) (12) | level12 0x3069d0 | [`hoven_carrier`] |
 //! | — | 184 the gun shot (04, 12; created by code: the spawner 0x2d4150) | level12 0x2d4378 | [`gun_shot`] |
+//! | — | 1009 the ships' laser shot (11, 13, 17; created by code: the spawner 0x3025f8, the search 0x302420) | level13 0x302780 | [`ship_laser`] |
+//! | — | 295 the ships' homing missile (13, 17; created by code: the spawner 0x2e6a58) | level13 0x2e6c08 | [`ship_missile`] |
 //! | U397 | 326 Hoven's gun drones (ordinary and the turret game's attackers) and their shot 409 (12) | level12 0x2e9f68, 0x2ece00 | [`hoven_drone`] |
 //! | — | 1371 the drones' rider (12, 15; created by code: 0x308670, knocked off by 0x308708) | level12 0x308918 | [`drone_rider`] |
 //! | U538 | 1455 Kalebo III's grind-race host (the Hologuise, skill point 0x13d422; the race itself: G-LVL-007) (16) | level16 0x2e6808 | [`kalebo_race`] |
@@ -354,9 +358,15 @@ pub mod fleet_story;
 pub mod veldin_story;
 pub mod umbris_story;
 pub mod hoven_turret;
+pub mod gemlik_ship;
+pub mod gemlik_ship_hud;
+pub mod qwark_ship;
+pub mod qwark_ship_parts;
 pub mod turret_shell;
 pub mod hoven_carrier;
 pub mod gun_shot;
+pub mod ship_laser;
+pub mod ship_missile;
 pub mod hoven_drone;
 pub mod drone_rider;
 pub mod kalebo_race;
@@ -624,9 +634,19 @@ pub const PORTS: &[UnitPort] = &[
     // Draw callbacks only (no class runs them): the HUD (`Callback::UnitFrame`) and the red screen (`Callback::UnitQuads`).
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U424 69", level: gemlik_ship::REFERENCE_LEVEL, func: gemlik_ship::UPDATE_FN, classes: &gemlik_ship::CLASSES, update: gemlik_ship::update, joints: &gemlik_ship::CLASSES },
+    UnitPort { unit: "U424 69 hud", level: gemlik_ship::REFERENCE_LEVEL, func: gemlik_ship_hud::HUD_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U434 388", level: qwark_ship::REFERENCE_LEVEL, func: qwark_ship::UPDATE_FN, classes: &qwark_ship::CLASSES, update: qwark_ship::update, joints: &qwark_ship::CLASSES },
+    UnitPort { unit: "U434 388 beam", level: qwark_ship::REFERENCE_LEVEL, func: qwark_ship::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "388 parts", level: qwark_ship_parts::REFERENCE_LEVEL, func: qwark_ship_parts::PART_FN, classes: &qwark_ship_parts::PART_CLASSES, update: qwark_ship_parts::part_update, joints: &[] },
+    UnitPort { unit: "388 shield 352", level: qwark_ship_parts::REFERENCE_LEVEL, func: qwark_ship_parts::SHIELD_FN, classes: &qwark_ship_parts::SHIELD_CLASSES, update: qwark_ship_parts::shield_update, joints: &[] },
+    UnitPort { unit: "388 missile 82", level: qwark_ship_parts::REFERENCE_LEVEL, func: qwark_ship_parts::MISSILE_FN, classes: &qwark_ship_parts::MISSILE_CLASSES, update: qwark_ship_parts::missile_update, joints: &qwark_ship_parts::MISSILE_CLASSES },
+    UnitPort { unit: "388 mine 83", level: qwark_ship_parts::REFERENCE_LEVEL, func: qwark_ship_parts::MINE_FN, classes: &qwark_ship_parts::MINE_CLASSES, update: qwark_ship_parts::mine_update, joints: &[] },
     UnitPort { unit: "458 shell", level: turret_shell::REFERENCE_LEVEL, func: turret_shell::UPDATE_FN, classes: &turret_shell::CLASSES, update: turret_shell::update, joints: &[] },
     UnitPort { unit: "U407 1274", level: hoven_carrier::REFERENCE_LEVEL, func: hoven_carrier::UPDATE_FN, classes: &hoven_carrier::CLASSES, update: hoven_carrier::update, joints: &hoven_carrier::JOINTS },
     UnitPort { unit: "184 shot", level: gun_shot::REFERENCE_LEVEL, func: gun_shot::UPDATE_FN, classes: &gun_shot::CLASSES, update: gun_shot::update, joints: &[] },
+    UnitPort { unit: "1009 laser", level: ship_laser::REFERENCE_LEVEL, func: ship_laser::UPDATE_FN, classes: &ship_laser::CLASSES, update: ship_laser::update, joints: &[] },
+    UnitPort { unit: "295 missile", level: ship_missile::REFERENCE_LEVEL, func: ship_missile::UPDATE_FN, classes: &ship_missile::CLASSES, update: ship_missile::update, joints: &ship_missile::CLASSES },
     UnitPort { unit: "U397 326", level: hoven_drone::REFERENCE_LEVEL, func: hoven_drone::UPDATE_FN, classes: &hoven_drone::CLASSES, update: hoven_drone::update, joints: &hoven_drone::JOINTS },
     UnitPort { unit: "U397 409", level: hoven_drone::REFERENCE_LEVEL, func: hoven_drone::SHOT_FN, classes: &hoven_drone::SHOT_CLASSES, update: hoven_drone::shot_update, joints: &[] },
     UnitPort { unit: "1371 rider", level: drone_rider::REFERENCE_LEVEL, func: drone_rider::UPDATE_FN, classes: &drone_rider::CLASSES, update: drone_rider::update, joints: &[] },
@@ -651,6 +671,8 @@ impl Globals {
     /// The word at `addr` (0 until written: the words these ports use start at 0 in the data).
     pub fn word(&self, addr: u32) -> u32 { self.words.get(&addr).copied().unwrap_or(0) }
     pub fn set_word(&mut self, addr: u32, v: u32) { self.words.insert(addr, v); }
+    /// The word at `addr`, `init` until written (a word the overlay data starts at another value: Qwark's −1).
+    pub fn word_or(&self, addr: u32, init: u32) -> u32 { self.words.get(&addr).copied().unwrap_or(init) }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -756,6 +778,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::RING_FN)) => veldin_shots::ring_quads(table, svc, id),
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::AURA_DRAW_FN)) => veldin_shots::aura_quads(table, svc, id),
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::BEAM_FN)) => veldin_hopper::beam_quads(table, svc, id),
+        Some((qwark_ship::REFERENCE_LEVEL, qwark_ship::BEAM_FN)) => qwark_ship::beam_quads(table, svc, id),
         _ => None,
     }
 }
@@ -779,6 +802,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((veldin_pads::REFERENCE_LEVEL, veldin_pads::COUNTDOWN_FN)) => veldin_pads::countdown_draw(w, id),
         Some((hoven_turret::REFERENCE_LEVEL, hoven_turret::HUD_FN)) => hoven_turret::hud_frame(w, id),
+        Some((gemlik_ship::REFERENCE_LEVEL, gemlik_ship_hud::HUD_FN)) => gemlik_ship_hud::hud_frame(w, id),
         _ => {}
     }
 }

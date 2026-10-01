@@ -23,7 +23,7 @@
 //! **Level words** ([`lw`], all 0 in the overlay data): 0x161f00 the game on (the drones 326 and the carrier 1274 read
 //! it), 0x161f04 the turret destroyed, 0x161f20 the mounts (the attackers ease off with it), 0x161f24 the carrier's
 //! last stand (1274's `0x3054b0` sets it: the turret can no longer be destroyed), 0x1619a0 the carrier's death camera
-//! (1274), 0x14095f the vehicle "Quit?" (freeze kind 1's △; the engine's freeze effects do not write it yet).
+//! (1274). The vehicle "Quit?" 0x14095f is the shared record's ([`crate::vehicle::Record::quit`]).
 //!
 //! ## Coverage (`0x303540`)
 //! | address | what | port |
@@ -93,8 +93,6 @@ pub mod lw {
     pub const MOUNTS: u32 = 0x16_1f20;
     pub const LAST_STAND: u32 = 0x16_1f24;
     pub const CARRIER_CAM: u32 = 0x16_19a0;
-    /// 0x14095f (u8): the vehicles' "Quit?" answered yes (freeze kind 1).
-    pub const VEHICLE_QUIT: u32 = 0x14_095f;
 }
 
 pub mod pvo {
@@ -270,12 +268,12 @@ fn ride(w: &mut World, id: MobyId) {
     }
     if word(w, lw::LAST_STAND) == 0 {
         let mut hp = c::pf(w, id, pvo::HEALTH);
-        if word(w, lw::VEHICLE_QUIT) & 1 != 0 {
+        if w.svc.vehicle.quit & 1 != 0 {
             if 100.0 < hp {
                 let n = word(w, lw::MOUNTS).wrapping_sub(1);
                 set_word(w, lw::MOUNTS, n);
             }
-            set_word(w, lw::VEHICLE_QUIT, 0);
+            w.svc.vehicle.quit = 0;
             w.hero_fields_mut().call(HeroCall::Death);
             hp = c::pf(w, id, pvo::HEALTH);
         }

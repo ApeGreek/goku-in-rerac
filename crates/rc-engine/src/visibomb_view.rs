@@ -70,8 +70,13 @@ fn last_tick(p: &Play) -> u64 { p.game.counter.wrapping_sub(1) }
 /// `HudDraw` skips the HUD this frame (0x17e988).
 pub fn hud_off(play: Option<&Play>) -> bool { play.is_some_and(|p| p.svc.visibomb.hud_off_at == Some(last_tick(p))) }
 
-/// `UpdateOcclusion` falls back to everything visible this frame (0x15f608 = 1).
-pub fn all_visible(play: Option<&Play>) -> bool { play.is_some_and(|p| p.svc.visibomb.all_visible_at == Some(last_tick(p))) }
+/// The occlusion fallback 0x15f608 the last tick set for this frame (`Services::occlusion_fallback`; 0: none).
+pub fn occlusion_fallback(play: Option<&Play>) -> u8 {
+    play.and_then(|p| p.svc.occlusion_fallback.filter(|&(t, _)| t == last_tick(p))).map_or(0, |(_, v)| v)
+}
+
+/// 0x15f608 ≠ 0 this frame (the grid seas' "drawn anyway" test).
+pub fn all_visible(play: Option<&Play>) -> bool { occlusion_fallback(play) != 0 }
 
 /// The record `0x21b9f8` draws with: 0x16cc30's bands (alpha 0x0f) on levels 2, 5–8 and 10, else 0x16cc00's (0x17).
 pub fn band_alpha(level: u32) -> u32 { if level == 2 || level == 10 || (5..9).contains(&level) { 0x0f } else { 0x17 } }

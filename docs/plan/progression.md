@@ -199,7 +199,7 @@ cheat entry (media lane).
 | 10 Orxon | Batalia's commando 1130 (talk node 3) | P (`batalia_story`) |
 | 11 Pokitaru, 12 Hoven | Orxon's infobots 750 | P (`infobot`) |
 | 13 Gemlik | Hoven's turret 1267 (its target, the carrier 1274, destroyed) | P (`hoven_turret`, `hoven_carrier`; 2026-10-01 minigames lane) |
-| 14 Oltanis | Gemlik's director 1353 (Qwark's escape) | P (`gemlik_story`) |
+| 14 Oltanis | Gemlik's director 1353 (Qwark's escape), after Qwark's ship 388 falls to Gemlik's ship 69 | P (`gemlik_story`; the fight: `gemlik_ship`, `qwark_ship`, 2026-10-01) |
 | 15 Quartu | Oltanis' scrap merchant 924 (talk node 4) | P (`oltanis_story`) |
 | 16 Kalebo III | Quartu's Giant Clank mission 1446 | P (`quartu_giant_mission`) |
 | 17 Drek's fleet | Quartu's broadcast director 1419 | P (`quartu_story`) |

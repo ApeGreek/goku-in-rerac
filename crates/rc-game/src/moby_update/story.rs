@@ -191,3 +191,54 @@ pub fn death_bits(w: &mut World, m: MobyId) {
     w.svc.save.death.insert((lvl, sid));
     w.svc.save.death_level.insert(sid);
 }
+
+/// `0x254a30(group, update, drawn, collision)` (level09; level13 `0x2650a8`; −1: that part left alone): every live
+/// member of the moby group (`0x1abb40[group]`): update off = mode | 2, drawn off = +0x31 = 0 and mode | 1, collision
+/// = the class's blob or none.
+pub fn group_set(w: &mut World, group: i32, update: i32, drawn: i32, coll: i32) {
+    let Some(list) = usize::try_from(group).ok().and_then(|g| w.svc.groups.lists.get(g).cloned().flatten()) else { return };
+    for k in list {
+        let m = k as usize;
+        if m >= w.table.mobys.len() || w.m(m).state >= 0x80 { continue; }
+        set_flags(w, m, update, drawn, coll);
+    }
+}
+
+/// The update / drawn / collision stores of [`group_set`] on one moby.
+fn set_flags(w: &mut World, m: MobyId, update: i32, drawn: i32, coll: i32) {
+    use crate::moby_runtime::mode;
+    let has = crate::moby_update::classes::units::class_collision(w, w.m(m).o_class);
+    let mo = w.mm(m);
+    if update != -1 { if update == 0 { mo.mode |= mode::NO_UPDATE } else { mo.mode &= !mode::NO_UPDATE } }
+    if drawn != -1 {
+        if drawn == 0 {
+            mo.visible = 0;
+            mo.mode |= mode::HIDDEN;
+        } else {
+            mo.visible = 1;
+            mo.mode &= !mode::HIDDEN;
+        }
+    }
+    if coll != -1 { mo.has_collision = coll != 0 && has; }
+}
+
+/// Level13 `0x2651c8(classes, update, drawn, collision)`: [`group_set`]'s stores on every live moby (state < 0x80) of
+/// the table whose class is in the list (a 0- or ≥ 0x800-terminated s16 list, at most 0xe0 entries; an empty list
+/// touches nothing).
+pub fn class_list_set(w: &mut World, classes: &[i16], update: i32, drawn: i32, coll: i32) {
+    let list: Vec<i16> = classes.iter().copied().take_while(|&c| c != 0 && c < 0x800).take(0xe0).collect();
+    if list.is_empty() { return; }
+    for m in 0..w.table.mobys.len() {
+        if w.m(m).state == crate::moby_runtime::state::END { break; }
+        if w.m(m).state >= 0x80 || !list.contains(&w.m(m).o_class) { continue; }
+        set_flags(w, m, update, drawn, coll);
+    }
+}
+
+/// Level13 `0x265170(class, state)`: every live moby (state < 0x80) of the class gets `state`.
+pub fn class_state_set(w: &mut World, class: i16, state: u8) {
+    for m in 0..w.table.mobys.len() {
+        if w.m(m).state == crate::moby_runtime::state::END { break; }
+        if w.m(m).o_class == class && w.m(m).state < 0x80 { w.mm(m).state = state; }
+    }
+}

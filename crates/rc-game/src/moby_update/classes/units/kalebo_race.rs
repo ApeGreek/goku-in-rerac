@@ -11,7 +11,7 @@
 //! **System or not.** Per-class code on the talking-NPC machinery (`interact::{talk_register_at, talk_update_at,
 //! poll_scene_end_at, place_after_scene, give_item}`, the talk block at +0x20), the scene big-head cheat
 //! (`manip::scene_big_head`), the look-at manipulators (`manip::look`), the story layer (`cinematic::{hero_teleport,
-//! item_movie, save}`, `story::award_skill_point`), the moby groups ([`group_set`] = `0x254a30`, the loader's group
+//! item_movie, save}`, `story::award_skill_point`), the moby groups ([`story::group_set`] = `0x254a30`, the loader's group
 //! lists `Services::groups`).
 //!
 //! **Pvar block** (0x1e0): +0x20 the talk block (+0x24 last node, +0x28 auto, +0x2c radius 3.7, +0x56 node, +0x58 since),
@@ -40,7 +40,7 @@
 //! | 0x2e70c0 | the race groups +0x60 on (update, drawn, collision), +0xa0 off; death height 74; the sea word gp−0x4f8c = 76; `MusicRequestTrack(2, 6)` | [`race_on`] (the sea class 1111 (`Sea(6)`) does not read the word yet: noted in G-CLS-032) |
 //! | 0x2e7168 | +0x60 off; +0xa0 on, drawn, collision off; the sea word = 100; `MusicRequestTrack(0, 8)` | [`race_off`] |
 
-use crate::moby_runtime::{mode, MobyId};
+use crate::moby_runtime::MobyId;
 use crate::moby_update::creature as c;
 use crate::moby_update::interact::{self, talk};
 use crate::moby_update::services::{pvar as p, World};
@@ -83,28 +83,6 @@ const HOVERBOARD: usize = 30;
 fn music(w: &mut World, track: i16, stinger: i16) { if let Some(s) = w.sound.as_deref_mut() { s.music_request(track, stinger); } }
 fn to(w: &mut World, at: ([f32; 3], [f32; 3])) { crate::cinematic::hero_teleport(w, at.0, at.1, 0, true); }
 
-/// `0x254a30(group, update, drawn, collision)` (−1: that part left alone): every live member of the moby group.
-pub fn group_set(w: &mut World, group: i32, update: i32, drawn: i32, coll: i32) {
-    let Some(list) = usize::try_from(group).ok().and_then(|g| w.svc.groups.lists.get(g).cloned().flatten()) else { return };
-    for k in list {
-        let m = k as usize;
-        if m >= w.table.mobys.len() || w.m(m).state >= 0x80 { continue; }
-        let has = super::class_collision(w, w.m(m).o_class);
-        let mo = w.mm(m);
-        if update != -1 { if update == 0 { mo.mode |= mode::NO_UPDATE } else { mo.mode &= !mode::NO_UPDATE } }
-        if drawn != -1 {
-            if drawn == 0 {
-                mo.visible = 0;
-                mo.mode |= mode::HIDDEN;
-            } else {
-                mo.visible = 1;
-                mo.mode &= !mode::HIDDEN;
-            }
-        }
-        if coll != -1 { mo.has_collision = coll != 0 && has; }
-    }
-}
-
 fn set_death_z(w: &mut World, z: f32) {
     w.svc.death_z = z;
     w.hero_fields_mut().death_z = Some(z);
@@ -112,8 +90,8 @@ fn set_death_z(w: &mut World, z: f32) {
 
 /// `0x2e70c0` (module doc).
 pub fn race_on(w: &mut World, id: MobyId) {
-    for k in 0..16 { let g = c::pi32(w, id, pvo::GROUPS_ON + 4 * k); group_set(w, g, 1, 1, 1); }
-    for k in 0..8 { let g = c::pi32(w, id, pvo::GROUPS_OFF + 4 * k); group_set(w, g, 0, 0, 0); }
+    for k in 0..16 { let g = c::pi32(w, id, pvo::GROUPS_ON + 4 * k); story::group_set(w, g, 1, 1, 1); }
+    for k in 0..8 { let g = c::pi32(w, id, pvo::GROUPS_OFF + 4 * k); story::group_set(w, g, 0, 0, 0); }
     set_death_z(w, 74.0);
     w.svc.units.set_word(SEA_WORD, 76.0f32.to_bits());
     music(w, 2, 6);
@@ -121,8 +99,8 @@ pub fn race_on(w: &mut World, id: MobyId) {
 
 /// `0x2e7168` (module doc).
 pub fn race_off(w: &mut World, id: MobyId) {
-    for k in 0..16 { let g = c::pi32(w, id, pvo::GROUPS_ON + 4 * k); group_set(w, g, 0, 0, 0); }
-    for k in 0..8 { let g = c::pi32(w, id, pvo::GROUPS_OFF + 4 * k); group_set(w, g, 1, 1, 0); }
+    for k in 0..16 { let g = c::pi32(w, id, pvo::GROUPS_ON + 4 * k); story::group_set(w, g, 0, 0, 0); }
+    for k in 0..8 { let g = c::pi32(w, id, pvo::GROUPS_OFF + 4 * k); story::group_set(w, g, 1, 1, 0); }
     w.svc.units.set_word(SEA_WORD, 100.0f32.to_bits());
     music(w, 0, 8);
 }
