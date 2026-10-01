@@ -940,7 +940,8 @@ pub fn align_up(h: &mut Hero, k: f32, d: f32, max: f32, up: [f32; 4]) {
     let s = Pf::ZERO + (Pf::ONE - c * c).sqrt();
     let ang = fast_arctan(c, s);
     let r2 = rows[2];
-    let mut axis = [u[1] * r2[2] - u[2] * r2[1], u[2] * r2[0] - u[0] * r2[2], u[0] * r2[1] - u[1] * r2[0], Pf::ZERO];
+    // `FastVecCross(&axis, up, &rows[2])` = rows[2] × up (the operands' order reversed: `b × a`).
+    let mut axis = [r2[1] * u[2] - r2[2] * u[1], r2[2] * u[0] - r2[0] * u[2], r2[0] * u[1] - r2[1] * u[0], Pf::ZERO];
     let rot = |e: V4| crate::moby_update::services::euler_rows_fpu(e);
     let apply = |m: &[V4; 4], r: &[V4; 4]| -> [V4; 4] { mat4_mul(m, r) };
     let vmul = |v: V4, m: &[V4; 4]| -> V4 { std::array::from_fn(|k| ((m[0][k] * v[0] + m[1][k] * v[1]) + m[2][k] * v[2]) + m[3][k] * v[3]) };
