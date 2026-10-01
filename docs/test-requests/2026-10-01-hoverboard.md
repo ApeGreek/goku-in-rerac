@@ -86,3 +86,11 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
 - **Claim:** the mines along the grind rails float 0.7 above the rail, bobbing into place, spinning slowly and
   pulsing their glow. A hit blows one up; touching one blows it up and hurts Ratchet. A blown-up mine comes back
   once it is out of view. The mines the drones carry and drop disappear whenever Ratchet is not grinding.
+
+### B13. Kalebo III's board weapon (level 16)
+- **Claim:** a box at the top left of the race HUD shows a missile icon and the weapons held (dim red at 0). Riding
+  through a weapon pickup puts the launcher in Ratchet's hand and adds one (at most 3). ○ fires a missile that speeds
+  up and, after a moment, homes on the racer ahead within about 45° (straight on without one), trailing smoke and
+  sparks; it bursts on the first wall or racer it meets. A racer it hits blows up (+250 score). Each shot spends a
+  weapon a little under a second later. Holding weapons for 20 seconds without firing shows a hint. Leaving the board
+  puts the launcher away.

@@ -169,7 +169,9 @@ impl Hero {
     pub fn weapon_check(&mut self, c: &mut Ctx) -> bool {
         let t0 = self.timer;
         let it = &self.items;
-        if it.f13fc != 0 && (it.slot.id != 8 || self.f658 != 1) { return false; }
+        // The board levels' copies let the board weapon (0x24) through the 0x1413fc gate (level16 0x223350); no other
+        // level ever holds it.
+        if it.f13fc != 0 && it.slot.id != super::hoverboard::WEAPON_ITEM && (it.slot.id != 8 || self.f658 != 1) { return false; }
         if self.mode != 0 || it.slot.item.is_none() { return false; }
         if it.slot.state != 2 { return false; }
         // The other hand items (Swingshot, Hologuise, PDA, …): super::gadgets.

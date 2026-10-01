@@ -387,6 +387,17 @@ impl Game {
                 crate::hero::items::update_hand_selected(&mut self.hero, &mut self.item_globals, &mut self.rng, &ienv);
             }
         }
+        // The board weapon pickup's hand switch (crate::hero::hoverboard): 0x1413fc = 0, `UpdateWrenchSelected(0)`,
+        // 0x1413fc = 1, then the request 0x24 again (the pickup's last store).
+        if std::mem::take(&mut self.hero.gadgets.board_select) {
+            if let Some(data) = self.item_data.as_ref() {
+                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])), camera_up: Some(self.camera.out.rows_f32()[2]), targets: &[] };
+                self.hero.items.f13fc = 0;
+                crate::hero::items::update_hand_selected(&mut self.hero, &mut self.item_globals, &mut self.rng, &ienv);
+                self.hero.items.f13fc = 1;
+                self.item_globals.request = crate::hero::hoverboard::WEAPON_ITEM;
+            }
+        }
         // Ratchet's class sounds a body state played on his moby (Clank's burn 0x7d: `PlayClassSound(9, 0, Ratchet)`).
         for (index, flags) in std::mem::take(&mut self.hero.bodies.ratchet_sounds) {
             hero_sounds.voice(&self.mobys.mobys[self.hero_moby], index, flags, &mut self.rng);

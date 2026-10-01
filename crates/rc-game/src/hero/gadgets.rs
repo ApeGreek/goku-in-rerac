@@ -73,7 +73,7 @@ pub struct HandItemKind {
 }
 
 /// The hand items the port knows (see the module doc).
-pub static HAND_ITEMS: [HandItemKind; 21] = [
+pub static HAND_ITEMS: [HandItemKind; 22] = [
     HandItemKind { id: super::items::item::WRENCH, name: "wrench", fire: None, update: ItemUpdate::Slot(super::melee::wrench_update) },
     HandItemKind { id: super::swingshot::SWINGSHOT, name: "Swingshot", fire: Some(super::swingshot::fire), update: ItemUpdate::Hero(super::swingshot::item_update) },
     // The throw gloves' case of the weapon check (0x23 / the arm, super::weapons) and their shared update (the Bomb
@@ -112,6 +112,8 @@ pub static HAND_ITEMS: [HandItemKind; 21] = [
     HandItemKind { id: super::hologuise::HOLOGUISE, name: "Hologuise", fire: Some(super::hologuise::fire), update: ItemUpdate::None },
     // The weapon check's case 0x20 opens the remote vendor (super::pda); its moby (class 619) has no update.
     HandItemKind { id: super::pda::PDA, name: "PDA", fire: Some(super::pda::fire), update: ItemUpdate::None },
+    // Kalebo III's board weapon (case 0x24 of level16 0x223350; its missiles 1475: super::hoverboard).
+    HandItemKind { id: super::hoverboard::WEAPON_ITEM, name: "board weapon", fire: Some(super::hoverboard::weapon_fire), update: ItemUpdate::Slot(super::hoverboard::weapon_update) },
 ];
 
 /// The row of item `id`.
@@ -163,6 +165,9 @@ pub struct Gadgets {
     pub pda_open: bool,
     /// The disguise's transitions called `UpdateWrenchSelected(0)` (□): made by the tick right after the body's update.
     pub wrench_select: bool,
+    /// The board weapon pickup's hand switch (`crate::hero::hoverboard`, level16 `0x2252b0`): 0x1413fc = 0,
+    /// `UpdateWrenchSelected(0)`, 0x1413fc = 1, then the request 0x24; made by the tick right after the hero update.
+    pub board_select: bool,
 }
 
 impl Default for Gadgets {
@@ -185,6 +190,7 @@ impl Default for Gadgets {
             hand_request: 0,
             pda_open: false,
             wrench_select: false,
+            board_select: false,
         }
     }
 }

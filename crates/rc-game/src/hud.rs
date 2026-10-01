@@ -63,7 +63,7 @@
 //! | 0x27b028 `NpcTalkUpdate` | bolt counter queued and kept up `ScaleTicks(60)` for NPC nodes of kind 1 / 6 | `interact::talk_update_at` → `Services::hud` |
 //! | 0x2bc4f0 `CollectBolt` | the bolt counter queued | `classes::bolt` → `Services::hud` (and the count's change, `frame_calls`) |
 //! | 0x24fb50 second banner line 0x1795e8 (countdown > 1000) | | NOT ported (G-UI-011) |
-//! | level05 0x24cee8 / level16 0x21e398 race HUD, slots 5 / 7 (`0x2661a0` init, `0x2661e8` update, draws `0x266320` / `0x266710`) | lap and place, time (and the score once the race is won), on the board only | [`Element::RaceLap`] / [`Element::RaceTime`] (queued by the board's 0x6b entry: `crate::hero::hoverboard`); level 16's weapon count in slot 5: G-HERO-008 |
+//! | level05 0x24cee8 / level16 0x21e398 race HUD, slots 5 / 7 (`0x2661a0` init, `0x2661e8` update, draws `0x266320` / `0x266710`) | lap and place, time (and the score once the race is won), on the board only; level 16's board-weapon count box (0x238a30) | [`Element::RaceLap`] / [`Element::RaceTime`] (queued by the board's 0x6b entry: `crate::hero::hoverboard`) |
 //! | level05 race HUD slot 0 \| 0x10 (`0x262ae8` / `0x262b58` / `0x262f50`, data 0x13fbb4) | the boost meter, the trick-combo texts, the wrong-way warning (time trials) | [`Element::RaceMeter`] (its game part: `crate::hero::hoverboard::meter_tick`) |
 //! | level02 0x2e1fb8 counters (slots 5 / 7, icons 2000 / 2001, `0x23c990` / `0x23ccc8` / `0x23cda8`) | | NOT ported (G-UI-011, level 02's own element) |
 
@@ -436,6 +436,8 @@ pub struct Inputs {
     pub race_ticks: i32,
     pub race_score: i32,
     pub race_won: bool,
+    /// 0x13fc1e: the board weapons held (Kalebo III's count box in the lap bar).
+    pub race_weapons: u8,
     pub pal: bool,
     /// The time trial's meter (`crate::hero::hoverboard::MeterView`; its pulse reads [`Inputs::tick`]).
     pub race_meter: crate::hero::hoverboard::MeterView,
@@ -474,6 +476,7 @@ impl Default for Inputs {
             race_best_time: [0; 2],
             race_best_score: [0; 2],
             race_lap: 0,
+            race_weapons: 0,
             race_place: 0,
             race_ticks: 0,
             race_score: 0,
@@ -1452,9 +1455,9 @@ impl HudState {
         }
     }
 
-    /// Level05 0x266320: the race's lap and place on a bar across the bottom (`FontPrintLarge`, each with a black shadow
-    /// one pixel off): "Lap: n/3" from x 30 (the lap + 1, at most 3), "Place: nst / nd / rd / th" ending at x 480.
-    /// (Level 16's weapon count box, the board weapon's, is G-HERO-008's.)
+    /// Level05 0x266320 (level16 0x238a30): the race's lap and place on a bar across the bottom (`FontPrintLarge`, each
+    /// with a black shadow one pixel off): "Lap: n/3" from x 30 (the lap + 1, at most 3), "Place: nst / nd / rd / th"
+    /// ending at x 480. On level 16 (0x15ed84) also the board weapons' box ([`Self::draw_race_weapons`]).
     fn draw_race_lap(&self, i: usize, out: &mut Vec<Draw>) {
         if self.slots[i].counter < 1 { return; }
         let inp = &self.inputs;
@@ -1491,6 +1494,22 @@ impl HudState {
         let lx = px - width(&l);
         text(lx + 1, y + 1, 0x8000_0000, &l, out);
         text(lx, y, c1, &l, out);
+        if inp.level == 16 { self.draw_race_weapons(out); }
+    }
+
+    /// Level16 0x238a30's tail: the board weapons' box: before Rilgar's race is won (global flag 0) at the slot's anchor
+    /// x and y 18 (10 on PAL), after it at (110, 55) (gp−0x7240 / −0x723c, beside the time trial's meter); the frame
+    /// from x − 24, 110 wide (gp−0x7238), 32 high, alpha 0x60; the icon 0x7558 frame 2 (32 × 32); the count ("%d")
+    /// at x + 40 with its shadow, dim red 0x80202080 at 0, else 0x80e08060.
+    fn draw_race_weapons(&self, out: &mut Vec<Draw>) {
+        let inp = &self.inputs;
+        let (x, y) = if inp.race_won { (110, 55) } else { (ANCHORS[5].0, if inp.pal { 10 } else { 0x12 }) };
+        self.stretch_frame(x - 0x18, y, 110, 0x20, 0x60, out);
+        out.push(Self::sprite(self.assets.icon_frame(0x7558, 2), x, y, 0x20, 0x20, 0x80, Rot::None));
+        let n = format!("{}", inp.race_weapons).into_bytes();
+        out.push(Draw::Text { font: Font::Large, x: x + 0x29, y: y + 8, rgba: 0x8000_0000, text: n.clone() });
+        let c = if inp.race_weapons == 0 { 0x8020_2080 } else { 0x80e0_8060 };
+        out.push(Draw::Text { font: Font::Large, x: x + 0x28, y: y + 7, rgba: c, text: n });
     }
 
     /// Level05 0x266710: the race's time "Time:  m:ss:hh" centred on x 256 (3600 ticks a minute, 3000 on PAL); after

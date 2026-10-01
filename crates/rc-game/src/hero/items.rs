@@ -568,7 +568,12 @@ pub fn update_hand_selected(hero: &mut Hero, g: &mut ItemGlobals, rng: &mut Rng,
     let it = &mut hero.items;
     let held = it.slot.id;
     if held != 8 && held != 0x17 && held != 9 && it.slot.swap == 2 { it.slot.swap = 0; }
-    if it.f13f7 != 0 && held != 8 { it.f13f6 = 1; }
+    // The board levels' copies (level16 0x20d8b0): on the board with board weapons held (0x13fc1e) the flag stays clear;
+    // the board weapon (0x24) held off the board sets it (back to the wrench). Elsewhere neither applies.
+    let on_board = hero.group == super::hoverboard::GROUP;
+    let it = &mut hero.items;
+    if it.f13f7 != 0 && held != 8 && (!on_board || hero.board.weapons == 0) { it.f13f6 = 1; }
+    if held == super::hoverboard::WEAPON_ITEM && !on_board { it.f13f6 = 1; }
     if it.f13f7 != 0 && held == 8 {
         if g.request == 0x1f { g.request = 0; }
         if g.request != 0x18 && g.request != 0x24 { return; }

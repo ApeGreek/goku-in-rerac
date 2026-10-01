@@ -243,6 +243,11 @@ pub struct Board {
     pub boost_hold: i16,
     pub weapons: u8,
     pub weapon_lock: u8,
+    /// 0x141920: the board weapon's shots (the game's statistic; its −1 stops the count; the port's own, not saved).
+    pub shots: i16,
+    /// A shot of this tick's weapon check for the hand item's update to fire (`0x2a3e30` there: the port's item update
+    /// has the table): Ratchet's yaw and pitch, the target.
+    pub shot: Option<Shot>,
     /// 0x141402 (set by 0x6b, cleared by every on-foot SetState).
     pub f141402: u8,
     /// gp−0x7558 (0x15f6a8): a time trial was finished (the board's □ help waits for it).
@@ -403,7 +408,7 @@ impl Default for Board {
             yaw_vel: 0.0, hud: -1, boosting: 0, land_eta: 0, trick_mode: false, trick: 0, host: None, race_ticks: 0, waypoint: 0, lap: 0,
             jump: 0, jump_lock: 0, water: 0.0, wall_yaw: 0.0, score: 0, ramp: 0, wrong_way: 0, fading: false, race_line: false,
             last_ground_z: 0.0, airborne: 0, water_timer: 0, place: 0, boost_timer: 0, nearest: 0, weapon_hold: 0, boost_hold: 0,
-            weapons: 0, weapon_lock: 0, f141402: 0, trial_done: false, fade: Fade::default(), freeze: false, cmds: Vec::new(), carry: None,
+            weapons: 0, weapon_lock: 0, shots: 0, shot: None, f141402: 0, trial_done: false, fade: Fade::default(), freeze: false, cmds: Vec::new(), carry: None,
             meter: Meter::default(),
         }
     }
@@ -457,6 +462,9 @@ pub struct BoardWorld {
     pub spawn: Vec<[f32; 4]>,
     /// The racers' positions (pvar +0x2c + 4·k, k < +0x40; None: no such moby).
     pub racers: Vec<Option<[f32; 4]>>,
+    /// The five racer words +0x2c..+0x3c whatever the count (the board weapon's aim, `0x223350` case 0x24): the moby and
+    /// its position; None for −1.
+    pub aim: [Option<(MobyId, [f32; 4])>; 5],
     /// The groups of pvar +0x44 / +0x48 / +0x4c (None: −1).
     pub hoops: Option<Vec<Member>>,
     pub pads: Option<Vec<Member>>,
@@ -471,6 +479,14 @@ pub struct BoardWorld {
 impl BoardWorld {
     /// pvar word at byte offset `o`.
     pub fn pv(&self, o: usize) -> i32 { self.pv.get(o / 4).copied().unwrap_or(-1) }
+}
+
+/// A board-weapon shot waiting for the hand item's update (`Board::shot`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shot {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub target: Option<MobyId>,
 }
 
 /// A store of the board code outside the hero block.
@@ -502,6 +518,8 @@ pub enum BoardCmd {
     Meter(bool),
     /// The HUD calls of the race not ported (slot 0x10's boost meter, `update_resource_counter`: G-LVL-007), logged.
     Hud(&'static str),
+    /// `Help_Request(msg, rec)`: the board weapon's hint.
+    Help { msg: i32, rec: i32 },
 }
 
 /// `0x2551b8`: the jump anim (0x7f with the weapon).
@@ -1284,9 +1302,16 @@ fn pickups(h: &mut Hero, c: &mut Ctx) {
         cmds.push(BoardCmd::Bc { id: m.id, v: nn });
         if rr == 0 || !(dist3f(body, m.pos) < 1.5) { continue; }
         cmds.push(BoardCmd::Bc { id: m.id, v: ticks(300) as u8 });
-        // The hand switch to item 0x24 (`UpdateWrenchSelected(0)` with 0x141408 = 0x24) and 0x13d4b8 + 1: level 16's
-        // board weapon (G-HERO-008).
+        // The hand switch to the board weapon: not holding it → 0x141408 = 0x24 and `UpdateWrenchSelected(0)` with
+        // 0x1413fc cleared around it (made by the tick right after the hero update: `Gadgets::board_select`); then a
+        // weapon (at most 3), the request 0x24 again and its ammo 0x13d4b8 + 1.
+        if h.items.slot.id != WEAPON_ITEM {
+            h.gadgets.hand_request = WEAPON_ITEM;
+            h.gadgets.board_select = true;
+        }
         h.board.weapons = (h.board.weapons + 1).min(3);
+        h.gadgets.hand_request = WEAPON_ITEM;
+        if let Some(a) = h.weapons.ammo.get_mut(WEAPON_ITEM as usize) { *a += 1; }
     }
     h.board.boost_timer += boost;
     h.board.cmds.extend(cmds);
@@ -1509,4 +1534,61 @@ pub(super) fn carry(h: &mut Hero) {
     let pos = [pos[0] + v[0], pos[1] + v[1], pos[2] + v[2], pos[3]];
     let rows: [[f32; 4]; 3] = std::array::from_fn(|i| std::array::from_fn(|k| if k == 3 { 0.0 } else { m[0][k] * r[i][0] + m[1][k] * r[i][1] + m[2][k] * r[i][2] }));
     h.board.carry = Some((pos, rows));
+}
+
+/// `HeroPdaGadget` case 0x24 (level16 `0x223350`): the board weapon. While weapons are held and none has been fired
+/// yet (0x141920; 0x141d80 is 0 [L]), the hold timer 0x13fc1a counts and past `ticks(20)·60` asks for the hint
+/// `Help_Request(0x3e81, 0x83)`. With the hand moby: the cooldown 0x13fc1f steps, and its end spends a weapon; then
+/// with a weapon left, the cooldown out and ○ (the slot's fire mask) pressed within `ticks(7)`: the target is the
+/// racer (the board's +0x2c.. words, −1 skipped) within 45° of Ratchet's yaw and 45° of level, by the least
+/// `d·(1 + 2·yaw off + 2·pitch off)` (d the xy distance; the first one kept on a tie); the item's +0xbc = `ticks(7)`;
+/// the cooldown `ticks(50)`; the shots + 1 (unless −1); the play-time and per-level weapon-use stats (0x141922 /
+/// 0x141924) are not kept [L]; then the hand item's class sound 0 and the missile `0x2a3e30` at its joint list 0
+/// ([`weapon_update`], the item's update with the table, the same tick).
+pub fn weapon_fire(h: &mut Hero, c: &mut Ctx) {
+    let b = &mut h.board;
+    if b.weapons != 0 && b.shots == 0 {
+        b.weapon_hold = b.weapon_hold.wrapping_add(1);
+        if ((ticks(0x14) as f32 * 60.0) as i32) < b.weapon_hold as i32 { b.cmds.push(BoardCmd::Help { msg: 0x3e81, rec: 0x83 }); }
+    }
+    if h.items.slot.item.is_none() { return; }
+    let (r, n) = dec_byte(h.board.weapon_lock);
+    h.board.weapon_lock = n;
+    if r == 2 {
+        if h.board.weapons == 0 { return; }
+        h.board.weapons -= 1;
+    }
+    if h.board.weapons == 0 || h.board.weapon_lock != 0 { return; }
+    if c.env.pad.pressed_within(h.items.slot.fire_mask, ticks(7)).is_none() { return; }
+    let me = to_f32x3(h.pos);
+    let yaw = h.rot[2].to_f32();
+    let mut best = 9_999_999.0f32;
+    let mut target = None;
+    for (id, p) in world(c.env).map(|w| w.aim).unwrap_or_default().into_iter().flatten() {
+        let a = fast_arctan(Pf::f(p[0] - me[0]), Pf::f(p[1] - me[1]));
+        let yd = fast_diff_rots(Pf::f(yaw), a).to_f32();
+        if !(yd <= std::f32::consts::FRAC_PI_4) { continue; }
+        let d = ((me[0] - p[0]).powi(2) + (me[1] - p[1]).powi(2)).sqrt();
+        let pa = fast_arctan(Pf::f(d), Pf::f(p[2] - me[2]));
+        let pd = fast_diff_rots(pa, Pf::ZERO).to_f32();
+        if !(pd <= std::f32::consts::FRAC_PI_4) { continue; }
+        let d = ((p[0] - me[0]).powi(2) + (p[1] - me[1]).powi(2)).sqrt();
+        let score = d + d * yd + d * yd + d * pd + d * pd;
+        if target.is_some() && best <= score { continue; }
+        best = score;
+        target = Some(id);
+    }
+    h.gadgets.item_bc = ticks(7) as u8;
+    h.board.weapon_lock = ticks(0x32) as u8;
+    if h.board.shots != -1 { h.board.shots += 1; }
+    h.board.shot = Some(Shot { yaw, pitch: h.rot[1].to_f32(), target });
+}
+
+/// The board weapon's item update (item 0x24, in the slot loop): the shot [`weapon_fire`] made this tick: the item's
+/// class sound 0 and the missile (`0x2a3e30`, `units::board_missile`) at the item's joint list 0.
+pub fn weapon_update(hero: &mut Hero, table: &mut crate::moby_runtime::MobyTable, _anim: &dyn AnimCtl, env: &super::items::ItemEnv, hits: &mut dyn super::items::HitSink, _rng: &mut crate::rng::Rng) {
+    let Some(s) = hero.board.shot.take() else { return };
+    hero.fx.item_sounds.push(0);
+    let at = super::guns::item_point(hero, env, 0);
+    crate::moby_update::classes::units::board_missile::spawn(table, hits, env.frame as u64, (s.yaw, s.pitch), env.hero_moby, at, s.target);
 }

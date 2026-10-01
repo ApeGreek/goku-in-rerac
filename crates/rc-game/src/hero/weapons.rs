@@ -247,7 +247,13 @@ pub fn swap_commit(h: &mut Hero) {
 /// holding class's sequence 0): 0x1c / 0x1d / 0x1f, 0x31 / 0x32, 0x37, 0x4a / 0x4b, 0x50, 0x60, 0x6d / 0x6e. (The
 /// function also returns an arm angle for 0x1c..0x1f past key time 25 (−75°) and 0x37 (−55°), which `0x22e660` writes
 /// to the joint records 8 / 9: not ported, gaps.md G-WPN-011.)
-pub fn hold_special(seq: u8) -> bool { matches!(seq, 0x1c | 0x1d | 0x1f | 0x31 | 0x32 | 0x37 | 0x4a | 0x4b | 0x50 | 0x60 | 0x6d | 0x6e) }
+///
+/// The board levels' copies (level05 `0x23b378`, level16 `0x20afa0`) first answer yes on the board (group 0x16) with
+/// board weapons held (0x13fc1e) and Ratchet's key B in 0x69..0x6c (Kalebo III's board weapon; 0 elsewhere).
+pub fn hold_special(h: &Hero, seq: u8) -> bool {
+    if h.group == super::hoverboard::GROUP && h.board.weapons != 0 && (0x69..=0x6c).contains(&seq) { return true; }
+    matches!(seq, 0x1c | 0x1d | 0x1f | 0x31 | 0x32 | 0x37 | 0x4a | 0x4b | 0x50 | 0x60 | 0x6d | 0x6e)
+}
 
 /// **The glove-holding layers** `0x22e660` (first in the items' upkeep `0x22f390`, before `0x22f068`): while the hand
 /// item's def byte +0x18 (0x1413fb) is set, a pose layer on Ratchet's joint list 12 (his right arm, the hand item's)
@@ -310,7 +316,7 @@ pub fn hold_update(h: &mut Hero, anim: &dyn AnimCtl) {
         // +0x30: Ratchet blending (0x13fdec) into another sequence than the layer's key B while the layer is itself
         // between two sequences.
         l.own_blend = !steady && v.blending() && l.seq_b != v.seq_b && l.seq_a != l.seq_b;
-        let special = hold_special(v.seq_b);
+        let special = hold_special(h, v.seq_b);
         if !special && !l.special {
             if !l.own_blend {
                 if steady { l.seq_a = v.seq_a; }

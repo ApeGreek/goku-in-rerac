@@ -851,6 +851,7 @@ fn hero_inputs(g: &mut Inputs, p: &crate::gameplay::Play) {
     let b = &h.board;
     (g.race_lap, g.race_place, g.race_ticks, g.race_score) = (b.lap as i32, b.place, b.race_ticks, b.score);
     g.race_won = p.svc.interact.game.flags.first().is_some_and(|&f| f != 0);
+    g.race_weapons = b.weapons;
     g.race_meter = rc_game::hero::hoverboard::MeterView { meter: b.meter, wrong_way: b.wrong_way, fuel: b.fuel };
 }
 

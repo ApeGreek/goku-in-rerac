@@ -202,7 +202,7 @@ pub fn update(w: &mut World, id: MobyId) {
     let (yaw, pitch) = (w.m(id).rotation[2], w.m(id).rotation[1]);
     let step = polar(speed, yaw, -pitch);
     // The trail every tick (every other one under load).
-    if !throttle || w.counter & 1 == 0 { trail(w, id, step, speed); }
+    if !throttle || w.counter & 1 == 0 { trail(w, id, step, speed, &TRAIL); }
     let dir = add3(step, motion);
     let pos = add3(pos0, dir);
     { let m = w.mm(id); m.position = [pos[0], pos[1], pos[2], m.position[3]]; }
@@ -259,12 +259,26 @@ pub fn update(w: &mut World, id: MobyId) {
     w.delete_moby(id);
 }
 
+/// The trail's constants: the first puff's alpha, grey and life (ticks), the second puff's life, the spark's size and
+/// life. Kalebo III's board missile 1475 runs the same trail code with its own (`units::board_missile`).
+pub struct Trail {
+    pub alpha: u8,
+    pub rgb: u32,
+    pub life: i32,
+    pub life2: i32,
+    pub spark: f32,
+    pub spark_life: i32,
+}
+
+/// The Devastator missile's trail constants.
+const TRAIL: Trail = Trail { alpha: 0x32, rgb: 0x50_5050, life: 40, life2: 7, spark: 25000.0, spark_life: 15 };
+
 /// The trail (`0x2c5b70`): a smoke puff (type 44: size 40000 growing 1000, falling 0.0002, alpha 0x32 grey 0x505050,
 /// `ticks(40)`, ALPHA 0x44 and texture `def[23][0]`) at a random point of this step drifting `randf(0.1, 0.2)·dt` less
 /// `randf(0.1, 1)·dt` along the path; a brighter one (falling 0.0004, alpha 0x7f 0xb0b0b0, `ticks(7)`) at the missile
 /// with the same drift; a spark (type 21, size 25000, 0.02 along the missile's z axis turned a random angle about its x
-/// axis, 0x4f007fff → 0x1fffffff, `ticks(15)`, splitting).
-fn trail(w: &mut World, id: MobyId, step: [f32; 3], speed: f32) {
+/// axis, 0x4f007fff → 0x1fffffff, `ticks(15)`, splitting). [`Trail`] holds the constants the copies differ in.
+pub fn trail(w: &mut World, id: MobyId, step: [f32; 3], speed: f32, look: &Trail) {
     use crate::particles::{type21, type44};
     let x = w.rng.randf(-1.0, 1.0);
     let y = w.rng.randf(-1.0, 1.0);
@@ -276,10 +290,10 @@ fn trail(w: &mut World, id: MobyId, step: [f32; 3], speed: f32) {
     let k = w.rng.randf(0.0, 1.0);
     let pos = v3(w.m(id).position);
     let p = add3(with_len(step, k * speed), pos);
-    let t40 = w.ticks(40);
-    let t7 = w.ticks(7);
-    let t15 = w.ticks(15);
-    let a = type44::Spawn { size: 40000.0, growth: 1000.0, damp: 1.0, fall: f32::from_bits(0xb951_b717), w: 0.0, pos: p, vel: v, life: t40, alpha: 0x32, rgb: 0x50_5050, spin: 3 };
+    let t40 = w.ticks(look.life);
+    let t7 = w.ticks(look.life2);
+    let t15 = w.ticks(look.spark_life);
+    let a = type44::Spawn { size: 40000.0, growth: 1000.0, damp: 1.0, fall: f32::from_bits(0xb951_b717), w: 0.0, pos: p, vel: v, life: t40, alpha: look.alpha, rgb: look.rgb, spin: 3 };
     let b = type44::Spawn { size: 40000.0, growth: 1000.0, damp: 1.0, fall: f32::from_bits(0xb9d1_b717), w: 0.0, pos, vel: v, life: t7, alpha: 0x7f, rgb: 0xb0_b0b0, spin: 3 };
     let rows = w.m(id).rows;
     let zax = [rows[2][0] * 0.02, rows[2][1] * 0.02, rows[2][2] * 0.02];
@@ -298,7 +312,7 @@ fn trail(w: &mut World, id: MobyId, step: [f32; 3], speed: f32) {
     type44::spawn_rng(sys, w.rng, &b);
     let ang = w.rng.rand_angle();
     let sv = super::blaster_shot::rotate(zax, ang, xax);
-    type21::spawn_rng(sys, w.rng, 25000.0, [p[0], p[1], p[2], 0.0], [sv[0], sv[1], sv[2], 0.0], 0x4f00_7fff, 0x1fff_ffff, t15, 1);
+    type21::spawn_rng(sys, w.rng, look.spark, [p[0], p[1], p[2], 0.0], [sv[0], sv[1], sv[2], 0.0], 0x4f00_7fff, 0x1fff_ffff, t15, 1);
 }
 
 /// The explosion (module doc).

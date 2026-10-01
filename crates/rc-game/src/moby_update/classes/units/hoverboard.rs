@@ -93,6 +93,7 @@ pub fn world(svc: &Services, table: &MobyTable, board: MobyId) -> Option<BoardWo
         race: path(pv[0x20 / 4]),
         spawn: path(pv[0x24 / 4]),
         racers,
+        aim: std::array::from_fn(|k| usize::try_from(pv[0x2c / 4 + k]).ok().and_then(|i| table.mobys.get(i).map(|r| (i, r.position)))),
         hoops: group(pv[0x44 / 4]),
         pads: group(pv[0x48 / 4]),
         weapons: group(pv[0x4c / 4]),
@@ -159,6 +160,7 @@ pub fn apply(w: &mut World) {
                 if on { w.svc.hud.queue(r) } else { w.svc.hud.set_flags(r, 0) }
             }
             BoardCmd::Hud(what) => w.svc.unported(what),
+            BoardCmd::Help { msg, rec } => { w.svc.help.request(msg, rec); }
         }
     }
 }
