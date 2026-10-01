@@ -2,7 +2,7 @@
 status: open
 job: menus-flow
 date: 2026-10-01
-commit: <filled in by the coordinator at commit time>
+commit: 7bf9dc6
 areas: [ui, world]
 ---
 

@@ -2,7 +2,7 @@
 status: open
 job: saves-frontend
 date: 2026-10-01
-commit:
+commit: 7bf9dc6
 areas: [ui, formats, classes]
 ---
 

@@ -2,7 +2,7 @@
 status: open
 job: space-visuals
 date: 2026-10-01
-commit: <filled in by the coordinator>
+commit: 7bf9dc6
 areas: [world, cinematic, render, ui, classes]
 ---
 

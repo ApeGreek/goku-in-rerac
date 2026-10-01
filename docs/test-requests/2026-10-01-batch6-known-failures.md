@@ -2,7 +2,7 @@
 status: open
 job: batch-6 full-suite results
 date: 2026-10-01
-commit:
+commit: 7bf9dc6
 areas: [classes, ui, weapons, world]
 ---
 
