@@ -2,7 +2,7 @@
 status: open
 job: hoverboard
 date: 2026-10-01
-commit: (this commit)
+commit: f8c48c9
 areas: [hero, classes, menus]
 ---
 
