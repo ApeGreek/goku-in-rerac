@@ -2,7 +2,7 @@
 status: open
 job: pokitaru-jet
 date: 2026-10-01
-commit: TBD
+commit: 49c5513
 areas: [classes, world, hud, render]
 ---
 
