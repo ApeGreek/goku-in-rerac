@@ -2,7 +2,7 @@
 status: open
 job: gemlik-ship
 date: 2026-10-01
-commit: pending
+commit: 9257c3f
 areas: [classes, world, hud, render]
 ---
 
