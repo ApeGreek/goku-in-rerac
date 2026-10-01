@@ -1861,6 +1861,21 @@ impl<'a> World<'a> {
         }
     }
 
+    /// Level17 `0x26fdd0(pos, kind, k)`: a type-80 glow ([`crate::particles::type79::spawn80`]; counted as a type-80
+    /// spawn when one is made or the pool refuses it). First consumer: the fleet turrets' bolts 1368
+    /// (`units::fleet_turret`).
+    pub fn part80(&mut self, pos: [f32; 4], kind: i32, k: i32) {
+        let n = if kind != 0 { 5 } else { 15 };
+        if n - k < 0 { return; }
+        let Some(p) = self.particles.as_deref_mut() else { return };
+        let (created, failed) = (p.stats.created, p.stats.create_failed);
+        crate::particles::type79::spawn80(p, self.rng, pos, kind, k);
+        if (p.stats.created, p.stats.create_failed) != (created, failed) {
+            if p.stats.create_failed != failed { self.svc.fx.part_failed += 1; }
+            *self.svc.fx.part_spawns.entry(80).or_default() += 1;
+        }
+    }
+
     // (The effect mobys' spawners, `DebrisSpawn` 0x2c5080 and `FlashSpawn` 0x2c20e0, live with their updates in
     // `classes::debris`.)
 

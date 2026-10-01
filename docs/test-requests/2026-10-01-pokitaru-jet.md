@@ -18,7 +18,7 @@ is literally the same (springs, exhaust, screen point, HUD marker / strip / spri
 |---|---|---|---|
 | 1242 jet (11, 1) + HUD callback 0x311d50 | level11 0x313290 | `units/pokitaru_jet.rs`, `units/pokitaru_jet_hud.rs` | Gemlik's ship's helpers |
 | 1264 convoy (11, 4), 1265 car (created), 1524 sludge (created) | level11 0x3172c0 / 0x3181f0 / 0x31ab08 | `units/pokitaru_convoy.rs` | — |
-| 1319 fighter (11, 52) + contrails 0x3192c8 | level11 0x319838 | `units/pokitaru_fighter.rs` | — |
+| 1319 fighter (11, 52) + contrails 0x3192c8 | level11 0x319838 | `units/ship_fighter.rs` | — |
 | 1017 fighter laser (created) | level11 0x309098 | `units/fighter_shot.rs` | levels 13, 17 |
 | 1034 missile (created) | level11 0x3094f8 | `units/ship_missile.rs` (`spawn_early`) | levels 13, 17 |
 | 1218 / 1220 pickups, 1219 parachute (created) | level11 0x30f728 / 0x310028 | `units/ship_pickup.rs` | — |

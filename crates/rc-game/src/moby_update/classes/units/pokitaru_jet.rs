@@ -4,7 +4,7 @@
 //! record [`crate::vehicle`]): the stick steers, ✕ boosts, □ / L1 fire the lasers 1009 ([`super::ship_laser`]),
 //! ○ / R1 the missiles 1034 ([`super::ship_missile::spawn_early`]) at the HUD's lock. Near the play area's walls (its
 //! cuboid +0x104) the stick is bent back inside. While convoys are on screen the jet calls in ambushing fighters 1319
-//! ([`super::pokitaru_fighter::launch`]) every 4 s, up to 5 less the convoys left. Hits wear the record's health;
+//! ([`super::ship_fighter::launch`]) every 4 s, up to 5 less the convoys left. Hits wear the record's health;
 //! the world wrecks it at once. The HUD ([`super::pokitaru_jet_hud`], the draw callback `0x311d50`) counts the
 //! convoys left (+0xe8); none left: 3 s of flight, the fade, the landing: the mission done, Ratchet at the exit. "Quit?"
 //! puts him back. Read from the level11 decomp (`0x313290` and its helpers `0x312838` / `0x313f60` / `0x3125a8` /
@@ -46,7 +46,7 @@
 //! | 2 | the record: class, missiles 10 / 20, 0x140948 = 20, 0x14095e = 1, health 255, the moby, +0xf0 = 0, +0xf4 = 0xff, 256, 100, 0x14094b / 49 / 4a = 3, bits 0; `CameraScript(the camera, its Euler, 1, 0, 0)` | [`mount`] ([`crate::vehicle::Record::take`]) |
 //! | 2 | +0x68 = 0, speed 0.1, +0x6c / +0x70 / +0x84 / +0x80 / +0xd4 / +0xd8 = 0; distances 0xff; +0xb8 = 0, +0xb4 = −15/4, +0xbc = 1; Ratchet's moby +0x98 = −1; scale = class scale / 4; Ratchet hidden (0x1413f5) | [`mount`] |
 //! | 4 | +0x130 ≠ 0 → `Approach(0, 4·dt)`, the fade; 0x15f608 = 2; the flight (`0x312838`) | [`update`], [`fly`] |
-//! | 4 | convoys drawn (+0xea) and fewer ambushers on a run (`0x31a758(+0x10c)`) than 5 − +0xe8: `FastDecTimer(+0x114)` out → a launch (`0x31a7d8(+0x10c)`), made → +0x114 = `ticks(240)` | [`update`] (`pokitaru_fighter::{attacking, launch}`) |
+//! | 4 | convoys drawn (+0xea) and fewer ambushers on a run (`0x31a758(+0x10c)`) than 5 − +0xe8: `FastDecTimer(+0x114)` out → a launch (`0x31a7d8(+0x10c)`), made → +0x114 = `ticks(240)` | [`update`] (`ship_fighter::{attacking, launch}`) |
 //! | 4 | +0xe8 < 1 → +0xf8 = 180, → 8; the record's bit 0 (quit) → 5 | [`update`] |
 //! | 5 | Ratchet shown, his moby +0x98 = 0, `SetState(0, 1)`, `CameraScript2(0)`; `FUN_0024b090(0x14095c, 0)`; `MusicRequestTrack(0, 8)`; position / rotation = the start; scale; `fun_0020e098`; `HeroTeleport` to the exit cuboid +0xfc (0, 1); the voices released; → 1; +0x130 = 0.99, the fade | [`quit`] (`FUN_0024b090` on the record's handle: n/a, nothing writes 0x14095c on Pokitaru [L]) |
 //! | 7 | 0x15f608 = 2; `FastDecTimer(+0xf8)` out → the death sequence (`0x2319b0`) | [`update`] (`HeroCall::Death`) |
@@ -250,9 +250,9 @@ pub fn update(w: &mut World, id: MobyId) {
             w.svc.occlusion_fallback = Some((w.counter, 2));
             fly(w, id);
             let g = pi(w, id, pvo::AMBUSH_GROUP);
-            let attacking = super::pokitaru_fighter::attacking(w, g);
+            let attacking = super::ship_fighter::attacking(w, g, super::ship_fighter::CLASS);
             let left = c::pi16(w, id, pvo::CONVOYS) as i32;
-            if c::pi16(w, id, pvo::CONVOYS_DRAWN) != 0 && attacking < 5 - left && c::dec_timer_pvar_i32(w, id, pvo::AMBUSH_T) != 0 && super::pokitaru_fighter::launch(w, g).is_some() {
+            if c::pi16(w, id, pvo::CONVOYS_DRAWN) != 0 && attacking < 5 - left && c::dec_timer_pvar_i32(w, id, pvo::AMBUSH_T) != 0 && super::ship_fighter::launch(w, g, super::ship_fighter::CLASS).is_some() {
                 let t = w.ticks(0xf0);
                 seti(w, id, pvo::AMBUSH_T, t);
             }
@@ -527,7 +527,7 @@ fn fly(w: &mut World, id: MobyId) {
     let off = if c::pu8(w, id, pvo::VIEW) == 0 { chase } else { cockpit };
     for (k, &o) in off.iter().enumerate() { spring(w, id, o, 0.15, 0.8, 1.0, pvo::CAM_OFF + 4 * k, pvo::CAM_OFF_V + 4 * k); }
     let o = [pf(w, id, pvo::CAM_OFF), pf(w, id, pvo::CAM_OFF + 4), pf(w, id, pvo::CAM_OFF + 8)];
-    let rows = super::pokitaru_fighter::rows_of([pf(w, id, pvo::ROLL), pf(w, id, pvo::PITCH), pf(w, id, pvo::YAW)]);
+    let rows = super::ship_fighter::rows_of([pf(w, id, pvo::ROLL), pf(w, id, pvo::PITCH), pf(w, id, pvo::YAW)]);
     let pos = w.m(id).position;
     let eye: [f32; 3] = std::array::from_fn(|k| o[0] * rows[0][k] + o[1] * rows[1][k] + o[2] * rows[2][k] + pos[k]);
     crate::cinematic::camera_targets(w, Some(eye), None);

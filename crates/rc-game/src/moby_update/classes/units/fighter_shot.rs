@@ -1,7 +1,7 @@
 //! **The fighters' laser shot, class 1017** (created by code only): its spawner level11 `0x308f48` and its update
 //! `0x309098`, the same code on levels 13 and 17 (`0x302e48` / `0x2e2978` the updates): one shared unit through
 //! [`LevelPorts`](super::LevelPorts) code identity. Pokitaru's fighters 1319 fire it at the jet
-//! ([`super::pokitaru_fighter`]). No level data but the trail's colours. Read from the level11 decomp. Native `f32`.
+//! ([`super::ship_fighter`]). No level data but the trail's colours. Read from the level11 decomp. Native `f32`.
 //!
 //! **Pvar block** (0x24): +0x00 the velocity, +0x10 the brightness (1.0, ×0.74 a tick once its life is out), +0x14 its
 //! life (ticks), +0x18 the life timer, +0x1c the owner (index + 1), +0x20 the damage.

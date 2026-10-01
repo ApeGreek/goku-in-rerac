@@ -1,4 +1,7 @@
-//! **Pokitaru's fighters, class 1319** (level11 `0x319838`, census U389, 52 instances): the escorts of the convoys
+//! **The ships' fighters: Pokitaru's 1319** (level11 `0x319838`, census U389, 52 instances) **and the fleet's 1843**
+//! (level17 `0x2f40d8`, census U576, 60 instances; the same code but for the pickups they drop (the floating 224 /
+//! 228, [`super::ship_pickup_float`]), the help record they leave alone and the launch's +0x98; their escorts are placed
+//! by the fleet's turrets 347, [`super::fleet_turret`], which also launch them). Pokitaru's: the escorts of the convoys
 //! 1264 ([`super::pokitaru_convoy`] spaces them along its path) and the ambushers the jet 1242 calls in
 //! ([`super::pokitaru_jet`]). An escort flies its path (forward or back, at a random rate) on a random orbit around
 //! it; shot down it bursts, drops a ship pickup ([`super::ship_pickup`]) and waits hidden until it is off screen
@@ -62,6 +65,12 @@ pub const UPDATE_FN: u32 = 0x31_9838;
 pub const TRAIL_FN: u32 = 0x31_92c8;
 pub const CLASS: i16 = 0x527;
 pub const CLASSES: [i16; 1] = [CLASS];
+/// The fleet's copy (module doc).
+pub const FLEET_LEVEL: u32 = 17;
+pub const FLEET_UPDATE_FN: u32 = 0x2f_40d8;
+pub const FLEET_TRAIL_FN: u32 = 0x2f_3b68;
+pub const FLEET_CLASS: i16 = 0x733;
+pub const FLEET_CLASSES: [i16; 1] = [FLEET_CLASS];
 
 pub mod pvo {
     pub const PATH: usize = 0x60;
@@ -88,9 +97,12 @@ pub mod pvo {
     pub const LEN: usize = 0x2d0;
 }
 
-/// 0x1f14b0 / 0x1f14c0: the two gun offsets (model space).
+/// 0x1f14b0 / 0x1f14c0 (level 17: 0x1de110 / 0x1de120, the same): the two gun offsets (model space).
 const GUNS: [[f32; 3]; 2] = [[0.3, 0.4, -1.15], [0.3, -0.4, -1.15]];
-/// gp−0x4830: the shot's speed (32·dt).
+/// The fleet's 1843 (else Pokitaru's 1319).
+fn fleet(w: &World, id: MobyId) -> bool { w.m(id).o_class == FLEET_CLASS }
+
+/// gp−0x4830 (level 17: gp−0x4818): the shot's speed (32·dt).
 const SHOT_SPEED: f32 = 32.0;
 /// gp−0x4810 (0x1623f0): the contrails' length (5; 16 with cheat 2).
 const TRAIL_LEN: f32 = 5.0;
@@ -139,7 +151,7 @@ fn show(w: &mut World, id: MobyId) {
         let t = w.ticks(10);
         w.anim_blend(id, 0, 0, t);
     }
-    let coll = super::class_collision(w, CLASS);
+    let coll = super::class_collision(w, w.m(id).o_class);
     let m = w.mm(id);
     m.mode &= !1;
     m.has_collision = coll;
@@ -239,16 +251,23 @@ fn follow_jet(w: &mut World, id: MobyId) -> [f32; 4] {
 
 /// States 2 / 6: the burst, the pickup, the sound; → `next`, hidden (module doc).
 fn shot_down(w: &mut World, id: MobyId, next: u8) {
+    let fleet = fleet(w, id);
     if next == 4 {
-        w.svc.help.records.help[HELP_REC].count = 0xffff;
+        if !fleet { w.svc.help.records.help[HELP_REC].count = 0xffff; }
         follow_jet(w, id);
     }
     let p = w.m(id).position;
     fx::death_explosion(w, 2.0, 13.0, Some(id), p, -1);
-    let kind = if w.rng.randi(2) == 0 { super::ship_pickup::MISSILES } else { super::ship_pickup::HEALTH };
-    super::ship_pickup::spawn(w, p, [0.0; 4], kind);
+    let first = w.rng.randi(2) == 0;
+    if fleet {
+        let kind = if first { super::ship_pickup_float::HEALTH } else { super::ship_pickup_float::MISSILES };
+        super::ship_pickup_float::spawn(w, p, kind);
+    } else {
+        let kind = if first { super::ship_pickup::MISSILES } else { super::ship_pickup::HEALTH };
+        super::ship_pickup::spawn(w, p, [0.0; 4], kind);
+    }
     w.play_sound(1, 0, id);
-    if next == 3 { w.svc.help.records.help[HELP_REC].count = 0xffff; }
+    if next == 3 && !fleet { w.svc.help.records.help[HELP_REC].count = 0xffff; }
     hide(w, id, next);
 }
 
@@ -401,13 +420,14 @@ fn trails(w: &mut World, id: MobyId) {
     if tick != 0 && w.svc.units.word(key) != tick {
         w.svc.units.set_word(key, tick);
         seti(w, id, pvo::DRAW_TICK, tick as i32);
-        if let Some(i) = super::row(REFERENCE_LEVEL, TRAIL_FN) { w.svc.draw_callbacks.register(Callback::UnitQuads(i), id); }
+        let row = if fleet(w, id) { super::row(FLEET_LEVEL, FLEET_TRAIL_FN) } else { super::row(REFERENCE_LEVEL, TRAIL_FN) };
+        if let Some(i) = row { w.svc.draw_callbacks.register(Callback::UnitQuads(i), id); }
     }
 }
 
 /// Level11 `0x3192c8`: the contrails of the registering fighter's group (module doc).
 pub fn trail_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, id: MobyId) -> Option<super::FxQuads> {
-    let me = table.mobys.get(id).filter(|m| m.o_class == CLASS && m.pvars.len() >= pvo::LEN)?;
+    let me = table.mobys.get(id).filter(|m| (m.o_class == CLASS || m.o_class == FLEET_CLASS) && m.pvars.len() >= pvo::LEN)?;
     if me.group < 0 { return None; }
     let n = if svc.cheats.on(2) { TRAIL_LEN_CHEAT } else { TRAIL_LEN };
     let tick = crate::moby_update::services::pvar::i32(&me.pvars, pvo::DRAW_TICK) as u32;
@@ -440,17 +460,18 @@ pub fn trail_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upd
     Some(super::FxQuads { fx: 0x13, additive: true, quads })
 }
 
-/// Level11 `0x31a758(g)`: the group's fighters on an attack run.
-pub fn attacking(w: &World, g: i32) -> i32 {
+/// Level11 `0x31a758(g)`: the group's fighters (`class`) on an attack run.
+pub fn attacking(w: &World, g: i32, class: i16) -> i32 {
     let Ok(g) = i8::try_from(g) else { return 0 };
-    scheduler::group_ids(w, g).into_iter().filter(|&m| m < w.table.mobys.len() && w.m(m).o_class == CLASS && w.m(m).state == 5).count() as i32
+    scheduler::group_ids(w, g).into_iter().filter(|&m| m < w.table.mobys.len() && w.m(m).o_class == class && w.m(m).state == 5).count() as i32
 }
 
-/// Level11 `0x31a7d8(g)`: one waiting fighter of the group launched at random (module doc).
-pub fn launch(w: &mut World, g: i32) -> Option<MobyId> {
+/// Level11 `0x31a7d8(g)` / level17 `0x2f4fb8(g)`: one waiting fighter (`class`) of the group launched at random
+/// (module doc; the fleet's copy leaves +0x98).
+pub fn launch(w: &mut World, g: i32, class: i16) -> Option<MobyId> {
     let g = i8::try_from(g).ok()?;
     for m in scheduler::group_ids(w, g) {
-        if m >= w.table.mobys.len() || w.m(m).o_class != CLASS || w.m(m).state != 4 { continue; }
+        if m >= w.table.mobys.len() || w.m(m).o_class != class || w.m(m).state != 4 { continue; }
         if w.rng.randi(10) != 0 { continue; }
         story::pvars(w, m, pvo::LEN);
         let rows = view_rows(w, 0.174_532_92);
@@ -464,7 +485,7 @@ pub fn launch(w: &mut World, g: i32) -> Option<MobyId> {
             mo.state = 5;
         }
         set(w, m, pvo::RATE, DT * 20.0);
-        seti(w, m, pvo::CLOSE_T, 0);
+        if class != FLEET_CLASS { seti(w, m, pvo::CLOSE_T, 0); }
         set(w, m, pvo::LEAD, 5.0);
         show(w, m);
         return Some(m);

@@ -1,5 +1,5 @@
 //! **The ship pickups, classes 1218 (missiles) and 1220 (health), and their parachute 1219** (created by code only:
-//! the spawner level11 `0x30f5a8`, a shot-down fighter 1319 drops one, [`super::pokitaru_fighter`]): the pickup
+//! the spawner level11 `0x30f5a8`, a shot-down fighter 1319 drops one, [`super::ship_fighter`]): the pickup
 //! hangs under its parachute (`0x30fd98` makes it), drifts down and is drawn toward the flown ship 1242 / 69 / 1379
 //! ([`crate::vehicle`]) within 40; the ship touching it (or within 4) collects it: five missiles or a quarter of the
 //! health. Shooting the parachute drops the pickup. Read from the level11 decomp and disassembly. Native `f32`.

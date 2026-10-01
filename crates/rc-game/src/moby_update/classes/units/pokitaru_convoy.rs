@@ -2,7 +2,7 @@
 //! (`0x3181f0`, eight made by each convoy) **and the sludge 1524** the cars drop into the sea (`0x31ab08`, made by
 //! `0x31ada0`): the jet mission's targets. A convoy head flies a closed path with its eight cars strung behind it
 //! 3.5 apart (each car on the path 7 behind the one ahead), its escorts 1319 spaced along it
-//! ([`super::pokitaru_fighter`]); once Ratchet flies (hero state 0x32) it switches to its battle path. Hits on any car
+//! ([`super::ship_fighter`]); once Ratchet flies (hero state 0x32) it switches to its battle path. Hits on any car
 //! wear the convoy's health (80); each eighth lost, the hit car's place is taken by the tail car, which breaks off
 //! in pieces, and the cars behind close the gap; the last car gone, the convoy bursts and is deleted. Passing a
 //! marked point (w = 42) a car starts a second of dropping sludge, which splashes on the sea, spreads and sinks. The
@@ -354,7 +354,7 @@ fn hits(w: &mut World, id: MobyId) -> bool {
     let n = pi(w, id, pvo::CARS_N);
     if sum == 0.0 || ((n - 1) as f32) < (hp / HEALTH) * 8.0 { return false; }
     let Some(k) = last else { return false };
-    w.svc.help.records.help[super::pokitaru_fighter::HELP_REC].count = 0xffff;
+    w.svc.help.records.help[super::ship_fighter::HELP_REC].count = 0xffff;
     let n = n - 1;
     seti(w, id, pvo::CARS_N, n);
     let tail = car(w, id, n as usize);
@@ -395,18 +395,18 @@ fn hits(w: &mut World, id: MobyId) -> bool {
 /// Level11 `0x3180a0(m, path)` (module doc).
 fn place_escorts(w: &mut World, id: MobyId, path_i: i32) {
     let Ok(g) = i8::try_from(c::pi16(w, id, pvo::ESCORTS)) else { return };
-    let list: Vec<MobyId> = scheduler::group_ids(w, g).into_iter().filter(|&m| m < w.table.mobys.len() && w.m(m).o_class == super::pokitaru_fighter::CLASS).collect();
+    let list: Vec<MobyId> = scheduler::group_ids(w, g).into_iter().filter(|&m| m < w.table.mobys.len() && w.m(m).o_class == super::ship_fighter::CLASS).collect();
     if list.is_empty() { return; }
     let p = path(w, path_i);
     let step = (p.len() as i32 / list.len() as i32) as i16 as i32;
     for (j, m) in list.into_iter().enumerate() {
         let i = j as i32 * step;
         let q = at(&p, i);
-        story::pvars(w, m, super::pokitaru_fighter::pvo::LEN);
+        story::pvars(w, m, super::ship_fighter::pvo::LEN);
         w.mm(m).position = q;
-        seti(w, m, super::pokitaru_fighter::pvo::POINT, i);
-        set(w, m, super::pokitaru_fighter::pvo::T, 0.0);
-        seti(w, m, super::pokitaru_fighter::pvo::PATH, path_i);
+        seti(w, m, super::ship_fighter::pvo::POINT, i);
+        set(w, m, super::ship_fighter::pvo::T, 0.0);
+        seti(w, m, super::ship_fighter::pvo::PATH, path_i);
     }
 }
 

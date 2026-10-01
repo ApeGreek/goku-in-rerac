@@ -78,7 +78,7 @@ fn blip(w: &World, out: &mut Vec<ScreenPrim>, m: MobyId, kind: usize, rgba: u32)
     let mut yaw = e[2];
     if std::f32::consts::FRAC_PI_2 < e[1] || e[1] < -std::f32::consts::FRAC_PI_2 { yaw = -yaw; }
     let th = sub_rot(std::f32::consts::FRAC_PI_2, yaw);
-    let rows = super::pokitaru_fighter::rows_of([0.0, 0.0, th]);
+    let rows = super::ship_fighter::rows_of([0.0, 0.0, th]);
     let cam = w.camera_point();
     let p = w.m(m).position;
     let d = [p[0] - cam[0], p[1] - cam[1]];

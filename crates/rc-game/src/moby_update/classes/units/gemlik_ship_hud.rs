@@ -54,12 +54,12 @@ const RING: [[i16; 2]; 30] = [
     [12, 2], [12, 2], [9, 2], [9, 8], [7, 6], [3, 11], [3, 8], [3, 8], [-3, 11], [-3, 11], [-3, 8], [-9, 8], [-7, 6], [-12, 2], [-9, 2],
 ];
 /// gp−0x5838 (0x1613c8): the off-screen arrow.
-const ARROW: [[i16; 2]; 3] = [[2, 8], [-2, 8], [0, -8]];
+pub(super) const ARROW: [[i16; 2]; 3] = [[2, 8], [-2, 8], [0, -8]];
 /// 0x1cbdb8: the blips (tex, u, v, w, h, cx, cy).
 const BLIPS: [[i32; 7]; 3] = [[2, 0, 8, 7, 7, 3, 3], [2, 9, 13, 2, 2, 0, 0], [2, 13, 13, 2, 2, 0, 0]];
 
 /// The frame height 0x13e504 (NTSC).
-const H: f32 = 416.0;
+pub(super) const H: f32 = 416.0;
 const GREEN_RING: u32 = 0xff00_ff00;
 const RED_RING: u32 = 0x5000_00ff;
 const BLIP_WHITE: u32 = 0x7580_8080;
@@ -93,7 +93,7 @@ pub(super) fn strip(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, t
 }
 
 /// `0x2b7d50(x, y, s, a, 0x1cbd40, 30, ·, rgba)`: a target ring.
-fn ring(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, rgba: u32) { strip(out, x, y, s, a, &RING, rgba) }
+pub(super) fn ring(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, rgba: u32) { strip(out, x, y, s, a, &RING, rgba) }
 
 /// `0x2b8320(x, y, s, a, r, g, b, alpha)`: the lock marker's four quarters of FX `fx` (module doc; 0x37 here, Pokitaru's
 /// jet `0x311048` the same with FX 0x42).
@@ -121,9 +121,16 @@ pub(super) fn sprite(out: &mut Vec<ScreenPrim>, x: f32, y: f32, side: f32, uv: f
 /// `0x2b89f8(euler, camera, m, kind, rgba, set)`: a radar blip (module doc).
 fn blip(w: &World, out: &mut Vec<ScreenPrim>, m: MobyId, kind: usize, rgba: u32, set: i32) {
     let cam = w.camera_point();
+    blip_from(w, out, [cam[0], cam[1], cam[2]], m, kind, rgba, set, false);
+}
+
+/// The blip relative to `from` (the camera, or what a caller passes in its place); `mirror`: x negated under the mirror
+/// cheat 0x15edb4 (the fleet's copy `0x2eaae0`).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn blip_from(w: &World, out: &mut Vec<ScreenPrim>, from: [f32; 3], m: MobyId, kind: usize, rgba: u32, set: i32, mirror: bool) {
     let th = sub_rot(std::f32::consts::FRAC_PI_2, w.camera_yaw);
     let p = w.m(m).position;
-    let b = [p[0] - cam[0], p[1] - cam[1]];
+    let b = [p[0] - from[0], p[1] - from[1]];
     let (sn, cs) = th.sin_cos();
     let k = f32::from_bits(0x3d92_4925);
     let v = [(b[0] * cs - b[1] * sn) * k, (b[0] * sn + b[1] * cs) * k];
@@ -135,7 +142,8 @@ fn blip(w: &World, out: &mut Vec<ScreenPrim>, m: MobyId, kind: usize, rgba: u32,
         colour = (rgba & 0xff_ffff) | (((a * (46.0 - d) * 0.125) as i32 as u32) << 24);
     }
     let [tex, u, vv, bw, bh, cx, cy] = BLIPS[kind];
-    let x = (v[0] as i32 + 432 - cx) as f32;
+    let sign = if mirror && w.svc.cheats.on(4) { -1.0 } else { 1.0 };
+    let x = ((sign * v[0]) as i32 + 432 - cx) as f32;
     let y = ((-v[1]) as i32 - 80 + H as i32 - cy) as f32;
     let (bw, bh, u, vv) = (bw as f32, bh as f32, u as f32, vv as f32);
     let pos = [[x, y], [x + bw, y], [x, y + bh], [x + bw, y + bh]];

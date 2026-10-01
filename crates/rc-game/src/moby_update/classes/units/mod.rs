@@ -188,7 +188,11 @@
 //! | — | 1034 its earlier copy (11, 13, 17; created by code: the spawner level11 0x309378) | level11 0x3094f8 | [`ship_missile`] |
 //! | U384 | 1242 Pokitaru's jet (the convoy mission: the flight, the guns, the missiles, the edge bend, the ambush calls), its HUD 0x311d50 (the convoys left, the lock, the gauge) (11) | level11 0x313290 | [`pokitaru_jet`], [`pokitaru_jet_hud`] |
 //! | U387 | 1264 Pokitaru's convoys (the jet mission's targets), their cars 1265 and the sludge 1524 they drop (11) | level11 0x3172c0, 0x3181f0, 0x31ab08 | [`pokitaru_convoy`] |
-//! | U389 | 1319 Pokitaru's fighters (the convoys' escorts and the jet's ambushers: paths, attack runs, shots, pickups), their contrails 0x3192c8 (11) | level11 0x319838 | [`pokitaru_fighter`] |
+//! | U389 | 1319 Pokitaru's fighters (the convoys' escorts and the jet's ambushers: paths, attack runs, shots, pickups), their contrails 0x3192c8 (11) | level11 0x319838 | [`ship_fighter`] |
+//! | U576 | 1843 the fleet's fighters (the same code, the floating pickups), their contrails 0x2f3b68 (17) | level17 0x2f40d8 | [`ship_fighter`] |
+//! | U433 | 224 / 228 the floating ship pickups (13: 8 + 8; 17: dropped by 1843) | level13 0x2e1cc8 | [`ship_pickup_float`] |
+//! | U568 | 1379 the fleet's ship (Gemlik's flight with the edge bend; the turrets' mission), its HUD 0x2eb9a8 (17) | level17 0x2ed018 | [`fleet_ship`], [`fleet_ship_hud`] |
+//! | U563 | 347 the fleet's turrets (the ship mission's targets) and their bolt 1368 (17) | level17 0x2cb310, 0x2e8e08 | [`fleet_turret`] |
 //! | — | 1218 / 1220 the ship pickups (missiles / health) and their parachute 1219 (11; created by code: the spawner 0x30f5a8) | level11 0x30f728, 0x310028 | [`ship_pickup`] |
 //! | — | 1017 the fighters' laser shot (11, 13, 17; created by code: the spawner level11 0x308f48) | level11 0x309098 | [`fighter_shot`] |
 //! | U397 | 326 Hoven's gun drones (ordinary and the turret game's attackers) and their shot 409 (12) | level12 0x2e9f68, 0x2ece00 | [`hoven_drone`] |
@@ -377,7 +381,11 @@ pub mod ship_laser;
 pub mod ship_missile;
 pub mod fighter_shot;
 pub mod ship_pickup;
-pub mod pokitaru_fighter;
+pub mod ship_pickup_float;
+pub mod fleet_turret;
+pub mod fleet_ship;
+pub mod fleet_ship_hud;
+pub mod ship_fighter;
 pub mod pokitaru_convoy;
 pub mod pokitaru_jet;
 pub mod pokitaru_jet_hud;
@@ -663,8 +671,15 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "1009 laser", level: ship_laser::REFERENCE_LEVEL, func: ship_laser::UPDATE_FN, classes: &ship_laser::CLASSES, update: ship_laser::update, joints: &[] },
     UnitPort { unit: "295 missile", level: ship_missile::REFERENCE_LEVEL, func: ship_missile::UPDATE_FN, classes: &ship_missile::CLASSES, update: ship_missile::update, joints: &ship_missile::CLASSES },
     UnitPort { unit: "1034 missile", level: ship_missile::EARLY_LEVEL, func: ship_missile::EARLY_UPDATE_FN, classes: &ship_missile::EARLY_CLASSES, update: ship_missile::update, joints: &ship_missile::EARLY_CLASSES },
-    UnitPort { unit: "U389 1319", level: pokitaru_fighter::REFERENCE_LEVEL, func: pokitaru_fighter::UPDATE_FN, classes: &pokitaru_fighter::CLASSES, update: pokitaru_fighter::update, joints: &[] },
-    UnitPort { unit: "U389 1319 trails", level: pokitaru_fighter::REFERENCE_LEVEL, func: pokitaru_fighter::TRAIL_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U389 1319", level: ship_fighter::REFERENCE_LEVEL, func: ship_fighter::UPDATE_FN, classes: &ship_fighter::CLASSES, update: ship_fighter::update, joints: &[] },
+    UnitPort { unit: "U389 1319 trails", level: ship_fighter::REFERENCE_LEVEL, func: ship_fighter::TRAIL_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U576 1843", level: ship_fighter::FLEET_LEVEL, func: ship_fighter::FLEET_UPDATE_FN, classes: &ship_fighter::FLEET_CLASSES, update: ship_fighter::update, joints: &[] },
+    UnitPort { unit: "U576 1843 trails", level: ship_fighter::FLEET_LEVEL, func: ship_fighter::FLEET_TRAIL_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U433 224 228", level: ship_pickup_float::REFERENCE_LEVEL, func: ship_pickup_float::UPDATE_FN, classes: &ship_pickup_float::CLASSES, update: ship_pickup_float::update, joints: &ship_pickup_float::CLASSES },
+    UnitPort { unit: "U568 1379", level: fleet_ship::REFERENCE_LEVEL, func: fleet_ship::UPDATE_FN, classes: &fleet_ship::CLASSES, update: fleet_ship::update, joints: &fleet_ship::CLASSES },
+    UnitPort { unit: "U568 1379 hud", level: fleet_ship::REFERENCE_LEVEL, func: fleet_ship_hud::HUD_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U563 347", level: fleet_turret::REFERENCE_LEVEL, func: fleet_turret::UPDATE_FN, classes: &fleet_turret::CLASSES, update: fleet_turret::update, joints: &fleet_turret::CLASSES },
+    UnitPort { unit: "U563 1368", level: fleet_turret::REFERENCE_LEVEL, func: fleet_turret::SHOT_FN, classes: &fleet_turret::SHOT_CLASSES, update: fleet_turret::shot_update, joints: &[] },
     UnitPort { unit: "U384 1242", level: pokitaru_jet::REFERENCE_LEVEL, func: pokitaru_jet::UPDATE_FN, classes: &pokitaru_jet::CLASSES, update: pokitaru_jet::update, joints: &pokitaru_jet::CLASSES },
     UnitPort { unit: "U384 1242 hud", level: pokitaru_jet::REFERENCE_LEVEL, func: pokitaru_jet_hud::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U387 1264", level: pokitaru_convoy::REFERENCE_LEVEL, func: pokitaru_convoy::UPDATE_FN, classes: &pokitaru_convoy::CLASSES, update: pokitaru_convoy::update, joints: &[] },
@@ -805,7 +820,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::AURA_DRAW_FN)) => veldin_shots::aura_quads(table, svc, id),
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::BEAM_FN)) => veldin_hopper::beam_quads(table, svc, id),
         Some((qwark_ship::REFERENCE_LEVEL, qwark_ship::BEAM_FN)) => qwark_ship::beam_quads(table, svc, id),
-        Some((pokitaru_fighter::REFERENCE_LEVEL, pokitaru_fighter::TRAIL_FN)) => pokitaru_fighter::trail_quads(table, svc, id),
+        Some((ship_fighter::REFERENCE_LEVEL, ship_fighter::TRAIL_FN)) | Some((ship_fighter::FLEET_LEVEL, ship_fighter::FLEET_TRAIL_FN)) => ship_fighter::trail_quads(table, svc, id),
         _ => None,
     }
 }
@@ -831,6 +846,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((hoven_turret::REFERENCE_LEVEL, hoven_turret::HUD_FN)) => hoven_turret::hud_frame(w, id),
         Some((gemlik_ship::REFERENCE_LEVEL, gemlik_ship_hud::HUD_FN)) => gemlik_ship_hud::hud_frame(w, id),
         Some((pokitaru_jet::REFERENCE_LEVEL, pokitaru_jet_hud::HUD_FN)) => pokitaru_jet_hud::hud_frame(w, id),
+        Some((fleet_ship::REFERENCE_LEVEL, fleet_ship_hud::HUD_FN)) => fleet_ship_hud::hud_frame(w, id),
         _ => {}
     }
 }
