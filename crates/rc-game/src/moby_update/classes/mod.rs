@@ -28,6 +28,7 @@
 //! | 774 (talking NPC; levels 1, 8) | 0x2ff118 `TalkingNpcUpdate` | [`talking_npc`] |
 //! | 760 (fire / smoke fields on the bombed buildings), 809 (their smoke scroll; levels 0, 1, 14) | 0x2fdbc0 `ParticleFieldUpdate`, 0x2ba658 | [`fire_field`] (draw callbacks: [`draw_callbacks`]) |
 //! | 705 (spinners), 703 / 715 (elevators), 768 / 769 (sliding doors), 1042 (shootables), 701 (collapsing platforms; level 1) | 0x2f9bf0, 0x2f95c0, 0x2fed68, 0x307c48, 0x2f9080 | [`props`] |
+//! | 1007 (the camera moby; created by the camera system on every level) | 0x2ba7c8 | [`crate::follow_camera::camera_moby`] |
 //! | 704 (rocks), 709–711 (shell walls), 729 (big wall), 778 (pipe) and its spray 779 (level 1) | 0x2f9810, 0x2f9d80, 0x2fa800, 0x2ff860, 0x2ffb28 | [`breakables::novalis`] |
 //! | the break template's 21 copies (754, 1813 on level 1; 22 classes on levels 1–4, 6–12, 16, 17), 1816 (remains) | [`breakables::RECIPES`], 0x30d200 | [`breakables`] (`ClassUpdate::Breakable(i)`) |
 //! | 1546 (cutscene FX driver; levels with scene effects) | 0x30c190 `CutsceneFxUpdate` | [`cutscene_fx`] |
@@ -153,6 +154,7 @@ pub enum ClassUpdate {
     SlidingDoor,
     Shootable,
     Collapse,
+    CameraMoby,
     Rock,
     ShellWall,
     Wall,
@@ -199,7 +201,7 @@ pub enum ClassUpdate {
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 73] = [
+    pub const ALL: [ClassUpdate; 74] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -238,6 +240,7 @@ impl ClassUpdate {
         ClassUpdate::SlidingDoor,
         ClassUpdate::Shootable,
         ClassUpdate::Collapse,
+        ClassUpdate::CameraMoby,
         ClassUpdate::Rock,
         ClassUpdate::ShellWall,
         ClassUpdate::Wall,
@@ -316,6 +319,7 @@ impl ClassUpdate {
             ClassUpdate::SlidingDoor => props::DOOR_FN,
             ClassUpdate::Shootable => props::SHOOTABLE_FN,
             ClassUpdate::Collapse => props::COLLAPSE_FN,
+            ClassUpdate::CameraMoby => crate::follow_camera::camera_moby::UPDATE_FN,
             ClassUpdate::Rock => breakables::novalis::ROCK_FN,
             ClassUpdate::ShellWall => breakables::novalis::SHELL_WALL_FN,
             ClassUpdate::Wall => breakables::novalis::WALL_FN,
@@ -404,6 +408,7 @@ impl ClassUpdate {
             ClassUpdate::SlidingDoor => &props::DOOR_CLASSES,
             ClassUpdate::Shootable => &props::SHOOTABLE_CLASSES,
             ClassUpdate::Collapse => &props::COLLAPSE_CLASSES,
+            ClassUpdate::CameraMoby => &crate::follow_camera::camera_moby::CLASSES,
             ClassUpdate::Rock => &breakables::novalis::ROCK_CLASSES,
             ClassUpdate::ShellWall => &breakables::novalis::SHELL_WALL_CLASSES,
             ClassUpdate::Wall => &breakables::novalis::WALL_CLASSES,
@@ -600,6 +605,7 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::SlidingDoor => props::door_update(w, id),
         ClassUpdate::Shootable => props::shootable_update(w, id),
         ClassUpdate::Collapse => props::collapse_update(w, id),
+        ClassUpdate::CameraMoby => crate::follow_camera::camera_moby::update(w, id),
         ClassUpdate::Rock => breakables::novalis::rock_update(w, id),
         ClassUpdate::ShellWall => breakables::novalis::shell_wall_update(w, id),
         ClassUpdate::Wall => breakables::novalis::wall_update(w, id),

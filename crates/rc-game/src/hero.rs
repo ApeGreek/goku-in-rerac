@@ -68,6 +68,7 @@ pub mod visibomb;
 pub mod crank;
 pub mod scripted;
 pub mod worn;
+pub mod bodies;
 
 use crate::ps2v::Pf;
 pub use ledge::LedgeBlock;
@@ -461,6 +462,8 @@ pub struct Hero {
     /// The Walloper's arcs, glow and the gadget lunge's queued hits ([`walloper`]; the game's globals 0x1dc020.. and
     /// 0x1616fc..).
     pub walloper: walloper::Walloper,
+    /// The other bodies' fields (Clank's health, Giant Clank's energy, the body moby; [`bodies`], G-HERO-005).
+    pub bodies: bodies::Bodies,
 }
 
 /// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
@@ -527,7 +530,7 @@ impl Hero {
             owned: Owned::default(), back_slot: idle::BackSlot::default(), feet_slot: idle::ItemSlot::default(), head_slot: idle::ItemSlot::default(), worn: worn::Worn::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], edge: (false, 0.0, 0.0), boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
-            joint_targets: Default::default(), help: Default::default(), walloper: Default::default(),
+            joint_targets: Default::default(), help: Default::default(), walloper: Default::default(), bodies: bodies::Bodies::default(),
         }
     }
 
@@ -746,6 +749,13 @@ pub fn hero_update_with_sounds(
             eprintln!("rc_game::hero: state {:#x} is not ported; the hero is frozen", hero.state);
         }
         return HeroTick::Unimplemented(hero.state);
+    }
+    // A body is the hero moby (`0x2070d0` → `HeroUpdateAlt` 0x2062b0, G-HERO-005): its own update.
+    if hero.mode != 0 {
+        bodies::body_update(hero, moby, env, anim, rng, sounds, counter);
+        // (`fx::end`'s back placement is Ratchet's: the back items do not update in a body.)
+        hero.fx.view = anim.view();
+        return HeroTick::Ran;
     }
     // The Comet-Strike's catch (the wrench's update asked for Ratchet's loop exit after last tick's advance).
     comet::before_advance(hero, anim);

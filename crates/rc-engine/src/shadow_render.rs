@@ -197,7 +197,9 @@ pub fn shadow_tick(play: Option<ResMut<Play>>, level: Res<crate::Level>, game: O
             water_z: h.water_level.to_f32(),
             liquid_z: h.surf.liquid,
         };
-        shadows::update_hero_shadow(&mut p.game.mobys.mobys[hero_id], &mut sg.pitch, &mut sg.dirs, &hin, light, line);
+        // `0x22a260` runs on the hero moby 0x1413d0 (a body's while one is in: rc_game::hero::bodies).
+        let hm = p.game.hero.hero_moby(hero_id);
+        shadows::update_hero_shadow(&mut p.game.mobys.mobys[hm], &mut sg.pitch, &mut sg.dirs, &hin, light, line);
     }
     // The scene actors (`CutsceneModeUpdate`, right after each actor's `MobyBuildMatrix`: +0x7f ≠ 0 →
     // ShadowProbeAlongDir 0x26f0e0 with direction 0), before the direction update at the end of the frame.

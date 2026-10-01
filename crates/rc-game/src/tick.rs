@@ -120,6 +120,11 @@ pub trait MobySystem {
     fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { None }
     /// The moby ids of group `g` (`0x1abcc0[g]`, list order; none for `g < 0`): the Swingshot camera's group look.
     fn group(&self, _g: i8) -> Vec<MobyId> { Vec::new() }
+    /// `CreateMoby(o_class)` 0x263390 outside the moby loop (the camera moby 1007, `crate::follow_camera::camera_moby`);
+    /// None: no slot, no class, or no moby world.
+    fn create_moby(&mut self, _table: &mut MobyTable, _o_class: i16, _counter: u64) -> Option<MobyId> { None }
+    /// `DeleteMoby` 0x2636c0 outside the moby loop (the camera moby).
+    fn delete_moby(&mut self, _table: &mut MobyTable, _id: MobyId, _counter: u64) {}
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -214,7 +219,12 @@ impl Game {
         // The globals the moby loop reads outside the moby system: this tick's pad, the last camera update's Euler,
         // Ratchet's anim fields after his last update (moby_update::services::LoopGlobals).
         let e = self.camera.out.euler;
-        self.hero.loop_in = crate::moby_update::services::LoopGlobals { pad: self.pad.clone(), cam_euler: [e[0].to_f32(), e[1].to_f32(), e[2].to_f32()], anim: anim.view() };
+        self.hero.loop_in = crate::moby_update::services::LoopGlobals {
+            pad: self.pad.clone(),
+            cam_euler: [e[0].to_f32(), e[1].to_f32(), e[2].to_f32()],
+            anim: anim.view(),
+            cam_pos: self.camera.current_pos(),
+        };
         (hooks.mobys)(&mut self.mobys, &self.hero, &mut self.rng, &self.camera.out, coll, self.counter);
         // The classes' stores into the hero block (the flow 679's push, the lift's lockouts …) land before the hero
         // update, as in the game (moby_update::services::HeroFields).
@@ -222,16 +232,17 @@ impl Game {
         if let Some(f) = &hero_writes { f.apply(&mut self.hero); }
         // Their camera shakes (stores into 0x167260 / 0x167270; the camera update at the end of the tick applies them).
         for r in hooks.world.as_deref_mut().map(|w| w.take_camera_shakes()).unwrap_or_default() { self.camera.request_shake(r); }
-        let hero_moby = Some(self.hero_moby);
+        // `0x1413d0`: the hero moby (Ratchet's, or the body moby while a body is in: crate::hero::bodies).
+        let hero_moby = Some(self.hero.hero_moby(self.hero_moby));
         // Their cinematic camera calls (CameraScript, CameraScript2, HeroTeleport's camera reset: crate::cinematic).
         let cine = hooks.world.as_deref_mut().map(|w| w.take_cinematic()).unwrap_or_default();
         crate::cinematic::apply_camera_calls(&mut self.camera, &cine, &CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: None, hero_moby });
         // Ratchet's hit message as the moby loop left it (the hit intake 0x231580 and the hurt entries read it).
-        self.hero.damage.hit = hooks.world.as_deref().and_then(|w| w.hit_message(&self.mobys, self.hero_moby)).map(|r| hero_hit(&self.mobys, &r));
+        self.hero.damage.hit = hooks.world.as_deref().and_then(|w| w.hit_message(&self.mobys, self.hero.hero_moby(self.hero_moby))).map(|r| hero_hit(&self.mobys, &r));
         // The hero's queries see the table as the moby loop left it (a snapshot: the hero holds its own moby).
         let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
         // The carriers' platform blocks as the moby loop left them (`HeroPlatformUpdate`, hero::platform).
-        let mut carriers = crate::hero::platform::Carriers::collect(&self.mobys, self.hero_moby);
+        let mut carriers = crate::hero::platform::Carriers::collect(&self.mobys, self.hero.hero_moby(self.hero_moby));
         carriers.grind = self.grind_paths.clone();
         // The Swingshot targets of the moby loop's run list (hero::swingshot, the weapon check's searches).
         carriers.targets = self.swing_targets(hooks.world.as_deref());
@@ -255,12 +266,41 @@ impl Game {
                 water: hooks.world.as_deref().and_then(|w| w.water()),
                 world: Some(&carriers),
             };
-            // The classes' calls into the hero code (SetState / SetAnim: the bolt crank), with the hero's context.
-            if let Some(f) = &hero_writes { f.run_calls(&mut self.hero, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None }); }
+            // The classes' calls into the hero code (SetState / SetAnim: the bolt crank; SwitchCharacter / leaving a body:
+            // crate::hero::bodies), with the hero's context.
+            // A `SwitchCharacter`'s item slots' pass `0x231088` (crate::hero::items::slot_pass) with the item environment.
+            {
+                let switching = self.hero.bodies.restore.is_some() || hero_writes.as_ref().is_some_and(|f| f.calls.iter().flatten().any(|c| matches!(c, crate::moby_update::services::HeroCall::SwitchCharacter { .. })));
+                let targets = if switching && self.hero.items.slot.item.is_some() { self.target_list(hooks.world.as_deref()) } else { Vec::new() };
+                let cam = (self.camera.out.pos_f32(), self.camera.out.rows_f32());
+                let (data, pad, counter, ratchet) = (self.item_data.as_ref(), &self.pad, self.counter, self.hero_moby);
+                let (globals, mobys) = (&mut self.item_globals, &mut self.mobys);
+                let mut pass = |h: &mut crate::hero::Hero, a: &mut dyn AnimCtl, r: &mut crate::rng::Rng| {
+                    let Some(data) = data else { return };
+                    let ienv = ItemEnv { data, pad, frame: counter as i32, hero_moby: ratchet, coll: Some(coll), camera: Some((cam.0, cam.1[0])), camera_up: Some(cam.1[2]), targets: &targets };
+                    crate::hero::items::slot_pass(h, globals, mobys, &*a, r, &ienv, &mut *hits);
+                };
+                // The death reload's switch back into the checkpoint's body (`0x29adc8`, crate::hero::bodies).
+                if let Some((m, st, b)) = self.hero.bodies.restore.take() {
+                    crate::hero::bodies::switch_character_with(&mut self.hero, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None }, m, st, b, Some(&mut pass));
+                }
+                if let Some(f) = &hero_writes { f.run_calls_with(&mut self.hero, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None }, Some(&mut pass)); }
+            }
             crate::cinematic::run_hero_calls(&mut self.hero, &cine, &mut crate::hero::states::Ctx { env: &env, anim: &mut *anim, rng: &mut self.rng, voice: None });
-            let moby = &mut self.mobys.mobys[self.hero_moby];
+            // A switch made the body the hero moby: its commands to the table (Ratchet hidden, the body's mode bits),
+            // and the hit message the intake reads is the new hero moby's.
+            if !self.hero.bodies.cmds.is_empty() {
+                crate::hero::bodies::apply_cmds(&mut self.hero, &mut self.mobys, self.hero_moby, hits, self.counter);
+                let now = self.hero.hero_moby(self.hero_moby);
+                if Some(now) != hero_moby {
+                    self.hero.damage.hit = hooks.world.as_deref().and_then(|w| w.hit_message(&self.mobys, now)).map(|r| hero_hit(&self.mobys, &r));
+                }
+            }
+            let moby = &mut self.mobys.mobys[self.hero.hero_moby(self.hero_moby)];
             hero_update_with_sounds(&mut self.hero, moby, &env, anim, &mut self.rng, hero_sounds)
         };
+        let hm = self.hero.hero_moby(self.hero_moby);
+        let hero_moby = Some(hm);
         drop(scene);
         // The mobys the hero update created (CreateMoby inside it: the water splash 775), before anything else can take a
         // slot, with their MobyBuildMatrix (hero::fx::create_mobys).
@@ -271,21 +311,35 @@ impl Game {
         }
         // The hero's camera shakes (the stomp's landing, …: its stores into 0x167260 / 0x167270 during the update).
         for r in std::mem::take(&mut self.hero.fx.shakes) { self.camera.request_shake(r); }
-        // HeroSyncMoby 0x229f20: Ratchet's hit slot +0xa4 = 0xff (the message is consumed by this update).
-        if hero_tick != HeroTick::OutOfBounds { self.mobys.mobys[self.hero_moby].hit_slot = 0xff; }
+        // HeroSyncMoby 0x229f20 (0x22a110 in a body): the hero moby's hit slot +0xa4 = 0xff (the message is consumed by
+        // this update).
+        if hero_tick != HeroTick::OutOfBounds { self.mobys.mobys[hm].hit_slot = 0xff; }
         self.hero.damage.hit = None;
         if hero_tick == HeroTick::Ran {
-            // The write-back's MobyBuildMatrix(Ratchet) (HeroSyncMoby 0x229f20): bounding sphere from his
+            // The write-back's MobyBuildMatrix(hero moby) (HeroSyncMoby 0x229f20 / 0x22a110): bounding sphere from its
             // animation fields (+0x50..0x54, the moby's own in the game), matrix, grid re-registration.
             let v = anim.view();
-            let a = &mut self.mobys.mobys[self.hero_moby].anim;
+            let a = &mut self.mobys.mobys[hm].anim;
             (a.seq_a, a.seq_b, a.frame_a, a.frame_b, a.t) = (v.seq_a, v.seq_b, v.frame_a, v.frame_b, v.t);
-            if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, self.hero_moby); }
+            if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, hm); }
+        }
+        // The rest of `HeroUpdateAlt` (a body): the glow, Clank's antenna glow and rotor, Giant Clank's pilot, the
+        // body's hits; and the commands its update or a class's leave made (crate::hero::bodies).
+        if self.hero.mode != 0 || !self.hero.bodies.cmds.is_empty() {
+            crate::hero::bodies::after_update(&mut self.hero, &mut self.mobys, self.hero_moby, &mut *anim, hits, hero_sounds, &mut self.rng, self.counter);
+            if self.hero.mode != 0 {
+                if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, self.hero_moby); }
+            }
+        }
+        // Ratchet's class sounds a body state played on his moby (Clank's burn 0x7d: `PlayClassSound(9, 0, Ratchet)`).
+        for (index, flags) in std::mem::take(&mut self.hero.bodies.ratchet_sounds) {
+            hero_sounds.voice(&self.mobys.mobys[self.hero_moby], index, flags, &mut self.rng);
         }
         // The hits the pack states queued in their physics (the stomp's descent, the Thruster long jump's crates).
         if !self.hero.packs.hits.is_empty() { crate::hero::packs::deliver_hits(&mut self.hero, &mut self.mobys, self.hero_moby, hits); }
-        // HeroItemsUpdate 0x231268 (hand slot): create, attach, the swap, the item's update (the wrench's hit).
-        if hero_tick == HeroTick::Ran {
+        // HeroItemsUpdate 0x231268 (hand slot): create, attach, the swap, the item's update (the wrench's hit). Not in a body
+        // (`HeroUpdateAlt` has no item pass).
+        if hero_tick == HeroTick::Ran && self.hero.mode == 0 {
             if let Some(data) = self.item_data.as_ref() {
                 // 0x1abe80, the targetable mobys of the moby loop's run list (crate::targeting), for the items' aim searches.
                 let targets = if self.hero.items.slot.item.is_some() { self.target_list(hooks.world.as_deref()) } else { Vec::new() };
@@ -371,6 +425,8 @@ impl Game {
                     groups.insert(f.group, ids);
                 }
             }
+            // The follow camera's scripted focus moby (0x16735c, `0x3111d8`): its state and position.
+            if let Some(id) = self.camera.focus_moby { add(id); }
             self.camera.world.mobys = mobys;
             self.camera.world.groups = groups;
         }
@@ -381,6 +437,24 @@ impl Game {
             self.camera.update(&CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: mobys.as_ref(), hero_moby })
         };
         drop(scene);
+        // `Camera_handleCollWithHero`'s camera moby (class 1007): created while the follow camera is current (+0x30 =
+        // 0xff, mode |= 0x41, at the camera, `MobyBuildMatrix`), deleted otherwise (crate::follow_camera::camera_moby).
+        if let (Some(call), Some(w)) = (self.camera.cam_moby_call.take(), hooks.world.as_deref_mut()) {
+            match call {
+                crate::follow_camera::camera_moby::Call::Create { pos } => {
+                    let id = w.create_moby(&mut self.mobys, crate::follow_camera::camera_moby::CLASS, self.counter);
+                    if let Some(id) = id {
+                        let m = &mut self.mobys.mobys[id];
+                        m.update_dist = 0xff;
+                        m.mode |= 0x41;
+                        m.position = [pos[0], pos[1], pos[2], m.position[3]];
+                        w.build_matrix(&mut self.mobys, id);
+                    }
+                    self.camera.camera_moby_created(id);
+                }
+                crate::follow_camera::camera_moby::Call::Delete(id) => w.delete_moby(&mut self.mobys, id, self.counter),
+            }
+        }
         // The first-person camera's store of 0x1413f5 (`0x316330`; every SetState clears it).
         if self.camera.first_person_flag() { self.hero.f13f5 = 1; }
         // A crate blocking the camera line (0x312ef8): FUN_0026e808(20.0, tmpl, Ratchet, 0x800000, dir), +0x18 /

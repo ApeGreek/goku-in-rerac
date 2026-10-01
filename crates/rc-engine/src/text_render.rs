@@ -112,6 +112,9 @@ pub fn execute(out: &mut Hud2d, st: &mut TextState, glyphs: &[GlyphTable; 3], dr
             }
             Draw::UiFrame { top, bottom, left, right, alpha } => draw_ui_frame(out, *top, *bottom, *left, *right, *alpha),
             Draw::FxQuad { fx, x, y, w, h, u, v, tw, th, rgba } => out.strip_glyph(*fx, *x, *y, *w, *h, *u, *v, *tw, *th, *rgba),
+            Draw::Sprite16 { frame, x, y, w, h, alpha } => out.sprite_fine(*frame, *x, *y, *w, *h, *alpha),
+            Draw::Rect16 { x0, y0, x1, y1, rgba } => out.rect_fine(*x0, *y0, *x1, *y1, *rgba),
+            Draw::SpriteSub { frame, x, y, w, h, alpha } => out.sprite_sub(*frame, *x, *y, *w, *h, *alpha),
         }
     }
 }

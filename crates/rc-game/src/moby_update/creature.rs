@@ -69,9 +69,6 @@ pub struct Globals {
     /// The scripted sequences' calls into the camera and the hero, in the order the game makes them (the game calls
     /// `CameraScript` / `SetState` directly): the cutscene system and the hero read and clear this queue.
     pub scripts: Vec<ScriptRequest>,
-    /// `*(0x1612d0 + i·0x1190 + 8)`: the height of ripple patch `i` of the level's ripple manager (the amoeboid's
-    /// fall-out rule, pvar+0x258). Filled by whoever sets up the level's water; empty: the rule cannot fire (counted).
-    pub ripple_z: Vec<f32>,
     /// The weapons' reaction layer ([`react::Globals`]: the Suck Cannon's slots, the reaction tables, the chickens).
     pub react: react::Globals,
 }
@@ -217,6 +214,16 @@ pub fn set_pu8(w: &mut World, id: MobyId, o: usize, x: u8) { w.mm(id).pvars[o] =
 /// `MobyAnimBlend(m, seq, frame, ticks)` guarded by the game's idiom `if (m+0x53 != seq)`.
 pub fn blend_to(w: &mut World, id: MobyId, seq: u8, frame: i32, ticks: i32) {
     if w.m(id).anim.seq_b != seq { w.anim_blend(id, seq, frame, ticks); }
+}
+
+/// `fun_00212ed8(m, seq, frame)` (L01 0x26c5a8), the hard cut ([`rc_formats::moby_anim::hard_cut`]), then the loop
+/// sound of the new sequence (`update_moby_animation_state`). Nothing for a class without that sequence.
+pub fn hard_cut(w: &mut World, id: MobyId, seq: u8, frame: i32) {
+    let (o, classes) = (w.m(id).o_class, w.classes);
+    let Some(class) = classes.anim(o) else { return };
+    if rc_formats::moby_anim::hard_cut(&mut w.table.mobys[id].anim, class, seq, frame) {
+        crate::moby_update::anim_sound::after_sequence_change(&mut w.table.mobys[id], class);
+    }
 }
 
 #[cfg(test)]

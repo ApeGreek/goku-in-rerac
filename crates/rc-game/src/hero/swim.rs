@@ -33,8 +33,11 @@
 //!
 //! **The lean** ([`Hero::swim_lean`], 0x33..0x35): the neck and feet joint records from the roll and the pitch change.
 //!
-//! **Not ported**: the ✕-tap stats records, the oxygen HUD meter (`queue_animation_update(4, …)`; [`Swim::oxygen`] holds the value) and the water currents
-//! (classes 613 / 679: they write 0x13f528 and push the hero).
+//! **The oxygen meter** (`0x2406b0`: `queue_animation_update(4, …)` every tick under water without the O2 Mask) is
+//! `crate::hud`'s, derived each tick from [`Swim::oxygen`] and the hero's group (`hud::HudState::tick`'s `frame_calls`).
+//!
+//! **Not ported**: the ✕-tap stats records and the water currents (classes 613 / 679: they write 0x13f528 and push the
+//! hero).
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // FPU-style compare order kept from the original.
 
 use super::anim::AnimCtl;
@@ -107,6 +110,10 @@ pub enum SwimEvent {
     Voice(i32, i32),
     /// `0x2319b0` from the drowned state: deaths++, fade to black, respawn.
     Drowned,
+    /// `0x167494 = 0` (`0x2406b0`, the surface jump out of the water into state 6): the camera's underwater flag
+    /// cleared before its next test. The engine stores it as `water::world::UnderwaterStore::Off` into
+    /// `WaterWorld::underwater_store` with the tick's counter (G-REN-032).
+    UnderwaterOff,
 }
 
 /// The hero block's swim fields (level01 addresses; boot .bss, same in every level).
@@ -264,6 +271,8 @@ impl Hero {
                 }
             }
             if w + 0.4 < z {
+                // `0x167494 = 0` before the SetState (the camera is out of the water with him).
+                self.swim.events.push(SwimEvent::UnderwaterOff);
                 self.set_state(c, 6, true);
                 return true;
             }

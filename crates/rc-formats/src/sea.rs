@@ -215,6 +215,116 @@ pub mod hoven_ref {
     pub const LAYER_SPEED: u32 = 0x16_20e0;
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Liquid meshes drawn through the generic strip emitters (G-REN-026)
+
+/// One culled liquid mesh: a bounding sphere (`FastBSphereCheck(256, record)`: x, y, z, r) and its strips. A strip
+/// without stored colours (the lava flows, the two-texture strips) takes its colours from the caller; one without
+/// normals has none (only the two-texture strips' sphere map reads them).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LiquidMesh {
+    /// None: drawn without the sphere check.
+    pub sphere: Option<[f32; 4]>,
+    pub strips: Vec<StripMesh>,
+    /// Per strip, the stored normals (empty: none).
+    pub normals: Vec<Vec<[f32; 3]>>,
+}
+
+/// Reads `c` positions (12 bytes) and ST pairs (8 bytes) from `pos` / `st` into a strip without colours.
+fn strip_at(ov: &Overlay, pos: u32, st: u32, c: usize) -> Result<StripMesh> {
+    let (pb, sb) = (ov.buf(pos, 12 * c)?, ov.buf(st, 8 * c)?);
+    let mut m = StripMesh::default();
+    for i in 0..c {
+        m.pos.push([pb.f32(12 * i)?, pb.f32(12 * i + 4)?, pb.f32(12 * i + 8)?]);
+        m.st.push([sb.f32(8 * i)?, sb.f32(8 * i + 4)?]);
+    }
+    Ok(m)
+}
+
+/// The lava-flow mesh table of level 9's 317 callback (`0x21e8c0(t, table, n, fx a, fx b)`): `n` records of 0x40 bytes:
+/// +0x00 the bounding sphere, +0x10 the positions, +0x14 the ST, +0x1c the strip count k, +0x20 k + 1 `s16` vertex
+/// starts (strip j = vertices start[j] .. start[j + 1] of the two arrays).
+pub fn parse_flow_meshes(ov: &Overlay, table: u32, n: usize) -> Result<Vec<LiquidMesh>> {
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n as u32 {
+        let b = ov.buf(table + 0x40 * k, 0x40)?;
+        let sphere = [b.f32(0)?, b.f32(4)?, b.f32(8)?, b.f32(0xc)?];
+        let (pos, st, count) = (b.u32(0x10)?, b.u32(0x14)?, b.i32(0x1c)?);
+        if !(0..=15).contains(&count) { return invalid(format!("liquid flow mesh {k}: {count} strips")); }
+        let mut m = LiquidMesh { sphere: Some(sphere), ..Default::default() };
+        for j in 0..count as usize {
+            let (a, e) = (b.i16(0x20 + 2 * j)?, b.i16(0x22 + 2 * j)?);
+            if a < 0 || e < a { return invalid(format!("liquid flow mesh {k}: strip {j} {a}..{e}")); }
+            m.strips.push(strip_at(ov, pos + 12 * a as u32, st + 8 * a as u32, (e - a) as usize)?);
+            m.normals.push(Vec::new());
+        }
+        out.push(m);
+    }
+    Ok(out)
+}
+
+/// A table of `n` one-strip mesh records of 0x20 bytes (level 9's grid-textured meshes `0x2c1978(state, table, n)`,
+/// the two-texture strip module level12 `0x2bc210(table, n, tex0, tex1)`): +0x00 the bounding sphere, +0x10 the
+/// positions, +0x14 the ST, +0x18 the normals (read with `normals`), +0x1c the vertex count.
+pub fn parse_mesh_records(ov: &Overlay, table: u32, n: usize, normals: bool) -> Result<Vec<LiquidMesh>> {
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n as u32 {
+        let b = ov.buf(table + 0x20 * k, 0x20)?;
+        let sphere = [b.f32(0)?, b.f32(4)?, b.f32(8)?, b.f32(0xc)?];
+        let c = b.i32(0x1c)?;
+        if !(0..=0x1000).contains(&c) { return invalid(format!("liquid mesh {k}: {c} vertices")); }
+        let c = c as usize;
+        let strip = strip_at(ov, b.u32(0x10)?, b.u32(0x14)?, c)?;
+        let nrm = if normals {
+            let nb = ov.buf(b.u32(0x18)?, 12 * c)?;
+            (0..c).map(|i| Ok([nb.f32(12 * i)?, nb.f32(12 * i + 4)?, nb.f32(12 * i + 8)?])).collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        out.push(LiquidMesh { sphere: Some(sphere), strips: vec![strip], normals: vec![nrm] });
+    }
+    Ok(out)
+}
+
+/// `n` unculled meshes of one strip each from four tables (class 1848's draw `0x30f0e0`): the vertex counts (`s32`) and
+/// pointers to the positions, the normals and the colours (GS RGBA bytes, R low). No ST is stored (the draw computes
+/// it): the strips' ST are zeros.
+pub fn parse_pointer_meshes(ov: &Overlay, counts: u32, pos_ptrs: u32, normal_ptrs: u32, rgba_ptrs: u32, n: usize) -> Result<Vec<LiquidMesh>> {
+    let mut out = Vec::with_capacity(n);
+    for k in 0..n as u32 {
+        let c = ov.i32(counts + 4 * k)?;
+        if !(0..=0x1000).contains(&c) { return invalid(format!("pointer mesh {k}: {c} vertices")); }
+        let c = c as usize;
+        let (pb, nb, cb) = (ov.buf(ov.u32(pos_ptrs + 4 * k)?, 12 * c)?, ov.buf(ov.u32(normal_ptrs + 4 * k)?, 12 * c)?, ov.buf(ov.u32(rgba_ptrs + 4 * k)?, 4 * c)?);
+        let mut m = StripMesh::default();
+        let mut nrm = Vec::with_capacity(c);
+        for i in 0..c {
+            m.pos.push([pb.f32(12 * i)?, pb.f32(12 * i + 4)?, pb.f32(12 * i + 8)?]);
+            nrm.push([nb.f32(12 * i)?, nb.f32(12 * i + 4)?, nb.f32(12 * i + 8)?]);
+            m.rgba.push(cb.u32(4 * i)?);
+            m.st.push([0.0; 2]);
+        }
+        out.push(LiquidMesh { sphere: None, strips: vec![m], normals: vec![nrm] });
+    }
+    Ok(out)
+}
+
+/// The ALPHA FIX of GS contexts 1 and 2 in a strip-state packet (a GIF tag and eight A+D registers: TEST_1/2, TEX1_1,
+/// CLAMP_1, ALPHA_1 (0x42), TEX1_2, CLAMP_2, ALPHA_2 (0x43)): the two-texture module's (level12 `0x1cb7a0`, level14
+/// `0x1cba20`) and the lava flows' (level09 `0x16eaa0`). Every packet's ALPHA is `FIX << 32 | 0x64`.
+pub fn strip_state_fix(ov: &Overlay, packet: u32) -> Result<[u8; 2]> {
+    let mut fix = [None, None];
+    for i in 1..9u32 {
+        let b = ov.buf(packet + 0x10 * i, 0x10)?;
+        let (lo, hi, reg) = (b.u32(0)?, b.u32(4)?, b.u32(8)?);
+        if (reg == 0x42 || reg == 0x43) && lo == 0x64 { fix[(reg - 0x42) as usize] = Some(hi as u8); }
+    }
+    match fix {
+        [Some(a), Some(b)] => Ok([a, b]),
+        _ => invalid(format!("strip state packet {packet:#x}: no ALPHA_1 / ALPHA_2 of the form FIX << 32 | 0x64")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

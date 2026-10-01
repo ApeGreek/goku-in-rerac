@@ -24,7 +24,7 @@
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::fx::{beam_explosion, Beam};
-use crate::moby_update::creature::{add, add_rot, atan, pf, pi32, pv4, scale, set_pf, set_pv4, sub, DT, DT2};
+use crate::moby_update::creature::{add, add_rot, atan, pf, pi32, pv4, set_pf, set_pv4, sub, DT, DT2};
 use crate::moby_update::services::{pf as to_pf, pv, World};
 
 /// The update in the level08 class table.
@@ -71,6 +71,8 @@ mod trail_k {
     pub const C1: (u32, u32) = (0x6000_80ff, 0x6020_a0c0);
     pub const C2: (u32, u32) = (0x2080_2040, 0x2060_1020);
     pub const OFFSET: [f32; 4] = [f32::from_bits(0xc013_3333), 0.0, f32::from_bits(0x3e99_999a), 0.0];
+    /// The blob row (`super::super::engine_trail`): byte 9 = trunc(8) − 0x70.
+    pub const BLOB: super::super::engine_trail::Blob = super::super::engine_trail::Blob { k1: V1, k2: V2, jitter: JITTER, w1: W1, w2: W2, c1: C1, c2: C2, t: T, spread: T_SPREAD, byte9: -0x70 };
 }
 
 fn len2(v: [f32; 4]) -> f32 { (v[0] * v[0] + v[1] * v[1]).sqrt() }
@@ -153,7 +155,7 @@ fn fall(w: &mut World, id: MobyId) -> bool {
     true
 }
 
-/// `0x2dec90(m, old)`: one trail blob (module doc).
+/// `0x2dec90(m, old)`: one trail blob (module doc; the shared shape `super::engine_trail`).
 fn trail(w: &mut World, id: MobyId, old: [f32; 4]) {
     use trail_k as k;
     let m = w.m(id);
@@ -162,35 +164,5 @@ fn trail(w: &mut World, id: MobyId, old: [f32; 4]) {
     let o = k::OFFSET;
     let local: [f32; 4] = std::array::from_fn(|l| if l == 3 { 0.0 } else { r[0][l] * o[0] + r[1][l] * o[1] + r[2][l] * o[2] });
     let point = add(local, m.position);
-    let mut v1 = scale(d, k::V1);
-    let mut v2 = scale(d, k::V2);
-    let j = w.rng.rand_vec(0.0, k::JITTER * DT);
-    v2 = add(v2, [j[0], j[1], j[2], 0.0]);
-    v1[3] = w.rng.randf(k::W1.0, k::W1.1);
-    v2[3] = w.rng.randf(k::W2.0, k::W2.1);
-    let c1 = tween(w.rng.randf(0.0, 1.0), k::C1);
-    let c2 = tween(w.rng.randf(0.0, 1.0), k::C2);
-    let r0 = w.rng.randf(0.0, 1.0);
-    let t0 = gscale(w, k::T[0] as f32 * r0 + 1.0);
-    let r1 = w.rng.randf(-k::T_SPREAD, k::T_SPREAD);
-    let t1 = gscale(w, k::T[1] as f32 * (r1 + 1.0));
-    let r2 = w.rng.randf(-k::T_SPREAD, k::T_SPREAD);
-    let t2 = gscale(w, k::T[2] as f32 * (r2 + 1.0));
-    let a = crate::particles::type02::Spawn { pos: point, v1, v2, c1, c2, t: [t0, t1, t2], def: -1 };
-    *w.svc.fx.part_spawns.entry(2).or_default() += 1;
-    match w.particles.as_deref_mut() {
-        None => {
-            w.rng.randf(0.0, 255.0);
-        }
-        Some(p) => match crate::particles::type02::spawn(p, w.rng, &a) {
-            // The record's byte 9 (its near / far fade) = trunc(8) − 0x70.
-            Some(i) => p.pool.recs[i][9] = (8i32 - 0x70) as u8,
-            None => w.svc.fx.part_failed += 1,
-        },
-    }
+    super::engine_trail::blob(w, &k::BLOB, point, d);
 }
-
-/// `truncate_float_to_s32(multiply_global_scale(x))`.
-fn gscale(w: &World, x: f32) -> i32 { w.svc.timing.scale(to_pf(x)).to_f32() as i32 }
-
-fn tween(f: f32, c: (u32, u32)) -> u32 { crate::particles::tween_color(f.to_bits(), c.0, c.1) }

@@ -16,7 +16,7 @@
 
 use super::hints::{arm_or_remind, bump, class_state, flag, gone, in_cuboid, owned, pvi, request, set_flag};
 use crate::moby_runtime::MobyId;
-use crate::moby_update::classes::enemy_spawner::group_count;
+use crate::moby_update::scheduler::group_count;
 use crate::moby_update::services::World;
 
 pub const UPDATE_FN: u32 = 0x30_83b0;

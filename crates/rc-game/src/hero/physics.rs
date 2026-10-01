@@ -576,7 +576,16 @@ impl Hero {
     pub fn wall_check(&mut self, env: &Env, mode: i32) {
         if self.f658 != 0 { return; }
         if len2(self.vel) < DT * Pf::b(0x3dcc_cccd) { return; }
-        let (up, l) = if self.group == 0x11 || self.group == 0x12 { (Pf::ZERO, Pf::b(0x3f33_3333)) } else { (Pf::b(0x3ebd_70a4), Pf::b(0x3f00_0000)) };
+        // The water groups, then the bodies (L00 0x212318: Clank 0.35 up / 0.27 long, Giant Clank 1.5 / 5.0).
+        let (up, l) = if self.group == 0x11 || self.group == 0x12 {
+            (Pf::ZERO, Pf::b(0x3f33_3333))
+        } else if self.mode == 1 {
+            (Pf::b(0x3eb3_3333), Pf::b(0x3e8a_3d71))
+        } else if self.mode == 2 {
+            (Pf::b(0x3fc0_0000), Pf::b(0x40a0_0000))
+        } else {
+            (Pf::b(0x3ebd_70a4), Pf::b(0x3f00_0000))
+        };
         let mut a = self.pos;
         a[2] = self.pos[2] + up;
         let mut bq = self.pos;
@@ -635,6 +644,13 @@ impl Hero {
         let c = self.mode;
         if c == 0 { self.cap_bottom_target = Pf::b(0x3f33_3333); } else if c == 3 { self.cap_bottom_target = Pf::b(0x3f19_999a); }
         if c == 0 || c == 3 { self.cap_top_target = Pf::b(0x3f4c_cccd); self.cap_radius_target = Pf::b(0x3ee6_6666); }
+        // The other bodies (L00 0x211380, super::bodies): Clank bottom 0.45 / radius 0.3 / top 0.6, Giant Clank 4.45 / 3.75 /
+        // 5.25.
+        if c == 1 {
+            (self.cap_bottom_target, self.cap_radius_target, self.cap_top_target) = (Pf::b(0x3ee6_6667), Pf::b(0x3e99_999a), Pf::b(0x3f19_9999));
+        } else if c == 2 {
+            (self.cap_bottom_target, self.cap_radius_target, self.cap_top_target) = (Pf::b(0x408e_6666), Pf::b(0x4070_0000), Pf::b(0x40a8_0000));
+        }
         if self.group == 4 {
             if self.jump.takeoff < self.timer && self.jump.descending == 0 { self.cap_bottom_target = self.jump.bottom784; }
         } else if self.state == 6 {
@@ -1050,6 +1066,8 @@ impl Hero {
         dec_s(&mut self.f546);
         // 0x13f538 (the fidget cooldown) and the fidget records' +0x60 (0x179d70 + k·0x70).
         dec_s(&mut self.idle.cooldown);
+        // Body 2: Giant Clank's beam lockout 0x140986 (super::bodies::giant).
+        if self.mode == 2 { dec_s(&mut self.bodies.beam_lock); }
         for t in &mut self.idle.fidget_cool { dec_i(t); }
         self.f50c = if self.f13f8 != 0 { self.f50c + 1 } else { 0 };
         if !env.pad.no_direction { self.f4fc = 0; self.f4f8 += 1; } else { self.f4f8 = 0; self.f4fc += 1; }
@@ -1075,8 +1093,9 @@ impl Hero {
         }
         if reset { self.f532 = 0; }
         self.edge_nudge();
-        // Body point pos + R·(0, 0, 0.7) and the shadow / target point.
-        let b = mul_rows4(&self.rows, [Pf::ZERO, Pf::ZERO, Pf::b(0x3f33_3333), Pf::ZERO]);
+        // Body point pos + R·(0, 0, 0.7) (0.4 for Clank, 4.0 for Giant Clank: super::bodies) and the shadow / target point.
+        let up = match self.mode { 1 => Pf::b(0x3ecc_cccd), 2 => Pf::b(0x4080_0000), _ => Pf::b(0x3f33_3333) };
+        let b = mul_rows4(&self.rows, [Pf::ZERO, Pf::ZERO, up, Pf::ZERO]);
         self.body_point = vadd(b, self.pos);
         if self.pos[2] - self.ground_z < Pf::b(0x4080_0000) {
             self.shadow_point = self.pos;

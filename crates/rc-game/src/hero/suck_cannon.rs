@@ -43,7 +43,9 @@
 //! and the 8 ammo pickups. Its calls into class code run on the moby world the hit sink builds, with the moby loop's
 //! item tables and sound layer (the vacuumed bolts' pickup sound `bolt::start_fly`, `pickup::collect`'s `AddAmmo`,
 //! whose hero-block write goes to Ratchet in the same tick).
-//! Not ported: the held-count HUD element (`queue_animation_update(4, 0x753f, …)`: G-UI-011), the stats 0x1416c8..
+//! The held-count HUD element (`queue_animation_update(4, 0x753f, …)`, every tick of the update) is `crate::hud`'s,
+//! derived each tick from the cannon's state (`hud::Inputs::suck_active`, `update_suck` / `draw_suck`).
+//! Not ported: the stats 0x1416c8..
 //! (G-SAV-009), the gold cannon 0x13e529 (not mirrored: 5 slots; G-WPN-009), the pad's released mask 0x13cae8 |= 5 as
 //! it goes away (G-HERO-025), the aim with the weapon lowered at a wall 0x141618 (G-WPN-011).
 

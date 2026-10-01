@@ -35,6 +35,17 @@
 //! FIX 0x7f passes as opaque world surfaces [L: 127/128 of the source, at most one level off] and the additive pass as a
 //! display-blend effect with `As = FIX`.
 //!
+//! **The liquid meshes (G-REN-026)** (`rc_game::water::sea::MeshSet`; [`mesh_prims`] = the generic strip emitters level01
+//! `0x21fda8` / `0x21fa98`): every mesh whose sphere passes `FastBSphereCheck(256, sphere)` (the particles' view test of
+//! the camera as last drawn), one strip per stored strip, per pass: the ST rule (stored · scale, the lava scroll, the
+//! sphere map `0x2667fc`, 1848's reflection map `0x30ef18` + scroll), the colour rule (one RGBA, the lava pattern, the
+//! stored colours), the texture (an FX, an animated FX blend made like the grid's image, or the grid's own image and
+//! fog). ALPHA `FIX << 32 | 0x64` with TEST 0x50000 (Z GEQUAL): FIX 0x80 = an opaque world surface, a lower FIX a
+//! display-blend effect with `As = FIX` (the texture's alpha forced to 0x80, the vertex alpha = FIX) over it. Users:
+//! level 9's lava flows (two passes, FIX 0x80 / 0x60) before its grid and its ten grid-textured meshes after it; 854's
+//! seven gated grids (one shared image and fog, [`grid_prims_into`]); 293 (12) / 1418 (14) (FX a stored, FX b sphere
+//! map at FIX 0x40); 1848 (FX 40 reflection at FIX 0x20, list 1).
+//!
 //! **Order.** Opaque surfaces go to the main opaque pass (their Z makes the order irrelevant). The effect draws of the
 //! after-ties list go first among the effects (`TIES_BIAS`), the list-1 draws just before the other list-1 callbacks
 //! (`SEA_LIST1_BIAS`). The display-blend pass runs after the world's own translucent draws, so a translucent moby part in
@@ -51,7 +62,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use rc_formats::sea::{GRID_BLOCK_CELLS, GRID_BLOCK_POINTS, GRID_STRIP_LEN, GRID_TEXTURE_SIDE};
 use rc_game::moby_update::classes::draw_callbacks::Callback;
-use rc_game::water::sea::{self as gs, SeaData, SeaKind};
+use rc_game::water::sea::{self as gs, GridAnim, SeaData, SeaKind};
 use std::collections::HashMap;
 
 /// `RC_SEA=0` turns the sea drawing off.
@@ -73,24 +84,40 @@ pub struct GridFrames {
     pub frames: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
-/// The level data the drawing needs beyond `rc_game::water::sea`: the grids' raw animation frames, by sea port.
+/// The level data the drawing needs beyond `rc_game::water::sea`: the raw frames of every animated liquid image (the
+/// grids', 854's shared one, the lava flows'), by animation.
 #[derive(Clone, Debug, Default)]
 pub struct LevelSea {
-    pub grid_frames: HashMap<usize, GridFrames>,
+    pub anim_frames: HashMap<GridAnim, GridFrames>,
+}
+
+/// The animations the level's sea ports draw with.
+fn anims(d: &rc_game::water::world::LevelWaterData) -> Vec<(usize, GridAnim)> {
+    let mut out = Vec::new();
+    let sets = |port: usize, sets: &[gs::MeshSet], out: &mut Vec<(usize, GridAnim)>| {
+        for p in sets.iter().flat_map(|s| &s.passes) {
+            if let gs::MeshTex::Anim(a) = p.tex { out.push((port, a)); }
+        }
+    };
+    for p in &d.sea {
+        match &p.data {
+            SeaData::Grid(g) => {
+                out.push((p.port, gs::grid_anim(&g.grid)));
+                sets(p.port, &g.extras, &mut out);
+            }
+            SeaData::GridSet(g) => out.push((p.port, g.anim)),
+            SeaData::Meshes(m) => sets(p.port, std::slice::from_ref(&**m), &mut out),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Reads the raw FX frames of every liquid grid on the level (`water`: the level's water data).
 pub fn load(core: &rc_formats::level::LevelCore, index: &[u8], core_data: &[u8], water: &crate::water_render::LevelWater) -> LevelSea {
     let mut out = LevelSea::default();
     let Some(d) = water.data.as_ref() else { return out };
-    let grids: Vec<(usize, &rc_formats::sea::LiquidGrid)> = d
-        .sea
-        .iter()
-        .filter_map(|p| match &p.data {
-            SeaData::Grid(g) => Some((p.port, &g.grid)),
-            _ => None,
-        })
-        .collect();
+    let grids = anims(d);
     if grids.is_empty() { return out; }
     let h = &core.header;
     let entries: Vec<rc_formats::particle_tex::FxTextureEntry> = match (h.fx_textures.count, h.fx_textures.offset) {
@@ -103,6 +130,7 @@ pub fn load(core: &rc_formats::level::LevelCore, index: &[u8], core_data: &[u8],
     };
     let side = GRID_TEXTURE_SIDE as i32;
     for (port, g) in grids {
+        if out.anim_frames.contains_key(&g) { continue; }
         let frames: Option<Vec<(Vec<u8>, Vec<u8>)>> = (0..g.frames as usize)
             .map(|k| {
                 let e = entries.get(g.tex as usize + k)?;
@@ -113,7 +141,7 @@ pub fn load(core: &rc_formats::level::LevelCore, index: &[u8], core_data: &[u8],
             .collect();
         match frames {
             Some(frames) => {
-                out.grid_frames.insert(port, GridFrames { frames });
+                out.anim_frames.insert(g, GridFrames { frames });
             }
             None => eprintln!("sea: {}: FX frames {}..+{} are not all 64×64: not drawn", gs::PORTS[port].name, g.tex, g.frames),
         }
@@ -152,8 +180,8 @@ pub fn tween(t: f32, a: u32, b: u32) -> u32 {
 enum Tex {
     /// FX texture n; `true`: its alpha forced to 0x80 (a FIX blend reads `As = FIX` through the vertex alpha).
     Fx(usize, bool),
-    /// A grid port's animated image.
-    Grid(usize),
+    /// An animated liquid image (a grid's, 854's, the lava flows').
+    Anim(GridAnim),
 }
 
 /// One draw of this tick.
@@ -231,10 +259,15 @@ pub fn ocean_groups(pv: &[u8], run: &gs::SeaRun, t: &rc_formats::sea::OceanTable
 fn pvar_i32(pv: &[u8], o: usize) -> i32 { i32::from_le_bytes(pv[o..o + 4].try_into().unwrap()) }
 
 /// The grid's strips this tick (module doc): None when no block is near enough.
-pub fn grid_prims(g: &gs::GridData, scale: f32, z: f32, alpha: u8, cam: [f32; 3]) -> PrimBuf {
-    let r = &g.grid;
-    let [bx, by] = r.blocks();
+pub fn grid_prims(r: &rc_formats::sea::LiquidGrid, module: &rc_formats::sea::LiquidGridModule, scale: f32, z: f32, alpha: u8, cam: [f32; 3]) -> PrimBuf {
     let mut b = PrimBuf::default();
+    grid_prims_into(&mut b, r, module, scale, z, alpha, cam);
+    b
+}
+
+/// [`grid_prims`] appended to `b` (854 draws its seven records with one image and fog).
+pub fn grid_prims_into(b: &mut PrimBuf, r: &rc_formats::sea::LiquidGrid, module: &rc_formats::sea::LiquidGridModule, scale: f32, z: f32, alpha: u8, cam: [f32; 3]) {
+    let [bx, by] = r.blocks();
     let n = GRID_BLOCK_CELLS as f32;
     for j in 0..by {
         for i in 0..bx {
@@ -246,11 +279,40 @@ pub fn grid_prims(g: &gs::GridData, scale: f32, z: f32, alpha: u8, cam: [f32; 3]
             if (d2 - r.cull_dist2).partial_cmp(&0.0) != Some(std::cmp::Ordering::Less) { continue; }
             let cols = &r.colours[k];
             b.strip((0..GRID_STRIP_LEN).map(|v| {
-                let o = g.module.order[v] as usize;
+                let o = module.order[v] as usize;
                 let (col, row) = (o % GRID_BLOCK_POINTS, o / GRID_BLOCK_POINTS);
                 let p = [r.origin[0] + (i * GRID_BLOCK_CELLS + col) as f32 * r.cell[0], r.origin[1] + (j * GRID_BLOCK_CELLS + row) as f32 * r.cell[1], z];
-                let st = g.module.st[v];
+                let st = module.st[v];
                 (p, [st[0] * scale, st[1] * scale], (cols[v] & 0x00ff_ffff) | (alpha as u32) << 24)
+            }));
+        }
+    }
+}
+
+/// One pass of a liquid mesh set for this tick (`rc_game::water::sea::MeshSet`; the generic strip emitters level01
+/// `0x21fda8` / `0x21fa98`): every mesh whose sphere passes `FastBSphereCheck(256, sphere)` (`view`; None: all), each
+/// strip with the pass's ST and the set's colours, alpha `alpha` (0x80 for an opaque pass, the FIX for a blend).
+pub fn mesh_prims(set: &gs::MeshSet, pass: &gs::MeshPass, counter: u64, cam: [f32; 3], view: Option<&rc_game::particles::BSphereView>, alpha: u8, scroll: [f32; 2]) -> PrimBuf {
+    let mut b = PrimBuf::default();
+    let f = gs::flow_offset(counter);
+    for m in &set.meshes {
+        if let (Some(v), Some(sp)) = (view, m.sphere) {
+            if v.culled(256.0, sp) { continue; }
+        }
+        for (s, normals) in m.strips.iter().zip(&m.normals) {
+            b.strip(s.pos.iter().zip(&s.st).enumerate().map(|(i, (p, st))| {
+                let uv = match pass.st {
+                    gs::MeshSt::Stored { scale } => [st[0] * scale, st[1] * scale],
+                    gs::MeshSt::Flow { k, add } => [st[0], st[1] + (k * f + add)],
+                    gs::MeshSt::SphereMap => gs::sphere_map_st(*p, normals.get(i).copied().unwrap_or_default(), cam),
+                    gs::MeshSt::EnvMap => gs::env_map_st(*p, normals.get(i).copied().unwrap_or_default(), cam, scroll),
+                };
+                let c = match set.colour {
+                    gs::MeshColour::Const(c) => c,
+                    gs::MeshColour::Flow => gs::flow_colour(i),
+                    gs::MeshColour::Stored => s.rgba.get(i).copied().unwrap_or(0x8080_8080),
+                };
+                (*p, uv, (c & 0x00ff_ffff) | (alpha as u32) << 24)
             }));
         }
     }
@@ -269,6 +331,31 @@ fn strip_prims(strips: &[rc_formats::sea::StripMesh], scroll: [f32; 2], alpha: O
     b
 }
 
+/// The draw groups of one liquid mesh set (`rc_game::water::sea::MeshSet`), one per pass in order: a FIX 0x80 pass
+/// (`(Cs − Cd)·1 + Cd = Cs`, Z written) as an opaque world surface, a lower FIX as a display-blend effect with
+/// `As = FIX` (the texture's alpha forced to 0x80, the vertex alpha = FIX) on top of it (Z test GEQUAL: the same
+/// strip passes). `grid` = the port's grid image, FIX and fog for a [`gs::MeshTex::Grid`] pass; `anim` makes an
+/// animated image for this tick (false: its frames are missing, the pass is skipped).
+#[allow(clippy::too_many_arguments)]
+fn mesh_set_groups(groups: &mut Vec<Group>, set: &gs::MeshSet, counter: u64, cam: [f32; 3], view: &rc_game::particles::BSphereView, bias: f32, level_fog: TfragFog, grid: Option<(GridAnim, u8, TfragFog)>, scroll: [f32; 2], anim: &mut dyn FnMut(GridAnim) -> bool) {
+    for (j, pass) in set.passes.iter().enumerate() {
+        let (tex, fix, fog) = match pass.tex {
+            gs::MeshTex::Fx(n) => (Tex::Fx(n as usize, pass.fix < 0x80), pass.fix, level_fog),
+            gs::MeshTex::Anim(a) => {
+                if !anim(a) { continue; }
+                (Tex::Anim(a), pass.fix, level_fog)
+            }
+            gs::MeshTex::Grid => {
+                let Some((a, fix, fog)) = grid else { continue };
+                (Tex::Anim(a), fix, fog)
+            }
+        };
+        let opaque = fix >= 0x80 || (matches!(pass.tex, gs::MeshTex::Grid) && fix >= 0x61);
+        let prims = mesh_prims(set, pass, counter, cam, Some(view), if opaque { 0x80 } else { fix }, scroll);
+        groups.push(Group { tex, effect: (!opaque).then_some(false), fog, bias: bias + j as f32 * 0.25, prims });
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------
 // Bevy
 
@@ -278,7 +365,7 @@ type Slot = (Entity, Handle<Mesh>, Handle<FxPrimMaterial>, bool);
 struct SeaDraw {
     slots: Vec<Option<Slot>>,
     fx: HashMap<(usize, bool), Handle<Image>>,
-    grid_images: HashMap<usize, Handle<Image>>,
+    anim_images: HashMap<GridAnim, Handle<Image>>,
     drawn: Option<u64>,
     pixels: Vec<u8>,
 }
@@ -331,6 +418,7 @@ fn draw(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FxPrimMaterial>>,
     mut vis: Query<&mut Visibility>,
+    particles: Option<Res<crate::particle_render::ParticleSim>>,
 ) {
     let st = state.into_inner();
     let Some(p) = play.as_deref() else { return };
@@ -345,8 +433,30 @@ fn draw(
     let fx = level.0.particles.textures.as_ref().map(|t| t.fx_textures.as_slice());
     let water = &p.svc.water;
     let cbs = &p.svc.draw_callbacks;
+    let view = crate::particle_render::bsphere_view(cam_t, particles.map_or_else(|| crate::particle_render::view_tans(None), |s| s.view_tan));
+    let all_visible = crate::visibomb_view::all_visible(Some(p));
     let registered = cbs.ties.iter().map(|e| (true, e)).chain(cbs.list1.iter().map(|e| (false, e)));
     let mut groups: Vec<Group> = Vec::new();
+    // The animated images of this tick, made once each.
+    let mut made: Vec<GridAnim> = Vec::new();
+    let mut anim = |a: GridAnim, st: &mut SeaDraw, images: &mut Assets<Image>| -> bool {
+        if made.contains(&a) { return true; }
+        let Some(frames) = level.0.sea.anim_frames.get(&a) else { return false };
+        grid_image(frames, a.period, counter, &mut st.pixels);
+        let h = st.anim_images.entry(a).or_insert_with(|| {
+            let mut img = Image::new_uninit(
+                Extent3d { width: GRID_TEXTURE_SIDE, height: GRID_TEXTURE_SIDE, depth_or_array_layers: 1 },
+                TextureDimension::D2,
+                TextureFormat::Rgba8Unorm,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            img.sampler = repeat_sampler();
+            images.add(img)
+        });
+        if let Some(mut img) = images.get_mut(&*h) { img.data = Some(st.pixels.clone()); }
+        made.push(a);
+        true
+    };
     for (k, (ties, &(cb, id))) in registered.enumerate() {
         let Callback::Sea(port) = cb else { continue };
         let port = port as usize;
@@ -357,25 +467,20 @@ fn draw(
         match (gs::PORTS[port].kind, data) {
             (SeaKind::Grid(gp), SeaData::Grid(g)) => {
                 if !gs::grid_draws(port, &m.pvars, &p.svc.volumes, cam) { continue; }
-                let Some(frames) = level.0.sea.grid_frames.get(&port) else { continue };
                 // The animated image of this tick.
-                grid_image(frames, g.grid.period, counter, &mut st.pixels);
-                let h = st.grid_images.entry(port).or_insert_with(|| {
-                    let mut img = Image::new_uninit(
-                        Extent3d { width: GRID_TEXTURE_SIDE, height: GRID_TEXTURE_SIDE, depth_or_array_layers: 1 },
-                        TextureDimension::D2,
-                        TextureFormat::Rgba8Unorm,
-                        RenderAssetUsages::RENDER_WORLD,
-                    );
-                    img.sampler = repeat_sampler();
-                    images.add(img)
-                });
-                if let Some(mut img) = images.get_mut(&*h) { img.data = Some(st.pixels.clone()); }
+                let ga = gs::grid_anim(&g.grid);
+                if !anim(ga, st, &mut images) { continue; }
                 let r = &g.grid;
                 let lf = LevelFog { color: r.fog_rgb, near_dist: r.fog[0], far_dist: r.fog[1], near_intensity: r.fog[2], far_intensity: r.fog[3] };
                 let opaque = run.fix >= 0x61;
-                let prims = grid_prims(g, gp.scale, run.z, if opaque { 0x80 } else { run.fix }, cam);
-                groups.push(Group { tex: Tex::Grid(port), effect: (!opaque).then_some(false), fog: TfragFog::new(&lf), bias, prims });
+                let prims = grid_prims(&g.grid, &g.module, gp.scale, run.z, if opaque { 0x80 } else { run.fix }, cam);
+                groups.push(Group { tex: Tex::Anim(ga), effect: (!opaque).then_some(false), fog: TfragFog::new(&lf), bias, prims });
+                // Level 9's lava meshes (317's callback `0x2ef750`): the flows before the grid, the grid-textured ones
+                // after it with its image, fog and FIX.
+                for (j, set) in g.extras.iter().enumerate() {
+                    let b = if set.before_grid { bias - 1.0 - j as f32 } else { bias + 1.0 + j as f32 };
+                    mesh_set_groups(&mut groups, set, counter, cam, &view, b, level_fog, Some((ga, run.fix, TfragFog::new(&lf))), [0.0; 2], &mut |a| anim(a, st, &mut images));
+                }
             }
             (SeaKind::Ocean, SeaData::Ocean(t)) => {
                 if m.pvars.len() < 0x30 { continue; }
@@ -390,6 +495,21 @@ fn draw(
                 groups.push(Group { tex: Tex::Fx(HOVEN_FX[0], false), effect: None, fog: level_fog, bias: bias + 1.0, prims: strip_prims(&h.groups[1], run.scroll[0], None) });
                 groups.push(Group { tex: Tex::Fx(HOVEN_FX[1], true), effect: Some(true), fog: level_fog, bias: bias + 2.0, prims: strip_prims(&h.groups[1], run.scroll[1], Some(h.fix2)) });
             }
+            (SeaKind::GridSet, SeaData::GridSet(g)) => {
+                // 854's callback `0x2ea048`: the shared image and fog (`0x2a4818`), the gated records, the fog restore.
+                if !anim(g.anim, st, &mut images) { continue; }
+                let opaque = g.fix >= 0x61;
+                let mut prims = PrimBuf::default();
+                for (r, gate) in &g.grids {
+                    if !gs::grid_set_drawn(*gate, &m.pvars, &p.svc.volumes, cam, all_visible) { continue; }
+                    grid_prims_into(&mut prims, r, &g.module, gs::aridia_ref::SCALE, r.origin[2], if opaque { 0x80 } else { g.fix }, cam);
+                }
+                let lf = LevelFog { color: g.fog_rgb, near_dist: g.fog[0], far_dist: g.fog[1], near_intensity: g.fog[2], far_intensity: g.fog[3] };
+                groups.push(Group { tex: Tex::Anim(g.anim), effect: (!opaque).then_some(false), fog: TfragFog::new(&lf), bias, prims });
+            }
+            (SeaKind::TwoTex(_) | SeaKind::EnvOverlay, SeaData::Meshes(set)) => {
+                mesh_set_groups(&mut groups, set, counter, cam, &view, bias, level_fog, None, run.scroll[0], &mut |a| anim(a, st, &mut images));
+            }
             _ => {}
         }
     }
@@ -398,7 +518,7 @@ fn draw(
     for (k, g) in groups.into_iter().enumerate() {
         let img = match g.tex {
             Tex::Fx(i, a) => fx_handle(st, &mut images, fx, i, a),
-            Tex::Grid(port) => st.grid_images.get(&port).cloned(),
+            Tex::Anim(a) => st.anim_images.get(&a).cloned(),
         };
         if st.slots.len() <= k { st.slots.push(None); }
         let (Some(img), false) = (img, g.prims.is_empty()) else {

@@ -32,7 +32,7 @@
 //! streaks (15), sparks (11), puffs (8), the flash shells (class 112) and the explosion light. Native `f32`.
 
 use crate::moby_runtime::MobyId;
-use crate::moby_update::creature::fx::{self, part_unported, Beam};
+use crate::moby_update::creature::fx::{self, Beam};
 use crate::scene_player::SceneActorState;
 use crate::moby_update::creature::DT;
 use crate::moby_update::services::World;
@@ -215,38 +215,10 @@ fn puff(w: &mut World, g: [f32; 4], p: [f32; 4], spin: i32, rgba: u32, life: i32
 
 /// [`puff`] with the phase-2 start alpha `a0` (+0x2a).
 #[allow(clippy::too_many_arguments)]
-fn puff23(w: &mut World, [jitter, lo, hi, size]: [f32; 4], p: [f32; 4], spin: i32, rgba: u32, life: i32, rotation: Option<u8>, a0: u8) -> bool {
-    let Some(sys) = w.particles.as_deref_mut() else { return part_unported(w, 23) };
-    *w.svc.fx.part_spawns.entry(23).or_default() += 1;
-    let Some(i) = crate::particles::type23::spawn(sys, w.rng, jitter, lo, hi, size, p, spin, [0.0; 4], rgba) else {
-        w.svc.fx.part_failed += 1;
-        return false;
-    };
-    let rot = rotation.map(|_| w.rng.randi(0xff) as u8);
-    let r = &mut w.particles.as_deref_mut().unwrap().pool.recs[i];
-    use crate::particles::rec;
-    rec::set_i16(r, 0xa, life as i16);
-    r[9] = 4 + 0x40;
-    if let Some(b) = rot { r[8] = b; }
-    rec::set_u32(r, 0x24, 2);
-    r[0x2a] = a0;
-    r[0x2b] = r[0xa];
-    true
+fn puff23(w: &mut World, g: [f32; 4], p: [f32; 4], spin: i32, rgba: u32, life: i32, rotation: Option<u8>, a0: u8) -> bool {
+    fx::puff23(w, g, p, spin, [0.0; 4], rgba, life, rotation.is_some(), a0)
 }
 
 /// `FUN_00278810` 0x278810 at point `p`: two glow puffs (spin ±`randi(16)`, life `ticks(30)`) and three white cores
 /// (spin 16, −16, 16, life `ticks(6)`, a random rotation byte `randi(255)`).
-fn trail(w: &mut World, p: [f32; 4]) {
-    for _ in 0..2 {
-        let r = w.rng.randi(0x10);
-        let spin = if w.rng.randi(2) == 0 { r } else { -r };
-        let life = w.ticks(0x1e);
-        puff(w, [0.1, 1.0, 0.9, TRAIL_GLOW_SIZE], p, spin, THRUSTER_RGBA, life, None);
-    }
-    let mut spin = 0x10;
-    for _ in 0..3 {
-        let life = w.ticks(6);
-        puff(w, [0.05, 1.0, 0.97, TRAIL_CORE_SIZE], p, spin, 0x7fff_ffff, life, Some(0));
-        spin = -spin;
-    }
-}
+fn trail(w: &mut World, p: [f32; 4]) { fx::jet_puffs(w, TRAIL_GLOW_SIZE, TRAIL_CORE_SIZE, p, p, [0.0; 4]); }

@@ -18,7 +18,7 @@ column.
 | **459** | 25 | 0x2e6bf0 | enemy | robot trooper: jetpack arrival, patrol path hops, fire-glob sprayer (722) | **ported** (2026-09-28) |
 | **666** | 2 | 0x2f4960 | enemy carrier | dropship: flies a path, drops ≤ 8 children (0x1ab / 0x154 / 0x1cb) | **ported** |
 | **688** | 2 | 0x2f7728 | enemy (scripted) | gunship: town bombardment (686 shells, 700 fires) and the bridge fly-by | **ported** |
-| **815** | 6 | 0x3021b8 | enemy spawner | re-creates a member of its group while the group is empty; group −1 on Novalis (inert) | **ported** (gate only) |
+| **815** | 6 | 0x3021b8 | enemy spawner | re-creates a member of its group while the group is empty; group −1 on Novalis (inert) | **ported** (2026-10-01: the re-creation `0x302328` too) |
 | 1818 | 1 | 0x30df40 | helper (summoned) | the Sonic Summoner's "mouse": head item 5 (`0x1404a8` is slot 2's item, not the hand) worn and owned (`0x13d4c5`); flies beside Ratchet shooting enemies (1633) | **ported** (`classes::mouse`, level_generalisation.md "Common classes") |
 | 11 | 1 | 0x2bb128 | other | Gadgetron vendor | not ported |
 | 604 | 1 | 0x2f2b68 | prop | the mouse's house (opens / closes on the mouse's commands) | **ported** (`classes::mouse`) |
@@ -34,7 +34,7 @@ column.
 | 280 | 2 | 0x2e0c68 | prop | bolt crank | not ported |
 | 641 / 665 | 1 / 4 | 0x2f4348 / 0x2f4710 | prop | crank-driven rotator / slider | not ported |
 | 695 | 9 | 0x2f8268 | prop | floating pushable | not ported |
-| 701 | 3 | 0x2f9080 | prop | collapsing platform | **ported** (§7; the camera look `FUN_002f9000` is not) |
+| 701 | 3 | 0x2f9080 | prop | collapsing platform | **ported** (§7; the camera look `FUN_002f9000` too since 2026-10-01: `props::collapse_look`) |
 | 703 / 715 | 2 / 5 | 0x2f95c0 | prop | elevators | **ported** (§7) |
 | 704 | 3 | 0x2f9810 | prop | breakable rock | **ported** (§7; its type-22 puffs are records only) |
 | 705 | 5 | 0x2f9bf0 | prop | oscillating spinner | **ported** (§7) |
@@ -184,8 +184,9 @@ sound 2 on a bridge piece, else 1. The gunship's side needs from the camera only
 
 ### Spawner 815 (`EnemySpawnerUpdate` 0x3021b8)
 
-See `classes/enemy_spawner.rs`: the state 0 → 1 step and the gate (`MobyGroupCount` 0x26e008, limit 5); the group
-re-creation `0x302328` (an amoeboid respawn) is not ported — no Novalis spawner has a group.
+See `classes/enemy_spawner.rs`: the state 0 → 1 step, the gate (`MobyGroupCount` 0x26e008, limit 5) and (2026-10-01)
+the re-creation `0x302328`: the group's first live member reset at the spawner and thrown away from Ratchet (state 9);
+no Novalis spawner has a group.
 
 ### Amoeboid fall-out (`0x2eec68`)
 
@@ -297,7 +298,7 @@ through.
 
 ## 6. Not done / open
 
-* Classes: 1818 (gadget-gated); 815's group re-creation `0x302328`; (the bridge pieces 709–711 now break under the
+* Classes: 1818 (gadget-gated); ~~815's group re-creation `0x302328`~~ (ported 2026-10-01); (the bridge pieces 709–711 now break under the
   shells: §7); the dropship's camera moby P+0x180 (−1 on Novalis); the gunship's kill effects
   (skill point, level sound 1, banner 0x53d6, debris 1510 `0x30be70`: no Novalis weapon has mask 0x800000).
 * Particle types 16 (smoke), 22 (jet exhaust / ember smoke) and 26 (the globs' and shells' glow): records taken and the
@@ -738,3 +739,31 @@ boarders stay hidden at sea; a 1231 on a start path would stay in state 1 (no ca
 in his hurt pose among group 5's sand sharks, two surfaced beside him with their jaws open, the dive puffs on the sand.
 
 **Not ported:** the cheat branch of each (G-SAV-006). Not taken (time): 574 (U130, 03: 17) and 452 (U280, 08: 3).
+
+## 14. The Pokitaru boats and the last two big creatures (2026-10-01)
+
+Four units, each registered by code identity (`units::PORTS`; every one exists on one level only); the coverage tables
+(every call and branch, with the side effects) are the module docs. Test request:
+`docs/test-requests/2026-10-01-pokitaru-boats-creatures.md`.
+
+| unit | port | what it is |
+|---|---|---|
+| U363 1075 (11: 2) | `units::pokitaru_boat` | the boats: wait at the path start (slow propellers, half the wake), sail it at 6 u/s once started (engine loops 0 / 1, the turn, the follow camera pulled out past the node whose w is 37), carry everything on them (`CarryRiders`), drag their boarders' area path (+0xa8, the 1246s' +0x230) along in their frame, wait for the group's boarders at the end, then rise 6 and work as a lift (#440) or stop; bob, wobble, four propeller manipulators, type-34 wake bubbles within 38 of the camera |
+| U130 574 (03: 17) and the rocket 833 | `units::kerwan_trooper` | Kerwan's gun troopers: patrol, head / torso look-at, rockets from joint 0 with a smoke ring, punch, the turn toward a target behind, the jump down a second path, riding the 1210 platforms with their path, knockback / death flights, the falls, the beam explosion and three pieces, the respawn of the 822-linked ones |
+| U280 452 (08: 3) | `units::batalia_runner` | Batalia's runners: wait, run their path at 10 u/s when Ratchet nears it, deleted at its end or (#343) keep fleeing on a second path; any hit: a flight, `SetDeathBits`, the death explosion on landing |
+
+**System or not.** The 1246 boarders' hand-off is the boat's own data: its state (> 1 shows them, 5 deletes the hidden
+ones), its platform block (the biters ride through `FUN_002752c0`) and the area path it moves; nothing new is shared.
+Extended shared layer: `fx::muzzle_smoke` (level03 `0x250ae8`, a census cluster with level 10 / 15 / 18 copies),
+`fx::part21` / `fx::part44` / `fx::turn_about`, `creature::hard_cut` (`fun_00212ed8`), `bolt::start_fly_to` (the
+fly-off with a target), the moby → follow-camera setters `cinematic::follow_distance` / `follow_pivot_height`.
+Per class (one caller each): the boat's wake and propellers, the troopers' node choice `0x2c9ca0` and group test
+`0x2c6d98` (573 and 574 only), the rocket 833, the runner's member list.
+
+**The game's, noted:** the boats start only through the commando 114 (G-ENM-011): without it they wait at their
+start and the 30 boarders stay hidden (the game behaves the same without its driver). 452's member list takes class
+633, which no level has (its links name class-13 bolts), so the collecting never runs; its states 2–4 have no setter.
+574's `0x24fba8` (the slope alignment on a platform) writes a stack copy: no effect.
+
+**Not ported:** the big-head cheat of 574 and 452 (G-SAV-006). The callers 114 / 822 / 573 are ported since
+2026-10-01 (`units::pokitaru_commando`, `kerwan_train`, `kerwan_hound`; G-ENM-011 keeps the cutaway machine 1157).

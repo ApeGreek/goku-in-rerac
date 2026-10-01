@@ -131,7 +131,7 @@ pub struct JointRec {
 impl JointRec {
     const fn new(rec: u8, joint: i16, k: u32, d: u32) -> JointRec { JointRec::of_kind(rec, joint, 0, k, d) }
 
-    const fn of_kind(rec: u8, joint: i16, kind: u8, k: u32, d: u32) -> JointRec {
+    pub(crate) const fn of_kind(rec: u8, joint: i16, kind: u8, k: u32, d: u32) -> JointRec {
         JointRec {
             rec, joint, kind, attached: false, cur: [0.0; 3], vel: [0.0; 3], target: [0.0; 3], trans: [0.0; 3], trans_vel: [0.0; 3],
             trans_target: [0.0; 3], k: f(k), d: f(d), scale: 1.0, node_scale: 1.0,
@@ -151,7 +151,7 @@ impl JointRec {
     /// k, d, 0, &angle, &vel, 2)` on x, y, z, the linear spring `0x270780(target, k, d, 0, &trans, &vel)` on x, y, z and
     /// the manipulator is attached; otherwise it is detached (the angles stay). Then the targets are cleared and the
     /// scale reset. (The option 0x15edb5's mirror of x / z is not ported: options.)
-    fn update(&mut self) {
+    pub(crate) fn update(&mut self) {
         let small = |v: f32| v.abs() < f(0x3ba3_d70a);
         let still = |v: f32| v.abs() < f(0x3b44_9ba6);
         let active = self.target.iter().any(|&t| t != 0.0)
@@ -375,6 +375,21 @@ impl Idle {
 
     /// `DetachManipulator`: unlink `m`.
     fn detach(&mut self, m: Manip) { self.manips.retain(|&x| x != m); }
+
+    /// `FUN_00227420` (`SwitchCharacter` and leaving a body, `super::bodies`): every record of the block 0x17ab00
+    /// whose manipulator is attached is detached from its moby (`FUN_00226ff8(kind)`), and its angles +0x40, angle
+    /// targets +0x60 and translation targets +0x90 are zeroed, scale +0xac = 1 (the translation +0x70 and the
+    /// spring velocities are kept). Ratchet's eyelid nodes are not records (left as they are).
+    pub(crate) fn detach_all(&mut self) {
+        for r in self.joints.iter_mut() {
+            r.attached = false;
+            r.cur = [0.0; 3];
+            r.target = [0.0; 3];
+            r.trans_target = [0.0; 3];
+            r.scale = 1.0;
+        }
+        self.manips.retain(|m| !matches!(m, Manip::Rec(_)));
+    }
 
     /// Ratchet's joint-modifier list (moby `+0x64`) as the evaluator reads it, head first, each node's joint list
     /// resolved through `targets` (per class joint list, its target joint; 0xff or missing: the node is dropped).
@@ -682,7 +697,7 @@ impl Hero {
     /// ([`Hero::back_swap`]); a wrapped pack on sequence 0 blends to 1 (2 ticks). Put away (3): once the pack's
     /// put-away animation wraps the pack is deleted (`0x2305e8`: the slot is empty; the next hero update creates
     /// the target item). Then the pack moby's own update (+0x74, [`Hero::back_pack_update`]).
-    fn back_slot_loop(&mut self, rng: &mut Rng) {
+    pub(super) fn back_slot_loop(&mut self, rng: &mut Rng) {
         self.back_slot_states(rng);
         self.back_pack_update();
     }
@@ -1135,26 +1150,9 @@ impl Hero {
     /// 0x140240.., [`Hero::clank_modifiers`]).
     fn clank_glow_blink(&mut self, counter: i32, rng: &mut Rng) {
         if self.back_slot.clank_hidden != 0 { return; }
-        let base = if self.health == 1 { 0x88 } else { 0x38 };
-        let flash = self.f53e;
+        let (health, flash) = (self.health, self.f53e);
         let Some(b) = self.back.as_mut() else { return };
-        let p = ticks(110);
-        let ph = (counter % p) as f32 / p as f32;
-        let s = fast_sin(Pf::f((ph + ph) * std::f32::consts::PI + -std::f32::consts::PI)).to_f32();
-        let v = s * 24.0;
-        let (vi, gi) = (v as i32, (s * 48.0) as i32);
-        let (mut r, mut g, mut bl) = (base + vi + 0xc, gi + 0xa0, vi + 0x4c);
-        if flash != 0 {
-            // The hit flash: fading in over its first 5 ticks (of 45), out over its last 20, toward red.
-            let (t5, t20, t45) = (ticks(5), ticks(20), ticks(45));
-            let mut t = 1.0f32;
-            if t45 - t5 < flash as i32 { t = (t45 - flash as i32) as f32 / t5 as f32; }
-            if (flash as i32) < t20 { t = flash as f32 / t20 as f32; }
-            bl -= ((vi + 0xc) as f32 * t) as i32;
-            r = (r - ((vi + 0xc) as f32 * t) as i32) + (t * 112.0) as i32;
-            g = (g - ((gi + 0x18) as f32 * t) as i32) - (t * 72.0) as i32;
-        }
-        b.clank_color = (0x80u32 << 24) | ((bl as u32 & 0xff) << 16) | ((g as u32 & 0xff) << 8) | (r as u32 & 0xff);
+        b.clank_color = clank_glow_word(counter, health, flash);
         let i = &mut self.idle;
         if dec_timer_s16(&mut i.clank_blink_timer) != 0 && b.clank.anim.seq_b == 1 {
             i.clank_blink = 1;
@@ -1188,6 +1186,31 @@ impl Hero {
         out
     }
 
+}
+
+/// `0x2278c0`'s glow word (moby +0x90 of Clank: on Ratchet's back in mode 0, the hero moby itself as Clank or Giant
+/// Clank, `super::bodies`) at tick `counter` (0x15f5cc): a ticks(110) sine s; red `base + (int)(24s) + 0xc` (base 0x38,
+/// 0x88 at health 1), green `(int)(48s) + 0xa0`, blue `(int)(24s) + 0x4c`, alpha 0x80; the hit flash 0x13f53e
+/// (`flash`) fades the pulse toward red over its first 5 ticks (of 45) and back over its last 20.
+pub fn clank_glow_word(counter: i32, health: i32, flash: i16) -> u32 {
+    let base = if health == 1 { 0x88 } else { 0x38 };
+    let p = ticks(110);
+    let ph = (counter % p) as f32 / p as f32;
+    let s = fast_sin(Pf::f((ph + ph) * std::f32::consts::PI + -std::f32::consts::PI)).to_f32();
+    let v = s * 24.0;
+    let (vi, gi) = (v as i32, (s * 48.0) as i32);
+    let (mut r, mut g, mut bl) = (base + vi + 0xc, gi + 0xa0, vi + 0x4c);
+    if flash != 0 {
+        // The hit flash: fading in over its first 5 ticks (of 45), out over its last 20, toward red.
+        let (t5, t20, t45) = (ticks(5), ticks(20), ticks(45));
+        let mut t = 1.0f32;
+        if t45 - t5 < flash as i32 { t = (t45 - flash as i32) as f32 / t5 as f32; }
+        if (flash as i32) < t20 { t = flash as f32 / t20 as f32; }
+        bl -= ((vi + 0xc) as f32 * t) as i32;
+        r = (r - ((vi + 0xc) as f32 * t) as i32) + (t * 112.0) as i32;
+        g = (g - ((gi + 0x18) as f32 * t) as i32) - (t * 72.0) as i32;
+    }
+    (0x80u32 << 24) | ((bl as u32 & 0xff) << 16) | ((g as u32 & 0xff) << 8) | (r as u32 & 0xff)
 }
 
 /// The glow word of Clank's antenna moby 1204 (`HeroItemsAttach` 0x22fec0) at tick `counter` (0x15f5cc): a

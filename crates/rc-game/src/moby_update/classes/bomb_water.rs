@@ -92,8 +92,14 @@ pub fn part64(w: &mut World, a: &type64::Spawn) {
 pub fn entry(w: &mut World, id: MobyId, surface_z: f32) {
     let p = w.m(id).position;
     ripple(w, p[0], p[1], 0.5, f32::from_bits(0xbeb3_3333), true);
-    let at = [p[0], p[1], surface_z, p[3]];
-    if let Some(s) = splash::spawn(w, 2.0, at) { w.mm(s).alpha = 0x70; }
+    splash_and_drops(w, 2.0, [p[0], p[1], surface_z, p[3]]);
+}
+
+/// The second half of the water entry: the splash moby 775 of size `size` (2 here) at `at` with alpha 0x70 and the 16
+/// type-35 drops (the same calls in the drip 787's splash, level01 `0x2ffdc0`: `units::drip`, size 2; and level 08's
+/// liquid 327 when Ratchet falls in, `0x2da0f0`: `crate::water::sea`, size 3).
+pub fn splash_and_drops(w: &mut World, size: f32, at: V) {
+    if let Some(s) = splash::spawn(w, size, at) { w.mm(s).alpha = 0x70; }
     for _ in 0..16 {
         let a = w.rng.rand_angle();
         let s = w.rng.randf(dt() * 0.0, dt() * 3.0);

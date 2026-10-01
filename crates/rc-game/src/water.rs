@@ -257,7 +257,7 @@ pub struct RippleTickInfo {
     /// This tick ran a step (else a lerp).
     pub stepped: bool,
     pub drops: u32,
-    /// Drips (class 787) the game would spawn this tick (not simulated, see the module docs).
+    /// Drips (class 787) spawned this tick (or, without a moby system, the spawn's draws made).
     pub drips: u32,
     /// Zone-5 mist puffs (type 56) spawned this tick.
     pub mist: u32,
@@ -284,6 +284,8 @@ pub struct RippleSim {
     pub strip_order: Vec<u16>,
     /// gp−0x4f7c: ticks until the next drip.
     pub drip_timer: i32,
+    /// 0x1fa650: the five drip start points (x, y, z, w).
+    pub drip_points: Vec<[f32; 4]>,
     /// 0x1fa6a0: the zone-5 foam ring's row per tick (`counter % 20`), 20 bytes.
     pub mist_rows: Vec<u8>,
     /// What the last [`RippleSim::tick`] did.
@@ -333,6 +335,7 @@ impl RippleSim {
         sim.zone_masks = t.zone_masks.clone();
         sim.zone_cuboids = zone_cuboids;
         sim.mist_rows = t.mist_rows.clone();
+        sim.drip_points = t.drips.clone();
         // 751 init overrides (Novalis): patches 13–16 scroll along u only, patch 15 pins its first column.
         if sim.patches.len() > 16 {
             for p in 13..=16 { sim.patches[p].speed = [Pf::b(0xbad1_b717), Pf::ZERO]; }
@@ -395,6 +398,7 @@ impl RippleSim {
             uv_select: m.uv_select.clone(),
             strip_order: m.strip_order.clone(),
             drip_timer: 0,
+            drip_points: Vec::new(),
             mist_rows: Vec::new(),
             last: RippleTickInfo { zone: -1, ..Default::default() },
         }
@@ -545,8 +549,22 @@ impl RippleSim {
     pub fn tick(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng) -> RippleTickInfo { self.tick_with(cam, cuboids, rng, 0, None) }
 
     /// [`tick`](Self::tick) with the tick counter 0x15f5cc (the zone-5 foam row) and the particle system the zone-5
-    /// waterfall foam spawns into (types 57 and 56; None: the spawners' draws are made without records).
-    pub fn tick_with(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng, counter: u64, mut parts: Option<&mut crate::particles::Particles>) -> RippleTickInfo {
+    /// waterfall foam spawns into (types 57 and 56; None: the spawners' draws are made without records). Without a
+    /// moby system the drip's `CreateMoby(787)` fails: its point and timer draws only ([`RippleSim::drip_due`]); the
+    /// moby loop's 751 (`crate::water::managers`) runs the phases itself and spawns the drip moby.
+    pub fn tick_with(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng, counter: u64, parts: Option<&mut crate::particles::Particles>) -> RippleTickInfo {
+        let mut info = self.tick_zones(cam, cuboids, rng);
+        if self.drip_due(info.zone, rng).is_some() {
+            self.drip_timer = rng.rand_range(300, 0x4b0);
+            info.drips += 1;
+        }
+        self.tick_mist(&mut info, rng, counter, parts);
+        self.last = info;
+        info
+    }
+
+    /// The first part of the 751 tick: the zone activation with the random drops, then the clock `0x2b7fe0`.
+    pub fn tick_zones(&mut self, cam: [f32; 3], cuboids: &[Cuboid], rng: &mut Rng) -> RippleTickInfo {
         let mut info = RippleTickInfo { zone: -1, ..Default::default() };
         let quarter_range = (0xc080_0000, 0x4080_0000); // randf(−4, 4)
         for z in 0..self.zones.len() {
@@ -576,16 +594,26 @@ impl RippleSim {
             }
         }
         info.stepped = self.clock();
-        // Drips (zone 0 or 6): the random draws of the spawn, not the 787 moby itself.
-        let drip_zone = info.zone == 0 || info.zone == 6;
-        if drip_zone { self.drip_timer -= 1; }
-        if drip_zone && self.drip_timer < 1 {
-            let _point = rng.randi(5);
-            let _dx = rng.randf_bits(0xbe19_999a, 0x3e19_999a);
-            let _dy = rng.randf_bits(0xbe19_999a, 0x3e19_999a);
-            self.drip_timer = rng.rand_range(300, 0x4b0);
-            info.drips += 1;
-        }
+        info
+    }
+
+    /// The drip's turn of the 751 tick (zone 0 or 6): `--gp−0x4f7c < 1` → the spawn point: `randi(5)` of the drip
+    /// table 0x1fa650 (x, y, z, w), x + `randf(±0.15)`, then y + `randf(±0.15)`. The caller then spawns the drip 787
+    /// (`0x2ffcd0(0.2, point)`: `crate::moby_update::classes::units::drip::spawn`) and re-arms the timer with
+    /// `rand_range(300, 0x4b0)` into [`RippleSim::drip_timer`].
+    pub fn drip_due(&mut self, zone: i32, rng: &mut Rng) -> Option<[f32; 4]> {
+        if zone != 0 && zone != 6 { return None; }
+        self.drip_timer -= 1;
+        if self.drip_timer >= 1 { return None; }
+        let i = rng.randi(5);
+        let mut at = usize::try_from(i).ok().and_then(|i| self.drip_points.get(i)).copied().unwrap_or_default();
+        at[0] += f32::from_bits(rng.randf_bits(0xbe19_999a, 0x3e19_999a));
+        at[1] += f32::from_bits(rng.randf_bits(0xbe19_999a, 0x3e19_999a));
+        Some(at)
+    }
+
+    /// The last part of the 751 tick (zone 5's waterfall foam), after the drip.
+    pub fn tick_mist(&mut self, info: &mut RippleTickInfo, rng: &mut Rng, counter: u64, mut parts: Option<&mut crate::particles::Particles>) {
         // Zone 5: the waterfall foam at the foot of the fall (0x2fd750..0x2fd944): one flat foam ring (type 57) on the
         // row 0x1fa6a0[counter % 20], then up to 20 mist puffs (type 56) down the fall, each with odds 1/32. Standard
         // f32 for the positions; the row loop's 0.05 steps keep the PS2 sum (the loop count).
@@ -616,8 +644,7 @@ impl RippleSim {
                 t += dt;
             }
         }
-        self.last = info;
-        info
+        self.last = *info;
     }
 
     /// `0x2b7d28`: the first patch whose bounds hold (x, y, z) (1/1024 units, z within [z−1, z+1)) and whose

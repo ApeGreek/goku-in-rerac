@@ -320,6 +320,74 @@ impl MobyFocus {
     }
 }
 
+/// Class 3's pvar block (0x40 bytes): the **rail / slide camera** (level01 init `0x315de0` + `0x314e98`, update
+/// `0x315358`, pre hook `0x316030`; 13 records on 01, 05, 08, 16, 17). The camera rides a camera path (+0x20) beside
+/// Ratchet's rail or slide and looks ahead along it. The run-time words (+0x34, +0x36) start as the file has them.
+///
+/// | offset | type | field |
+/// |---|---|---|
+/// | 0x00 | f32 | the look-ahead along the path / rail (0.5 .. 15) |
+/// | 0x20 | s32 | the camera path (`0x1b0930[i]`; −1 on level 17's record: never current) |
+/// | 0x24 | s32 | the grind path (`0x15f70c[i]`) Ratchet must ride (the kind-7 check, the pre hook); −1: any |
+/// | 0x28 / 0x2c | s32 | mode 2's mapping paths: +0x28 over the camera path, +0x2c over the rail |
+/// | 0x30 | s32 | the mode: 0 parallel to the rail, 2 mapped piecewise, else (1, 3) the path point nearest Ratchet |
+/// | 0x34 | s16 | mode 2's mapping done (set by the first init; kept for the level) |
+/// | 0x36 | s16 | the init found the camera ahead of Ratchet along the path (mode 3): the place offset flips |
+/// | 0x38 | f32 | the place offset along the path / rail (−3, −4: behind) |
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RailCamera {
+    pub header: CameraHeader,
+    pub ahead: f32,
+    pub path: i32,
+    pub rail: i32,
+    pub map_path: i32,
+    pub map_rail: i32,
+    pub mode: i32,
+    pub mapped: i16,
+    pub flipped: i16,
+    pub along: f32,
+}
+
+impl RailCamera {
+    /// The block (None when shorter than 0x3c).
+    pub fn parse(pvar: &[u8]) -> Option<RailCamera> {
+        let b = Buf(pvar);
+        Some(RailCamera {
+            header: CameraHeader::parse(pvar)?,
+            ahead: b.f32(0).ok()?,
+            path: b.i32(0x20).ok()?,
+            rail: b.i32(0x24).ok()?,
+            map_path: b.i32(0x28).ok()?,
+            map_rail: b.i32(0x2c).ok()?,
+            mode: b.i32(0x30).ok()?,
+            mapped: b.i16(0x34).ok()?,
+            flipped: b.i16(0x36).ok()?,
+            along: b.f32(0x38).ok()?,
+        })
+    }
+}
+
+/// Class 14's pvar block (0x40 bytes): the **side view** (level03 hook `0x2ebd70`, init `0x2eb978`, update
+/// `0x2ebdb0`, pre hook `0x2ebde8`; Kerwan's 4 records): while Ratchet's feet are in the header's cuboid the camera
+/// keeps the record's facing (`rot` as Euler rows, row 0) at +0x20 behind and +0x24 above a smoothed Ratchet. Class 1
+/// (the fixed view, level03 `0x2e8870`.., 03 / 04) reads only the header (its look height is the header's +0x18).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SideView {
+    pub header: CameraHeader,
+    /// +0x20: the distance behind along the record's facing (8).
+    pub distance: f32,
+    /// +0x24: the height above Ratchet along −gravity (4).
+    pub height: f32,
+}
+
+impl SideView {
+    /// The block (None when shorter than 0x28).
+    pub fn parse(pvar: &[u8]) -> Option<SideView> {
+        let b = Buf(pvar);
+        Some(SideView { header: CameraHeader::parse(pvar)?, distance: b.f32(0x20).ok()?, height: b.f32(0x24).ok()? })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -25,9 +25,9 @@
 //!
 //! **The alert frame** (`HudBoltAlertShow` 0x227d90, in the hero's frame after the moby pass: [`alert_frame`]):
 //! with the Metal Detector owned (`0x13d4db`, item 27) the flag is `nearest ≠ 0 && distance < 20` and element 7 is
-//! requested (`queue_animation_update(7, 0x753a, …)`), then the nearest is cleared (distance 100000); without it,
-//! flag 0 and nothing is cleared. The HUD element itself and the detector's dig (bolts from the cache, the
-//! nibble write, `DeleteMoby`) belong to the HUD and the gadget ports: [`Globals`] is what they read.
+//! requested (`queue_animation_update(7, 0x753a, …)`: `Services::hud`, drawn by `crate::hud`'s bolt alert), then the
+//! nearest is cleared (distance 100000); without it, flag 0 and nothing is cleared. The detector's dig (bolts from the
+//! cache, the nibble write, `DeleteMoby`) belongs to the gadget port (G-WPN-006): [`Globals`] is what it reads.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::services::{pvar as p, World};
@@ -139,7 +139,11 @@ pub fn alert_frame(w: &mut World) {
     g.alert = g.nearest.is_some() && g.distance < ALERT_RANGE;
     g.distance = FAR;
     g.nearest = None;
-    if g.alert { g.alert_requests += 1; }
+    if g.alert {
+        g.alert_requests += 1;
+        // `queue_animation_update(7, 0x753a, 0x24b458, 0x24ee20, 0x24eed8, 0x141398, 1)`: the HUD's element 7.
+        w.svc.hud.queue(crate::hud::Request::BOLT_ALERT);
+    }
 }
 
 #[cfg(test)]

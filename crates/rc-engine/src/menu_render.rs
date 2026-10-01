@@ -490,11 +490,14 @@ fn menu_frame(
         Mode::Gameplay => {
             let inp = MenuInput::from_pad(&play.game.pad, true);
             // 0x15f594: a context-prompt owner blocks the ring (the vendor's △ is not also a ring open).
-            let gate = HeroGate { early_exit: sess.hp < 1, held_item: held_item(&gs.global), f594: play.svc.interact.prompt.owner, ..Default::default() };
+            // 0x1413f4: the ring opens only on foot or in the disguise (Clank's △ is his command menu: G-UI-018).
+            let gate = HeroGate { early_exit: sess.hp < 1, held_item: held_item(&gs.global), f594: play.svc.interact.prompt.owner, b13f4: play.game.hero.mode, ..Default::default() };
             if let Some(qs) = rt.qs.as_mut() {
                 let h = qs.hero(&inp, &gate, &mut gs.global, sess);
                 let u = qs.update(&inp, &gate, &mut gs.global, sess, vsync);
                 if u.lock_pad { play.game.pad.lock = 2; }
+                // 0x242930: the ring's △ also keeps health and bolts up (`HudShowHealth` + the bolt counter, ScaleTicks(180)).
+                if h.show_health_bolts { feed.calls.push(rc_game::hud::Call::ShowHealthBolts(rc_game::hud::scale_ticks(180))); }
                 if trace || h.request.is_some() || u.closed || h.opened {
                     if h.opened { println!("menus: frame {frame}: quick select opened (slots {:?})", gs.global.quick_select); }
                     if let Some(r) = h.request { println!("menus: frame {frame}: double tap: hand request item {r} (0x141408)"); }
@@ -586,6 +589,8 @@ fn menu_frame(
                 if let Some(p) = out.entered { println!("menus: frame {frame}: page {p:#x} entered (kind {:#x})", menu.kind); }
                 if out.quit { println!("menus: frame {frame}: Quit Game ○ (0x15f570 = 1: leaving the level is not ported)"); }
                 if let Some(p) = out.freeze { println!("menus: frame {frame}: mode_freezeInit(3, {p:#x}) (save / load dialog not ported)"); }
+                // PageMenuClose 0x28c6c8 (its equip requests are always set): health and bolts kept up ScaleTicks(180).
+                if out.equip.is_some() { feed.calls.push(rc_game::hud::Call::ShowHealthBolts(rc_game::hud::scale_ticks(180))); }
                 // PageMenuClose: the Gadgets / Weapons pages' changed slots are requested (rc_game::inventory).
                 if let Some(req) = out.equip.filter(|r| r.iter().any(Option::is_some)) {
                     rc_game::inventory::apply_close_requests(sess, &req);
@@ -820,9 +825,20 @@ fn clip(a: [i32; 4], b: [i32; 4]) -> [i32; 4] { [a[0].max(b[0]), a[1].min(b[1]),
 fn translate(d: &Draw, ox: i32, oy: i32) -> Draw {
     let mut d = d.clone();
     match &mut d {
-        Draw::Sprite { x, y, .. } | Draw::Text { x, y, .. } | Draw::FxQuad { x, y, .. } => {
+        Draw::Sprite { x, y, .. } | Draw::Text { x, y, .. } | Draw::FxQuad { x, y, .. } | Draw::SpriteSub { x, y, .. } => {
             *x += ox;
             *y += oy;
+        }
+        // (The HUD's 1/16-pixel calls: the slot meters only, never in a panel; translated for completeness.)
+        Draw::Sprite16 { x, y, .. } => {
+            *x += ox << 4;
+            *y += oy << 4;
+        }
+        Draw::Rect16 { x0, y0, x1, y1, .. } => {
+            *x0 += ox << 4;
+            *x1 += ox << 4;
+            *y0 += oy << 4;
+            *y1 += oy << 4;
         }
         Draw::TextWindow { window: w, .. } => {
             w.x_min += ox as i16;

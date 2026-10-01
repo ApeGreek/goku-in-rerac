@@ -24,11 +24,14 @@
 //! never find a primitive (the port has no grid). The avoidance's level branches are ported (level 15 with body 2,
 //! level 13 in state 0x7b).
 //!
-//! The level's other camera classes: the Swingshot camera ([`swing`], class 7), the placed view (class 23) and the
-//! moby focus ([`focus`], class 18); the Swingshot targets' look-up hint ([`swing::LookHint`]) and the focus scan of
-//! 0x3111d8 (+0x230 = 1) feed the follow camera. Not modelled: the scripted focus moby 0x16735c and its auto-yaw
-//! (G-HERO-026), and the Euler pitch/roll (0x2721f0; only the yaw feeds gameplay — pitch and roll are
-//! derived here from the rows with the same FastArcTan).
+//! The level's other camera classes: the Swingshot camera ([`swing`], class 7), the rail / slide camera ([`rail`],
+//! class 3), the fixed and side views ([`cuboid`], classes 1 / 14; the plumbing of a current level-class camera and
+//! the switch's blends: [`class_cam`]), the placed view (class 23) and the moby focus ([`focus`], class 18); the
+//! Swingshot targets' look-up hint ([`swing::LookHint`]), the scripted focus moby 0x16735c ([`Camera::set_focus_moby`])
+//! and the focus scan of 0x3111d8 (+0x230 = 1) feed the follow camera; the camera moby 1007 ([`camera_moby`]) stands
+//! at the follow camera. The hero-state tweaks `0x3111d8` and the target modes `0x30fb08` / `0x3101c0` are ported
+//! whole (player_controller.md §15 "The hero-state tweaks", "Target modes"). Not modelled: the Euler pitch/roll
+//! (0x2721f0; only the yaw feeds gameplay — pitch and roll are derived here from the rows with the same FastArcTan).
 //!
 //! **Camera shake** ([`Shake`], [`ShakeRequest`]): the two shake records 0x167260 (along the camera's up row) and
 //! 0x167270 (along its forward row) that `CameraUpdate` applies to the published position 0x167240 after the Euler
@@ -48,8 +51,12 @@ use crate::pad::{fast_arctan, PadState};
 use crate::ps2v::Pf;
 use rc_formats::collision::Collision;
 
+pub mod camera_moby;
+pub mod class_cam;
+pub mod cuboid;
 pub mod focus;
 pub mod level;
+pub mod rail;
 pub mod script;
 pub mod swing;
 pub mod type6;
@@ -275,6 +282,16 @@ pub struct Camera {
     pub hint: swing::LookHint,
     /// What the tick feeds the camera from the moby world each tick ([`CamWorld`]).
     pub world: CamWorld,
+    /// The current level-class camera (classes 3, 1, 14: [`class_cam::ClassCam`]).
+    pub class_cam: class_cam::ClassCam,
+    /// 0x16735c: the scripted focus moby the follow camera turns toward (`0x3111d8`; written by the classes that stage
+    /// a look, [`Camera::set_focus_moby`]: units 1422, 1470, 1051, not ported) and 0x167360, the ticks since the right
+    /// stick last moved (the turn eases in over 400).
+    pub focus_moby: Option<usize>,
+    pub focus_ticks: i32,
+    /// 0x167354: the camera moby (class 1007, [`camera_moby`]) and this tick's request to the moby world for it.
+    pub cam_moby: Option<usize>,
+    pub cam_moby_call: Option<camera_moby::Call>,
 }
 
 /// The moby-world facts the camera code reads beyond the collision queries, fed by the tick before each camera
@@ -523,6 +540,14 @@ impl Camera {
 
     /// Reset 0x20ee80: re-run the motion pre-step, init, backup D0, publish the position.
     pub fn reset(&mut self, inp: &CamInput) {
+        // The follow camera made current (the level-class and Swingshot cameras dropped, their +0x7e cleared), no
+        // blend (0x167370 = 0).
+        self.class_cam.active = false;
+        self.class_cam.release = 0;
+        self.swing.active = false;
+        self.swing.release = 0;
+        self.level_cams.release = 0;
+        self.blend.mode = 0;
         self.pre_motion(inp);
         self.init(inp);
         self.d0 = self.cam;
@@ -779,24 +804,29 @@ impl Camera {
         // The script camera (type 5) never yields to an activation check; `CameraScript2` releases it (script.rs).
         // The type-6 camera (the missile view) likewise holds until its hand-back `0x317e70` (type6.rs).
         // With another camera current the loop's checks still run (class 17's regions see it and leave).
-        if !self.follow_is_current() && !self.swing.active { self.activation_loop(inp); }
+        if !self.follow_is_current() && !self.swing.active && !self.class_cam.active { self.activation_loop(inp); }
         let prev = if self.type6.active {
             self.type6_frame(inp)
         } else if self.script.active {
             self.script_frame(inp)
         } else if self.swing.active {
             self.swing_frame(inp)
+        } else if self.class_cam.active {
+            self.class_frame(inp)
         } else {
             self.switch_cameras(inp)
         };
-        if self.type6.active || self.script.active || self.swing.active {
-            // Its update ran in type6_frame / script_frame / swing_frame.
+        if self.type6.active || self.script.active || self.swing.active || self.class_cam.active {
+            // Its update ran in type6_frame / script_frame / swing_frame / class_frame.
         } else if self.first_person.active {
             self.first_person_update(inp);
         } else {
             self.update_type0(inp);
             self.cam.prev_pos = self.cam.pos;
         }
+        // `Camera_handleCollWithHero` 0x20d068 for the camera now current (the camera moby; in the game before the
+        // current camera's update: the request only reads the class and the last published position).
+        self.handle_coll_with_hero();
         // `ExecuteCamPostUpdFuncs` 0x20cd88 (the end of `UpdateAllCameras`): the hint's post-update.
         self.look_hint_post();
         let (rows, pos) = self.active_view();
@@ -901,16 +931,72 @@ impl Camera {
             self.set_pivot_height(tgt.to_f32(), f32::from_bits(0x3b44_9ba6));
         }
         if inp.hero.group == 0x10 { self.cam.look_h = Pf::b(0x3e80_0000); }
+        // Clank (body 1): distance 3 (base too) at 0.003 while no region holds the settings, look and pivot heights 1
+        // unless gliding; the sphere chain's scale D+0x20c = 0.6.
+        let h = inp.hero;
+        if h.mode == 1 {
+            if self.level_cams.owner.is_none() {
+                self.set_distance(3.0, f32::from_bits(0x3b44_9ba6), true);
+                if h.group != 5 {
+                    self.cam.look_h = Pf::ONE;
+                    self.set_pivot_height(1.0, f32::from_bits(0x3b44_9ba6));
+                }
+            }
+            self.cam.sph_scale = Pf::b(0x3f19_999a);
+        }
+        // Giant Clank (body 2, G-HERO-005): look 9 / distance 12 (base) / pivot 15 unless a mode-11 region holds
+        // D+0x230 = 2, the run-toward lock, the sphere chain's scale 2.0 and step 0.14 (level01 gp 0x162210..0x162220).
+        if h.mode == 2 {
+            if self.level_cams.focus < 2 {
+                self.set_look_height(9.0, f32::from_bits(0x3ba3_d70a), false);
+                self.set_distance(12.0, f32::from_bits(0x3b44_9ba6), true);
+                self.set_pivot_height(15.0, f32::from_bits(0x3b44_9ba6));
+            }
+            self.lock_toward();
+            self.cam.sph_scale = Pf::b(0x4000_0000);
+            self.cam.sph_step = Pf::b(0x3e0f_5c29);
+        }
+        // A weapon held up (0x1413fa) off the rails (group ≠ 0xf): the leash off, the look from the smoothed target, the
+        // horizontal spring 0.04 / 0.2.
+        if h.f13fa != 0 && h.group != 0xf {
+            self.set_leash(0);
+            self.look_from_smoothed();
+            self.set_h_spring(f32::from_bits(0x3d23_d70a), f32::from_bits(0x3e4c_cccd));
+        }
         // The Swingshot targets' look-up hint's callback (record 0x167490: `0x2eb408`, swing.rs).
         self.look_hint_callback();
-        // 0x3111d8: no focus moby (0x16735c = 0: its writers, classes 1422 / 1470 / 1051, are not ported, G-HERO-026) →
-        // +0x230 = 0; then `coll_sphere_mobys(15, Ratchet's feet, 1, Ratchet)`: a listed moby whose target record's
-        // byte +0x0d is set → +0x230 = 1 (class 17's modes 6 / 8 read it next tick).
+        // The scripted focus moby (0x16735c): gone (state ≥ 0x80) → cleared; else, with no mode-11 region (D+0x230 < 2),
+        // the right stick moving (|x| or |y| ≥ 0.3) restarts 0x167360, which counts up to 400 ticks, and the camera
+        // turns toward the moby at (count / 400)·12° a tick (`0x313b48`). +0x230 = 0 either way.
+        if let Some(id) = self.focus_moby {
+            if self.level_cams.focus < 2 {
+                match self.world.mobys.get(&id).copied() {
+                    Some(m) if (m.state as i8) < 0 => self.focus_moby = None,
+                    m => {
+                        if 0.3 <= inp.pad.rx.to_f32().abs() || 0.3 <= inp.pad.ry.to_f32().abs() { self.focus_ticks = 0; }
+                        self.focus_ticks += 1;
+                        if t(400) < self.focus_ticks { self.focus_ticks = t(400); }
+                        let rate = (self.focus_ticks as f32 / t(400) as f32) * 0.209_439_52;
+                        if let Some(m) = m { self.turn_toward_point(rate, 0.0, m.pos); }
+                    }
+                }
+            }
+        }
+        // The focus scan (`coll_sphere_mobys(15, Ratchet's feet, 1, Ratchet)`): a listed moby whose target record's byte
+        // +0x0d is set → +0x230 = 1 (class 17's modes 6 / 8 read it next tick).
         self.level_cams.focus = 0;
         if let Some(sc) = inp.mobys {
             let feet = to_f32x3(inp.hero.pos);
             let near = coll_sphere_mobys(sc, feet, 15.0, QueryFlags(1), inp.hero_moby);
             if near.iter().any(|id| self.world.focus.contains(id)) { self.level_cams.focus = 1; }
+        }
+        // State 0x81 with L2 / R2 held (0x13cae0 & 3): the leash off, the look from the smoothed target, the spring
+        // 0.04 / 0.2 (and D+0x12..0x16 = 0: read only by the yaw-stabiliser branch below). The yaw stabiliser (gp
+        // 0x16220c ≠ 0: D+0x12..0x16, 0x15ef40 from the yaw history 0x167340) is never on: its switch has no writer.
+        if h.state == 0x81 && inp.pad.held & 3 != 0 {
+            self.set_leash(0);
+            self.look_from_smoothed();
+            self.set_h_spring(f32::from_bits(0x3d23_d70a), f32::from_bits(0x3e4c_cccd));
         }
         self.targets(inp);
         self.leash();
@@ -947,56 +1033,130 @@ impl Camera {
         }
     }
 
-    /// Target mode state machine 0x30fb08 (the transitions an on-foot run reaches).
+    /// Target mode state machine 0x30fb08 (D+0x104; D+0x105 the previous mode, D+0x106 / +0x108 the look blend's timer
+    /// and 1 / length, D+0x114 / +0x10c the raise's timer and 1 / length, D+0x110 its height, D+0x117 frozen, D+0x60 /
+    /// +0x70 its end points; gp constants of level 01 0x16219c..0x1621f8). From mode 0: group 2 → 1 (10 ticks); state
+    /// 0xf → 3 (the raise 3.0 over 85 ticks, look blend 30); state 0xc → 8 (30); state 0xb → 6 (the raise 1.0 over 35,
+    /// 30); states 0xd / 0xe → 5 (the raise 3.5 over 45, 30); group 4 → 2 (30); the raise modes only with no platform
+    /// motion (0x16736c = 0). From the others: state 0x14 → 9 (the raise 1.5 over 30, no blend) unless in 1 or 9; 1 / 2
+    /// out of groups 2 and 4 → 0 (no blend, D+0x105 kept); 7: not descending (0x13f76e = 0) → 6 again, group 2 → 1
+    /// (20); 4 out of group 4 → 1 in group 2 else 0 (20); 3 in state 0xb → 6; 5 in state 0xc → 8 (30); 8 out of state
+    /// 0xc → 0 (20); 6 out of state 0xb → 0 (20); 3 / 5 out of group 4 → 0 (20); 9 / 10 in group 2 or 55 ticks in the
+    /// air → 1 (20; the row blend D+0x20 = 90 ticks, the saved forward = the forward); 9 out of state 0x14 → 10 (30);
+    /// 10 when the raise timer runs out → 0 (20); 5 in state 0x10 → 0 (20). Docs: player_controller.md §15
+    /// "Target modes".
     fn target_mode(&mut self, inp: &CamInput) {
         let h = inp.hero;
         let pdz = self.g.plat_dz;
         let up2 = self.g.up2;
         let up_s = self.g.up_s;
+        let air = h.f65c as i16 as i32;
         let d = &mut self.cam;
-        let set = |d: &mut FollowCamera, m: u8, k: i32| {
-            d.mode_prev = d.mode;
+        let set = |d: &mut FollowCamera, prev: u8, m: u8, k: i32| {
+            d.mode_prev = prev;
             d.mode = m;
             d.mode_t = k as i16;
-            d.mode_inv = if k != 0 { Pf::ONE / i2f(k) } else { Pf::ONE };
+            d.mode_inv = Pf::ONE / i2f(k);
         };
-        match d.mode {
-            0 => {
-                if h.group == 2 {
-                    set(d, 1, 10);
-                } else if h.state == 0xb && pdz == Pf::ZERO {
-                    set(d, 6, 30);
-                    d.raise_t = t(35) as i16;
-                    d.raise_inv = Pf::ONE / Pf::f(35.0);
-                    d.raise_frozen = 0;
-                    d.raise_h = Pf::ONE;
-                    d.raise_b = vscale(up2, dot(up2, vadd(vscale(up_s, Pf::ONE), h.pos)));
-                    d.raise_a = d.vtarget;
-                } else if h.state == 0xe && pdz == Pf::ZERO {
-                    set(d, 5, 30);
-                    d.raise_t = t(45) as i16;
-                    d.raise_inv = Pf::ONE / Pf::f(45.0);
-                    d.raise_frozen = 0;
-                    d.raise_h = Pf::b(0x4060_0000);
-                    d.raise_b = vscale(up2, dot(up2, vadd(vscale(up_s, d.raise_h), h.pos)));
-                    d.raise_a = d.vtarget;
-                } else if h.group == 4 && pdz == Pf::ZERO {
-                    set(d, 2, 30);
-                }
+        // The raise (`0x30fa78`): from the vertical target to height `ht` above Ratchet along up_s, over `ticks`.
+        let raise = |d: &mut FollowCamera, ticks: i32, ht: Pf| {
+            d.raise_t = ticks as i16;
+            d.raise_inv = Pf::ONE / i2f(ticks);
+            d.raise_frozen = 0;
+            d.raise_h = ht;
+            d.raise_b = vscale(up2, dot(up2, vadd(vscale(up_s, ht), h.pos)));
+            d.raise_a = d.vtarget;
+        };
+        let plat = pdz == Pf::ZERO;
+        if d.mode == 0 {
+            if h.group == 2 {
+                set(d, 0, 1, 10);
+            } else if h.state == 0xf && plat {
+                set(d, 0, 3, 30);
+                raise(d, t(0x55), Pf::b(0x4040_0000));
+            } else if h.state == 0xc && plat {
+                set(d, 0, 8, 30);
+            } else if h.state == 0xb && plat {
+                set(d, 0, 6, 30);
+                raise(d, t(0x23), Pf::ONE);
+            } else if (h.state == 0xd || h.state == 0xe) && plat {
+                set(d, 0, 5, 30);
+                raise(d, t(0x2d), Pf::b(0x4060_0000));
+            } else if h.group == 4 && plat {
+                set(d, 0, 2, 30);
             }
-            1 | 2 => {
-                if h.group != 2 && h.group != 4 {
-                    d.mode_prev = d.mode;
-                    d.mode = 0;
-                    d.mode_t = 0;
-                    d.mode_inv = Pf::ONE;
-                }
-            }
-            6 if h.state != 0xb => set(d, 0, t(20)),
-            3 | 5 if h.group != 4 => set(d, 0, t(20)),
-            4 if h.group != 4 => set(d, if h.group == 2 { 1 } else { 0 }, t(20)),
-            _ => {}
+            return;
         }
+        let m = d.mode;
+        if m != 9 && m != 1 && h.state == 0x14 {
+            d.mode_prev = m;
+            d.mode = 9;
+            d.mode_t = 0;
+            d.mode_inv = Pf::ONE;
+            raise(d, t(0x1e), Pf::b(0x3fc0_0000));
+            return;
+        }
+        if (m == 1 || m == 2) && h.group != 4 && h.group != 2 {
+            d.mode = 0;
+            d.mode_inv = Pf::ONE;
+            d.mode_t = 0;
+            return;
+        }
+        // Back to 6 (LAB_0030fed4).
+        let to_six = |d: &mut FollowCamera, prev: u8| {
+            set(d, prev, 6, 30);
+            raise(d, t(0x23), Pf::ONE);
+        };
+        if m == 7 {
+            if h.jump.descending == 0 {
+                to_six(d, 7);
+                return;
+            }
+            if h.group == 2 {
+                set(d, 7, 1, t(0x14));
+                return;
+            }
+        }
+        if m == 4 && h.group != 4 {
+            set(d, 4, if h.group == 2 { 1 } else { 0 }, t(0x14));
+            return;
+        }
+        if m == 3 && h.state == 0xb {
+            to_six(d, 3);
+            return;
+        }
+        if m == 5 && h.state == 0xc {
+            set(d, 5, 8, 30);
+            return;
+        }
+        if m == 8 && h.state != 0xc {
+            set(d, 8, 0, t(0x14));
+            return;
+        }
+        if m == 6 && h.state != 0xb {
+            set(d, 6, 0, t(0x14));
+            return;
+        }
+        if (m == 3 || m == 5) && h.group != 4 {
+            set(d, m, 0, t(0x14));
+            return;
+        }
+        // 9 / 10 → 1 (LAB_00310090): in group 2, or 55 ticks in the air.
+        if (m == 9 || m == 10) && (h.group == 2 || t(0x37) <= air) {
+            set(d, m, 1, t(0x14));
+            d.row_blend = t(0x5a) as i16;
+            d.saved_fwd = d.rows[0];
+            return;
+        }
+        if m == 9 && h.state != 0x14 {
+            set(d, 9, 10, 0x1e);
+            return;
+        }
+        if m == 10 && dec_timer(&mut d.raise_t) != 0 {
+            set(d, 10, 0, t(0x14));
+            return;
+        }
+        if m == 5 && h.state == 0x10 { set(d, 5, 0, t(0x14)); }
     }
 
     /// VerticalTarget 0x3101c0: returns the vertical target V and writes the horizontal part to D+0x40.
@@ -1009,17 +1169,32 @@ impl Camera {
             d.target = vsub(hero, v);
             v
         };
+        // State 0x77: the target flattened, the vertical target from the smoothed one; mode 11 (the row blend 90
+        // ticks, the saved forward = the forward) on the first tick.
+        if h.state == 0x77 {
+            let d = &mut self.cam;
+            d.target = vsub(d.target, vscale(up2, dot(d.target, up2)));
+            let v = vscale(up2, dot(up2, d.smooth));
+            d.vtarget = v;
+            if d.mode != 11 {
+                d.mode = 11;
+                d.saved_fwd = d.rows[0];
+                d.row_blend = t(0x5a) as i16;
+            }
+            return v;
+        }
         match self.cam.mode {
             2 => {
+                let to_one = |d: &mut FollowCamera| {
+                    d.mode = 1;
+                    d.mode_t = 10;
+                    d.mode_inv = Pf::ONE / i2f(10);
+                };
                 if h.state == 0x11 {
-                    self.cam.mode = 1;
-                    self.cam.mode_t = 10;
+                    to_one(&mut self.cam);
                 } else if h.jump.descending != 0 && Pf::b(0x3e4c_cccd) < h.height {
                     let a = self.view_angle(h);
-                    if a < Pf::b(0xbc23_d70a) || HALF_PI < a {
-                        self.cam.mode = 1;
-                        self.cam.mode_t = 10;
-                    }
+                    if a < Pf::b(0xbc23_d70a) || HALF_PI < a { to_one(&mut self.cam); }
                 }
                 let mut hold = false;
                 if h.f65c != 0 && self.g.plat_dz == Pf::ZERO && (h.jump.descending == 0 || h.jump.land_eta >= 16) {
@@ -1058,6 +1233,7 @@ impl Camera {
                     } else {
                         d.mode = 4;
                         d.mode_t = 20;
+                        d.mode_inv = Pf::ONE / i2f(20);
                     }
                 }
                 v
@@ -1066,6 +1242,11 @@ impl Camera {
                 let v = self.cam.vtarget;
                 self.cam.target = vsub(hero, vscale(up2, dot(hero, up2)));
                 v
+            }
+            // Modes 9 / 10 (state 0x14 and after): halfway between the plain vertical target and the raise's start.
+            9 | 10 => {
+                let v = plain(&mut self.cam);
+                vlerp(v, self.cam.raise_a, Pf::b(0x3f00_0000))
             }
             _ => plain(&mut self.cam),
         }
@@ -1714,6 +1895,13 @@ impl Camera {
         if let Some(y) = yaw_input_toward(dir, to_f32x3(self.cam.off), to_f32x3(self.g.up_s), tolerance) { self.cam.script_yaw = Pf::f(y); }
     }
 
+    /// The store a class makes into 0x16735c (the scripted focus moby: `None` = 0). The follow camera's tweaks
+    /// (`0x3111d8`) turn toward it while it lives and clear it when its state goes ≥ 0x80; class 18's region test takes a
+    /// region whose moby it is as entered. Writers in the game: units 1422 (L18 0x2f2bf0), 1470 (L17 0x2f26d0), 1051
+    /// (L06 0x2f9a28), none ported; a port of one calls this (through the moby → camera channel,
+    /// `crate::cinematic::CinematicCall::FocusMoby`). The tick feeds the moby's state and position (`CamWorld::mobys`).
+    pub fn set_focus_moby(&mut self, id: Option<usize>) { self.focus_moby = id; }
+
     /// The end-sphere flags D+0x218 (level02 `0x2f6570`; level 01 has no copy: no caller there).
     pub fn set_end_flags(&mut self, v: u32) {
         if self.follow_is_current() { self.cam.end_flags = v; }
@@ -2144,6 +2332,10 @@ enum Release {
 }
 
 impl Camera {
+    /// The current camera's own position (0x167280 +0x30: before the blend and the shakes), for the moby loop's
+    /// readers (the camera moby's update, `moby_update::services::LoopGlobals::cam_pos`).
+    pub fn current_pos(&self) -> [f32; 3] { to_f32x3(self.active_view().1) }
+
     /// The active camera's rows and position (UpdateCam +0x00.. and +0x30).
     fn active_view(&self) -> ([V4; 3], V4) {
         if self.type6.active { return self.type6_view(); }
@@ -2152,6 +2344,7 @@ impl Camera {
             let (r, p) = self.swing_view();
             return (rows_pf(r), level::pos4(p));
         }
+        if self.class_cam.active { return self.class_view(); }
         if self.first_person.active {
             let mut p = crate::hero::physics::from_f32x3(self.first_person.pos);
             p[3] = Pf::ONE;
@@ -2183,7 +2376,14 @@ impl Camera {
             Some(level::CLASS_FIRST_PERSON) => {}
             Some(c) if c == swing::CLASS_SWING && self.level_cams.ports.swing => {
                 let prev = self.active_view();
+                self.level_cams.release = 0;
                 self.swing_switch_in(inp, prev);
+                return Some(prev);
+            }
+            Some(c) if self.level_cams.ports.runs_class_cam(c) && self.level_cams.won_slot.is_some() => {
+                let prev = self.active_view();
+                let slot = self.level_cams.won_slot.unwrap();
+                self.class_switch_in(inp, c, slot, prev);
                 return Some(prev);
             }
             Some(c) => {
@@ -2193,6 +2393,8 @@ impl Camera {
             None => return None,
         }
         let prev = self.active_view();
+        // The switch clears the camera it leaves' +0x7e (class 1's hook may have set the follow camera's).
+        self.level_cams.release = 0;
         self.first_person.active = true;
         self.g.since_switch = 0;
         self.first_person_init(inp, rows_f(prev.0)[0]);

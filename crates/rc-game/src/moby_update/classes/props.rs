@@ -37,8 +37,9 @@
 //! state 2, a camera shake (up, 0.4, `ticks(30)`), class sound 1. 2: the wait, then state 3 with a 45-tick fall
 //! timer. 3: falls (`vz −= 30·dt²`); once the timer is out and it is 20 below home: a shake (0.1, `ticks(20)`), sound 0,
 //! state 4 at home − 20, the death bits. 4: when the rubble is over and the camera hold is set: `CameraScript2(0)`,
-//! `SetState(0, 1)`, the letterbox off. Not ported: the camera look at the platform while it goes (`FUN_002f9000`:
-//! the `0x313af0` / `0x313628` / `0x313690` / `0x3136c8` camera calls in states 2 and 3; counted).
+//! `SetState(0, 1)`, the letterbox off. States 2 and 3 first look at the platform (`FUN_002f9000`, [`collapse_look`]:
+//! the follow camera turned along the trigger cuboid's x row at 8° a tick, distance 7, pivot 2.5, look 3.5, rates
+//! 0.02; no-ops unless the follow camera is current).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{pv, pvar as p, HitTemplate, World};
@@ -237,6 +238,20 @@ pub fn shootable_update(w: &mut World, id: MobyId) {
 // ---------------------------------------------------------------------------------------------------
 // 701
 
+/// `FUN_002f9000` (states 2 and 3, before the rest): the follow camera turned along the trigger cuboid's x row (rotated
+/// about its z row by the level's gp word 0x161c28 = 0: the row itself) at 8° a tick (`0x313af0(0x3e0efa35, 0, dir)`),
+/// distance 7 (`0x313628(7, 0.02, 0)`), pivot height 2.5 (`0x313690(2.5, 0.02)`), look height 3.5
+/// (`0x3136c8(3.5, 0.02, 0)`) — the follow camera's one-tick setters, through the moby → camera channel.
+fn collapse_look(w: &mut World, id: MobyId) {
+    let c = p::i32(&w.m(id).pvars, 0x80);
+    let Some(m) = usize::try_from(c).ok().and_then(|c| w.svc.volumes.cuboids.get(c)).map(|s| s.matrix) else { return };
+    let dir = [m[0][0], m[0][1], m[0][2]];
+    crate::cinematic::follow_turn_toward(w, f32::from_bits(0x3e0e_fa35), 0.0, dir);
+    crate::cinematic::follow_distance(w, 7.0, f32::from_bits(0x3ca3_d70a), false);
+    crate::cinematic::follow_pivot_height(w, 2.5, f32::from_bits(0x3ca3_d70a));
+    crate::cinematic::follow_look_height(w, 3.5, f32::from_bits(0x3ca3_d70a), false);
+}
+
 /// `CollapsingPlatformUpdate` (0x2f9080).
 pub fn collapse_update(w: &mut World, id: MobyId) {
     use crate::follow_camera::{ShakeAxis, ShakeRequest};
@@ -304,7 +319,7 @@ pub fn collapse_update(w: &mut World, id: MobyId) {
             }
         }
         2 => {
-            w.svc.unported("701: camera look (FUN_002f9000)");
+            collapse_look(w, id);
             if dec(w, 0x8a) != 0 {
                 let t = w.ticks(0x2d);
                 let m = w.mm(id);
@@ -314,7 +329,7 @@ pub fn collapse_update(w: &mut World, id: MobyId) {
             }
         }
         3 => {
-            w.svc.unported("701: camera look (FUN_002f9000)");
+            collapse_look(w, id);
             {
                 let m = w.mm(id);
                 let vz = p::ff(&m.pvars, 0x68) - DT * DT * 30.0;

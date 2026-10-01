@@ -137,7 +137,7 @@ L01:00268d80	MobyMarkJointChain	anim	has	V
 L01:00271030	NormaliseMatrixColumns	anim	has	V	
 L01:00264630	MobyGetBoneMatrix	anim	has	V	MobyGetBoneMatrix
 L01:002646d0	MobyEvalAttachLists	anim	has	V	
-L01:00265d78	MobyAnimSphereLerp	anim	has	L	MobyAnimSphereLerp (named, not cited in the port)
+L01:00265d78	MobyAnimSphereLerp	anim	has	V	MobyAnimSphereLerp: creature::react::sphere_lerp (the class swap: moby_update::class_swap)
 L01:0026c7a8	MobyAnimBlendEx	anim	partly	L	MobyAnimBlendEx: documented in moby_animation.md, no port citation
 L01:00247a90	SetAnim	anim	has	V	SetAnim (hero)
 L01:002777d8	FUN_002777d8	anim	has	V	NPC look-at record (moby_update::manip::look; talking_npc, spinner_float; G-HERO-009 2026-09-30)
@@ -151,7 +151,7 @@ C:eaa5cf4465ec	FUN_002418b0	anim	has	L	sequence frame count, not on L01
 C:94cf214dfe7f	FUN_0027b9c0	anim	partly	L	moby kept on another moby's joint every tick (attach child), not on L01
 L01:002b52a8	FUN_002b52a8	anim	partly	L	manipulator z rotations (0x221e38), vendor-style
 L01:00263d90	FUN_00263d90	anim	has	V	class texture/scale helper (pyro_glow.rs)
-L01:00263718	update_moby_animation_state	anim	has	L	update_moby_animation_state
+L01:00263718	update_moby_animation_state	anim	has	V	update_moby_animation_state: moby_update::class_swap::update_anim_state (G-CLS-031)
 L01:002a1618	PlayClassSound	sound	has	V	PlayClassSound
 L01:002a12f0	SoundIsAlive	sound	has	V	SoundIsAlive
 L01:002a1348	release_voice_slot	sound	has	V	release_voice_slot
@@ -437,7 +437,7 @@ C:e9efe398571a		family	family	V	approach by 0.1
 C:804ab5384c93	FUN_002db990	family	family	V	pvar init
 C:8faeb3633958	FUN_00295de8	family	family	V	L04 family (manipulators)
 C:a8c09d3f73ff	FUN_00295778	family	family	V	L04 family (capsule collision)
-C:99346c2b3975	FUN_002e9d10	family	family	V	L06 knock variant
+C:99346c2b3975	FUN_002e9d10	family	family	V	L06 knock variant: the 827 family's wake, ported with its one caller 1066 (units::blarg_waker::wake)
 L01:00278020	FUN_00278020	heightmap	has	V	level height from the byte grid 0x15fc98..0x15fca8: rc_formats::level::HeightGrid::height (G-LVL-008, W2 2026-09-29)
 L01:002a29a0	FUN_002a29a0	levelexit	missing	L	game mode request 0x15f5c0 (level exit / transition)
 L01:00279070	OpenShipMenu	help	has	V	PromptRelease: interact.rs Prompt::release (Lombyte's name OpenShipMenu is wrong: it drops the prompt lease)
@@ -471,8 +471,8 @@ L01:0024b108	FUN_0024b108	hud	trivial	L	HUD record anchor: x / y shifted by the 
 C:a717d063371e	FUN_002f5360	family	family	V	L06 six-child set: state 2 → 4, the children → 5 (class sound 0)
 C:cdf5239bdc5f	FUN_002f53e8	family	family	V	L06 six-child set: state 6 → 8, the children → 9
 C:8d520530637e	FUN_0029aec0	lsound	partly	L	level sound on a slot (0x15f574 base; record owner 0x13e5ce / 0x13e5d8), L06 copy
-C:40920504317a	FUN_002f9948	group	partly	L	group command variant: members → state 0x12, +0x94 = 0, flags |= 1 & ~0x1000 (scheduler::group_cmd sets the command byte only)
-C:bcbd2dbe1730	FUN_002f99b0	group	partly	L	group command variant: members in 0x12 → state 0, +0x94 = the class colour, flags (as 0x2f9948)
+C:40920504317a	FUN_002f9948	group	has	V	group park (level06): members → state 0x12, +0x94 = 0, flags |= 1 & ~0x1000 (scheduler::group_park)
+C:bcbd2dbe1730	FUN_002f99b0	group	has	V	group unpark (level06): members in 0x12 → state 0, +0x94 = the class collision, flags &~1 | 0x1000 (scheduler::group_unpark)
 C:9c39817b4fe9	FUN_002e9ea0	group	trivial	V	every 827 of the group in state 0x10 or dead (−2 / −3) test
 C:a0194c2bd0e8	FUN_002ef868	family	family	V	debris child moby (class 0x140 + n) with random rotation, spin and life, L09 copy of the effect-moby spawner family (G-CLS-026); level code of its callers only (G-CLS-026 2026-09-30: not a shared system, ported with them)
 C:b376dbd21da4	FUN_00272cb8	particles	has	L	type-0 rain streak spawner of three kinds (particles::type00), not on L01

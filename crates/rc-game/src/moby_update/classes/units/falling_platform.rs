@@ -19,7 +19,9 @@
 //! | states 1–2 | pose = `lerp(start, cuboid centre / Euler, t/2)` (`0x2211e8` ×2) | [`update`] |
 //! | every tick | `0x265358`: the children placed | [`update`] (`triggers::place_children`) |
 //! | | +0x344 ≠ 0, state ≠ 4: +0x344 += 0.25; `randi(trunc(+0x344)) == 0` → a burning bit (`SpawnDebrisMoby(0.1, 2, 1, 0.75, p, 0, class 696, ticks(240), 0)`) at Ratchet's feet + (15 up, `randf(0, 20)` out at the camera yaw `randf(±60°)`) | [`update`] (`gunship::spawn_ember`, `World::camera_yaw`) |
-//! | 0x2f1c38 | (called by the boss 1422) state 1 → 2, the grind-path cut `0x2f1d08` (0x802, 0x908 / 0x954 with +0x0c), the group command `0x2fa888(group, 1)` | [`start`] (the grind cut and the group command: NOT ported: they belong with the boss 1422, G-ENM-001) |
+//! | 0x2f1c38 | (called by the boss 1422) a 1381 in state 1: +0x0c ≠ −1 → the grind-path cuts `0x2f1d08(0x802 / 0x908 / 0x954, cuboid +0x0c)`; state 2; the group command `0x2fa888(group, 1)` | [`start`] (the group command ported; the grind cuts NOT ported: G-HERO-039) |
+//! | 0x2fa888(group, v) | every member of class 0x630 (the carriers 1584): +0xbc = v | [`start`] |
+//! | 0x2f1d08(k, cuboid) | the grind path `0x1c6200[byte 0x1c6500 + k]`: each of its points (0x20 apart from +0x28, count +0x26) inside the cuboid (\|x\|, \|y\| < 1 in its frame) gets +0x0c = 0 and +0x14 = 1 (the rail cut) | NOT ported (G-HERO-039: the loader's grind table 0x1c6500 / 0x1c6200 and the 0x20-byte run-time rail points are not modelled; the hero's rails are `svc.volumes.grind_paths`) |
 //! | 0x2f1cc8 | (called by the boss) state 1, t 0, rate 0; the children placed | [`reset`] |
 //! | | no sound, particle, light, hit, save flag | n/a |
 
@@ -152,12 +154,23 @@ fn delete_child(w: &mut World, ch: MobyId) {
     w.delete_moby(ch);
 }
 
-/// Level18 `0x2f1c38` (the boss's call): a 1381 in state 1 goes to 2. The grind-path cut `0x2f1d08` and the group
-/// command `0x2fa888` are not ported (with the boss 1422, G-ENM-001).
+/// Level18 `0x2f1c38` (the boss's call): a 1381 in state 1 goes to 2 and its group's carriers get +0xbc = 1
+/// (`0x2fa888`). The grind-path cuts `0x2f1d08` (with +0x0c ≠ −1) are not ported (G-HERO-039).
 pub fn start(w: &mut World, id: MobyId) {
     if w.m(id).o_class != 1381 || w.m(id).state != 1 { return; }
+    if w.m(id).pvars.len() >= 0x10 && c::pi32(w, id, 0x0c) != -1 {
+        w.svc.unported("1381: the grind-path cuts 0x2f1d08 (G-HERO-039)");
+    }
     w.mm(id).state = 2;
-    w.svc.unported("1381: the boss's grind-path cut 0x2f1d08 and group command 0x2fa888");
+    let g = w.m(id).group;
+    group_command(w, g, 1);
+}
+
+/// Level18 `0x2fa888(group, v)`: every member of class 0x630 gets +0xbc = v.
+pub fn group_command(w: &mut World, group: i8, v: u8) {
+    for m in crate::moby_update::scheduler::group_ids(w, group) {
+        if w.m(m).o_class == CHILD_CLASS { w.mm(m).cmd = v; }
+    }
 }
 
 /// Level18 `0x2f1cc8` (the boss's call): back to state 1 (t 0, no debris), the children placed.

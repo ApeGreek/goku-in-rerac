@@ -90,13 +90,86 @@ impl Groups {
     }
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The moby groups: the engine's group services (G-CLS-023)
+//
+// A group is a list of the level's moby indices (gameplay +0x48 → `0x1abcc0[g]`, [`Groups`]); a member's +0x21 holds
+// its group. Besides the activity rule of the run-list builder above (one active member runs the whole group), the
+// engine has five functions a class calls on a group; the level overlays link them only where a class uses them, so
+// this table is the set every level has (the callers per level: `docs/plan/gaps.md` G-CLS-023). Any class that issues
+// a group command calls these: there is no other group state.
+//
+// | address (level01) | game | what | here |
+// |---|---|---|---|
+// | 0x26e008 | `MobyGroupCount(g, skip)` | members alive (state < 0x80) and not in state `skip` (−1: any state) | [`group_count`] |
+// | 0x26e090 | `0x26e090(g, c)` | every member's command byte +0xbc = c (dead ones too) | [`group_cmd`] |
+// | 0x26e0e0 | `0x26e0e0(g, s)` | every live member's state = s (the "group command" of the teleporters, water managers, switches) | [`group_state`] |
+// | 0x26e150 | `0x26e150(&out, g, a, b)` | the walk's first member passing the filter (a, b) | [`group_first`] |
+// | 0x26e238 | `0x26e238(&out, cur, a, b)` | the next member after `cur` in `cur`'s group (+0x21) passing the filter | [`group_next`] |
+// | level06 0x2f9948 | (Blarg's copy, 1051 / 1108) | park: every member state 0x12, collision off (+0x94 = 0), mode `&~0x1000 \| 1` | [`group_park`] |
+// | level06 0x2f99b0 | (Blarg's copy, 1051 / 1108) | unpark: members in 0x12 → state 0, class collision, mode `&~1 \| 0x1000` | [`group_unpark`] |
+//
+// The walk keeps its cursor in globals (0x160114 the current moby, 0x16010c its list entry, 0x160110 its index): the
+// port walks the list directly, which visits the same members in the same order. Its filter (a2, a3), read from the
+// level02 copies 0x25b8b8 / 0x25b9a0 (the same code on every level): (0, 0) the live members (state < 0x80), (1, 0)
+// every member, (1, 1) the dead ones only, (0, 1) none (the walk runs to the end and returns −1). A group index out of
+// range (0x26e150: `g < 0` or `g > [0x15fff4]`; 0x26e238: `cur+0x21 > [0x15fff4]`) or without a list gives none.
+
+/// The member filter of the group walk `0x26e150` / `0x26e238` (its arguments a2, a3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupWalk {
+    /// (0, 0): state < 0x80.
+    Alive,
+    /// (1, 0): every member.
+    Any,
+    /// (1, 1): state ≥ 0x80.
+    Dead,
+    /// (0, 1): no member passes (the walk runs to the end).
+    Nothing,
+}
+
+impl GroupWalk {
+    /// The filter of the call `(a2, a3)`.
+    pub fn of(a2: bool, a3: bool) -> GroupWalk {
+        match (a2, a3) {
+            (false, false) => GroupWalk::Alive,
+            (true, false) => GroupWalk::Any,
+            (true, true) => GroupWalk::Dead,
+            (false, true) => GroupWalk::Nothing,
+        }
+    }
+
+    fn takes(self, m: &Moby) -> bool {
+        let dead = m.state >= 0x80;
+        match self {
+            GroupWalk::Alive => !dead,
+            GroupWalk::Any => true,
+            GroupWalk::Dead => dead,
+            GroupWalk::Nothing => false,
+        }
+    }
+}
+
 /// The moby ids of group `g` (`0x1abcc0[g]`, list order; none for `g < 0`).
 pub fn group_ids(w: &World, g: i8) -> Vec<MobyId> {
     if g < 0 { return Vec::new(); }
     w.svc.groups.lists.get(g as usize).and_then(|l| l.clone()).map(|l| l.into_iter().map(|m| m as MobyId).collect()).unwrap_or_default()
 }
 
-/// `0x26e0e0(g, s)`: every live member's state byte = `s`.
+/// The list of group `g` as an `i32` index (the classes keep group indices in pvar words).
+fn group_list(w: &World, g: i32) -> Vec<MobyId> { i8::try_from(g).map(|g| group_ids(w, g)).unwrap_or_default() }
+
+/// `MobyGroupCount(g, skip_state)` 0x26e008: the members of group `g` that are alive (state < 0x80) and not in
+/// `skip_state` (−1: count every live member). No list: 0.
+pub fn group_count(w: &World, g: i32, skip_state: i32) -> i32 {
+    group_list(w, g)
+        .into_iter()
+        .filter_map(|i| w.table.mobys.get(i))
+        .filter(|m| m.state < 0x80 && (skip_state == -1 || m.state as i32 != skip_state))
+        .count() as i32
+}
+
+/// `0x26e0e0(g, s)`: every live member's state byte = `s` (a dead member, state ≥ 0x80, is left).
 pub fn group_state(w: &mut World, g: i8, s: u8) {
     for m in group_ids(w, g) {
         if let Some(mm) = w.table.mobys.get_mut(m) {
@@ -109,6 +182,50 @@ pub fn group_state(w: &mut World, g: i8, s: u8) {
 pub fn group_cmd(w: &mut World, g: i8, c: u8) {
     for m in group_ids(w, g) {
         if let Some(mm) = w.table.mobys.get_mut(m) { mm.cmd = c; }
+    }
+}
+
+/// `0x26e150(&out, g, a2, a3)`: the first member of group `g` (list order) that passes `f` (module table).
+pub fn group_first(w: &World, g: i32, f: GroupWalk) -> Option<MobyId> {
+    group_list(w, g).into_iter().find(|&i| w.table.mobys.get(i).is_some_and(|m| f.takes(m)))
+}
+
+/// `0x26e238(&out, cur, a2, a3)`: the next member after `cur` in `cur`'s group (its +0x21, read unsigned) that passes
+/// `f`; none when `cur` is not in its group's list or is its last member.
+pub fn group_next(w: &World, cur: MobyId, f: GroupWalk) -> Option<MobyId> {
+    let g = w.table.mobys.get(cur)?.group as u8;
+    let list = w.svc.groups.lists.get(g as usize)?.as_ref()?;
+    let at = list.iter().position(|&e| (e & 0x7fff) as usize == cur)?;
+    list[at + 1..].iter().map(|&e| (e & 0x7fff) as usize).find(|&i| w.table.mobys.get(i).is_some_and(|m| f.takes(m)))
+}
+
+/// The whole walk `0x26e150` then `0x26e238` until −1: the members of `g` passing `f`, in list order.
+pub fn group_walk(w: &World, g: i32, f: GroupWalk) -> Vec<MobyId> {
+    group_list(w, g).into_iter().filter(|&i| w.table.mobys.get(i).is_some_and(|m| f.takes(m))).collect()
+}
+
+/// Level06 `0x2f9948(g)` (Blarg's group park, 1051 / 1108): every member (no state test) state 0x12, `+0x94 = 0`
+/// (collision off), mode `& ~0x1000 | 1` (hidden, not targetable).
+pub fn group_park(w: &mut World, g: i32) {
+    for i in group_list(w, g) {
+        if let Some(m) = w.table.mobys.get_mut(i) {
+            m.state = 0x12;
+            m.has_collision = false;
+            m.mode = (m.mode & !mode::TARGETABLE) | mode::HIDDEN;
+        }
+    }
+}
+
+/// Level06 `0x2f99b0(g)` (Blarg's group unpark): the members in state 0x12 → state 0, `+0x94` = the class's collision
+/// (class +0x10), mode `& ~1 | 0x1000`.
+pub fn group_unpark(w: &mut World, g: i32) {
+    for i in group_list(w, g) {
+        let Some(oc) = w.table.mobys.get(i).filter(|m| m.state == 0x12).map(|m| m.o_class) else { continue };
+        let coll = w.classes.info(oc).is_some_and(|c| c.has_collision);
+        let m = &mut w.table.mobys[i];
+        m.state = 0;
+        m.has_collision = coll;
+        m.mode = (m.mode & !mode::HIDDEN) | mode::TARGETABLE;
     }
 }
 

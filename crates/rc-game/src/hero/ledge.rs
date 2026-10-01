@@ -117,6 +117,27 @@ fn diff_rots(a: f32, b: f32) -> f32 { wrap(a - b).abs() }
 /// `FastArcTan(x, y)` = atan2(y, x).
 fn arctan(x: f32, y: f32) -> f32 { y.atan2(x) }
 fn dir(yaw: f32, s: f32) -> [f32; 2] { [yaw.cos() * s, yaw.sin() * s] }
+/// The body's dimensions in the ledge probes B and C (L00 0x20bed0 / 0x20c758: Ratchet's, and Clank's in body 1,
+/// `super::bodies::clank::LEDGE`): the highest top above the feet (`top`; the probe's line runs from `top + 0.15` down to
+/// `low`), the steps ahead (`step`·0.25), the least height of the top above the ground under the hero, the wall lines'
+/// start below the top, the hang point below the top and out along the wall normal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LedgeDims {
+    pub top: f32,
+    pub low: f32,
+    pub step: f32,
+    pub min_above: f32,
+    pub wall_from: f32,
+    pub hang: f32,
+    pub out: f32,
+}
+
+/// Ratchet's.
+pub const RATCHET_LEDGE: LedgeDims = LedgeDims { top: 1.5, low: 1.15, step: 0.3, min_above: 1.8, wall_from: -0.7, hang: -1.43, out: 0.45 };
+
+/// The dimensions of the body now (Clank's in body 1).
+fn dims(h: &Hero) -> LedgeDims { if h.mode == 1 { super::bodies::clank::LEDGE } else { RATCHET_LEDGE } }
+
 /// Angle of a raw normal from straight up (`0x2493c8`, gravity mode 0).
 fn slope(n: [f32; 3]) -> f32 { arctan(n[2], (n[0] * n[0] + n[1] * n[1]).sqrt()) }
 
@@ -137,16 +158,17 @@ fn moby_ledge_ok(env: &Env, moby: usize) -> bool {
 /// The "ledge ahead" core of probes B and C: the ledge top ahead of `feet` along the hero's facing (4 vertical lines
 /// from 1.65 to 1.15 above `feet`, `r + 0.075·k` ahead). `no_water`: probe B also rejects surface 0.
 fn top_ahead(h: &Hero, env: &Env, feet: [f32; 3], no_water: bool) -> Option<CollOutput> {
+    let d = dims(h);
     let yaw = f(h.rot[2]);
     let r = f(h.cap_radius);
     let mut q = feet;
     q[0] += yaw.cos() * r;
     q[1] += yaw.sin() * r;
     for _ in 0..4 {
-        q[0] += yaw.cos() * 0.3 * 0.25;
-        q[1] += yaw.sin() * 0.3 * 0.25;
-        let a = [q[0], q[1], q[2] + (1.5 + 0.15)];
-        let b = [q[0], q[1], q[2] + 1.15];
+        q[0] += yaw.cos() * d.step * 0.25;
+        q[1] += yaw.sin() * d.step * 0.25;
+        let a = [q[0], q[1], q[2] + (d.top + 0.15)];
+        let b = [q[0], q[1], q[2] + d.low];
         if let Some(o) = line(env, a, b, 4, true) {
             let t = o.surface_id();
             if t != 9 && t != 0xc && !(no_water && t == 0) && slope(o.normal) < 0.349_065_84 { return Some(o); }
@@ -160,8 +182,9 @@ fn top_ahead(h: &Hero, env: &Env, feet: [f32; 3], no_water: bool) -> Option<Coll
 fn wall_below(h: &Hero, env: &Env, from: [f32; 3], top: [f32; 3]) -> Option<f32> {
     let yaw_to = arctan(top[0] - from[0], top[1] - from[1]);
     let d = dir(yaw_to, f(h.cap_radius) + f(h.cap_radius));
+    let from_z = dims(h).wall_from;
     (0..5).find_map(|i| {
-        let z = top[2] + (1.0 - i as f32 / 5.0) * -0.7;
+        let z = top[2] + (1.0 - i as f32 / 5.0) * from_z;
         line(env, [from[0], from[1], z], [top[0] + d[0], top[1] + d[1], z], 2, false).map(|w| arctan(w.normal[0], w.normal[1]))
     })
 }
@@ -184,8 +207,9 @@ pub(super) fn probe_c(h: &Hero, env: &Env, feet: [f32; 3], yaw: f32) -> bool {
     if h.f658 == 2 { return false; }
     let Some(o) = top_ahead(h, env, feet, false) else { return false };
     let top = o.point;
-    if feet[2] + 1.5 < top[2] { return false; }
-    if top[2] - f(h.ground_z) < 1.8 { return false; }
+    let dm = dims(h);
+    if feet[2] + dm.top < top[2] { return false; }
+    if top[2] - f(h.ground_z) < dm.min_above { return false; }
     let Some(ly) = wall_below(h, env, feet, top) else { return false };
     if !(diff_rots(yaw, add_rot(ly, PI_F)) < 1.134_464) { return false; }
     if edge_out(env, top, ly, 0.07).is_none() { return false; }
@@ -206,7 +230,13 @@ pub(super) fn wall_ledge_probe_b(h: &mut Hero, env: &Env, anim: &AnimView) {
             || matches!(h.state, 8 | 0x1a | 0x1b);
         if h.state == 0xe && anim.frame < 37.0 { on = false; }
     }
+    // Clank (L00 0x20bed0, body 1): in a jump that descends or rises slower than 2.5 u/s, falling, or in his glide 0x4f /
+    // shimmy 0x4d / 0x4e (super::bodies::clank).
+    if h.mode == 1 {
+        on = (h.group == 4 && (h.jump.descending != 0 || f(h.vel[2]) < DTF * 2.5)) || h.group == 2 || matches!(h.state, 0x4d..=0x4f);
+    }
     if !on { return; }
+    let dm = dims(h);
     // The feet 2 ticks ahead (0x26e488: pos + n·eff, z − ((n² + n) / 2)·g).
     let g = f(if h.group == 4 { h.jump.g } else { h.group_gravity });
     let pos = to_f32x3(h.pos);
@@ -220,20 +250,20 @@ pub(super) fn wall_ledge_probe_b(h: &mut Hero, env: &Env, anim: &AnimView) {
     }
     h.ledge_blk.moby = o.moby;
     let top = o.point;
-    if pos[2] + 1.5 < top[2] { return; }
+    if pos[2] + dm.top < top[2] { return; }
     // Nothing between the hero and the top point just above the top.
     if line(env, [pos[0], pos[1], top[2] + 0.05], [top[0], top[1], top[2] + 0.05], 4, true).is_some() { return; }
     let blocked = coll_capsule_m(env.coll, env.mobys, [top[0], top[1], top[2] + 0.6], 0.6, 0.45, QueryFlags(4), env.hero_moby).is_some();
     if blocked { h.ledge_blk.f844 |= 1 } else { h.ledge_blk.f844 &= !1 }
     h.ledge_blk.top_z = top[2];
-    if top[2] - f(h.ground_z) < 1.8 { return; }
+    if top[2] - f(h.ground_z) < dm.min_above { return; }
     let Some(ly) = wall_below(h, env, pos, top) else { return };
     h.ledge_blk.yaw = ly;
     if !(diff_rots(f(h.rot[2]), add_rot(ly, PI_F)) < 1.134_464) { return; }
     let Some(e) = edge_out(env, top, ly, 0.03) else { return };
     let back = dir(ly, -(0.5 * 0.03));
-    let out = dir(ly, 0.45);
-    h.ledge_blk.point = [e[0] + back[0] + out[0], e[1] + back[1] + out[1], top[2] - 1.43];
+    let out = dir(ly, dm.out);
+    h.ledge_blk.point = [e[0] + back[0] + out[0], e[1] + back[1] + out[1], top[2] + dm.hang];
     h.f838 = 1;
 }
 

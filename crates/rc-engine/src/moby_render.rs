@@ -570,7 +570,13 @@ fn spawn_system(
     mut metal_materials: ResMut<Assets<MobyMetalMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
-    let s = spawn_mobys(&mut commands, &level.0, &mut meshes, &mut images, &mut materials, &mut metal_materials, &mut buffers);
+    // The classes a placed moby may become at run time (rc_game::moby_update::class_swap, G-CLS-031): only where the
+    // moby loop runs the level's class code.
+    let swaps = |o: i16| -> Vec<i16> {
+        if !crate::gameplay::enabled() { return Vec::new(); }
+        rc_game::moby_update::class_swap::targets(crate::gameplay::level_ports(), o)
+    };
+    let s = spawn_mobys(&mut commands, &level.0, &swaps, &mut meshes, &mut images, &mut materials, &mut metal_materials, &mut buffers);
     let m = &level.0.mobys;
     let mode = if m.cpu_light { "CPU bit-exact colours, bind pose (RC_MOBY_CPU_LIGHT=1)" } else if m.lighting.is_none() { "unlit (RC_NO_LIGHT)" } else { "GPU skinning + lighting" };
     println!(
@@ -829,9 +835,11 @@ fn metal_image(level: &LoadedLevel, kind: i32, images: &mut Assets<Image>) -> (H
 type ClassDraws = ((Vec<Part>, u8), Vec<Part>, (Vec<MetalPart>, u8));
 
 /// Builds the class meshes and storage buffers and spawns the entities of every instance (module doc).
+#[allow(clippy::too_many_arguments)]
 fn spawn_mobys(
     commands: &mut Commands,
     level: &LoadedLevel,
+    swaps: &dyn Fn(i16) -> Vec<i16>,
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     materials: &mut Assets<MobyMaterial>,
@@ -843,8 +851,14 @@ fn spawn_mobys(
     let mut st = Stats::default();
     let lod_on = moby_lod::lod_enabled() && !m.cpu_light;
 
-    // Class meshes, only for classes something instances, in class order (asset ids follow it).
-    let used: BTreeSet<usize> = m.placed.iter().flatten().map(|p| p.class).collect();
+    // Per placed instance, the other classes it may take at run time (`swaps`: a class swap of its class code): their
+    // meshes, palette slots and metal entities are made with the level (MobyOcclusion::set_class).
+    let class_ix: HashMap<i32, usize> = m.classes.iter().enumerate().map(|(i, c)| (c.o_class, i)).collect();
+    let swap_to: Vec<Vec<usize>> = m.instances.iter().zip(&m.placed)
+        .map(|(inst, p)| if p.is_none() { Vec::new() } else { swaps(inst.o_class as i16).into_iter().filter_map(|o| class_ix.get(&(o as i32)).copied()).collect() })
+        .collect();
+    // Class meshes, only for classes something instances (or may become), in class order (asset ids follow it).
+    let used: BTreeSet<usize> = m.placed.iter().flatten().map(|p| p.class).chain(swap_to.iter().flatten().copied()).collect();
     st.classes_used = used.len();
     let mut parts: HashMap<usize, ClassDraws> = HashMap::new();
     for &ci in &used {
@@ -881,9 +895,14 @@ fn spawn_mobys(
         let r = Mat3::from_cols(Vec3::from(p.rows[0]), Vec3::from(p.rows[1]), Vec3::from(p.rows[2]));
         let model = Mat4::from_mat3_translation(a * r * (p.scale / 1024.0), game_to_bevy(inst.position));
         let ac = &m.anim[p.class];
-        let (_, _, (_, metal_joint)) = &parts[&p.class];
-        let max_joint = parts[&p.class].0 .1.max(*metal_joint);
-        let slots = (ac.joint_count as u32).max(max_joint as u32 + 1).max(1);
+        let slots_of = |ci: usize| {
+            let (_, _, (_, metal_joint)) = &parts[&ci];
+            let max_joint = parts[&ci].0 .1.max(*metal_joint);
+            ((m.anim[ci].joint_count as u32).max(max_joint as u32 + 1).max(1), max_joint)
+        };
+        let (own, max_joint) = slots_of(p.class);
+        // The palette range fits every class the instance may take.
+        let slots = swap_to[ii].iter().map(|&ci| slots_of(ci).0).fold(own, u32::max);
         if (max_joint as usize) >= ac.joint_count.max(1) { st.joint_past_count += 1; }
         let (mode, cpu_base) = match (m.cpu_light, p.colors, &p.lights) {
             (true, Some(c), _) => (MODE_CPU_TABLE, set_base[c]),
@@ -946,7 +965,7 @@ fn spawn_mobys(
         if pos.cmplt(lo).any() || pos.cmpgt(hi).any() { st.outside += 1; }
         let r = Mat3::from_cols(Vec3::from(p.rows[0]), Vec3::from(p.rows[1]), Vec3::from(p.rows[2]));
         let transform = Transform::from_matrix(Mat4::from_mat3_translation(a * r * (p.scale / 1024.0), game_to_bevy(inst.position)));
-        let ((high, _), low, (metal, _)) = &parts[&p.class];
+        let ((high, _), low, _) = &parts[&p.class];
         let mut d = InstanceDraws {
             input: Some(ProcInput {
                 position: inst.position,
@@ -980,38 +999,50 @@ fn spawn_mobys(
                 d.groups.insert(GroupKey { low, blend }, ents);
             }
         }
-        for part in metal.iter() {
-            if part.kind == TEX_CHROME { st.chrome += part.triangles } else { st.glass += part.triangles }
-            let (image, texel_alpha) = metal_imgs.entry(part.kind).or_insert_with(|| metal_image(level, part.kind, images)).clone();
-            for pass in metal_passes(texel_alpha) {
-                let mat = metal_mats
-                    .entry((part.kind, pass, part.caster))
-                    .or_insert_with(|| {
-                        metal_materials.add(MobyMetalMaterial {
-                            texture: image.clone(),
-                            fog,
-                            instances: inst_buffer.clone(),
-                            palette: palette.clone(),
-                            normal_table: normal_table.clone(),
-                            lods: lods.clone(),
-                            pass,
-                            caster: part.caster,
+        // The metal entities of the placed class, then of each class it may become (kept hidden in `other`).
+        for (n, &ci) in std::iter::once(&p.class).chain(&swap_to[ii]).enumerate() {
+            let cls = &m.classes[ci];
+            let (_, _, (metal, _)) = &parts[&ci];
+            let mut ents = Vec::new();
+            for part in metal.iter() {
+                if part.kind == TEX_CHROME { st.chrome += part.triangles } else { st.glass += part.triangles }
+                let (image, texel_alpha) = metal_imgs.entry(part.kind).or_insert_with(|| metal_image(level, part.kind, images)).clone();
+                for pass in metal_passes(texel_alpha) {
+                    let mat = metal_mats
+                        .entry((part.kind, pass, part.caster))
+                        .or_insert_with(|| {
+                            metal_materials.add(MobyMetalMaterial {
+                                texture: image.clone(),
+                                fog,
+                                instances: inst_buffer.clone(),
+                                palette: palette.clone(),
+                                normal_table: normal_table.clone(),
+                                lods: lods.clone(),
+                                pass,
+                                caster: part.caster,
+                            })
                         })
-                    })
-                    .clone();
-                metal_batches += 1;
-                let e = commands.spawn((
-                    Mesh3d(part.mesh.clone()),
-                    MeshMaterial3d(mat),
-                    transform,
-                    MeshTag(ii as u32),
-                    NoFrustumCulling,
-                    Visibility::Hidden,
-                    Name::new(format!("moby {ii} class {} metal {} {pass:?}", inst.o_class, part.kind)),
-                ));
-                d.metal.push(e.id());
-                st.metal_entities += 1;
-                st.entities += 1;
+                        .clone();
+                    metal_batches += 1;
+                    let e = commands.spawn((
+                        Mesh3d(part.mesh.clone()),
+                        MeshMaterial3d(mat),
+                        transform,
+                        MeshTag(ii as u32),
+                        NoFrustumCulling,
+                        Visibility::Hidden,
+                        Name::new(format!("moby {ii} class {} metal {} {pass:?}", cls.o_class, part.kind)),
+                    ));
+                    ents.push(e.id());
+                    st.metal_entities += 1;
+                    st.entities += 1;
+                }
+            }
+            if n == 0 {
+                d.metal = ents;
+            } else {
+                let h = &cls.class.header;
+                d.other.push(OtherClass { class: ci, class_sphere: h.bsphere, lod_trans: h.lod_trans, groups: BTreeMap::new(), metal: ents });
             }
         }
         // Triangles on an unused class slot (0xff): not drawn (none on the disc, docs/plan/moby_untextured.md).
@@ -1045,6 +1076,7 @@ fn spawn_mobys(
         metal_on: moby_lod::metal_enabled(),
         last_hist: None,
         last_print: f32::MIN,
+        pending_hide: Vec::new(),
     });
     st.build = t0.elapsed();
     st
@@ -1063,6 +1095,19 @@ struct InstanceDraws {
     metal: Vec<Entity>,
     /// The translation the entities carry (the Transparent3d sort key), updated when a driven instance moves.
     translation: Vec3,
+    /// The other classes the instance may take at run time (a class swap, [`MobyOcclusion::set_class`]): their
+    /// entities, kept hidden, swapped with the fields above when the moby's class changes.
+    other: Vec<OtherClass>,
+}
+
+/// A class a placed instance is not showing now ([`InstanceDraws::other`]): what [`InstanceDraws`] holds per class.
+struct OtherClass {
+    class: usize,
+    class_sphere: [f32; 4],
+    /// Class +0x0e (MobyProc's LOD switch).
+    lod_trans: u8,
+    groups: BTreeMap<GroupKey, Vec<Entity>>,
+    metal: Vec<Entity>,
 }
 
 /// One entity group of an instance: LOD and GS state ([`MobyBlend`]).
@@ -1136,6 +1181,9 @@ pub struct MobyOcclusion {
     metal_on: bool,
     last_hist: Option<[usize; 9]>,
     last_print: f32,
+    /// Entities of a class an instance stopped showing ([`MobyOcclusion::set_class`]), hidden by the next
+    /// `update_moby_occlusion`.
+    pending_hide: Vec<Entity>,
 }
 
 /// `MobyProc` for every placed instance (module doc): the occlusion test (after the "dead" check, which no
@@ -1166,6 +1214,10 @@ pub fn update_moby_occlusion(
     });
     let classes = &level.0.mobys.anim;
     let s = &mut *state;
+    // The entities of the classes instances stopped showing (a class swap, MobyOcclusion::set_class).
+    for e in std::mem::take(&mut s.pending_hide) {
+        if let Ok((mut v, _)) = ents_q.get_mut(e) { *v = Visibility::Hidden; }
+    }
     let mut lod_bytes = vec![0u8; s.last_lod.len()];
     // hist: occluded, culled (distance, near, frustum), high, high fading, low, low fading, metal.
     let mut hist = [0usize; 9];
@@ -1893,6 +1945,26 @@ impl MobyOcclusion {
 
     /// The `MobyAnim` instance of gameplay instance `ii` (None without geometry).
     pub fn anim_index(&self, ii: usize) -> Option<usize> { self.anim_index.get(ii).copied().flatten() }
+
+    /// Static instance `ii` now shows class `ci` (index into `LevelMobys::classes`): its moby changed its class at
+    /// run time (rc_game::moby_update::class_swap, G-CLS-031: +0xa6, +0x24 header, +0x72). The entities, sphere and
+    /// LOD switch of `ci`, made with the level for the classes the instance may become, take the place of the shown
+    /// class's (hidden next frame); MobyProc then picks the new class's group as on a first show. False (nothing
+    /// changes) when `ci` is the shown class or one the instance was not made for. The caller points the instance's
+    /// `MobyAnim` entry at `ci` ([`crate::moby_anim::MobyAnim::set_class`]).
+    pub fn set_class(&mut self, ii: usize, ci: usize) -> bool {
+        let Some(d) = self.draws.get_mut(ii) else { return false };
+        if d.class == ci { return false; }
+        let Some(o) = d.other.iter_mut().find(|o| o.class == ci) else { return false };
+        std::mem::swap(&mut d.class, &mut o.class);
+        std::mem::swap(&mut d.class_sphere, &mut o.class_sphere);
+        std::mem::swap(&mut d.groups, &mut o.groups);
+        std::mem::swap(&mut d.metal, &mut o.metal);
+        if let Some(inp) = d.input.as_mut() { std::mem::swap(&mut inp.lod_trans, &mut o.lod_trans); }
+        self.pending_hide.extend(o.groups.values().flatten().copied().chain(o.metal.iter().copied()));
+        if let Some(s) = self.shown.get_mut(ii) { *s = None; }
+        true
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------

@@ -200,6 +200,8 @@ impl SoundSink for ClassSoundSink<'_> {
     }
     /// `HeroTeleport`'s env sample point ([`AudioSystem::hero_teleported`]).
     fn hero_teleported(&mut self, pos: [f32; 3]) { self.audio.hero_teleported(pos); }
+    /// `MusicRequestTrack(track, stinger)` from a class ([`crate::audio::music::Music::request`]).
+    fn music_request(&mut self, track: i16, stinger: i16) { self.audio.music.request(track, stinger); }
     /// `SoundSetPitchBend(slot, pb)`: the slot's +0x14 (no owner test, as the game).
     fn set_pitch_bend(&mut self, slot: i32, pb: i32) {
         if let Some(s) = usize::try_from(slot).ok().and_then(|i| self.audio.slots.slots.get_mut(i)) { s.pb = pb; }
@@ -240,6 +242,9 @@ pub fn ratchet_trigger(class: &MobyAnimClass, before: &AnimView, after: &AnimVie
 pub struct HeroClassSounds<'a, F> {
     pub audio: F,
     pub class: &'a MobyAnimClass,
+    /// The other bodies' classes by o_class (the hero moby is a body's while one is in: `crate::hero::bodies`; its
+    /// advance plays its own class's triggers). None: only Ratchet's.
+    pub body_classes: Option<&'a dyn Fn(i16) -> Option<&'a MobyAnimClass>>,
     pub listener: Listener,
     pub hero: MobyId,
     pub counter: u64,
@@ -267,7 +272,10 @@ where
     A: DerefMut<Target = AudioSystem>,
 {
     fn anim_advanced(&mut self, moby: &crate::moby_runtime::Moby, before: &AnimView, after: &AnimView, rng: &mut Rng) {
-        let Some(idx) = ratchet_trigger(self.class, before, after) else { return };
+        // The hero moby's class: Ratchet's (o_class 0), or the body's.
+        let class = if moby.o_class == 0 { Some(self.class) } else { self.body_classes.and_then(|f| f(moby.o_class)) };
+        let Some(class) = class else { return };
+        let Some(idx) = ratchet_trigger(class, before, after) else { return };
         let Some(mut a) = (self.audio)() else { return };
         self.play(&mut a, moby, idx as i32, 0, rng);
     }

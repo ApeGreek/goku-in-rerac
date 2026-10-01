@@ -223,7 +223,7 @@ dropped. Headless: `crates/rc-game/tests/ui/interaction_vendor.rs`. `novalis_her
   `mode_freezeInit(0)` "Quit Race?"). Needs: the class, the hoverboard hero states, the race HUD — out of scope here.
 * **Ship** (`ShipUpdate`): owner 2, within 4 of the hatch, △ → 0x15f630 → take-off (mode 6, menus.md §5). The
   `Handoff::ShipMenu` exists; the class is not ported.
-* **Teleporter** (1135): owner 4 standing on the pad; teleport states not ported.
+* **Teleporter** (1135): owner 4 standing on the pad; △ (the lease not tested) → the walk to the pad and the teleport (ported 2026-10-01: `classes/teleporter.rs`). Pokitaru's pads 318 use owner 0xb and need the lease (`units::pokitaru_teleporter`).
 * **Movies** (node scene bit 0x4000): crate::scene_render's `play_movie` → crate::movie_render (native player); the
   dialogue continues at `MovieExitToGameplay`.
 * **The Novalis Infobot** (2026-09-28, hero_gameplay.md §6): after the sale's scene 1 → movie 2 → scene 2 the worker's

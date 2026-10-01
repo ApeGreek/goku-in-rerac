@@ -409,10 +409,10 @@ fn path_counter(w: &mut World, c: MobyId, path: i32) {
     for pt in w.svc.splines[s].iter_mut() { pt[3] = 0; }
 }
 
-/// The group's members in list order, skipping deleted mobys (`FUN_0026e150` / `FUN_0026e238`).
+/// The group's members in list order, skipping deleted mobys (`FUN_0026e150` / `FUN_0026e238` with the filter (0, 0)).
 fn group_members(w: &World, g: i8) -> Vec<MobyId> {
-    let Some(Some(list)) = w.svc.groups.lists.get(g as usize) else { return Vec::new() };
-    list.iter().map(|&e| (e & 0x7fff) as usize).filter(|&i| i < w.table.mobys.len() && w.m(i).state < 0x80).collect()
+    use crate::moby_update::scheduler::{group_walk, GroupWalk};
+    group_walk(w, g as i32, GroupWalk::Alive)
 }
 
 /// State 1: wait for a hit (or, for TNT, a touch).

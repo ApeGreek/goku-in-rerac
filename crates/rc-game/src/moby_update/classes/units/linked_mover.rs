@@ -22,6 +22,13 @@
 //! | state 4 | map flag = 0; link away or in A → sound +0x30, → 2; else position += rows·(T at length −speed-back·dt), travelled += speed-back·dt; past \|T\|: position = home, sound +0x34 when +0x30 ≠ −1 (sic), map flag = 0, → 1 | [`update`] |
 //! | | the map zone flags `0x184528[i]` (read by the in-game map's zone table, flag 0x80) | NOT ported: G-UI-001 (the map) |
 //! | | no particle, light, save flag, other moby written | n/a |
+//!
+//! **The platform variant**, classes 104, 106, 1129: level07 0x31aee0, the same code on 13 (census U263; 5 created
+//! instances): the same state machine and quirks with the block at pvar +0xa0 (home +0xa0, travelled +0xac, link
+//! +0xb0, A / B +0xb4 / +0xb8, travel +0xbc, speeds +0xc8 / +0xcc, sounds +0xd0 / +0xd4, map flag +0xd8), the map
+//! flag written only at the init (0), the end of the way out (1) and home (0), and a platform block at +0x60:
+//! `CarryRiders(+0x60, position − old position, rotation, rotation)` every tick (0x288d88 = L01 0x2755f8)
+//! ([`platform_update`], [`run`] with base 0xa0; read from the level07 decomp of 0x31aee0).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{add, len3, pf, pi32, pv4, set_len3, set_pf, set_pi32, set_pv4, DT};
@@ -31,6 +38,10 @@ use crate::moby_update::services::World;
 pub const UPDATE_FN: u32 = 0x31_0df0;
 pub const REFERENCE_LEVEL: u32 = 7;
 pub const CLASSES: [i16; 4] = [1063, 1078, 1079, 1131];
+/// The platform variant (level07 0x31aee0): its classes and its block's pvar offset.
+pub const PLATFORM_FN: u32 = 0x31_aee0;
+pub const PLATFORM_CLASSES: [i16; 3] = [104, 106, 1129];
+pub const PLATFORM_BASE: usize = 0xa0;
 
 type V = [f32; 4];
 
@@ -38,8 +49,11 @@ type V = [f32; 4];
 fn rows_mul(r: &[[f32; 4]; 4], v: V) -> V { std::array::from_fn(|l| if l == 3 { 0.0 } else { r[0][l] * v[0] + r[1][l] * v[1] + r[2][l] * v[2] }) }
 
 /// The link's state (pvar +0x10), None when it is away (module doc); also the rotators' (`linked_rotator`, the same pvar layout).
-pub fn link_state(w: &World, id: MobyId) -> Option<u8> {
-    let l = usize::try_from(pi32(w, id, 0x10)).ok()?;
+pub fn link_state(w: &World, id: MobyId) -> Option<u8> { link_state_at(w, id, 0) }
+
+/// [`link_state`] for the block at pvar `base` (the link at `base + 0x10`).
+pub fn link_state_at(w: &World, id: MobyId, base: usize) -> Option<u8> {
+    let l = usize::try_from(pi32(w, id, base + 0x10)).ok()?;
     let s = w.table.mobys.get(l)?.state;
     (s != 0xfe && s != 0xfd).then_some(s)
 }
@@ -49,72 +63,90 @@ fn sound(w: &mut World, id: MobyId, o: usize) {
     if s != -1 { w.play_sound(s, 0, id); }
 }
 
-fn travel(w: &World, id: MobyId) -> V { let t = pv4(w, id, 0x1c); [t[0], t[1], t[2], 0.0] }
+fn travel(w: &World, id: MobyId, base: usize) -> V { let t = pv4(w, id, base + 0x1c); [t[0], t[1], t[2], 0.0] }
 
 /// Level07 0x310df0 (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x3c { return; }
+    run(w, id, 0);
+}
+
+/// Level07 0x31aee0 (classes 104 / 106 / 1129, census U263; the same code on 13): the mover with its block at pvar
+/// +0xa0 and a platform block at +0x60, carrying its riders every tick by its displacement (`CarryRiders(+0x60,
+/// position − old, rot, rot)`, 0x288d88 = L01 0x2755f8). Its map zone flag is written only at the init and the two
+/// turns (+0xd8; G-UI-001 either way) (module doc).
+pub fn platform_update(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < PLATFORM_BASE + 0x3c { return; }
+    let old = w.m(id).position;
+    run(w, id, PLATFORM_BASE);
+    let m = w.mm(id);
+    let (d, r) = (crate::moby_update::creature::sub(m.position, old), m.rotation);
+    crate::moby_update::triggers::carry_riders(&mut m.pvars, 0x60, d, r, r);
+}
+
+/// The state machine on the block at pvar `base` (module doc; offsets relative to `base`).
+pub fn run(w: &mut World, id: MobyId, base: usize) {
     let (mission, level) = (w.m(id).mission, w.svc.level);
-    if mission != 0xff && w.missions.mission_done(level, mission) == 0xff { set_pi32(w, id, 0x10, -1); }
-    let (a, b) = (pi32(w, id, 0x14) as u32, pi32(w, id, 0x18) as u32);
-    let link = link_state(w, id).map(u32::from);
+    if mission != 0xff && w.missions.mission_done(level, mission) == 0xff { set_pi32(w, id, base + 0x10, -1); }
+    let (a, b) = (pi32(w, id, base + 0x14) as u32, pi32(w, id, base + 0x18) as u32);
+    let link = link_state_at(w, id, base).map(u32::from);
     let next = match w.m(id).state {
         0 => {
             let p = w.m(id).position;
-            set_pv4(w, id, 0, p);
-            set_pf(w, id, 0xc, 0.0);
+            set_pv4(w, id, base, p);
+            set_pf(w, id, base + 0xc, 0.0);
             1
         }
         1 => {
             if link.is_some_and(|s| s != a) { return; }
-            let l = len3(travel(w, id));
-            set_pf(w, id, 0xc, l);
-            sound(w, id, 0x30);
+            let l = len3(travel(w, id, base));
+            set_pf(w, id, base + 0xc, l);
+            sound(w, id, base + 0x30);
             2
         }
         2 => {
             if link == Some(b) {
-                sound(w, id, 0x30);
+                sound(w, id, base + 0x30);
                 4
             } else {
-                let d = rows_mul(&w.m(id).rows, travel(w, id));
-                let step = pf(w, id, 0x28) * DT;
+                let d = rows_mul(&w.m(id).rows, travel(w, id, base));
+                let step = pf(w, id, base + 0x28) * DT;
                 let p = add(w.m(id).position, set_len3(d, step));
                 w.mm(id).position = p;
-                let left = pf(w, id, 0xc) - step;
-                set_pf(w, id, 0xc, left);
+                let left = pf(w, id, base + 0xc) - step;
+                set_pf(w, id, base + 0xc, left);
                 if 0.0 <= left { return; }
-                let home = pv4(w, id, 0);
+                let home = pv4(w, id, base);
                 w.mm(id).position = add(home, d);
-                set_pf(w, id, 0xc, 0.0);
+                set_pf(w, id, base + 0xc, 0.0);
                 w.mm(id).state = 3;
-                if pi32(w, id, 0x34) != -1 { sound(w, id, 0x30); }
+                if pi32(w, id, base + 0x34) != -1 { sound(w, id, base + 0x30); }
                 return;
             }
         }
         3 => {
             if link != Some(b) { return; }
-            set_pf(w, id, 0xc, 0.0);
-            sound(w, id, 0x30);
+            set_pf(w, id, base + 0xc, 0.0);
+            sound(w, id, base + 0x30);
             4
         }
         4 => {
             if link.is_none_or(|s| s == a) {
-                sound(w, id, 0x30);
+                sound(w, id, base + 0x30);
                 2
             } else {
-                let t = travel(w, id);
+                let t = travel(w, id, base);
                 let l = len3(t);
-                let step = pf(w, id, 0x2c) * DT;
+                let step = pf(w, id, base + 0x2c) * DT;
                 let d = rows_mul(&w.m(id).rows, set_len3(t, -step));
                 let p = add(w.m(id).position, d);
                 w.mm(id).position = p;
-                let done = pf(w, id, 0xc) + step;
-                set_pf(w, id, 0xc, done);
+                let done = pf(w, id, base + 0xc) + step;
+                set_pf(w, id, base + 0xc, done);
                 if done <= l { return; }
-                let home = pv4(w, id, 0);
+                let home = pv4(w, id, base);
                 w.mm(id).position = home;
-                if pi32(w, id, 0x30) != -1 { sound(w, id, 0x34); }
+                if pi32(w, id, base + 0x30) != -1 { sound(w, id, base + 0x34); }
                 1
             }
         }

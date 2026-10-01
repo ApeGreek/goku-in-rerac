@@ -56,7 +56,8 @@ pub enum Module {
     /// the Visibomb's flight; 0x1f: the mouse's summon; 0x32: turrets and vehicles; 0x78: the Umbris boss; 99 / 100:
     /// the scene body).
     Scripted,
-    /// Later: the other bodies (Clank, Giant Clank, Hologuise disguise).
+    /// `bodies/clank.rs` (body 1: 0x43..0x52, 0x7d) and `bodies/giant.rs` (body 2: 0x5a..0x62); the Hologuise disguise
+    /// (body 3: 0x53..0x59) is not ported (G-WPN-006).
     Bodies,
     /// Later: the Hoverboard (levels 5 and 16).
     Hoverboard,
@@ -149,22 +150,22 @@ pub static STATES: [StateInfo; 0x83] = [
     s("fidget state", -1, Stance, true),                          // 0x40
     s("fidget state end", -1, Stance, true),                      // 0x41
     s("grind hurt", 0xf, Boots, true),                           // 0x42
-    s("Clank idle", 0, Bodies, false),                            // 0x43
-    s("Clank walk", 1, Bodies, false),                            // 0x44
-    s("Clank fall", 2, Bodies, false),                            // 0x45
-    s("Clank hurt", 7, Bodies, false),                            // 0x46
-    s("Clank death", 0x14, Bodies, false),                        // 0x47
-    s("(Clank, physics no-op only)", -1, Bodies, false),          // 0x48
-    s("Clank jump", 4, Bodies, false),                            // 0x49
-    s("Clank ledge grab", 3, Bodies, false),                      // 0x4a
-    s("Clank ledge hang", 3, Bodies, false),                      // 0x4b
-    s("Clank jump 2", 4, Bodies, false),                          // 0x4c
-    s("Clank ledge shimmy left", 3, Bodies, false),               // 0x4d
-    s("Clank ledge shimmy right", 3, Bodies, false),              // 0x4e
-    s("Clank glide", 5, Bodies, false),                           // 0x4f
-    s("Clank walk variant (no entry)", -1, Bodies, false),        // 0x50
-    s("Clank kick (group-6 entry in melee.rs)", 6, Melee, false), // 0x51
-    s("Clank fall 2", 2, Bodies, false),                          // 0x52
+    s("Clank idle", 0, Bodies, true),                            // 0x43
+    s("Clank walk", 1, Bodies, true),                            // 0x44
+    s("Clank fall", 2, Bodies, true),                            // 0x45
+    s("Clank hurt", 7, Bodies, true),                            // 0x46
+    s("Clank death", 0x14, Bodies, true),                        // 0x47
+    s("(Clank, physics no-op only)", -1, Bodies, true),          // 0x48
+    s("Clank jump", 4, Bodies, true),                            // 0x49
+    s("Clank ledge grab", 3, Bodies, true),                      // 0x4a
+    s("Clank ledge hang", 3, Bodies, true),                      // 0x4b
+    s("Clank ledge climb", 4, Bodies, true),                          // 0x4c
+    s("Clank ledge shimmy left", 3, Bodies, true),               // 0x4d
+    s("Clank ledge shimmy right", 3, Bodies, true),              // 0x4e
+    s("Clank glide", 5, Bodies, true),                           // 0x4f
+    s("Clank walk variant (no entry)", -1, Bodies, true),        // 0x50
+    s("Clank kick (□)", 6, Bodies, true),                         // 0x51
+    s("Clank pit fall (surface 8 / 0xc)", 2, Bodies, true),                          // 0x52
     s("Hologuise idle", 0, Bodies, false),                        // 0x53
     s("Hologuise walk", 1, Bodies, false),                        // 0x54
     s("Hologuise fall", 2, Bodies, false),                        // 0x55
@@ -172,15 +173,15 @@ pub static STATES: [StateInfo; 0x83] = [
     s("Hologuise death", 0x14, Bodies, false),                    // 0x57
     s("Hologuise pit fall", 2, Bodies, false),                    // 0x58
     s("Hologuise ○ action", 0, Bodies, false),                    // 0x59
-    s("Giant Clank idle", 0, Bodies, false),                      // 0x5a
-    s("Giant Clank walk", 1, Bodies, false),                      // 0x5b
-    s("Giant Clank fall", 2, Bodies, false),                      // 0x5c
-    s("Giant Clank hurt", 7, Bodies, false),                      // 0x5d
-    s("Giant Clank jump", 4, Bodies, false),                      // 0x5e
-    s("Giant Clank attack 1", 6, Bodies, false),                  // 0x5f
-    s("Giant Clank attack 2", 6, Bodies, false),                  // 0x60
-    s("Giant Clank attack 3", 6, Bodies, false),                  // 0x61
-    s("Giant Clank death", 0x14, Bodies, false),                  // 0x62
+    s("Giant Clank idle", 0, Bodies, true),                      // 0x5a
+    s("Giant Clank walk", 1, Bodies, true),                      // 0x5b
+    s("Giant Clank fall", 2, Bodies, true),                      // 0x5c
+    s("Giant Clank hurt", 7, Bodies, true),                      // 0x5d
+    s("Giant Clank jump", 4, Bodies, true),                      // 0x5e
+    s("Giant Clank missiles (○)", 6, Bodies, true),                  // 0x5f
+    s("Giant Clank punches (□, three in a row)", 6, Bodies, true),                  // 0x60
+    s("Giant Clank head beam (△)", 6, Bodies, true),                  // 0x61
+    s("Giant Clank death", 0x14, Bodies, true),                  // 0x62
     s("cutscene control", 0x18, Scripted, true),                  // 0x63
     s("cutscene control / respawn (scene body)", 0x18, Scripted, true), // 0x64
     s("walk to point", 1, Stance, true),                          // 0x65
@@ -207,7 +208,7 @@ pub static STATES: [StateInfo; 0x83] = [
     s("pack jump wall rebound", 10, Packs, true),                 // 0x7a
     s("sinking liquid, no health (surface 3)", 0x19, Surface, true), // 0x7b
     s("burn death (surface 1)", 0x14, Damage, true),              // 0x7c
-    s("Clank burn (surface 1)", 0x14, Bodies, false),             // 0x7d
+    s("Clank burn (surface 1)", 0x14, Bodies, true),             // 0x7d
     s("(walk-case label only)", -1, Unused, false),               // 0x7e
     s("sinking death (surface 0xd)", 0x14, Damage, true),         // 0x7f
     s("death by a hazard moby (0x4eb / 0x558)", 0x14, Damage, true),  // 0x80
@@ -254,6 +255,9 @@ impl Hero {
             Stance => super::stance::entry(self, c, id, play, old_sub),
             Crank => super::crank::entry(self, c, id, play, old_sub),
             Scripted => super::scripted::entry(self, c, id, play, old_sub),
+            Bodies if implemented(id) => {
+                if (0x5a..=0x62).contains(&id) { super::bodies::giant::entry(self, c, id, play, old_sub) } else { super::bodies::clank::entry(self, c, id, play, old_sub) }
+            }
             Jump | Melee | Weapons | Bodies | Hoverboard | Unused => None,
         }
     }
@@ -295,6 +299,9 @@ impl Hero {
             Stance => return super::stance::physics(self, env, anim, rng),
             Crank => return super::crank::physics(self),
             Scripted => return super::scripted::physics(self, env, anim, rng),
+            Bodies if implemented(s) => {
+                return if (0x5a..=0x62).contains(&s) { super::bodies::giant::physics(self, env, anim, rng) } else { super::bodies::clank::physics(self, env, anim, rng) };
+            }
             Jump | Weapons | Bodies | Hoverboard | Unused => return false,
         }
         true
@@ -339,6 +346,9 @@ impl Hero {
             Stance => super::stance::transitions(self, c),
             Crank => super::crank::transitions(self, c),
             Scripted => super::scripted::transitions(self, c),
+            Bodies if implemented(s) => {
+                if (0x5a..=0x62).contains(&s) { super::bodies::giant::transitions(self, c) } else { super::bodies::clank::transitions(self, c) }
+            }
             Jump | Weapons | Bodies | Hoverboard | Unused => {}
         }
     }
@@ -379,6 +389,9 @@ mod tests {
         want.push(0x1d);
         // The class holds 0x1f / 0x32 / 0x78 (scripted.rs, G-HERO-002).
         want.extend([0x1f, 0x32, 0x78]);
+        // The other bodies (G-HERO-005): Clank (bodies/clank.rs) and Giant Clank (bodies/giant.rs).
+        want.extend([0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50, 0x51, 0x52, 0x7d]);
+        want.extend(0x5a..=0x62);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));
@@ -389,7 +402,7 @@ mod tests {
     fn stubs_own_no_ported_state() {
         for (id, s) in STATES.iter().enumerate() {
             if s.ported {
-                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons | Crank | Scripted), "state {id:#x} ported in {:?}", s.module);
+                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons | Crank | Scripted | Bodies), "state {id:#x} ported in {:?}", s.module);
             }
         }
     }

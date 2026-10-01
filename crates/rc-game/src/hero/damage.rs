@@ -207,7 +207,9 @@ const DTF: f32 = 1.0 / 60.0;
 pub(super) fn hit_intake(h: &mut Hero, c: &mut Ctx) -> bool {
     if h.group == 0x14 || h.group == 7 || h.state == 0x32 { return false; }
     if h.f510 != 0 { return false; }
-    let Some(hit) = h.damage.hit.filter(|m| m.flags & 1 != 0) else {
+    // Giant Clank (body 2) takes the hits with flag bit 2, everyone else bit 0 (L00 0x210ce8).
+    let mask = if h.mode == 2 { 2 } else { 1 };
+    let Some(hit) = h.damage.hit.filter(|m| m.flags & mask != 0) else {
         h.damage.killer = None;
         return false;
     };
@@ -218,6 +220,8 @@ pub(super) fn hit_intake(h: &mut Hero, c: &mut Ctx) -> bool {
         h.damage.grind_hit = 1;
         return false;
     }
+    // Body 2: the damage comes off Giant Clank's energy 0x140980 (truncated, not below 0).
+    if h.mode == 2 { h.bodies.energy = (h.bodies.energy - hit.damage as i32).max(0); }
     let mut exact = false;
     let mut dir = if hit.w30 & 1 == 0 {
         match hit.attacker {
@@ -249,7 +253,20 @@ pub(super) fn hit_intake(h: &mut Hero, c: &mut Ctx) -> bool {
             add_push(h, dir);
             return true;
         }
-        // Giant Clank (body 2): its energy rule is not ported; no push.
+        // Giant Clank (body 2): an attack with flag 4 or no energy left → his hurt 0x5d, the beam ended (`0x2a9be0`), and on
+        // the ground the knockback (7, 3.5)·dt; otherwise nothing but the energy (the push is zero).
+        2 => {
+            if hit.flags & 4 != 0 || h.bodies.energy < 1 {
+                h.set_state(c, 0x5d, true);
+                super::bodies::giant::beam_end(h);
+                if h.air_ticks == 0 {
+                    knock(DTF * 7.0, DTF * 3.5, &mut dir, exact);
+                    add_push(h, dir);
+                }
+            }
+            return true;
+        }
+        // The disguise is 3 (above); other words take no push.
         _ => return true,
     }
     if matches!(class, Some(0x4eb) | Some(0x558)) {

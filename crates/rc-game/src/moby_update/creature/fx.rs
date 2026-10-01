@@ -10,7 +10,10 @@
 //! * [`light_spawn`] 0x2f3570 and [`light_update`] 0x2f3748: the explosion light moby (class 0x27f = 639).
 //! * [`rate_slot`] `0x2efbf8`: a small "busy until tick" table that rate-limits the death explosions.
 //!
-//! The particle spawners the effects call ([`part02`], [`part04`], [`part08`], [`part15`], [`part52`]) fill the game's
+//! * [`muzzle_smoke`] level03 `0x250ae8` (and its copies on 10 / 15 / 18): a gun's smoke ring and sparks.
+//!
+//! The particle spawners the effects call ([`part02`], [`part04`], [`part08`], [`part15`], [`part21`], [`part44`],
+//! [`part52`]) fill the game's
 //! records (`crate::particles::type02` …) and make the spawners' own draws at the game's point, and are counted in
 //! `FxStats::part_spawns`. Without a particle system (unit tests) the draws are made as if a record was free. The
 //! explosion light takes one of the eight point-light slots (`WritePointLight_B` 0x252750, [`crate::point_lights`]).
@@ -45,6 +48,50 @@ pub fn part_unported(w: &mut World, ty: u8) -> bool {
     ok
 }
 
+/// One type-23 puff of [`jet_puffs`]: `PartType23Spawn(jitter, grow_lo, grow_hi, size, pos, spin, vel, rgba)` 0x282060
+/// with the callers' patch: timer +0x0a = `life`, byte 9 = 4 + 0x40, the rotation byte `randi(255)` when asked (drawn
+/// after the spawn, only with a record), phase 2 (+0x24) fading from +0x2a = `a0` over +0x2b = the timer's low byte.
+/// Without a particle system only the pool slot is counted.
+#[allow(clippy::too_many_arguments)]
+pub fn puff23(w: &mut World, [jitter, lo, hi, size]: [f32; 4], p: V, spin: i32, vel: V, rgba: u32, life: i32, rotation: bool, a0: u8) -> bool {
+    let Some(sys) = w.particles.as_deref_mut() else { return part_unported(w, 23) };
+    *w.svc.fx.part_spawns.entry(23).or_default() += 1;
+    let Some(i) = crate::particles::type23::spawn(sys, w.rng, jitter, lo, hi, size, p, spin, vel, rgba) else {
+        w.svc.fx.part_failed += 1;
+        return false;
+    };
+    let rot = rotation.then(|| w.rng.randi(0xff) as u8);
+    let r = &mut w.particles.as_deref_mut().unwrap().pool.recs[i];
+    use crate::particles::rec;
+    rec::set_i16(r, 0xa, life as i16);
+    r[9] = 4 + 0x40;
+    if let Some(b) = rot { r[8] = b; }
+    rec::set_u32(r, 0x24, 2);
+    r[0x2a] = a0;
+    r[0x2b] = r[0xa];
+    true
+}
+
+/// `FUN_00278810(glow, core, a, b, vel)` 0x278810 (the same code on other levels: level18 `0x266140`, cluster with 5
+/// copies): the jet glow of a moving point. Two glow puffs at `a` (`randi(16)` spin, its sign `randi(2)`; jitter 0.1,
+/// growth 1 → 0.9, size `glow`, colour 0x7f204080, life `ticks(30)`) and three white cores at `b` (jitter 0.05, growth
+/// 1 → 0.97, size `core`, spin 16, −16, 16, colour 0x7fffffff, life `ticks(6)`, a rotation byte), all moving at `vel`.
+/// Callers: the cutscene ships' trail (`classes::cutscene_fx`, `vel` zero), the boss 1422's jet (`units::veldin_boss`).
+pub fn jet_puffs(w: &mut World, glow: f32, core: f32, a: V, b: V, vel: V) {
+    for _ in 0..2 {
+        let r = w.rng.randi(0x10);
+        let spin = if w.rng.randi(2) == 0 { r } else { -r };
+        let life = w.ticks(0x1e);
+        puff23(w, [0.1, 1.0, 0.9, glow], a, spin, vel, 0x7f20_4080, life, false, 0x7f);
+    }
+    let mut spin = 0x10;
+    for _ in 0..3 {
+        let life = w.ticks(6);
+        puff23(w, [0.05, 1.0, f32::from_bits(0x3f78_51ec), core], b, spin, vel, 0x7fff_ffff, life, true, 0x7f);
+        spin = -spin;
+    }
+}
+
 /// `PartType05Spawn(grow, size, pos, r, g, b, life)` 0x27e750 (`particles::type05`, no draws): life 0 makes no call
 /// to `CreatePart` (nothing counted). The decoy's and the Glove of Doom canister's pops, the morph's flash.
 pub fn part05(w: &mut World, grow: f32, size: f32, pos: [f32; 4], rgb: [u32; 3], life: i32) {
@@ -75,6 +122,69 @@ pub fn part02(w: &mut World, a: &crate::particles::type02::Spawn) -> bool {
 /// `PartType04Spawn` 0x27e538 (the smoke / fire puff; `crate::particles::type04`): one raw `rand()` with a record.
 pub fn part04(w: &mut World, a: &crate::particles::type04::Spawn) -> bool {
     spawn_part(w, 4, |r| { r.rand(); }, |p, r| crate::particles::type04::spawn(p, r, a))
+}
+
+/// `PartType21Spawn(size, pos, vel, c1, c2, life, split)` 0x281c10 (the splitting spark; `crate::particles::type21`):
+/// nothing for life 0; one raw `rand()` (its rotation) with a record.
+#[allow(clippy::too_many_arguments)]
+pub fn part21(w: &mut World, size: f32, p: V, vel: V, c1: u32, c2: u32, life: i32, split: i16) -> bool {
+    if life == 0 { return false; }
+    spawn_part(w, 21, |r| { r.rand(); }, |s, r| crate::particles::type21::spawn_rng(s, r, size, p, vel, c1, c2, life, split))
+}
+
+/// `PartType44Spawn` 0x286450 (the drifting smoke puff; `crate::particles::type44`): one `randi(0xff)` (its rotation)
+/// with a record.
+pub fn part44(w: &mut World, a: &crate::particles::type44::Spawn) -> bool {
+    spawn_part(w, 44, |r| { r.randi(0xff); }, |s, r| crate::particles::type44::spawn_rng(s, r, a))
+}
+
+/// Level03 `0x24e650(angle, &out, v, axis)` (cluster with level10's copy): `v` turned by `angle` about the normalised
+/// `axis` (`build_quaternion_from_axis_angle`, then the quaternion rotation `fun_00214800`); `v` itself when
+/// `|angle| < 1e-5`. Rodrigues' form of the same rotation [L: the sense of the turn; every caller turns through a full
+/// ring].
+pub fn turn_about(angle: f32, v: V, axis: V) -> V {
+    if angle.abs() < 1e-5 { return v; }
+    let k = set_len3(axis, 1.0);
+    let (s, c) = angle.sin_cos();
+    let kv = super::dot3(k, v);
+    let x = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+    std::array::from_fn(|i| if i == 3 { v[3] } else { v[i] * c + x[i] * s + k[i] * kv * (1.0 - c) })
+}
+
+/// The muzzle smoke ring, level03 `0x250ae8(moby, &pos, add)` (one function on 03 / 10 / 15 / 18: L10 0x255ab0, L15
+/// 0x251d00, L18 0x264c10, census cluster of 720 bytes; no level-01 copy): around the moby's x axis (its rows +0xc0), the
+/// moby's z row (+0xe0) turned through a ring makes the directions.
+/// * `truncate(24.0)` = 24 smoke puffs: `i·15° + randf_sym(0, 7.5°)`, speed `randf(0.05, 0.1)` a tick, spin
+///   `rand_range(0, 3)` negated on `randi(2) ≠ 0`, life `rand_range(ticks(30), ticks(90))`, `+ add` when given;
+///   `PartType44Spawn(60000, 3000, 0.85, −0.001, 0.85, pos, v, life, 0x1e, 0xffffff, spin)`.
+/// * `truncate(6.0)` = 6 sparks: `i·60° + randf(0, 45°)`, speed `randf(0.05, 0.1)`, life `rand_range(ticks(20),
+///   ticks(60))`, `+ add`; `PartType21Spawn(10000, pos, v, 0x4f007fff, 0x1fffffff, life, 1)`.
+pub fn muzzle_smoke(w: &mut World, id: MobyId, pos: V, add_v: Option<V>) {
+    let rows = w.m(id).rows;
+    let (x_axis, z_row) = (rows[0], rows[2]);
+    for i in 0..24 {
+        let j = w.rng.randf_sym(0.0, f32::from_bits(0x3e06_0a92));
+        let mut v = turn_about(i as f32 * 0.261_799_4 + j, z_row, x_axis);
+        let sp = w.rng.randf(0.05, 0.1);
+        v = set_len3(v, sp);
+        let mut spin = w.rng.rand_range(0, 3);
+        if w.rng.randi(2) != 0 { spin = -spin; }
+        let (lo, hi) = (w.ticks(0x1e), w.ticks(0x5a));
+        let life = w.rng.rand_range(lo, hi);
+        if let Some(a) = add_v { v = add(v, a); }
+        let s = crate::particles::type44::Spawn { size: 60000.0, growth: 3000.0, damp: 0.85, fall: f32::from_bits(0xba83_126f), w: 0.85, pos: [pos[0], pos[1], pos[2]], vel: [v[0], v[1], v[2]], life, alpha: 0x1e, rgb: 0xff_ffff, spin };
+        part44(w, &s);
+    }
+    for i in 0..6 {
+        let j = w.rng.randf(0.0, std::f32::consts::FRAC_PI_4);
+        let mut v = turn_about(i as f32 * std::f32::consts::FRAC_PI_3 + j, z_row, x_axis);
+        let sp = w.rng.randf(0.05, 0.1);
+        v = set_len3(v, sp);
+        let (lo, hi) = (w.ticks(0x14), w.ticks(0x3c));
+        let life = w.rng.rand_range(lo, hi);
+        if let Some(a) = add_v { v = add(v, a); }
+        part21(w, 10000.0, pos, v, 0x4f00_7fff, 0x1fff_ffff, life, 1);
+    }
 }
 
 /// `PartType08Spawn(size, pos, vel, c1, c2, life)` 0x27f2b0 (the explosion puff): nothing for life 0; no draws.

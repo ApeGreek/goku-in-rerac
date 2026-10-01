@@ -80,7 +80,9 @@
 //!
 //! **The game's, noted:** the one swimmer (#569, path 51) has the tide water 1158 (#453) as its +0x254, and the tick's
 //! sea test runs in its state 0x13 too: its path lies below the tide + 0.5, so it blows up on its first tick after the
-//! init (the tide moves between 132.36 and 137; the port does the same). The boats 1075 are not ported (U363): the 30
+//! init (the tide moves between 132.36 and 137; the port does the same). The boats 1075 are [`super::pokitaru_boat`]
+//! (U363): they show the boarders once past state 1 and move the boarders' area path (+0x230 = the boat's +0xa8) with
+//! them; only the commando 114 sets them off (U353, [`super::pokitaru_commando`]): until he starts a boat the 30
 //! boarders stay hidden at sea.
 //!
 //! **Not the game's, noted [L]:** the deleted-boarder case above. Native `f32`; the rand draws at the game's points.

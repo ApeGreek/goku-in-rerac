@@ -42,8 +42,10 @@
 //! and counted into [`TalkGame::gold_bolts`], the count the gold-weapon offers' talk condition 6 spends). The save
 //! is an [`EngineRequest::Save`] (the game state already holds everything; there is no memory-card writer yet).
 //!
-//! Not ported: the cheat byte 0x15edb5 (mirrors the bolt: mode |= 0x8000; no cheats in the port), Ratchet's control
-//! mode 3's `FUN_00231450` before the teleport (counted; mode 3 is the vehicles').
+//! Ratchet in the Hologuise disguise (body 3, 0x1413f4 = 3) leaves it before the teleport (`FUN_00231450`, the level's
+//! leave copy: `crate::hero::bodies::queue_leave`, run before the teleport's calls).
+//!
+//! Not ported: the cheat byte 0x15edb5 (mirrors the bolt: mode |= 0x8000; no cheats in the port).
 //!
 //! [`GameWrite::GoldBolt`]: crate::moby_update::interact::GameWrite::GoldBolt
 //! [`TalkGame::gold_bolt_bits`]: crate::moby_update::interact::TalkGame::gold_bolt_bits
@@ -320,7 +322,8 @@ fn start_cutaway(w: &mut World, id: MobyId) {
     let face = [0.0, 0.0, add_rot(yaw, PI)];
     let fade = w.ticks(10);
     cinematic::fade_to_black(w, fade);
-    if w.hero.mode == 3 { w.svc.unported("gold bolt: control mode 3 exit FUN_00231450"); }
+    // Ratchet in the Hologuise (body 3): out of it first (the level's leave copy, `FUN_00231450` on level 01).
+    if w.hero.mode == crate::hero::bodies::body::DISGUISE { crate::hero::bodies::queue_leave(w); }
     cinematic::hero_teleport(w, at, face, HOLD, false);
     w.play_sound(0, 0, id);
     // The camera: 1.25 ahead of the spot, 4 to its left, 1 up, looking across (yaw − π/2); snap (mode 1).

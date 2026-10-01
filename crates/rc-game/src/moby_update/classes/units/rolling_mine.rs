@@ -1,7 +1,7 @@
 //! U553 (census 2026-09-29; the ids renumber per run): class 568, the rolling mines of level 18 (Veldin, 20 created
 //! instances; level18 `0x2d5918`, its tick `0x2d5f20`). A **pool**: every placed mine parks itself on its first update
-//! (state 5: hidden, no collision, untargetable) and waits for level18 `0x2d5cf8` — code of the boss class 1422
-//! (`0x2f2bf0`, its only caller; not ported, G-ENM-001) — to pick a parked one of a group, put it at a launch point
+//! (state 5: hidden, no collision, untargetable) and waits for level18 `0x2d5cf8` ([`throw`]) — called only by the boss
+//! class 1422 (`units::veldin_boss`, state 0x10) — to pick a parked one of a group, put it at a launch point
 //! and throw it (state 1: the ballistic velocity pvar +0x180, the landing height +0x178, the fuse +0x194). It falls,
 //! lands and rolls out (state 2), then (state 3) rolls toward a target within 6 (Ratchet or a decoy, the shared search
 //! `0x274b78`); it blows up — a beam explosion, then parked again — on a weapon hit, when the fuse runs out, when
@@ -33,7 +33,7 @@
 //! | case 4: `0x305260(m, +0x110)` done → state 3, record state 0 | the Suck Cannon's carried update | [`update`] (`react::carried`) |
 //! | table 0x2d6108 / 0x2d6190 / 0x2d61e0 / 0x2d6230 / 0x2d6250 | the Suck Cannon's wrappers: taken only in states 3 / 4 (else record state 0), the state saved in +0xbc, record +0x60 | `react::slot_*` with [`react::ROLLING_MINE_568`] |
 //! | table 0x2d6280 | slot +0x14: state 5, blend 0 (`ticks(10)`) when not on 0, +0x31 = 0, +0x94 = 0, mode & ~0x1000 \| 1 | [`park`] |
-//! | level18 `0x2d5cf8` (1422's) | picks a parked mine of a group (state 5), unhides it, throws it: state 1, +0x170 / +0x178 / +0x180 / +0x194 / +0x198 / +0x19c, class sound 0 | NOT ported: the boss 1422's code (G-ENM-001) |
+//! | level18 `0x2d5cf8(s, boss, group, from, to, fuse)` (the boss 1422's call) | the last parked (5) mine of the group in list order: update / draw 0xff, state 1, mode & ~0x41 \| 0x1000, drawn, +0xbc = 0, collision on; blend 0 (1 tick) when not on 0; position from; rot.x 0, rot.y −2.5; to.z + 0.75; landing = from + (to − from) at xy length −2.5 shorter; +0x170 = it; +0x180 = unit(it − from)·s with z 0, +0xc8 = 0, +0x188 = `0x25cf30(s, −10·dt², from, landing, 0)`; yaw = atan(+0x180); +0x194 fuse, +0x198 the boss, +0x19c 0; `PlayClassSound(0, 0)` | [`throw`] (2026-10-01, with the boss) |
 //!
 //! No bolts, no death bits, no pieces: the mine is never deleted. The large blast is the only hit on Ratchet (the
 //! beam explosion's damage sphere → his moby's hit record → the hero's intake).
@@ -84,6 +84,47 @@ fn park_fields(w: &mut World, id: MobyId) {
     m.state = st::PARKED;
     m.has_collision = false;
     m.mode = (m.mode & !mode::TARGETABLE) | mode::HIDDEN | mode::NO_ANIM;
+}
+
+/// Level18 `0x2d5cf8(s, boss, group, from, to, fuse)` (module doc): the boss 1422 throws a parked mine of `group`.
+pub fn throw(w: &mut World, s: f32, boss: MobyId, group: i32, from: [f32; 4], to: [f32; 4], fuse: i32) -> Option<MobyId> {
+    let g = i8::try_from(group).ok()?;
+    let id = crate::moby_update::scheduler::group_ids(w, g).into_iter().rfind(|&m| w.m(m).o_class == 0x238 && w.m(m).state == st::PARKED)?;
+    if w.m(id).pvars.len() < pv::SIZE { return None; }
+    let col = super::class_collision(w, 0x238);
+    {
+        let m = w.mm(id);
+        m.update_dist = 0xff;
+        m.draw_dist = 0xff;
+        m.state = st::FALL;
+        m.mode = (m.mode & !0x41) | mode::TARGETABLE;
+        m.visible = 1;
+        m.cmd = 0;
+        m.has_collision = col;
+    }
+    if w.m(id).anim.seq_b != 0 { w.anim_blend(id, 0, 0, 1); }
+    let m = w.mm(id);
+    m.position = from;
+    m.rotation[0] = 0.0;
+    m.rotation[1] = -K_ROLL;
+    let mut to = to;
+    to[2] += 0.75;
+    let a = c::sub(to, from);
+    let a = c::add(c::set_len2(a, c::len2(a) - K_ROLL), from);
+    c::set_pv4(w, id, pv::LAND, a);
+    let mut v = c::sub(a, from);
+    v[2] = 0.0;
+    let v = c::set_len3(v, s);
+    c::set_pi16(w, id, 0xc8, 0);
+    let mut t = 0.0;
+    let vz = crate::moby_update::creature::knock::lob_up(s, -(c::DT2 * 10.0), from, a, &mut t);
+    c::set_pv4(w, id, pv::THROW, [v[0], v[1], vz, v[3]]);
+    w.mm(id).rotation[2] = c::atan(v[0], v[1]);
+    c::set_pi32(w, id, pv::FUSE, fuse);
+    c::set_pi32(w, id, pv::WORD, boss as i32 + 1);
+    c::set_pi32(w, id, pv::TOUCHED, 0);
+    w.play_sound(0, 0, id);
+    Some(id)
 }
 
 /// Slot +0x14 of 568's table (level18 0x2d6280): back to the pool.

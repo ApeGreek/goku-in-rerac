@@ -184,8 +184,9 @@ impl UnderwaterState {
     /// else the hit point's own z, which is what `None` gives here) and `flag = cam.z < h + 0.04`
     /// (`c.lt.s`). No hit, or six non-water hits, leaves the flag **unchanged**.
     ///
-    /// Not modelled: the clears for camera mode 6 (`[0x167280]+0x86`) and `0x15f5c4 != 0`, and the other
-    /// writers (teleport `0x2368e0`, `0x2406b0`, `0x2cb788`); the port has no camera modes yet.
+    /// The clears for camera mode 6 (`[0x167280]+0x86`) and the game mode `0x15f5c4 != 0`, and the other writers
+    /// (`HeroTeleport` 0x2368e0, the surface jump `0x2406b0`, the Visibomb's end `0x2cb788`) are the caller's
+    /// (rc-engine `fog_state`; `crate::water::world::UnderwaterStore`).
     pub fn update(
         &mut self,
         cam: [f32; 3],
@@ -212,6 +213,18 @@ impl UnderwaterState {
         self.update(
             cam,
             |a, b| coll_line(mesh, a, b, QueryFlags(0x12)).map(|h| (h.point, h.surface_id())),
+            water_height,
+        );
+    }
+
+    /// [`update_with_mesh`](Self::update_with_mesh) with the moby pass of `CollLine_Fix` too: flags 0x12 test the moby
+    /// triangle meshes after the world (only their primitives are skipped), so the water the patch managers' mobys
+    /// carry as collision (levels 05 / 07 / 11 / 12 / 13: surface-0 faces at the moby's z) puts the camera under water
+    /// as the world's water faces do.
+    pub fn update_with_scene(&mut self, mesh: &Collision, scene: &crate::collision_query::MobyScene, cam: [f32; 3], water_height: impl FnMut([f32; 3]) -> Option<f32>) {
+        self.update(
+            cam,
+            |a, b| crate::collision_query::coll_line_m(mesh, Some(scene), a, b, QueryFlags(0x12), None).map(|h| (h.point, h.surface_id())),
             water_height,
         );
     }

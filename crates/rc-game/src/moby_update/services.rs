@@ -530,6 +530,9 @@ pub trait SoundSink {
     /// `HeroTeleport` 0x2368e0 moved Ratchet to `pos` (its `EnvNearestSamplePoint`: reverb and music track). Default:
     /// nothing.
     fn hero_teleported(&mut self, _pos: [f32; 3]) {}
+    /// `MusicRequestTrack(track, stinger)` 0x27a248 called by a class (the teleporter pads 1135's P+0x40 / P+0x44).
+    /// Default: nothing.
+    fn music_request(&mut self, _track: i16, _stinger: i16) {}
     /// `SoundSetPitchBend(slot, pb)` 0x2a1988: the slot's pitch bend (+0x14), sent with its next parameters (the
     /// Visibomb's loop). Default: nothing.
     fn set_pitch_bend(&mut self, _slot: i32, _pb: i32) {}
@@ -608,6 +611,9 @@ pub struct SaveBits {
     pub collected: HashMap<i16, u8>,
     /// `0x1bb6b0..`: the checkpoint record (class 805, `FUN_0029ac10`): the death reload's respawn point.
     pub checkpoint: Option<crate::moby_update::classes::checkpoint::Record>,
+    /// `0x1bb6f4` / `0x1bb6fc`: the body word 0x1413f4 and 0x14161c the record saved (the reload `0x29adc8` switches
+    /// back into body 1 / 2 with them: `crate::hero::bodies`).
+    pub checkpoint_body: (u8, i32),
 }
 
 /// Game-state words the ported classes read or add to (owned here until the game-state port takes them).
@@ -775,8 +781,20 @@ pub struct Services {
     pub level: u32,
     /// `0x15f5c4`: game mode (2 = cutscene; bolts hide).
     pub game_mode: i32,
+    /// `0x15f638`: the level's death height (gameplay header +0x28; set by the engine at the load): Veldin's floating
+    /// platforms 587 kill Ratchet riding one below it.
+    pub death_z: f32,
+    /// The level's camera records as the moby loop sees them (`0x15ef50`, set by the engine at the load): each
+    /// record's class (the slots `0x167b50 + i·0xa0` +0x86; Veldin's boss 1422 looks for the class-18 one).
+    pub camera_classes: Vec<i32>,
+    /// The class-18 records' distance / pivot height (pvar +0x34 / +0x38) as the moby loop last wrote them (the file's
+    /// values at the load; the boss 1422's camera tweak springs them, `cinematic::focus_record`).
+    pub camera_focus: Vec<[f32; 2]>,
     /// `0x13d4e2`: bolt grabber owned (the hero tick then sets the pickup radii to 12 / 4.5).
     pub bolt_grabber: bool,
+    /// The level overlays' own mutable words a class keeps between ticks, by address (e.g. Blarg's Clank station's
+    /// gp−0x4c88 0x161f78, −1 at load: `classes::units::blarg_clank_lift`). Missing: the load value the class knows.
+    pub level_words: HashMap<u32, u32>,
     /// `0x141402` (u8): the hero flag that makes dropped bolts fly straight to the hero.
     pub hero_magnet: u8,
     /// `0x15f5d0` / `0x15f5d4`: the frame-load ratios (RCNT1 based) that throttle sparks and flashes. The port
@@ -870,6 +888,10 @@ pub struct Services {
     /// The level's pvar shared data (gameplay section 0x4c, `rc_formats::gameplay::parse_pvar_shared_data`): a pvar
     /// field the loader pointed into it holds the offset here (the lamps' per-group registration tick, …).
     pub pvar_shared: Vec<u8>,
+    /// `0x140940`: the vehicle moby Ratchet rides (the ship-combat record; 0x140944 its class). Written by the flown
+    /// ships 1242 / 69 / 1379, which are not ported (G-LVL-009), so None until they are; read by Gemlik's water
+    /// managers' pause (`crate::water::managers`, level13 `0x309e88`).
+    pub vehicle: Option<MobyId>,
     /// The help / hint message system (`Help_Request` 0x225818, `Help_Update` 0x225bd0, the records and the log:
     /// [`crate::help`]); the classes request through it, the engine runs its update after the tick.
     pub help: crate::help::Help,
@@ -878,6 +900,9 @@ pub struct Services {
     /// The Visibomb's globals (the missile 0x141330, the HUD / occlusion flags, the missile view's look, the range
     /// static): [`crate::moby_update::classes::visibomb::Globals`].
     pub visibomb: crate::moby_update::classes::visibomb::Globals,
+    /// The HUD slot calls of the classes (`queue_animation_update` and the handle calls: [`crate::hud::calls`]); the HUD
+    /// replays the new ones before its next update loop.
+    pub hud: crate::hud::Calls,
 }
 
 impl Default for Services {
@@ -890,7 +915,11 @@ impl Services {
             timing: Timing::NTSC,
             level: 1,
             game_mode: 0,
+            death_z: 0.0,
+            camera_classes: Vec::new(),
+            camera_focus: Vec::new(),
             bolt_grabber: false,
+            level_words: HashMap::new(),
             hero_magnet: 0,
             frame_load: [Pf::ZERO; 2],
             hits: HitLog::default(),
@@ -933,7 +962,9 @@ impl Services {
             units: Default::default(),
             help: Default::default(), map: Default::default(),
             visibomb: Default::default(),
+            hud: Default::default(),
             pvar_shared: Vec::new(),
+            vehicle: None,
         }
     }
 
@@ -1002,7 +1033,7 @@ impl Services {
 ///
 /// | field | address | writers (level01) |
 /// |---|---|---|
-/// | `platform` | 0x13f440..0x13f44c (the push the move adds, its yaw) | flow 679 `0x2f6328` ([`super::classes::flow`]); water current 613 `0x2f3120` (not ported) |
+/// | `platform` | 0x13f440..0x13f44c (the push the move adds, its yaw) | flow 679 `0x2f6328` ([`super::classes::flow`]); water current 613 `0x2f3120` (`units::water_current`); the riding floats 664 / 1293 / 1320 (09) and 1069 (07) through [`HeroFields::ride`] (`units::riding_floats`) |
 /// | `momentum` | 0x13f4a0..0x13f4ac (carried momentum) | flow 679 |
 /// | `sink_hold` | 0x13f530 (s16, holds the sinking floor 0x31) | flow 679 |
 /// | `flow` | 0x13fd20 yaw, 0x13fd24 pitch, 0x13fd28, 0x13fd2c speed, 0x13fd30 pull | flow 679 |
@@ -1013,9 +1044,11 @@ impl Services {
 /// | `health` | 0x1415f8 | nanotech cluster 806 `0x300de0` ([`super::classes::pickup`]) |
 /// | `water_level` / `dive_lock` | 0x13f640 / 0x13f52e | the water managers of 05 / 12, the water plane 982 of 05 (`crate::water::managers`) |
 /// | `ammo` / `ammo_picked` | 0x13d428 / 0x13de08 (game state, Ratchet's mirror) | ammo pickups `0x2db028` (`AddAmmo` 0x2494d8) |
+/// | `fall_voice_clear` | 0x141602 (u16 = 0xffff) | level 08's liquid 327 `0x2da0f0` when Ratchet falls in (`crate::water::sea`) |
+/// | `speed` / `jump_lock` / `current_dist` | 0x13f4e4 / 0x13f528 / 0x141608 | the water current 613 `0x2f3120` (`units::water_current`; also `platform`, `momentum`) |
 ///
 /// Other class stores into the block, for the classes that are not ported yet (add a field here when one is):
-/// 613 also 0x13f4e4 (speed), 0x13f528, 0x141608; the camera / focus objects 0x13fda0; talking NPCs 0x13f3d0
+/// the camera / focus objects 0x13fda0; talking NPCs 0x13f3d0
 /// (position: `pose`); the Swingshot targets 0x13f904 / 0x13fcd8 / 0x13fcec (`0x2dbdc0`); `0x300de0` 0x13f510 (cheat 6
 /// only); the checkpoint record's respawn `0x29adc8` (position / Euler: the engine's respawn); the mode / control
 /// bytes 0x1413f5 / 0x1413fc of the vendor, ship and teleporter code. The scripted sequences' `SetState` calls
@@ -1049,6 +1082,44 @@ pub struct HeroFields {
     pub dive_lock: i16,
     /// `0x13fcd8 = 0`: the Swingshot's miss flag taken (Kerwan's director 1342 counts the misses).
     pub swing_help_clear: bool,
+    /// A class's store of 0x1413f5 (Ratchet hidden: the teleporter pads 1135 while their beam is narrow and after the
+    /// teleport), stored after the calls (a `SetState` among them clears it first, as in the game's order).
+    pub hero_hidden: Option<u8>,
+    /// `0x141602 = 0xffff`: the voice slot of Ratchet's death fall 0x77 forgotten (level 08's liquid 327 releases the
+    /// voice when he falls in: `crate::water::sea`).
+    pub fall_voice_clear: bool,
+    /// 0x13f4e4: Ratchet's current speed (the water current 613 clamps it to 1.5·dt while he swims in it).
+    pub speed: f32,
+    /// 0x13f528 (s16): the surface-jump lock (`Swim::jump_lock`; the water current 613 holds it at `ticks(35)`).
+    pub jump_lock: i16,
+    /// 0x141608: the xy distance from Ratchet to the nearest water current this tick (`HeroTickStateTimer` resets it to
+    /// 9999 every hero update, so the moby loop starts from 9999; only the currents read it: the nearest one pushes).
+    pub current_dist: f32,
+    /// A class's store of 0x14161b (no air: the O2 Mask goes on; the Clank-section classes, `crate::hero::bodies`).
+    pub airless: Option<u8>,
+    /// A class's copy of the hero's position / Euler into 0x141050 / 0x141060 (Giant Clank's pads 1451 / 1899: where he
+    /// got in; `crate::hero::bodies::Bodies::entry_pose`).
+    pub save_entry_pose: bool,
+    /// A class's store of 0x13f510 (Ratchet's hit invulnerability, ticks): Veldin's cutaway director 644 (`0x2dfaa0`)
+    /// holds him invulnerable for the length of its camera move.
+    pub invulnerable: Option<i32>,
+    /// A class's store of 0x141414 (the back slot's item request, `SessionState::temp_back`): the boss 1422's state 5
+    /// asks for the Thruster-Pack (3).
+    pub back_request: Option<i32>,
+}
+
+/// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
+/// `centre` by the change from the Euler rotation `e_old` to `e_new`: `out = centre + (p − centre)·E(e_old)ᵀ·E(e_new)`
+/// (`euler_to_matrix` 0x1fa050 twice, the transpose 0x1fa2d8, two `fun_001f9d20` row-vector products). The riding
+/// floats ([`HeroFields::ride`]).
+pub fn turn_about(p: [f32; 3], centre: [f32; 3], e_old: [f32; 3], e_new: [f32; 3]) -> [f32; 3] {
+    let (a, b) = (super::triggers::euler_matrix(e_old), super::triggers::euler_matrix(e_new));
+    let v = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]].map(|x| x as f64);
+    // v·Aᵀ: component i = row i of A · v.
+    let u: [f64; 3] = std::array::from_fn(|i| (0..3).map(|j| a[i][j] * v[j]).sum());
+    // u·B: Σ u_j · row j of B.
+    let o: [f64; 3] = std::array::from_fn(|k| (0..3).map(|j| u[j] * b[j][k]).sum());
+    [o[0] as f32 + centre[0], o[1] as f32 + centre[1], o[2] as f32 + centre[2]]
 }
 
 /// Ratchet's pose as a class stores it (native `f32`): position 0x13f3d0 (x, y, z; w kept), yaw 0x13f3e8, target
@@ -1073,6 +1144,19 @@ pub enum HeroCall {
     /// The death sequence `0x2319b0` ([`crate::hero::damage::death_fade`]: the deaths counted, the fade and the
     /// reload flag 0x141401), called by a class (the kill cuboids 1039).
     Death,
+    /// `0x249580(yaw, point, release)`: Ratchet walks to `point` and turns to `yaw` (the walk-to states 0x65..0x67,
+    /// `crate::hero::stance`); the teleporter pads 1135 on △.
+    WalkTo { point: [f32; 3], yaw: f32, release: i32 },
+    /// `SwitchCharacter(mode, state, moby)` (0x231348 and its level copies, `crate::hero::bodies::switch_character`): the
+    /// body moby `moby` (class `o_class`, its animation fields `anim` when the class asked) becomes the hero.
+    SwitchCharacter { mode: u8, state: i32, moby: MobyId, o_class: i16, anim: rc_formats::moby_anim::AnimState },
+    /// The level's leave-the-body copy (0x231450 and its copies, `crate::hero::bodies::leave_body`); `game_mode` = 0x15f5c4.
+    LeaveBody { game_mode: i32 },
+    /// The per-body idle `0x227638` (`crate::hero::bodies::body_idle`).
+    BodyIdle,
+    /// A class's store `0x141401 = 1` without the death sequence (the reload of the level, `Hero::fell_out`; no death
+    /// counted): Kerwan's train 822 when Ratchet falls off it (its `FadeToBlack(ticks(16))` goes with it).
+    Reload,
 }
 
 impl HeroFields {
@@ -1095,6 +1179,15 @@ impl HeroFields {
             water_level: f32::from_bits(h.water_level.0),
             dive_lock: h.swim.dive_lock,
             swing_help_clear: false,
+            hero_hidden: None,
+            fall_voice_clear: false,
+            speed: f32::from_bits(h.speed.0),
+            jump_lock: h.swim.jump_lock,
+            current_dist: 9999.0,
+            airless: None,
+            save_entry_pose: false,
+            invulnerable: None,
+            back_request: None,
         }
     }
 
@@ -1102,6 +1195,15 @@ impl HeroFields {
     /// than one).
     pub fn call(&mut self, c: HeroCall) {
         if let Some(s) = self.calls.iter_mut().find(|s| s.is_none()) { *s = Some(c); }
+    }
+
+    /// A riding class's store of Ratchet's platform delta (G-HERO-034: the floats 664 / 1293 / 1320 of level 09, 1069 of
+    /// level 07, while he stands on them): `vec_sub(0x13f440, out, 0x13f3d0)` (xyz = `out − hero`, w = `out.w` = the
+    /// hero's w through the rotation's identity row) then `0x13f448 += dz` (the float's own height change this tick).
+    /// The hero's move adds it to his position ([`HeroFields::platform`]; `Hero::platform`). `hero` = Ratchet's position
+    /// as the class read it (0x13f3d0, x y z w), `out` = where the class carries him ([`turn_about`]).
+    pub fn ride(&mut self, hero: [f32; 4], out: [f32; 3], dz: f32) {
+        self.platform = [out[0] - hero[0], out[1] - hero[1], (out[2] - hero[2]) + dz, hero[3]];
     }
 
     /// `FastMemZero16(0x13f430, 0x90)`: velocity, platform delta, displacement, effective velocities, applied
@@ -1130,7 +1232,14 @@ impl HeroFields {
         h.water_level = Pf(self.water_level.to_bits());
         h.swim.dive_lock = self.dive_lock;
         if self.swing_help_clear { h.swing.help = 0; }
+        if self.fall_voice_clear { h.damage.voice_slot = -1; }
+        h.speed = Pf(self.speed.to_bits());
+        h.swim.jump_lock = self.jump_lock;
         for (t, n) in h.weapons.picked.iter_mut().zip(self.ammo_picked.iter()) { *t += n; }
+        if let Some(v) = self.airless { h.worn.airless = v; }
+        if self.save_entry_pose { h.bodies.entry_pose = Some((ph::to_f32x3(h.pos), ph::to_f32x3(h.rot))); }
+        if let Some(t) = self.invulnerable { h.f510 = t; }
+        if let Some(v) = self.back_request { h.back_slot.slot.request = v; }
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
             h.rot[2] = pf(p.yaw);
@@ -1139,16 +1248,40 @@ impl HeroFields {
     }
 
     /// Runs the queued calls on the hero ([`HeroCall`]), in order, with the hero's context of this tick.
-    pub fn run_calls(&self, h: &mut Hero, c: &mut crate::hero::states::Ctx) {
+    pub fn run_calls(&self, h: &mut Hero, c: &mut crate::hero::states::Ctx) { self.run_calls_with(h, c, None) }
+
+    /// [`HeroFields::run_calls`] with the item slots' pass a `SwitchCharacter` makes (`crate::hero::items::slot_pass`
+    /// with the tick's item environment: `crate::hero::bodies::switch_character_with`).
+    pub fn run_calls_with(&self, h: &mut Hero, c: &mut crate::hero::states::Ctx, mut pass: Option<crate::hero::bodies::SlotPass>) {
         for call in self.calls.iter().flatten() {
             match *call {
                 HeroCall::SetState { id, play } => { h.set_state(c, id, play); }
                 HeroCall::SetAnim { blend, seq, frame } => h.set_anim(c.anim, c.rng, pf(blend), seq, frame),
                 HeroCall::Death => crate::hero::damage::death_fade(h),
+                HeroCall::WalkTo { point, yaw, release } => {
+                    // `0x249580(yaw, point, release)`: the walk-to target 0x140990 / 0x14099c / 0x1409a0, then
+                    // `SetState(0x65, 1)` unless Ratchet already walks to a point (0x65..0x67).
+                    h.walk_to.point = [pf(point[0]), pf(point[1]), pf(point[2]), h.walk_to.point[3]];
+                    h.walk_to.yaw = pf(yaw);
+                    h.walk_to.release = release;
+                    if !(0x65..=0x67).contains(&h.state) { h.set_state(c, 0x65, true); }
+                }
+                HeroCall::SwitchCharacter { mode, state, moby, o_class, anim } => {
+                    let b = crate::hero::bodies::BodyMoby { id: moby, o_class, anim };
+                    match pass {
+                        Some(ref mut f) => crate::hero::bodies::switch_character_with(h, c, mode, state, b, Some(&mut **f)),
+                        None => crate::hero::bodies::switch_character_with(h, c, mode, state, b, None),
+                    }
+                }
+                HeroCall::LeaveBody { game_mode } => crate::hero::bodies::leave_body(h, c, game_mode),
+                HeroCall::BodyIdle => crate::hero::bodies::body_idle(h, c),
+                HeroCall::Reload => h.fell_out = 1,
             }
         }
         // After the calls: the gold bolt stores 0x1413ff after its HeroTeleport's SetState (which clears it).
         if self.hide_hand { h.f13ff = 1; }
+        // The teleporter's store of 0x1413f5 after its HeroTeleport's SetState (which clears it).
+        if let Some(v) = self.hero_hidden { h.f13f5 = v; }
     }
 }
 
@@ -1162,6 +1295,9 @@ pub struct LoopGlobals {
     pub pad: crate::pad::PadState,
     pub cam_euler: [f32; 3],
     pub anim: crate::hero::AnimView,
+    /// The current camera's own position (0x167280 +0x30) after the last camera update (the camera moby 1007 reads
+    /// it: `crate::follow_camera::camera_moby`).
+    pub cam_pos: [f32; 3],
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1288,6 +1424,12 @@ impl<'a> World<'a> {
     /// (0x13d4e2). The mobys run before the hero, so tick 0 sees the init values.
     pub fn bolt_radii(&self) -> (Pf, Pf) {
         if self.counter == 0 { return (Pf::b(0x4008_0000), Pf::b(0x3fa0_0000)); }
+        // The other bodies (`HeroTickStateTimer`, crate::hero::bodies): Clank 2.125 / 1.25, Giant Clank 15 / 3.
+        match self.hero.mode {
+            1 => return (Pf::b(0x4008_0000), Pf::b(0x3fa0_0000)),
+            2 => return (Pf::b(0x4170_0000), Pf::b(0x4040_0000)),
+            _ => {}
+        }
         if self.svc.bolt_grabber { (Pf::b(0x4140_0000), Pf::b(0x4090_0000)) } else { (Pf::b(0x4040_0000), Pf::b(0x3fe0_0000)) }
     }
 
@@ -1564,9 +1706,12 @@ impl<'a> World<'a> {
             .collect();
         let jf: std::collections::HashMap<(usize, u8), [[f32; 4]; 4]> =
             joints.into_iter().filter(|(m, _)| *m < self.table.mobys.len()).map(|(m, l)| ((m, l), self.joint_matrix(m, l as usize))).collect();
+        let pvp: std::collections::HashMap<usize, [[f32; 3]; 3]> =
+            frames.keys().map(|&m| (m, [0xd0, 0x1f0, 0xe0].map(|o| pvar_block_point(self.table, m, o)))).collect();
         if let Some(p) = self.particles.as_deref_mut() {
             p.moby_frames = frames;
             p.joint_frames = jf;
+            p.pvar_points = pvp;
         }
     }
 
@@ -1660,6 +1805,19 @@ impl<'a> World<'a> {
         }
     }
 
+    /// Level17 `0x26fb60(moby, pos, vel)`: a type-79 spark ([`crate::particles::type79::spawn79`]), riding `moby`
+    /// when given (counted as a type-79 spawn). First consumer: the fleet lasers 99 (`units::fleet_laser`).
+    pub fn part79(&mut self, moby: Option<MobyId>, pos: [f32; 4], vel: [f32; 3]) {
+        let mp = moby.map(|m| { let p = self.table.mobys[m].position; (m, [p[0], p[1], p[2]]) });
+        let Some(p) = self.particles.as_deref_mut() else { return };
+        let (created, failed) = (p.stats.created, p.stats.create_failed);
+        crate::particles::type79::spawn79(p, self.rng, mp, pos, vel);
+        if (p.stats.created, p.stats.create_failed) != (created, failed) {
+            if p.stats.create_failed != failed { self.svc.fx.part_failed += 1; }
+            *self.svc.fx.part_spawns.entry(79).or_default() += 1;
+        }
+    }
+
     // (The effect mobys' spawners, `DebrisSpawn` 0x2c5080 and `FlashSpawn` 0x2c20e0, live with their updates in
     // `classes::debris`.)
 
@@ -1734,6 +1892,21 @@ pub fn deliver_hit_in(table: &mut MobyTable, hits: &mut HitLog, target: MobyId, 
         if t.damage < r.damage { return; }
     }
     hits.write(table, target, t, [Pf::ZERO; 4]);
+}
+
+/// The point (three f32) at `off` in moby `m`'s pvar block as the game's pointer `*(m + 0x78) + off` reads it: the
+/// moby's own block when it is long enough; past a 0x80-byte block (`CreateMoby`'s, one per slot from 0x15ffe8, in slot
+/// order) the read lands in the following slots' blocks [L: the blocks of the created mobys are contiguous]; zeros past
+/// the table. Type 69's modes 1..3 read +0xd0 / +0x1f0 / +0xe0 (`crate::particles::type69`).
+pub fn pvar_block_point(table: &MobyTable, m: MobyId, off: usize) -> [f32; 3] {
+    let read = |id: usize, o: usize| -> f32 {
+        table.mobys.get(id).and_then(|mo| mo.pvars.get(o..o + 4)).map_or(0.0, |b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let own = table.mobys.get(m).map_or(0, |mo| mo.pvars.len());
+    [0, 4, 8].map(|k| {
+        let o = off + k;
+        if o + 4 <= own || own != 0x80 { read(m, o) } else { read(m + o / 0x80, o % 0x80) }
+    })
 }
 
 /// `coll_sphere_mobys(r, centre, flags, ignore, tmpl)` 0x214468 ([`coll_sphere_mobys`]): the mobys the sphere
@@ -1892,6 +2065,20 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     fn group(&self, g: i8) -> Vec<MobyId> {
         if g < 0 { return Vec::new(); }
         self.svc.borrow().groups.lists.get(g as usize).and_then(|l| l.clone()).map(|l| l.into_iter().map(|m| m as MobyId).collect()).unwrap_or_default()
+    }
+    fn create_moby(&mut self, table: &mut MobyTable, o_class: i16, counter: u64) -> Option<MobyId> {
+        // A class the level does not load has no slot (0x198040[o_class]): no moby [L].
+        let info = self.classes.info(o_class)?;
+        let id = table.create(o_class, Some(&info), counter)?;
+        crate::moby_update::anim_sound::init(&mut table.mobys[id], self.classes.anim(o_class));
+        let mut s = self.svc.borrow_mut();
+        if s.snapshots.len() <= id { s.snapshots.resize(id + 1, None); }
+        s.snapshots[id] = None;
+        Some(id)
+    }
+    fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) {
+        table.delete(id, counter);
+        Arc::make_mut(&mut self.svc.borrow_mut().grid).remove(&mut table.mobys[id]);
     }
 }
 

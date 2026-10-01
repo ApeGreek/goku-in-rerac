@@ -63,6 +63,8 @@ fn sea_inventory_all_levels() {
                     assert!(h.groups.iter().flatten().all(|s| s.pos.len() == s.st.len() && s.pos.len() == s.rgba.len()));
                     eprintln!("level {level:02} {}: FIX2 {:#x} speeds {:?} {:?}", PORTS[p.port].name, h.fix2, h.g1_speed, h.layer_speed);
                 }
+                // The G-REN-026 ports (2026-10-01): checked by their own request (docs/test-requests/2026-10-01-water-liquids.md).
+                SeaData::GridSet(_) | SeaData::Meshes(_) => {}
             }
         }
     }

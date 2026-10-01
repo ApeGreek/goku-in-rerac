@@ -90,7 +90,8 @@ impl LevelWaterData {
         let pvars = rc_formats::gameplay::parse_pvars(gameplay)?;
         let vtbl = target.vtbl();
         let mut refs: HashMap<u32, Arc<LevelOverlay>> = HashMap::new();
-        for l in std::iter::once(1).chain(PORTS.iter().map(|p| p.level)).chain(super::sea::PORTS.iter().map(|p| p.level)) {
+        let extra_refs = [super::sea::gaspar_ref::LEVEL];
+        for l in std::iter::once(1).chain(PORTS.iter().map(|p| p.level)).chain(super::sea::PORTS.iter().map(|p| p.level)).chain(extra_refs) {
             if refs.contains_key(&l) { continue; }
             if let Some(o) = reference(l) { refs.insert(l, o); }
         }
@@ -151,6 +152,17 @@ impl LevelWaterData {
     pub fn port(&self, port: usize) -> Option<&PortData> { self.ports.iter().find(|p| p.port == port) }
 }
 
+/// A store into the underwater flag 0x167494 made by the game's code during a tick, outside the camera update's test
+/// `0x20e9f0` (which runs after it on the stored value: a test with no water hit within ±0.75 keeps it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnderwaterStore {
+    /// `0x167494 = 0`: the hero's surface jump out of the water (`0x2406b0`, state 6), the level start (`0x20ef58`).
+    Off,
+    /// `HeroTeleport` 0x2368e0: `0x167494 = (0x1413dc == 0x11)`, Ratchet's state group after the teleport's `SetState`
+    /// (0x11: under water).
+    HeroGroup,
+}
+
 /// The water state of the moby system (see the module docs).
 #[derive(Clone, Debug, Default)]
 pub struct WaterWorld {
@@ -170,6 +182,10 @@ pub struct WaterWorld {
     pub globals: HashMap<u32, u32>,
     /// The sea ports' state ([`super::sea`]).
     pub sea: super::sea::SeaState,
+    /// The last store into the underwater flag 0x167494 outside the camera's test, with the tick counter it was made
+    /// on ([`UnderwaterStore`]); the engine's camera-side flag (`rc-engine` `fog_state`) applies each store once,
+    /// before its test.
+    pub underwater_store: Option<(u64, UnderwaterStore)>,
 }
 
 impl WaterWorld {
@@ -199,6 +215,16 @@ impl WaterWorld {
         if let Some(sim) = self.sim.as_mut() {
             let n = sim.patches.len();
             sim.disturb(Pf::f(x), Pf::f(y), Pf::f(r), Pf::f(amp), 0..n, additive);
+        }
+    }
+
+    /// `*(*0x1612d0 + i·0x1190 + 8)`: record +0x08 of patch `i`, its water level (the module's patch after the init,
+    /// else the stored record the managers' mobys write before it); None without a patch `i`. The amoeboids' fall-out
+    /// rule on 05 / 11 reads it (`moby_update::classes::amoeboid`, pvar +0x258).
+    pub fn patch_level(&self, i: usize) -> Option<f32> {
+        match &self.sim {
+            Some(s) => s.patches.get(i).map(|p| p.rec.centre[2]),
+            None => self.records.get(i).map(|r| r.centre[2]),
         }
     }
 

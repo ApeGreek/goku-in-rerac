@@ -23,7 +23,7 @@
 //! +0x244 waypoint graph, +0x248 alternate-target group (class 623 members; −1 on Novalis), +0x24c target polygon, +0x250
 //! size, +0x254 glow phase, +0x258 fall-out ripple patch (0 on Novalis), +0x25c trigger cuboid, +0x260 gate moby.
 //! The fall-out rule (`0x2eec68`): with +0x258 ≠ 0 (a ripple patch index; Rilgar / level 11) an amoeboid below that
-//! patch's height (`creature::Globals::ripple_z`) bursts into goo and is deleted without bolts. Not ported (counted):
+//! patch's height (`water::world::WaterWorld::patch_level`) bursts into goo and is deleted without bolts. Not ported (counted):
 //! the big-head manipulator, the shadow probe.
 
 use crate::moby_runtime::{mode, MobyId};
@@ -452,14 +452,14 @@ fn pre(w: &mut World, id: MobyId) -> bool {
     // The fall-out rule (0x2eec68): below the height of ripple patch +0x258 the amoeboid bursts (no bolts).
     let fall = c::pi32(w, id, FALLOUT);
     if fall != 0 && st(w, id) != 0 {
-        match w.svc.creatures.ripple_z.get(fall as usize).copied() {
+        match usize::try_from(fall).ok().and_then(|i| w.svc.water.patch_level(i)) {
             Some(z) if c::pos(w, id)[2] < z => {
                 goo_burst(w, id, [0.0; 4]);
                 w.delete_moby(id);
                 return true;
             }
             Some(_) => {}
-            None => w.svc.unported("amoeboid 572: fall-out rule without ripple patch heights"),
+            None => w.svc.unported("amoeboid 572: fall-out rule without the level's ripple patch"),
         }
     }
     if c::pi32(w, id, ALERT) != 0 {

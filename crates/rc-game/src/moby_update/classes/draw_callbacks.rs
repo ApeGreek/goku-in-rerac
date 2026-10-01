@@ -56,6 +56,10 @@ pub enum Callback {
     /// The Visibomb range limiter 832's static (level01 `0x302438`, list 2): its `randi(32)` pairs and quads here
     /// ([`super::rc_range::draw_callback`]); `rc-engine`'s visibomb_view draws them.
     RangeStatic,
+    /// A census unit port's callback with game state or `rand` at draw time (`super::units::PORTS[i]`): its state part
+    /// runs in [`run_frame`] ([`super::units::frame_callback`]: Veldin's countdown 586's `0x2d8098`, its `randi(10)` and
+    /// its text into [`DrawCallbacks::texts`]).
+    UnitFrame(u16),
 }
 
 /// The lists (registration order).
@@ -74,6 +78,9 @@ pub struct DrawCallbacks {
     /// The Walloper glow's flicker drawn by the last [`run_frame`] (`randi(4) ≠ 0`: the dim colour 0x307f4040, else the
     /// bright 0x7f7f4040); None: no Walloper draw ran.
     pub walloper_dim: Option<bool>,
+    /// The 2-D countdowns the last [`run_frame`] drew (`DrawUIFrame` + `font_print_center_large`: Veldin's countdown
+    /// 586, [`super::units::veldin_pads::countdown_draw`]); `rc-engine`'s scene_render draws them over the world.
+    pub texts: Vec<super::units::veldin_pads::CountdownDraw>,
 }
 
 impl DrawCallbacks {
@@ -114,6 +121,7 @@ pub fn run_frame(w: &mut World) {
             Callback::FireField760 => super::fire_field::draw_callback(w, id),
             Callback::ThrusterFlame => super::thruster_flame::draw_callback(w, id),
             Callback::RangeStatic => super::rc_range::draw_callback(w, id),
+            Callback::UnitFrame(i) => super::units::frame_callback(w, i, id),
             Callback::Walloper => {
                 let dim = w.rng.randi(4) != 0;
                 w.svc.draw_callbacks.walloper_dim = Some(dim);

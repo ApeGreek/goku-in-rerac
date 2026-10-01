@@ -20,10 +20,14 @@
 //!
 //! **What the port runs** ([`CameraPorts`]): class 0 (the follow camera, `super::Camera::update_type0`), 4 (first
 //! person), 5 (script) and 6 (the Visibomb's view) — their switches are the existing ones — 7 (the Swingshot camera,
-//! [`super::swing`]: switched in and out here), and the hooks of the never-current classes 17 (below), 23 (the placed
-//! view, `placed_*`) and 18 (the moby focus, [`super::focus`]), each on the levels whose code for it is the reference
-//! level's. A choice of any other class (1, 3, 8, 14, 19..22: rails, vehicles, the fixed and path cameras) is
-//! recorded in [`LevelCameras::wanted`] and the current camera stays (G-HERO-027).
+//! [`super::swing`]: switched in and out here), the level-class cameras 3 (the rail / slide camera, [`super::rail`]),
+//! 1 (the fixed view) and 14 (the side view, [`super::cuboid`]) through [`super::class_cam`] (the switch's blends
+//! `0x20d110`, the shared D block), and the hooks of the never-current classes 17 (below), 23 (the placed view,
+//! `placed_*`) and 18 (the moby focus, [`super::focus`]), each on the levels whose code for it is the reference level's.
+//! The loop checks every slot but the current camera's own (two class-3 records hand over at a rail change). A choice
+//! of any other class (8: the hoverboard, G-HERO-008; 19: the armed fly-bys, no ported arming class; 20 / 21: the
+//! level-14 grind race, G-LVL-007; 22: giant Clank, G-HERO-005) is recorded in [`LevelCameras::wanted`] and the
+//! current camera stays (G-HERO-027).
 //!
 //! **Class 17** ([`RegionTweak`]): its hook always answers "no" (it never becomes the camera) and, while the follow
 //! camera is current, retunes it through the follow camera's setters (`0x313560`..`0x313b48`, [`super::Camera`]):
@@ -60,7 +64,7 @@ use crate::hero::physics::to_f32x3;
 use crate::moby_update::triggers::{point_in_cuboid, point_in_cylinder, point_in_path, point_in_sphere};
 use crate::pad::fast_diff_rots;
 use crate::ps2v::Pf;
-use rc_formats::cameras::{CameraHeader, CameraRecord, LevelCamera, MobyFocus, PlacedView, RegionTweak};
+use rc_formats::cameras::{CameraHeader, CameraRecord, LevelCamera, MobyFocus, PlacedView, RailCamera, RegionTweak, SideView};
 use rc_formats::volumes::Volumes;
 use rc_formats::level_overlay::LevelOverlay;
 use std::sync::Arc;
@@ -110,10 +114,16 @@ pub struct CameraPorts {
     pub placed: bool,
     /// Class 18's hook and helpers are level 02's (the moby focus, [`MobyFocus`]).
     pub focus: bool,
+    /// Class 3's hook, init (with `0x314e98`), update and pre hook are level 01's (the rail camera, [`super::rail`]).
+    pub rail: bool,
+    /// Class 1's four functions and helpers are level 03's (the fixed view, [`super::cuboid`]).
+    pub fixed: bool,
+    /// Class 14's four functions and helpers are level 03's (the side view, [`super::cuboid`]).
+    pub side: bool,
 }
 
 impl Default for CameraPorts {
-    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true } }
+    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true } }
 }
 
 impl CameraPorts {
@@ -123,7 +133,9 @@ impl CameraPorts {
     /// Classes 7 and 17 against level 01's code, 23 against level 00's, 18 against level 02's (`reference(level)`: that
     /// level's overlay; a class whose reference is missing is not run).
     pub fn from_overlays(target: &LevelOverlay, reference: &dyn Fn(u32) -> Option<Arc<LevelOverlay>>) -> CameraPorts {
-        let Some(level01) = reference(1) else { return CameraPorts { region: false, swing: false, placed: false, focus: false } };
+        let Some(level01) = reference(1) else {
+            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false };
+        };
         let rel = rc_formats::level_overlay::Relocation::new(&level01, target);
         let region = target.camvtbl().iter().find(|e| e.class == CLASS_REGION).is_some_and(|e| {
             rel.same_code(REGION_ACTIVATE, e.activate) && rel.func(REGION_UPDATE).is_some() && rel.func(REGION_TEST).is_some()
@@ -161,7 +173,25 @@ impl CameraPorts {
                 });
                 called.and_then(|c| target.code(c, n)).zip(r.code(FOCUS_UPDATE, n)).is_some_and(|(t, rf)| mask(t) == mask(rf))
             });
-        CameraPorts { region, swing, placed, focus }
+        // Class 3 (level 01) and classes 1 / 14 (level 03): every one of the four `camvtbl` functions a copy of the
+        // reference's, with copies of the helpers they call.
+        let four = |class: i32, level: u32, f: [u32; 4], helpers: &[u32]| {
+            reference(level).is_some_and(|r| {
+                let rel = rc_formats::level_overlay::Relocation::new(&r, target);
+                target.camvtbl().iter().find(|e| e.class == class).is_some_and(|e| {
+                    rel.same_code(f[0], e.activate)
+                        && rel.same_code(f[1], e.init)
+                        && rel.same_code(f[2], e.update)
+                        && rel.same_code(f[3], e.pre)
+                        && helpers.iter().all(|&h| rel.func(h).is_some())
+                })
+            })
+        };
+        use super::{cuboid, rail};
+        let rail = four(rail::CLASS_RAIL, 1, [rail::RAIL_ACTIVATE, rail::RAIL_INIT, rail::RAIL_UPDATE, rail::RAIL_PRE], &[rail::RAIL_DATA_INIT]);
+        let fixed = four(cuboid::CLASS_FIXED, 3, cuboid::FIXED_FNS, &cuboid::FIXED_HELPERS);
+        let side = four(cuboid::CLASS_SIDE, 3, cuboid::SIDE_FNS, &cuboid::SIDE_HELPERS);
+        CameraPorts { region, swing, placed, focus, rail, fixed, side }
     }
 
     /// Whether the port runs `class` as a current camera (the follow, first-person, script and type-6 cameras always).
@@ -169,9 +199,15 @@ impl CameraPorts {
         match class {
             CLASS_FOLLOW | CLASS_FIRST_PERSON | CLASS_SCRIPT | CLASS_TYPE6 => true,
             CLASS_SWING => self.swing,
+            super::rail::CLASS_RAIL => self.rail,
+            super::cuboid::CLASS_FIXED => self.fixed,
+            super::cuboid::CLASS_SIDE => self.side,
             _ => false,
         }
     }
+
+    /// Whether `class` is one of the level classes the port runs as a current camera through [`super::class_cam`].
+    pub fn runs_class_cam(&self, class: i32) -> bool { super::class_cam::CLASS_CAMS.contains(&class) && self.runs(class) }
 }
 
 /// One UpdateCam slot's record, header and run-time words.
@@ -187,6 +223,10 @@ pub struct Slot {
     pub focus: Option<MobyFocus>,
     /// Class 3's rail (pvar +0x24; −1: any).
     pub rail: i32,
+    /// Class 3's block with its camera path and mode 2's mappings (run time: +0x34, +0x36; [`super::rail`]).
+    pub rail_cam: Option<super::rail::RailSlot>,
+    /// Class 14's block ([`super::cuboid`]).
+    pub side: Option<SideView>,
 }
 
 /// The level's camera slots and the follow camera's lock words.
@@ -203,6 +243,11 @@ pub struct LevelCameras {
     pub focus: i32,
     /// The class the choice picked this tick when the port does not run it (G-HERO-027), for the log and the tests.
     pub wanted: Option<i32>,
+    /// The follow camera's UpdateCam +0x7e (releasing; class 1's hook sets it to 2 with its blend, `0x2e8870`); the
+    /// switch `0x20d110` clears it on the camera it leaves.
+    pub release: u8,
+    /// The slot the last activation loop chose (with the class it returns).
+    pub won_slot: Option<usize>,
     volumes: Option<Arc<Volumes>>,
     /// The records as loaded (a level restart rebuilds the slots from them: [`LevelCameras::restarted`]).
     source: Arc<[LevelCamera]>,
@@ -221,10 +266,23 @@ impl LevelCameras {
                 let placed = if c.record.class == CLASS_PLACED { PlacedView::parse(p) } else { None };
                 let focus = if c.record.class == CLASS_FOCUS { MobyFocus::parse(p) } else { None };
                 let rail = if c.record.class == 3 && p.len() >= 0x28 { i32::from_le_bytes(p[0x24..0x28].try_into().unwrap()) } else { -1 };
-                Slot { record: c.record, header, region, placed, focus, rail }
+                let rail_cam = if c.record.class == super::rail::CLASS_RAIL { RailCamera::parse(p).map(super::rail::RailSlot::new) } else { None };
+                let side = if c.record.class == super::cuboid::CLASS_SIDE { SideView::parse(p) } else { None };
+                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side }
             })
             .collect();
-        LevelCameras { level, slots, ports, owner: None, focus: 0, wanted: None, volumes, source: cams.to_vec().into() }
+        LevelCameras {
+            level,
+            slots,
+            ports,
+            owner: None,
+            focus: 0,
+            wanted: None,
+            release: 0,
+            won_slot: None,
+            volumes,
+            source: cams.to_vec().into(),
+        }
     }
 
     /// The slots as the level's (re)start makes them (the pvar blocks as loaded).
@@ -236,6 +294,9 @@ impl LevelCameras {
     }
 
     pub(super) fn shapes(&self) -> Option<&Volumes> { self.volumes.as_deref() }
+
+    /// The level's shapes and splines, shared.
+    pub(super) fn shapes_arc(&self) -> Option<Arc<Volumes>> { self.volumes.clone() }
 }
 
 /// A candidate's facts for `Camera_ActivationCheckPriority`.
@@ -283,6 +344,13 @@ impl Camera {
     /// Install the level's cameras (the slot init 0x20ef58; the owner lock and +0x230 start clear).
     pub fn set_level(&mut self, cams: LevelCameras) {
         self.level_cams = cams;
+        // 0x20ef58 also clears the camera moby 0x167354, the focus moby 0x16735c and its counter 0x167360, and no
+        // level-class camera is current.
+        self.cam_moby = None;
+        self.cam_moby_call = None;
+        self.focus_moby = None;
+        self.focus_ticks = 0;
+        self.class_cam = Default::default();
         // 0x20ef58 also clears the Swingshot targets' hint (camera, target, weight, callback: 0x167480 / 0x167484 /
         // 0x16748c / 0x167490).
         self.hint.target = None;
@@ -291,7 +359,9 @@ impl Camera {
     }
 
     /// Whether the follow camera is the current one (0x167280 +0x86 = 0: the setters' guard).
-    pub fn follow_is_current(&self) -> bool { !(self.type6.active || self.script.active || self.first_person.active || self.swing.active) }
+    pub fn follow_is_current(&self) -> bool {
+        !(self.type6.active || self.script.active || self.first_person.active || self.swing.active || self.class_cam.active)
+    }
 
     /// The class of the current camera.
     pub fn current_class(&self) -> i32 {
@@ -303,27 +373,67 @@ impl Camera {
             CLASS_FIRST_PERSON
         } else if self.swing.active {
             CLASS_SWING
+        } else if self.class_cam.active {
+            self.class_cam.class
         } else {
             CLASS_FOLLOW
         }
     }
 
+    /// The current camera's slot (`0x167280`): a level-class camera's own; for the system cameras the record of their
+    /// class (one per level); None without records.
+    pub(super) fn current_slot(&self) -> Option<usize> {
+        if self.class_cam.active { return Some(self.class_cam.slot); }
+        let cur = self.current_class();
+        self.level_cams.slots.iter().position(|s| s.record.class == cur)
+    }
+
+    /// The current camera's +0x7e (releasing): the Swingshot camera's, a level-class camera's, or the follow camera's
+    /// (class 1's hook writes it); 0 for the others (their releases are their own calls).
+    pub(super) fn current_release(&self) -> u8 {
+        match self.current_class() {
+            CLASS_SWING => self.swing.release,
+            CLASS_FOLLOW => self.level_cams.release,
+            _ if self.class_cam.active => self.class_cam.release,
+            _ => 0,
+        }
+    }
+
+    /// Set the current camera's +0x7e (class 1's hook `0x2e8870`: 2).
+    pub(super) fn set_current_release(&mut self, v: u8) {
+        match self.current_class() {
+            CLASS_SWING => self.swing.release = v,
+            CLASS_FOLLOW => self.level_cams.release = v,
+            _ if self.class_cam.active => self.class_cam.release = v,
+            _ => {}
+        }
+    }
+
     /// `UpdateAllCameras`' activation loop 0x20d620: every slot's check in slot order (class 17's hooks retune the
-    /// follow camera) against the current camera (releasing when its +0x7e is set: the Swingshot camera's pre hook),
-    /// then the choice. Returns the class that won when it is not the current one (the caller switches it in, or
-    /// records it in [`LevelCameras::wanted`] when the port does not run it).
+    /// follow camera) against the current camera (releasing when its +0x7e is set: the Swingshot camera's and the
+    /// level-class cameras' pre hooks, class 1's hook on the follow camera), then the choice. Every slot but the
+    /// current camera's own is checked (two records of one class can hand over: class 3's rails). Returns the class
+    /// that won when it is not the current camera (its slot in [`LevelCameras::won_slot`]); the caller switches it in,
+    /// or records it in [`LevelCameras::wanted`] when the port does not run it.
     pub(super) fn activation_loop(&mut self, inp: &CamInput) -> Option<i32> {
         let cur = self.current_class();
-        let releasing = cur == CLASS_SWING && self.swing.release != 0;
-        let mut best: Option<(i32, Best)> = Some((cur, Best { priority: self.level_cams.priority_of(cur), releasing }));
+        let cur_slot = self.current_slot();
+        // The best so far: None = the current camera (its +0x7e is read live: a hook may set it), else a slot.
+        let cur_priority = cur_slot.map_or(self.level_cams.priority_of(cur), |i| self.level_cams.slots[i].header.priority);
+        let mut best: Option<(i32, usize)> = None;
         let mut changed = false;
         let mut fp_checked = false;
         let h = inp.hero;
         let feet = to_f32x3(h.pos);
+        self.level_cams.won_slot = None;
         for i in 0..self.level_cams.slots.len() {
             let s = &self.level_cams.slots[i];
             let (class, header, rail) = (s.record.class, s.header, s.rail);
-            if class == cur { continue; }
+            if Some(i) == cur_slot || (cur_slot.is_none() && class == cur) { continue; }
+            let best_now = match best {
+                None => Best { priority: cur_priority, releasing: self.current_release() != 0 },
+                Some((_, b)) => Best { priority: self.level_cams.slots[b].header.priority, releasing: false },
+            };
             let hook = match class {
                 CLASS_REGION => {
                     if self.level_cams.ports.region { self.region_hook(i, inp); }
@@ -341,31 +451,42 @@ impl Camera {
                     fp_checked = true;
                     if self.follow_is_current() && self.first_person_activation(inp) { 1 } else { 0 }
                 }
+                super::cuboid::CLASS_FIXED if self.level_cams.ports.fixed => self.fixed_hook(i, Some(best_now), inp),
+                super::cuboid::CLASS_SIDE if self.level_cams.ports.side => super::cuboid::side_hook(h),
                 // The script and type-6 cameras' hooks answer 0; they are switched in by their calls (+0x7d is not
-                // set by the port's `CameraScript`, which switches directly).
+                // set by the port's `CameraScript`, which switches directly). Class 3's hook `0x315dd8` answers 0.
                 _ => 0,
+            };
+            // The best as the check reads it (after the hook: class 1's may have set the current camera's +0x7e).
+            let best_now = match best {
+                None => Best { priority: cur_priority, releasing: self.current_release() != 0 },
+                Some(_) => best_now,
             };
             let c = Candidate { class, priority: header.priority, activation: header.activation, entered: false, hook };
             let vols = self.level_cams.volumes.clone();
             let won = activation_check(
                 c,
-                best.map(|b| b.1),
+                Some(best_now),
                 || vols.as_deref().is_some_and(|v| point_in_cuboid(v, feet, header.cuboid)),
                 || h.f15d4 == class && (class != 3 || rail < 0 || (h.boots.rail == Some(rail as usize) && h.boots.off_rail == 0)),
             );
             if won {
-                best = Some((class, Best { priority: header.priority, releasing: false }));
+                best = Some((class, i));
                 changed = true;
             }
         }
+        let mut best = best.map(|(c, i)| (c, Some(i)));
         if !fp_checked && self.follow_is_current() && self.first_person_activation(inp) {
             // No records (a game without the level's data): the first-person camera's slot is implicit.
-            best = Some((CLASS_FIRST_PERSON, Best { priority: 6, releasing: false }));
+            best = Some((CLASS_FIRST_PERSON, None));
             changed = true;
         }
         self.level_cams.wanted = None;
         match best {
-            Some((c, _)) if changed && c != cur => Some(c),
+            Some((c, i)) if changed && (c != cur || (i.is_some() && i != cur_slot)) => {
+                self.level_cams.won_slot = i;
+                Some(c)
+            }
             _ => None,
         }
     }
@@ -380,6 +501,13 @@ impl Camera {
         let won = self.activation_loop(inp);
         let back = match won {
             Some(CLASS_FOLLOW) => true,
+            Some(c) if self.level_cams.ports.runs_class_cam(c) && self.level_cams.won_slot.is_some() => {
+                // A level-class camera (classes 3 / 1 / 14) over the released Swingshot camera.
+                let prev = self.active_view();
+                let slot = self.level_cams.won_slot.unwrap();
+                self.class_switch_in(inp, c, slot, prev);
+                return Some(prev);
+            }
             Some(c) => {
                 self.level_cams.wanted = Some(c);
                 self.swing.release != 0

@@ -756,7 +756,7 @@ fn draw_list1(
                     }
                     // Drawn by crate::water_render / crate::sea_render; the Walloper's arcs by crate::walloper_render; the
                     // range static by crate::visibomb_view.
-                    Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) | Callback::Walloper | Callback::RangeStatic => {}
+                    Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) | Callback::Walloper | Callback::RangeStatic | Callback::UnitFrame(_) => {}
                 }
             }
         }

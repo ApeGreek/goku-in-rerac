@@ -55,6 +55,9 @@ pub struct HeadMoby {
 pub struct Worn {
     pub head: Option<HeadMoby>,
     pub head_classes: Option<Arc<HeadClasses>>,
+    /// 0x14161b: no air here (written by the levels' Clank-section classes: Orxon's 22, Blarg's 1061): the O2 Mask goes
+    /// on as under water.
+    pub airless: u8,
 }
 
 impl Hero {
@@ -89,6 +92,11 @@ impl Hero {
                 if let Some(e) = c.iter().find(|e| e.1 == m.o_class) { moby_anim::advance(&mut m.anim, &e.2); }
             }
         }
+        self.worn_slot_loop(rng);
+    }
+
+    /// The slot loop 0x231088's slots 1 and 2 (also run alone by the body switch's pass, `items::slot_pass`).
+    pub(super) fn worn_slot_loop(&mut self, rng: &mut Rng) {
         // The slot loop: slot 1, then slot 2.
         match self.feet_slot.state {
             2 => {
@@ -141,7 +149,7 @@ impl Hero {
 
     /// `UpdateWrenchSelected(2)`'s rules, then the common swap (the O2 Mask is not saved).
     fn head_swap(&mut self, rng: &mut Rng) {
-        let under = self.group == 0x11 || matches!(self.state, 0x76 | 0x6a | 0x82);
+        let under = self.group == 0x11 || matches!(self.state, 0x76 | 0x6a | 0x82) || self.worn.airless != 0;
         let o2 = self.owned.has(item::O2_MASK as usize);
         let s = &mut self.head_slot;
         let cur = if s.state != 0 { s.id } else { 0 };

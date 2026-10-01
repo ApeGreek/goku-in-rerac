@@ -509,6 +509,82 @@ while he rides it (`0x288968`): a hero-side seam, `hero/**` was off-limits); 587
 `0x2f5e18` (unported: 0 until then); not reached for time), 1401 (16: the class-933 spawner `0x2de298` and knock-back;
 not reached).
 
+### In the port: cheap wins round 5 (2026-10-01, G-CLS-027)
+
+Taken from the census of 2026-10-01 08:45 (unit ids of that run; the verdict **cheap**, largest first), skipping the
+other lanes' units (the camera classes, spawners and group commands, Pokitaru's boats, the creatures 574 / 452) and
+1069 / 587 (the brief). The coverage table of every ported function is the module doc of its port; nothing was tested
+in this round (the test request: `docs/test-requests/2026-10-01-cheap-wins-5.md`). 25 census units / 248 created
+instances, 27 `units::PORTS` rows (plus two draw-only rows).
+
+| unit | classes (levels: created) | reference | port | notes |
+|---|---|---|---|---|
+| U506 | 471 reversing belts (16: 37) | level16 0x2c9878 | `units::kalebo_belt` | the group's belt push (`CarryRiders` on each member), Ratchet in cuboid +0x64 / +0x68 reverses it; the group voice (handoff); draw 0x2c9cd0: two quad layers (FX 0x13 / 0x10), the second scrolling with the speed (two `UnitQuads` rows) |
+| U541 | 99 sliding laser emitters (17: 35) | level17 0x2a8da0 | `units::fleet_laser` | shuttle between home and a cuboid / linked moby; beam hit (0x10001, sideways push), 15 type-79 sparks a tick (`World::part79`, the spawner's first consumer), beam quad 0x2a95b8 |
+| U485 | 221 shaking critters (15: 24) | level15 0x2c2938 | `units::quartu_critter` | NPC look-at record, group-busy test, type-21 dust, death: sound, explosion, bolts, three pieces |
+| U567 | 1355 divers (18: 36) | level18 0x2efb88 | `units::veldin_diver` | released only by the boss 1422 (`veldin_diver::activate` = 0x2f0030; 1422 unported: inert until then); trails + glows (two callbacks) |
+| U162 | 617 path riders (04: 4) | level04 0x2d6f68 | `units::eudora_path_rider` | |
+| U180 | 810 rocking floats (05: 4) | level05 0x30bdd8 | `units::rilgar_rocker` | carries its riders through the rock |
+| U195 | 895 flaps (05: 4) | level05 0x3166a0 | `units::rilgar_flap` | |
+| U283 | 467 / 472 linked lifts (08: 4) | level08 0x2ea398 | `units::batalia_lift` | global flag 0x35 |
+| U436 | 1577 watchers (13: 4) | level13 0x30be60 | `units::gemlik_watch` | |
+| U158 | 484 (04: 3) | level04 0x2ce060 | `units::marker::update` | `DeleteMoby(self)` |
+| U313 | 1206 hazard columns (09: 9) | level09 0x305a28 | `units::gaspar_hazard` | sphere hits along z |
+| U60 | 695 floating pushables (01: 9) | level01 0x2f8268 | `units::floating_pushable` | `walker::move_ground`, the water height |
+| U256 | 1080 sinking floats (07: 8) | level07 0x311bc8 | `units::umbris_sinker` | `HeroOnMoby` |
+| U505 | 470 glowing beacons (16: 8) | level16 0x2c9480 | `units::kalebo_glow` | the gold bolts' item glow, fourth consumer |
+| U341 | 1240 spark fountains (10: 4) | level10 0x2e5be0 | `units::orxon_sparks` | type 64 |
+| U263 | 104 / 106 / 1129 linked platforms (07: 1, 13: 4) | level07 0x31aee0 | `units::linked_mover::platform_update` | **the same state machine as U247 at another pvar base**: `linked_mover::run(w, id, base)` now takes the base |
+| U222 | 1054 split doors (06: 9) + the half 1055 | level06 0x2fbfb0 | `units::blarg_doors` | group state 3 (`scheduler::group_state`) |
+| U88 | 1504 wandering lights (01: 1, 06: 4) | level01 0x30b618 | `units::wandering_light` | a dynamic point light (`point_lights`) |
+| U376 | 1248 rising gates (11: 6) + halves 1247 | level11 0x316320 | `units::pokitaru_gate` | |
+| U194 | 893 hinged hatches (05: 4) | level05 0x316258 | `units::rilgar_hatch` | manipulator angle (`manip::set_axis`) |
+| U191 | 855 water spouts (05: 7) | level05 0x3150f0 | `units::rilgar_spout` | type-50 droplets, type-46 rings at the patch height, the group voice (G-AUD-010's last consumer) |
+| U438 | 1805 breakable props (13: 8) | level13 0x30cdb8 | `units::gemlik_breakable` | the skill point of the last of the group: G-SAV-007 |
+| U252 | 1041 lobbing turrets (07: 8) + their shot 882 | level07 0x30d4d8, 0x30bbc8 | `units::umbris_lobber` | the shot's update is in the class table but the census lists it only as created (0 placed) |
+| U118 | 1212 path ships (02: 6, 09: 3) | level02 0x2ec4b8 | `units::path_ship` | **shared**: the engine-trail blob (`units::engine_trail`, now also `batalia_fighter`'s); the skill points: G-SAV-007 |
+| U155 | 434 crank lifts (04: 3) | level04 0x2c6bb8 | `units::eudora_crank_lift` | posed by a bolt crank 280; sinks back unwinding it (writes the crank's progress and angle) |
+
+**Plug-and-play found this round**: `units::engine_trail::Blob` (one row per copy of the path flyers' exhaust blob:
+level08 0x2dec90, level02 0x2eca30); `linked_mover::run` at any pvar base (the U247 movers and the U263 platforms);
+`World::part79` (level 17's spark spawner 0x26fb60); the gold-bolt item glow and the group voice handoff gained their
+fourth / third consumers with no new code.
+
+**Not cheap after all** (reached, not ported): 1066 (U225, 06: 6: wakes dormant creatures of its group, 0x2e9d10: a
+spawner, the spawn lane's), 899 (U140, 03: 4: spawns path movers 898 along a path, `0x2db198`; spawner),
+1885 (U319, 09 / 13: 8: lobs creatures, `0x30b218`; spawner), 1401 (U521, 16: 14: spawner), 1906 (U579, 18: 18: a
+creature woken by the boss 1422), 432 / 1052 (U154, 04: 4: they swap their own class at run time, `+0xa6` / `+0x22` /
+the class header: no class-swap service in the port: G-CLS-031), 434 (U155, 04: 3: drives the bolt crank 280's pvars
+back: ported after all, see the table), 664 (U307, 09: 6) and 1293 /
+1320 (U316, 09: 6) (write Ratchet's platform delta 0x13f440 and z 0x13f448 while he rides them, like 1069: G-HERO-034),
+643 (U451, 14: 5: reads the hero's contact moby 0x13f58c: G-HERO-033), 111 (U415, 13: 8: the ship moby 0x140940 and
+hero state 0x32: G-LVL-009), 79 (U172, 05: 30: no Ghidra function at 0x2d7140, a disassembly-only port deferred for
+size), 466… (U156, 04: 38: its path driver 0x2cb8b8 has no Ghidra function, ~1,000 instructions), 857 (U328 / U212, 10 /
+06: 35: 4,300 words, Ratchet's state and the difficulty), class 8 (U440, 14: 11: 2,198 words, deferred for size).
+
+Census before → after (both `cargo run -p rc-trace -- class-census`; the after run includes the other lanes' ports
+of the same morning): 430 unported class-levels / 2,405 placed / 2,205 created, 347 units → **399 / 2,131 / 1,933, 320
+units**.
+
+### In the port: class swap and spawners (2026-10-01, G-CLS-031, G-CLS-027)
+
+The round-5 units left for a class-swap service and the spawn lane. The coverage table of every ported function is the
+module doc of its port; nothing was tested in this job (the test request: `docs/test-requests/2026-10-01-classswap-spawners.md`).
+6 census units / 36 placed instances, 8 `units::PORTS` rows (the created classes 898, 1886 have their own rows).
+
+| unit | classes (levels: placed) | reference | port | notes |
+|---|---|---|---|---|
+| U154 | 432 / 1052 crank followers (04: 4) | level04 0x2c6858 | `units::eudora_crank_follower` | posed by a bolt crank 280; **the class-swap service** `moby_update::class_swap` (432 → 1052 at the init, back to 432 when the crank is wound); the renderer draws a placed moby by its live class |
+| U225 | 1066 creature wakers (06: 6) | level06 0x2fda30 (the wake 0x2e9d10) | `units::blarg_waker` | wakes the dormant (state 0xf) 827s of its group one every 20 ticks; 827 is not ported (U211), so none is ever dormant in the port |
+| U140 | 899 path-mover lines (03: 4) + the movers 898 | level03 0x2db280, 0x2db198, 0x2db020 | `units::kerwan_path_spawner` | platforms 2.9 apart along the path at 3 u/s, `CarryRiders`; the spawner loops 898's sound 0 |
+| U319 | 1885 pod launchers (09: 4, 13: 4) + the pods 1886 | level09 0x30ab80, 0x30b3b0, 0x30a778 (level13 0x30d550 / 0x30dd80: the same code) | `units::pod_launcher` | health, flash, death blast and pieces 1733–1735; the pods bounce and hatch a revived dead member of the group (193 on 09, 63 on 13: both ported); the target search's cuboid list (`target::acquire_with`) |
+| U521 | 1401 mine drones (16: 14) | level16 0x2e37a0 | `units::kalebo_mine_drone` | waits in its cuboid, flies path A carrying a new race mine 933 (`0x2de298`), drops it (its state 1), flies back along path B; exhaust glows (type 23); the mine's own update (933, U517) is not ported |
+
+**System or not**: the class swap is a service now (`class_swap::swap` + its `PORTS` registry); the four "spawners" share
+no helper (each creates or wakes its own family's mobys with its own code), so there is no spawner system to port: a
+spawner is a class port that calls `World::create_moby` / the group walk. Left from the round-5 list: 1906 (U579, a
+creature woken by the boss 1422).
+
 ### In the port: W3 lane 2, moby services (2026-09-30, triggers.md §5b, creatures.md §12)
 
 The lane's four systems: G-REN-024 and G-CLS-026 were ported engine functions under other hashes (the hit flash,

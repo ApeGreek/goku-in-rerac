@@ -10,7 +10,8 @@
 //!    Because the game copies at the end of the render, the drawn fog lags the camera by one update; the
 //!    order here keeps that lag (inferred from the call order, see the doc).
 //! 2. **Camera update** (0x20eca8) for the camera (the fly camera for now): the underwater test 0x20e9f0
-//!    (`rc_game::fog_zones::UnderwaterState`, collision line queries against the level mesh; the water height
+//!    (`rc_game::fog_zones::UnderwaterState`, collision line queries against the level mesh and, with the game tick,
+//!    the moby meshes (the patch managers' water); the water height
 //!    is the level's water, `rc_game::water::world::WaterWorld::water_height`: the active ripple patch, the flat
 //!    plane, else the hit point), then the fog
 //!    zones `fun_001ee4b0` (`rc_game::fog_zones::update`), which overwrite the level fog globals. Nothing is
@@ -96,6 +97,8 @@ pub struct FogState {
     last_t: f32,
     /// The Visibomb's saved fog and the last of its writes applied (crate::visibomb_view).
     visibomb: crate::visibomb_view::FogSwap,
+    /// The tick of the last `WaterWorld::underwater_store` applied.
+    store_tick: Option<u64>,
 }
 
 impl FogState {
@@ -113,6 +116,7 @@ impl FogState {
             last_zone: None,
             last_t: 0.0,
             visibomb: Default::default(),
+            store_tick: None,
         }
     }
 
@@ -204,16 +208,34 @@ fn update_fog_state(
     let Some((entity, t, tint)) = cams.iter().next() else { return };
     let eye = game_eye(t).to_array();
     let was = state.underwater.flag;
+    // The game code's own stores into 0x167494 during the ticks (HeroTeleport, the surface jump: `UnderwaterStore`),
+    // each applied once, before the camera's test.
+    if let Some((tick, store)) = play.as_deref().and_then(|p| p.svc.water.underwater_store) {
+        if state.store_tick != Some(tick) {
+            state.store_tick = Some(tick);
+            state.underwater.flag = match store {
+                rc_game::water::world::UnderwaterStore::Off => false,
+                rc_game::water::world::UnderwaterStore::HeroGroup => play.as_deref().is_some_and(|p| p.game.hero.group == 0x11),
+            };
+        }
+    }
     if let Some(forced) = state.force_underwater {
         state.underwater.flag = forced;
-    } else if play.as_deref().is_some_and(|p| p.game.camera.type6_active()) {
-        // UnderwaterTest 0x20e9f0: 0 while the active camera is of type 6 (`+0x86 == 6`: the Visibomb's view).
+    } else if play.as_deref().is_some_and(|p| p.game.camera.type6_active() || p.svc.game_mode != 0) {
+        // UnderwaterTest 0x20e9f0: 0 while the active camera is of type 6 (`+0x86 == 6`: the Visibomb's view) or the
+        // game mode 0x15f5c4 is not 0 (a cutscene).
         state.underwater.flag = false;
     } else if let Some(mesh) = &state.mesh {
         // Water height: 0x26ed38 = the level's water (`Services::water`: the active ripple patch, then the flat
         // plane), falling back to the hit point; without the game tick the plugin's Novalis ripples.
         match play.as_deref() {
-            Some(p) => state.underwater.update_with_mesh(mesh, eye, |q| p.svc.water.water_height(q)),
+            // `CollLine_Fix(…, 0x12)`: the world mesh, then the moby meshes (the patch managers' water is moby
+            // collision).
+            Some(p) => {
+                let src = p.svc.scene_parts(&p.game.mobys, &*p.classes);
+                let scene = p.svc.scene(&src);
+                state.underwater.update_with_scene(mesh, &scene, eye, |q| p.svc.water.water_height(q));
+            }
             None => {
                 let ripple = water.as_ref().and_then(|w| w.fallback.as_ref());
                 state.underwater.update_with_mesh(mesh, eye, |q| ripple.and_then(|r| r.patch_height(q[0], q[1], q[2])));

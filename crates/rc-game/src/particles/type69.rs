@@ -8,9 +8,12 @@
 //! 30))` (the three draws, in that order), +0x30 = 1/timer, +0x34 = alpha (s16), +0x36 = mode 0, +0x38 = 0x7f7f7f,
 //! +0x3c = a3, velocity +0x20 = vel, RGBA `alpha << 24 | 0x7f7f7f`.
 //!
-//! **Update**: outside [2, 1021]³ → killed; mode 0: pos += vel (modes 1–3 copy a point out of the moby's pvars
-//! +0xd0 / +0x1f0 / +0xe0 and mode 4 the moby's position + 0.2 up: no spawner sets them, see G-PRT-001; here they hold
-//! the position and are counted in [`super::PartStats::unported_branch`]); outside the box again → killed; rotation +=
+//! **Update**: outside [2, 1021]³ → killed; mode 0: pos += vel; modes 1 / 2 / 3 copy a point out of the moby's pvar
+//! block (+0xd0 / +0x1f0 / +0xe0: [`Particles::pvar_points`], read past a 0x80-byte block into the next slot's as the
+//! game's contiguous blocks do [L]) and mode 4 takes the moby's position (z 0.2 up from the record's old z: the game
+//! adds 0.2 to the z it read before the copy) ([`Particles::moby_frames`]; a moby the frames miss: the point
+//! unchanged, counted in [`super::PartStats::unported_branch`]). Giant Clank's beam 0x5f3 sets mode 3
+//! (`moby_update::classes::units::giant_beam`). Outside the box again → killed; rotation +=
 //! `trunc(randf_sym(0, 64))` (past 0xff: − 0xff; the byte wraps) — one draw a tick; then the timer fires → killed, else
 //! A = `trunc(t · (1/life) · alpha)` over +0x38's colour (the twinkle fades out linearly). Native `f32`.
 
@@ -48,18 +51,37 @@ pub fn spawn(sys: &mut Particles, rng: &mut Rng, pos: [f32; 4], vel: [f32; 4], a
 
 fn in_box(p: [f32; 3]) -> bool { p.iter().all(|&x| (2.0..=1021.0).contains(&x)) }
 
+/// The moby a record in modes 1..4 follows (+0x3c: moby + 1).
+pub fn moby_of(r: &super::Record) -> Option<usize> {
+    if r[0] != TYPE || !(1..=4).contains(&rec::i16(r, 0x36)) { return None; }
+    (rec::u32(r, 0x3c) as usize).checked_sub(1)
+}
+
 /// Update 0x289df0: one draw a tick while it lives in the box.
 pub fn update(sys: &mut Particles, i: usize, rng: &mut Rng) {
     if !in_box(rec::pos(&sys.pool.recs[i])) {
         sys.kill_part(i);
         return;
     }
-    if rec::i16(&sys.pool.recs[i], 0x36) == 0 {
+    let mode = rec::i16(&sys.pool.recs[i], 0x36);
+    if mode == 0 {
         let r = &mut sys.pool.recs[i];
         let (p, v) = (rec::v3(r, 0x10), rec::v3(r, 0x20));
         rec::set_v3(r, 0x10, [p[0] + v[0], p[1] + v[1], p[2] + v[2]]);
     } else {
-        sys.stats.unported_branch += 1;
+        let m = moby_of(&sys.pool.recs[i]);
+        let q = match mode {
+            1..=3 => m.and_then(|m| sys.pvar_points.get(&m)).map(|p| p[mode as usize - 1]),
+            4 => {
+                let z = rec::pos(&sys.pool.recs[i])[2];
+                m.and_then(|m| sys.moby_frames.get(&m)).map(|f| [f.pos[0], f.pos[1], z + 0.2])
+            }
+            _ => None,
+        };
+        match q {
+            Some(q) => rec::set_v3(&mut sys.pool.recs[i], 0x10, q),
+            None => sys.stats.unported_branch += 1,
+        }
     }
     if !in_box(rec::pos(&sys.pool.recs[i])) {
         sys.kill_part(i);

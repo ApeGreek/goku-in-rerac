@@ -107,18 +107,34 @@ pub fn update(w: &mut World, id: MobyId) {
     look_at(w, id);
 }
 
+/// The pvar layout of an NPC's head look-at: the same code is compiled into several NPC classes with their own offsets
+/// (774 here; Quartu's Giant Clank mission NPC 1446, `units::quartu_giant_mission`). `pitch` = the record that takes the
+/// pitch (+0x64, ×1.25) and half the yaw (+0x68), `yaw` = the one that takes half the yaw (+0x68); both are run in that
+/// order (`FUN_002777d8(k, d, npc, rec, list)`).
+#[derive(Clone, Copy, Debug)]
+pub struct LookLayout {
+    pub pitch: (usize, u8),
+    pub yaw: (usize, u8),
+    pub glance: usize,
+    pub seen: usize,
+    pub glance_timer: usize,
+    /// Only while sequence B (+0x53) is 0 (774's gate; 1446 has none).
+    pub gate_seq_b: bool,
+}
+
 /// P+0x50 / P+0xd0: the look records on joint lists 0 (head) and 1 (neck); P+0x150 the glance point, P+0x164 the
 /// "seen Ratchet" timer, P+0x168 the glance timer.
-const LOOK: [usize; 2] = [0x50, 0xd0];
-const GLANCE: usize = 0x150;
-const SEEN: usize = 0x164;
-const GLANCE_TIMER: usize = 0x168;
+pub const LAYOUT: LookLayout = LookLayout { pitch: (0x50, 0), yaw: (0xd0, 1), glance: 0x150, seen: 0x164, glance_timer: 0x168, gate_seq_b: true };
 
 /// The head look-at tail of `TalkingNpcUpdate` (module doc table).
-pub fn look_at(w: &mut World, id: MobyId) {
-    if w.m(id).pvars.len() < 0x170 { w.mm(id).pvars.resize(0x170, 0); }
+pub fn look_at(w: &mut World, id: MobyId) { look_at_layout(w, id, &LAYOUT) }
+
+/// The head look-at on the layout `l` (module doc table).
+pub fn look_at_layout(w: &mut World, id: MobyId, l: &LookLayout) {
+    let need = [l.pitch.0 + manip::rec::SIZE, l.yaw.0 + manip::rec::SIZE, l.glance + 0x10, l.seen + 4, l.glance_timer + 4].into_iter().max().unwrap_or(0);
+    if w.m(id).pvars.len() < need { w.mm(id).pvars.resize(need, 0); }
     let (mut k, d) = (f32::from_bits(0x3ca3_d70a), f32::from_bits(0x3e99_999a));
-    if w.m(id).anim.seq_b == 0 {
+    if !l.gate_seq_b || w.m(id).anim.seq_b == 0 {
         let h = w.hero;
         let hp = h.pos.map(|x| x.to_f32());
         let body = h.body_point.map(|x| x.to_f32());
@@ -131,28 +147,28 @@ pub fn look_at(w: &mut World, id: MobyId) {
         if near {
             if c::len3(h.disp.map(|x| x.to_f32())) > 0.01 {
                 let t = c::ticks(w, 120);
-                c::set_pi32(w, id, SEEN, t);
+                c::set_pi32(w, id, l.seen, t);
             } else {
-                c::dec_timer_pvar_i32(w, id, SEEN);
+                c::dec_timer_pvar_i32(w, id, l.seen);
             }
-        } else if c::pi32(w, id, SEEN) != 0 {
-            c::set_pi32(w, id, SEEN, 0);
-            c::set_pv4(w, id, GLANCE, body);
+        } else if c::pi32(w, id, l.seen) != 0 {
+            c::set_pi32(w, id, l.seen, 0);
+            c::set_pv4(w, id, l.glance, body);
         }
-        if c::dec_timer_pvar_i32(w, id, GLANCE_TIMER) != 0 {
+        if c::dec_timer_pvar_i32(w, id, l.glance_timer) != 0 {
             let t = w.svc.timing.scale(crate::ps2v::Pf::f(w.rng.randf(180.0, 300.0))).to_f32() as i32;
-            c::set_pi32(w, id, GLANCE_TIMER, t);
+            c::set_pi32(w, id, l.glance_timer, t);
             let deg = f32::from_bits(0x3c8e_fa35);
             let yaw = c::add_rot(c::yaw(w, id), w.rng.randf(-90.0, 90.0) * deg);
             let pitch = w.rng.randf(0.0, 30.0) * deg;
             let g = [6.0 * yaw.cos() * pitch.cos(), 6.0 * yaw.sin() * pitch.cos(), 6.0 * pitch.sin(), 0.0];
-            c::set_pv4(w, id, GLANCE, c::add(g, [pos[0], pos[1], pos[2], 0.0]));
+            c::set_pv4(w, id, l.glance, c::add(g, [pos[0], pos[1], pos[2], 0.0]));
         }
-        let target = if c::pi32(w, id, SEEN) != 0 {
+        let target = if c::pi32(w, id, l.seen) != 0 {
             k = f32::from_bits(0x3d23_d70a);
             body
         } else {
-            c::pv4(w, id, GLANCE)
+            c::pv4(w, id, l.glance)
         };
         let eye = [pos[0], pos[1], pos[2] + 1.0, pos[3]];
         let v = c::sub(target, eye);
@@ -160,11 +176,12 @@ pub fn look_at(w: &mut World, id: MobyId) {
         let yaw = c::sub_rot(c::atan(v[0], v[1]), c::yaw(w, id)).clamp(-half_pi, half_pi);
         let lim = f32::from_bits(0x3f06_0a92);
         let pitch = (-c::atan(c::len2(v), v[2])).clamp(-lim, lim);
-        c::set_pf(w, id, 0x138, yaw * 0.5);
-        c::set_pf(w, id, 0xb4, pitch * 1.25);
-        c::set_pf(w, id, 0xb8, yaw * 0.5);
+        c::set_pf(w, id, l.yaw.0 + manip::rec::TARGET + 8, yaw * 0.5);
+        c::set_pf(w, id, l.pitch.0 + manip::rec::TARGET + 4, pitch * 1.25);
+        c::set_pf(w, id, l.pitch.0 + manip::rec::TARGET + 8, yaw * 0.5);
     }
-    for (list, ofs) in LOOK.into_iter().enumerate() { manip::look(w, id, id, ofs, list as u8, k, d); }
+    manip::look(w, id, id, l.pitch.0, l.pitch.1, k, d);
+    manip::look(w, id, id, l.yaw.0, l.yaw.1, k, d);
 }
 
 #[cfg(test)]
@@ -200,8 +217,8 @@ mod tests {
         r.randf(-90.0, 90.0);
         r.randf(0.0, 30.0);
         assert_eq!(w.rng.state, r.state);
-        assert_eq!(c::pi32(&w, 0, GLANCE_TIMER), n);
-        assert_eq!(c::pi32(&w, 0, SEEN), 120);
+        assert_eq!(c::pi32(&w, 0, LAYOUT.glance_timer), n);
+        assert_eq!(c::pi32(&w, 0, LAYOUT.seen), 120);
         // Looking at the body point from the eye (0, 0, 1): yaw 0, pitch −atan2(0.5, 3); k 0.04 → the spring's first step.
         let pitch = -(0.5f32).atan2(3.0);
         let mut a = crate::ps2v::Pf::ZERO;
@@ -215,8 +232,8 @@ mod tests {
         hero.body_point = v(-3.0, 0.0, 1.5);
         let mut w = World::new(&mut t, &hero, &mut rng, &classes, &mut svc, 1);
         look_at(&mut w, 0);
-        assert_eq!(c::pi32(&w, 0, SEEN), 0);
-        assert_eq!(c::pv4(&w, 0, GLANCE), [-3.0, 0.0, 1.5, 0.0]);
+        assert_eq!(c::pi32(&w, 0, LAYOUT.seen), 0);
+        assert_eq!(c::pv4(&w, 0, LAYOUT.glance), [-3.0, 0.0, 1.5, 0.0]);
         // Talking: no targets written (the records only spring).
         w.mm(0).anim.seq_b = 3;
         look_at(&mut w, 0);

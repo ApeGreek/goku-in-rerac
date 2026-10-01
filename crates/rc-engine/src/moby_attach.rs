@@ -462,8 +462,9 @@ fn place(a: &mut MobyAttach, host_class: &MobyAnimClass, host: &AnimState, snap:
 fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level: Res<crate::Level>, play: Option<Res<crate::gameplay::Play>>) {
     let (Some(mut a), Some(anim)) = (attach, anim) else { return };
     let hand = play.as_ref().map(|p| p.game.hero.items.slot.item.clone());
-    // First person (0x1413f5): `0x2486c0` hides Ratchet's items, the thrown wrench excepted.
-    let fp = play.as_ref().is_some_and(|p| p.game.hero.f13f5 != 0);
+    // First person (0x1413f5): `0x2486c0` hides Ratchet's items, the thrown wrench excepted; so does every tick of another
+    // body (`0x22a110` → `0x2486c0`, rc_game::hero::bodies: Clank or Giant Clank is the hero, Ratchet and his items hidden).
+    let fp = play.as_ref().is_some_and(|p| p.game.hero.f13f5 != 0 || p.game.hero.mode != 0);
     // 0x1413ff (the gold bolt's pickup): `FUN_002487a8` hides the hand item.
     let hand_off = play.as_ref().is_some_and(|p| p.game.hero.f13ff != 0);
     // The Swingshot's hook (a moby of its own in the game: advanced every tick, placed by the item's update).

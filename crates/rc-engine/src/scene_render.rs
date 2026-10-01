@@ -320,6 +320,11 @@ fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Pers
                 if let Some(l) = state.as_deref_mut().and_then(|s| s.0.levels.get_mut(level)) { l.map_mask = packed; }
                 println!("scene: memcard_Save (map mask packed; the in-memory game state holds every write; no card writer yet)");
             }
+            // The slideshow mode 7, PlayMovieB and PauseAllSounds from a class (the boss 1422's ending): not run by the
+            // engine yet (G-CUT-003, G-AUD-012); the game mode stays 0, so the class goes on.
+            R::Slideshow => println!("scene: EnterSlideshowMode requested (not ported: G-CUT-003)"),
+            R::MovieB { movie } => println!("scene: PlayMovieB({movie}) requested (not ported: G-CUT-003)"),
+            R::PauseSounds { mask } => println!("scene: PauseAllSounds({mask:#x}) requested (not ported: G-AUD-012)"),
             R::ShipHidden(h) => {
                 if let Some(id) = play.ship_moby() {
                     let m = &mut play.game.mobys.mobys[id];
@@ -875,10 +880,13 @@ fn hold_camera(hold: Res<FadeHold>, source: Option<Res<CameraSource>>, mut cams:
 }
 
 /// The fade quad component on the main camera.
-fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, hold: Res<FadeHold>, cams: Query<(Entity, Option<&SceneFade>), With<FlyCam>>) {
-    let black = if active.running { active.black } else { hold.coverage() };
+fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, hold: Res<FadeHold>, play: Option<Res<Play>>, cams: Query<(Entity, Option<&SceneFade>), With<FlyCam>>) {
+    // In gameplay without a hold: the classes' 0x15f3fc (`DrawWorld` 0x21a1b8: black at `trunc(min(f, 1)·128)` when
+    // f > 0; `rc_game::cinematic::set_fade`).
+    let gameplay = play.as_ref().map_or(0.0, |p| p.svc.cinematic.fade);
+    let black = if active.running { active.black } else if hold.frames > 0 { hold.coverage() } else { gameplay };
     let alpha = (black.clamp(0.0, 1.0) * 128.0) as u32;
-    let want = ((active.running || hold.frames > 0) && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
+    let want = ((active.running || hold.frames > 0 || gameplay > 0.0) && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
     for (e, have) in &cams {
         match (want, have) {
             (Some(w), Some(h)) if *h == w => {}
@@ -906,6 +914,25 @@ fn subtitle_layer(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, hold: 
     layer.hide_hud = active.running || flag;
     layer.prims.clear();
     if !active.running && rt.letterbox > 0 { layer.prims = letterbox_prims(rt.letterbox); }
+    // The census units' 2-D draw callbacks (Veldin's countdown 586, `0x2d8098`: `DrawUIFrame` and
+    // `font_print_center_large`, `rc_game::moby_update::classes::units::veldin_pads::countdown_draw`).
+    if !active.running {
+        if let (Some(glyphs), Some(p)) = (rt.glyphs.as_ref(), play.as_ref()) {
+            let texts = &p.svc.draw_callbacks.texts;
+            if !texts.is_empty() {
+                use crate::text_render::{draw_ui_frame, font_print, TextState};
+                let mut out = Hud2d::default();
+                let mut st = TextState::default();
+                let g = &glyphs[Font::Large as usize];
+                for t in texts {
+                    draw_ui_frame(&mut out, t.frame[0], t.frame[1], t.frame[2], t.frame[3], t.frame[4]);
+                    let width = rc_formats::font::measure_text_width(&t.text, 8, g);
+                    font_print(&mut out, &mut st, g, Font::Large, t.x - (width >> 1), t.y, t.rgba, &t.text, 8);
+                }
+                layer.prims.extend(out.prims);
+            }
+        }
+    }
     let (Some(glyphs), Some(line)) = (rt.glyphs.as_ref(), active.last.as_ref().and_then(|t| t.subtitle.as_ref())) else { return };
     if !active.running { return; }
     layer.prims = subtitle_prims(glyphs, &line.text);

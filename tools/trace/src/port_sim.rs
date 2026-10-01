@@ -420,6 +420,7 @@ impl<'l> PortSim<'l> {
         let mut hero_sounds = HeroClassSounds {
             audio: || std::cell::RefMut::filter_map(audio.borrow_mut(), |a| a.as_deref_mut()).ok(),
             class: &lv.ratchet,
+            body_classes: None,
             listener: class_sounds::listener_of(&cam),
             hero: hero_id,
             counter: self.game.counter,

@@ -288,6 +288,18 @@ pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable,
     slot_loop(hero, g, table, anim, rng, env, hits);
 }
 
+/// `FUN_00231088`, one pass of the item slots' loop on its own (the body switch `SwitchCharacter` 0x231348 +2 runs it
+/// with 0x1413f6 set, so the hand item starts its put-away): slot 0 ([`slot_loop`]: the swap rules, the put-away, the
+/// item's update), slots 1 / 2 (`Hero::worn_slot_loop`), slot 3 (`Hero::back_slot_loop`). Slots 4..6 hold nothing the
+/// port models (n/a).
+#[allow(clippy::too_many_arguments)]
+pub fn slot_pass(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: &dyn AnimCtl, rng: &mut Rng, env: &ItemEnv, hits: &mut dyn HitSink) {
+    slot_loop(hero, g, table, anim, rng, env, hits);
+    hero.worn_slot_loop(rng);
+    // (Without the back's classes only its bookkeeping exists: `Hero::back_items_update`.)
+    if hero.back.is_some() { hero.back_slot_loop(rng); }
+}
+
 /// `MobyAnimBlend(item, seq, frame, n)` on a hand item (the item updates of super::gadgets).
 pub(super) fn blend_item(it: &mut HandItem, data: &ItemData, seq: u8, frame: i32, n: i32) { blend(it, data, seq, frame, n) }
 

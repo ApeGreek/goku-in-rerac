@@ -171,6 +171,9 @@ pub enum GameWrite {
     Save,
     /// `*(0x14bec0 + level·4 + index) = 1`: gold bolt `index` of `level` collected (class 1134).
     GoldBolt { level: usize, index: usize },
+    /// `GiveItem(item, equip)` 0x275760 called by a class (Pokitaru's commando 114: the O2 Mask, item 6): applied by the
+    /// engine with the item tables (`GameState::give_item`); the banner is the class side's ([`give_item`]).
+    GiveItem { item: usize, equip: bool },
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -296,6 +299,9 @@ pub struct TalkTables {
     /// `0x1c4938`: first global slot of each level (20 entries: levels 0..18 and the end).
     pub base: Vec<i32>,
     pub shop: ShopTable,
+    /// `GiveItem`'s banner table (level11 0x1b0d40; found through its code): the message of item i (owned: i + 0x25), −1
+    /// none ([`give_item`]).
+    pub give_banners: Vec<i32>,
 }
 
 /// The 0x18-byte price records `0x1c4530[43]` (level01; the level range table follows them directly): items
@@ -349,6 +355,7 @@ impl TalkTables {
             }
         }
         let (ranges_at, tables_at) = (ranges_at?, tables_at?);
+        let give_banners = give_banner_table(ov);
         let base: Vec<i32> = (0..20).map(|i| ov.i32(ranges_at + 4 * i)).collect::<Option<_>>()?;
         let rec_at = ranges_at.checked_sub((SHOP_RECORDS * 0x18) as u32)?;
         let records: Vec<[u8; 0x18]> = (0..SHOP_RECORDS).map(|i| ov.bytes(rec_at + (i * 0x18) as u32, 0x18).map(|b| b.try_into().unwrap())).collect::<Option<_>>()?;
@@ -376,7 +383,7 @@ impl TalkTables {
                 out
             })
             .collect();
-        Some(TalkTables { tables, base, shop })
+        Some(TalkTables { tables, base, shop, give_banners })
     }
 
     /// The global slot of talk slot `k` (instance +0x74) on `level`.
@@ -388,6 +395,26 @@ impl TalkTables {
     }
 
     pub fn nodes(&self, g: usize) -> &[TalkNode] { self.tables.get(g).map_or(&[], |t| t.as_slice()) }
+}
+
+/// The entries of `GiveItem`'s banner table (`2·37`: the item's message, then the owned items' at +0x25).
+pub const GIVE_BANNERS: usize = 0x4a;
+
+/// `GiveItem` 0x275760's banner table, found by its code (`addiu v1, s0, 0x25` · `sq` · `lui a0, H` · `sq` · `addiu a0,
+/// a0, L`: the table at `H << 16 + L`); empty when the overlay has no such code.
+fn give_banner_table(ov: &Overlay) -> Vec<i32> {
+    for s in ov.sections().iter().filter(|s| s.kind != 8) {
+        let w: Vec<u32> = s.data.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+        for i in 0..w.len().saturating_sub(5) {
+            if w[i] != 0x2603_0025 { continue; }
+            let Some(h) = (1..=3).map(|k| w[i + k]).find(|x| x >> 16 == 0x3c04) else { continue };
+            let Some(l) = (2..=5).filter_map(|k| w.get(i + k)).find(|x| *x >> 16 == 0x2484) else { continue };
+            let a = ((h & 0xffff) << 16).wrapping_add((l & 0xffff) as i16 as i32 as u32);
+            let t: Option<Vec<i32>> = (0..GIVE_BANNERS as u32).map(|k| ov.i32(a + 4 * k)).collect();
+            if let Some(t) = t { return t; }
+        }
+    }
+    Vec::new()
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -548,6 +575,8 @@ impl Interact {
                 GameWrite::GoldBolt { level, index } => {
                     if let Some(b) = gs.levels.get_mut(level).and_then(|l| l.gold_bolts.get_mut(index)) { *b = 1; }
                 }
+                // Needs the item tables: the engine applies it from the returned list.
+                GameWrite::GiveItem { .. } => {}
             }
         }
         w
@@ -562,8 +591,8 @@ impl Interact {
 // ---------------------------------------------------------------------------------------------------------------
 // NpcTalk* (0x27b028 / 0x27b480 / 0x27b550)
 
-fn node_of(w: &World, id: MobyId, n: i16) -> Option<TalkNode> {
-    let g = p::i32(&w.m(id).pvars, talk::TABLE) - 1;
+fn node_of(w: &World, id: MobyId, base: usize, n: i16) -> Option<TalkNode> {
+    let g = p::i32(&w.m(id).pvars, base + talk::TABLE) - 1;
     if g < 0 || n < 0 { return None; }
     w.svc.interact.tables.nodes(g as usize).get(n as usize).copied()
 }
@@ -577,24 +606,28 @@ pub fn talk_slot(w: &World, id: MobyId) -> i32 {
 /// `NpcTalkRegister(npc, talk)` 0x27b480: −1 when the NPC has no slot or its slot no table; else the block is
 /// set up at node 0 (node 0's successor when the NPC was talked to before and node 0 has no condition) and the
 /// slot is returned.
-pub fn talk_register(w: &mut World, id: MobyId) -> i32 {
-    if w.m(id).pvars.len() < talk::SIZE { return -1; }
+pub fn talk_register(w: &mut World, id: MobyId) -> i32 { talk_register_at(w, id, 0) }
+
+/// [`talk_register`] on a talk block at pvar offset `base` (`NpcTalkRegister(npc, pvars + base)`: the commando 114
+/// keeps its block at +0x20).
+pub fn talk_register_at(w: &mut World, id: MobyId, base: usize) -> i32 {
+    if w.m(id).pvars.len() < base + talk::SIZE { return -1; }
     let g = talk_slot(w, id);
     if g < 0 || w.svc.interact.tables.nodes(g as usize).is_empty() { return -1; }
     let talked = w.svc.interact.game.talked.get(g as usize).copied().unwrap_or(0) != 0;
     let nodes = w.svc.interact.tables.nodes(g as usize).to_vec();
     let counter = w.counter as u32;
     let pv = &mut w.mm(id).pvars;
-    p::set_u8(pv, talk::REGISTERED, 1);
-    p::set_i16(pv, talk::LAST, -1);
-    p::set_u32(pv, talk::SINCE, counter);
-    p::set_i16(pv, talk::NODE, 0);
-    p::set_i32(pv, talk::TABLE, g + 1);
+    p::set_u8(pv, base + talk::REGISTERED, 1);
+    p::set_i16(pv, base + talk::LAST, -1);
+    p::set_u32(pv, base + talk::SINCE, counter);
+    p::set_i16(pv, base + talk::NODE, 0);
+    p::set_i32(pv, base + talk::TABLE, g + 1);
     let mut n = 0i16;
     if talked && nodes[0].kind == 0 { n = nodes[0].next; }
-    p::set_i16(pv, talk::NODE, n);
+    p::set_i16(pv, base + talk::NODE, n);
     let auto = nodes.get(n.max(0) as usize).map_or(0, |nd| (nd.flags & 1) as u8);
-    p::set_u8(pv, talk::AUTO, auto);
+    p::set_u8(pv, base + talk::AUTO, auto);
     g
 }
 
@@ -633,22 +666,25 @@ fn node_text(w: &World, nd: &TalkNode) -> Vec<u8> {
 /// [`talk::LAST`] and the block moves to its `next` (playing that node's scene at once when the old node has flag
 /// 4); then the current node's text goes into the prompt buffer (msg 0: the slot is dropped) and its condition
 /// picks the true / false node (recursing when that changes the node).
-pub fn talk_refresh(w: &mut World, id: MobyId, advance: bool) {
-    let n = p::i16(&w.m(id).pvars, talk::NODE);
-    let Some(mut nd) = node_of(w, id, n) else {
-        if advance { p::set_i16(&mut w.mm(id).pvars, talk::LAST, n); }
+pub fn talk_refresh(w: &mut World, id: MobyId, advance: bool) { talk_refresh_at(w, id, 0, advance) }
+
+/// [`talk_refresh`] on a talk block at pvar offset `base`.
+pub fn talk_refresh_at(w: &mut World, id: MobyId, base: usize, advance: bool) {
+    let n = p::i16(&w.m(id).pvars, base + talk::NODE);
+    let Some(mut nd) = node_of(w, id, base, n) else {
+        if advance { p::set_i16(&mut w.mm(id).pvars, base + talk::LAST, n); }
         return;
     };
     if advance {
         let counter = w.counter as u32;
         let pv = &mut w.mm(id).pvars;
-        p::set_i16(pv, talk::LAST, n);
-        p::set_u32(pv, talk::SINCE, counter);
+        p::set_i16(pv, base + talk::LAST, n);
+        p::set_u32(pv, base + talk::SINCE, counter);
         if nd.next != n {
             let old_flags = nd.flags;
-            p::set_i16(pv, talk::NODE, nd.next);
-            let Some(nn) = node_of(w, id, nd.next) else { return };
-            p::set_u8(&mut w.mm(id).pvars, talk::AUTO, (nn.flags & 1) as u8);
+            p::set_i16(pv, base + talk::NODE, nd.next);
+            let Some(nn) = node_of(w, id, base, nd.next) else { return };
+            p::set_u8(&mut w.mm(id).pvars, base + talk::AUTO, (nn.flags & 1) as u8);
             nd = nn;
             if old_flags & 4 != 0 {
                 w.svc.interact.talker = Some(id);
@@ -665,14 +701,14 @@ pub fn talk_refresh(w: &mut World, id: MobyId, advance: bool) {
     if nd.kind == 0 { return; }
     let c = condition(w, &nd);
     let to = if c { nd.yes } else { nd.no };
-    if to != p::i16(&w.m(id).pvars, talk::NODE) {
+    if to != p::i16(&w.m(id).pvars, base + talk::NODE) {
         let counter = w.counter as u32;
-        let auto = node_of(w, id, to).map_or(0, |x| (x.flags & 1) as u8);
+        let auto = node_of(w, id, base, to).map_or(0, |x| (x.flags & 1) as u8);
         let pv = &mut w.mm(id).pvars;
-        p::set_i16(pv, talk::NODE, to);
-        p::set_u32(pv, talk::SINCE, counter);
-        p::set_u8(pv, talk::AUTO, auto);
-        talk_refresh(w, id, false);
+        p::set_i16(pv, base + talk::NODE, to);
+        p::set_u32(pv, base + talk::SINCE, counter);
+        p::set_u8(pv, base + talk::AUTO, auto);
+        talk_refresh_at(w, id, base, false);
     }
 }
 
@@ -693,39 +729,50 @@ fn start_scene(w: &mut World, id: MobyId, scene: i16) {
 /// The end of the talker's scene or movie (`0x2ac608` / `MovieExitToGameplay`): the talker is shown again and
 /// its dialogue advances (`NpcTalkRefresh(npc, talk, 1)`). The engine sets [`Interact::scene_ended`]; the talking
 /// classes call this first in their update, so the refresh lands before their own logic as in the game.
-pub fn poll_scene_end(w: &mut World, id: MobyId) {
+pub fn poll_scene_end(w: &mut World, id: MobyId) { poll_scene_end_at(w, id, 0) }
+
+/// [`poll_scene_end`] for a talk block at pvar offset `base`.
+pub fn poll_scene_end_at(w: &mut World, id: MobyId, base: usize) {
     if !w.svc.interact.scene_ended || w.svc.interact.talker != Some(id) { return; }
     w.svc.interact.scene_ended = false;
     w.svc.interact.talker = None;
     w.mm(id).mode &= !1;
-    talk_refresh(w, id, true);
+    talk_refresh_at(w, id, base, true);
 }
 
 /// `NpcTalkUpdate(npc, talk)` 0x27b028: true when △ (or an auto node) started the node's scene / movie or advanced
 /// a scene-less node this tick.
-pub fn talk_update(w: &mut World, id: MobyId) -> bool {
+pub fn talk_update(w: &mut World, id: MobyId) -> bool { talk_update_at(w, id, 0) }
+
+/// [`talk_update`] on a talk block at pvar offset `base` (`NpcTalkUpdate(npc, pvars + base)`).
+pub fn talk_update_at(w: &mut World, id: MobyId, base: usize) -> bool {
     let h = HeroView::of(w.hero);
     if h.state == 0x1d || h.hp == 0 { return false; }
-    if w.m(id).pvars.len() < talk::SIZE { return false; }
-    if p::u8(&w.m(id).pvars, talk::REGISTERED) == 0 { talk_register(w, id); }
+    if w.m(id).pvars.len() < base + talk::SIZE { return false; }
+    if p::u8(&w.m(id).pvars, base + talk::REGISTERED) == 0 { talk_register_at(w, id, base); }
     if w.svc.game_mode != 0 { return false; }
-    let n = p::i16(&w.m(id).pvars, talk::NODE);
-    if n == -1 || p::u8(&w.m(id).pvars, talk::AUTO) == 0xff { return false; }
+    let n = p::i16(&w.m(id).pvars, base + talk::NODE);
+    if n == -1 || p::u8(&w.m(id).pvars, base + talk::AUTO) == 0xff { return false; }
     let m = w.m(id);
     let (pos, yaw) = ([m.position[0], m.position[1], m.position[2]], m.rotation[2]);
-    let r = p::ff(&m.pvars, talk::RADIUS);
+    let r = p::ff(&m.pvars, base + talk::RADIUS);
     // Range first (the game tests it before the refresh), then the node's text and condition, then facing.
     if !talk_rule(&h, pos, yaw, r, true) { return false; }
-    talk_refresh(w, id, false);
-    let auto = p::u8(&w.m(id).pvars, talk::AUTO) != 0;
+    talk_refresh_at(w, id, base, false);
+    let auto = p::u8(&w.m(id).pvars, base + talk::AUTO) != 0;
     if !auto && !talk_rule(&h, pos, yaw, r, false) { return false; }
     if w.counter < w.svc.interact.cooldown { return false; }
-    let Some(nd) = node_of(w, id, p::i16(&w.m(id).pvars, talk::NODE)) else { return false };
+    let Some(nd) = node_of(w, id, base, p::i16(&w.m(id).pvars, base + talk::NODE)) else { return false };
     if !auto && !w.svc.interact.triangle() {
         // The prompt (slot 12 through handle 0x160130) and, for a price condition (kinds 1 / 6), the bolt counter
         // for 60 ticks.
         w.svc.interact.talk_shown = true;
-        if nd.kind == 1 || nd.kind == 6 { w.svc.counters.hud_bolt_refresh += 1; }
+        if nd.kind == 1 || nd.kind == 6 {
+            w.svc.counters.hud_bolt_refresh += 1;
+            // `queue_animation_update(2, 0x754e, …)` + `FUN_0024b4b0(h, ScaleTicks(60))` (crate::hud).
+            w.svc.hud.queue(crate::hud::Request::BOLTS);
+            w.svc.hud.keep_up(crate::hud::Request::BOLTS, crate::hud::scale_ticks(60));
+        }
         return false;
     }
     let g = talk_slot(w, id);
@@ -750,11 +797,46 @@ pub fn talk_update(w: &mut World, id: MobyId) -> bool {
     }
     if nd.scene == -1 {
         w.svc.interact.talker = None;
-        talk_refresh(w, id, true);
+        talk_refresh_at(w, id, base, true);
         return true;
     }
     start_scene(w, id, nd.scene);
     true
+}
+
+/// `FUN_0027b438(npc, v)`: the "talked" word of the NPC's global talk slot (`0x13d5bc + 16·slot`) = `v`; nothing for a
+/// moby without a slot. (The Kerwan train 822 writes 1 on itself and 3 on the car Ratchet stands on; the commando 114
+/// writes 2; the infobots 1.)
+pub fn set_talked(w: &mut World, id: MobyId, v: u32) {
+    let g = talk_slot(w, id);
+    if g < 0 { return; }
+    if let Some(t) = w.svc.interact.game.talked.get_mut(g as usize) { *t = v; }
+    w.svc.interact.writes.push(GameWrite::Talked(g as usize, v));
+}
+
+/// `FUN_002783a8(d, npc)` 0x2783a8: when the running scene ends Ratchet stands `d` in front of the NPC (its yaw), facing
+/// it (Euler (0, 0, yaw + π)): 0x16cd26 = 1, 0x16ccf0 / 0x16cd00 ([`Interact::scene_end_place`]).
+pub fn place_after_scene(w: &mut World, npc: MobyId, d: f32) {
+    let m = w.m(npc);
+    let yaw = m.rotation[2];
+    let pos = [m.position[0] + yaw.cos() * d, m.position[1] + yaw.sin() * d, m.position[2]];
+    w.svc.interact.scene_end_place = Some((pos, add_rot(yaw, std::f32::consts::PI)));
+}
+
+/// `GiveItem(item, equip)` 0x275760 from a class update: the banner (`ShowBanner(table[item], ticks(300))`, the table
+/// entry `item + 0x25` once owned; −1: none), the acquired byte (the talk conditions' mirror), and the saved-game write
+/// the engine applies with the item tables ([`GameWrite::GiveItem`]: owned, ammo, vendor stock, quick select, the hand
+/// request).
+pub fn give_item(w: &mut World, item: usize, equip: bool) {
+    let owned = w.hero.owned.has(item);
+    let k = if owned { item + 0x25 } else { item };
+    let msg = w.svc.interact.tables.give_banners.get(k).copied().unwrap_or(-1);
+    if msg != -1 {
+        let t = w.ticks(300);
+        crate::cinematic::show_banner(w, msg, t);
+    }
+    if let Some(b) = w.svc.interact.game.acquired.get_mut(item) { *b = 1; }
+    w.svc.interact.writes.push(GameWrite::GiveItem { item, equip });
 }
 
 #[cfg(test)]

@@ -70,6 +70,14 @@
 //! | U335 | 1196 Orxon's path scouts (10; wake the brawlers' groups) | level10 0x2df270 | [`orxon_flyers`] |
 //! | U336 | 1199 Orxon's swoop flyers (10) | level10 0x2e01a8 | [`orxon_flyers`] |
 //! | U337 | 1202 Orxon's brawlers (10; Clank's-part branches: G-HERO-005) | level10 0x2e1d38 | [`orxon_brawler`] |
+//! | U323 | 22 Orxon's Clank section (10: Clank in charge without the O2 Mask, `crate::hero::bodies`) | level10 0x298b68 | [`clank_section`] |
+//! | U500 | 1451 / 1899 Giant Clank's pads (15, 18: in and out of Giant Clank, `crate::hero::bodies`) | level15 0x2ed068 | [`giant_pad`] |
+//! | U220 | 1061 Blarg's Clank station (06: Ratchet and Clank trade places, `crate::hero::bodies`) | level06 0x2fc640 | [`blarg_clank_lift`] |
+//! | — | 0x593 Giant Clank's landing shockwave (15, 18; made by the hero code, `crate::hero::bodies::giant`) | level15 0x29ead0 | [`giant_shockwave`] |
+//! | — | 0x100 Giant Clank's missiles (15, 18; made by the hero code: a copy of the Devastator missile with its own search) | level15 0x29d6c0 | [`giant_missile`] |
+//! | — | 0x5f3 Giant Clank's head beam (15, 18; held by the hero code, then flies) | level15 0x29edb0 | [`giant_beam`] |
+//! | U499 | 1446 Quartu's Giant Clank mission NPC (15: the talk, the two groups, out of Giant Clank, planet 16) | level15 0x2ec760 | [`quartu_giant_mission`] |
+//! | U307, U316, U255 | 664, 1293 / 1320 Gaspar's sinking floats (09), 1069 Umbris' rocking floats (07): they carry Ratchet by writing his platform delta (`HeroFields::ride`) | level09 0x2f86a0, 0x3091b0, level07 0x3112c8 | [`riding_floats`] |
 //! | U407 | 29 Gemlik's gun turrets (13), their rider 36 and shot 1238 (created by code) | level13 0x2b41b8, 0x2b4c80, 0x306300 | [`gemlik_turret`] |
 //! | U215 | 1038 orb holders (06, 10, 17), and the orb 1040 each makes | level06 0x2f7288, 0x2f7ab8 | [`orb_holder`] |
 //! | U503, U502, U514 | 552 barrier posts, 546 switches, 1387 walls (16) | level16 0x2cf4a8, 0x2cf198, 0x2e36e8 | [`kalebo_barrier`] |
@@ -100,6 +108,52 @@
 //! | U373 | 1231 Pokitaru's ball throwers (11), and the ball 1297 they make | level11 0x310180, 0x318b30 | [`pokitaru_thrower`] |
 //! | U128 | 75, 115–120, 132, 795 Kerwan's air traffic (03), and the exhaust trail 235 of 75 / 119 | level03 0x29dba8, 0x2bae48 | [`air_traffic`] |
 //! | U126 | 868, 905, 928 Kerwan's swinging path movers (03) | level03 0x294c08 | [`kerwan_mover`] |
+//! | U506 | 471 Kalebo's reversing belts (16): the group's belt push, the shared voice, two scrolling quad layers | level16 0x2c9878, draw 0x2c9cd0 | [`kalebo_belt`] |
+//! | U541 | 99 the fleet's sliding laser emitters (17): beam hit line, type-79 sparks, beam quad | level17 0x2a8da0, draw 0x2a95b8 | [`fleet_laser`] |
+//! | U485 | 221 Quartu's shaking critters (15): head look-at, shake, dust, death pieces | level15 0x2c2938 | [`quartu_critter`] |
+//! | U567 | 1355 Veldin's divers (18; released by the boss 1422): wander, dive, crash, trails and glows | level18 0x2efb88, draws 0x2f0390 / 0x2f06c0 | [`veldin_diver`] |
+//! | U162 | 617 Eudora's path riders (04) | level04 0x2d6f68 | [`eudora_path_rider`] |
+//! | U180 | 810 Rilgar's rocking floats (05) | level05 0x30bdd8 | [`rilgar_rocker`] |
+//! | U195 | 895 Rilgar's flaps (05) | level05 0x3166a0 | [`rilgar_flap`] |
+//! | U283 | 467 / 472 Batalia's linked lifts (08) | level08 0x2ea398 | [`batalia_lift`] |
+//! | U436 | 1577 Gemlik's watchers (13) | level13 0x30be60 | [`gemlik_watch`] |
+//! | U158 | 484 (04): `DeleteMoby(self)` | level04 0x2ce060 | [`marker::update`] |
+//! | U313 | 1206 Gaspar's hazard columns (09) | level09 0x305a28 | [`gaspar_hazard`] |
+//! | U60 | 695 Novalis' floating pushables (01) | level01 0x2f8268 | [`floating_pushable`] |
+//! | U256 | 1080 Umbris' sinking floats (07) | level07 0x311bc8 | [`umbris_sinker`] |
+//! | U505 | 470 Kalebo's glowing beacons (16; the gold bolts' item glow) | level16 0x2c9480 | [`kalebo_glow`] |
+//! | U341 | 1240 Orxon's spark fountains (10) | level10 0x2e5be0 | [`orxon_sparks`] |
+//! | U263 | 104, 106, 1129 linked platforms (07, 13): `linked_mover`'s state machine at +0xa0 with a carry | level07 0x31aee0 | [`linked_mover::platform_update`] |
+//! | U222 | 1054 Blarg's split doors (06) and their half 1055 | level06 0x2fbfb0 | [`blarg_doors`] |
+//! | U88 | 1504 wandering point lights (01, 06) | level01 0x30b618 | [`wandering_light`] |
+//! | U376 | 1248 Pokitaru's rising gates (11) and their halves 1247 | level11 0x316320 | [`pokitaru_gate`] |
+//! | U194 | 893 Rilgar's hinged hatches (05) | level05 0x316258 | [`rilgar_hatch`] |
+//! | U191 | 855 Rilgar's water spouts (05): type-50 droplets, type-46 rings, the group voice | level05 0x3150f0 | [`rilgar_spout`] |
+//! | U438 | 1805 Gemlik's breakable props (13) | level13 0x30cdb8 | [`gemlik_breakable`] |
+//! | U252 | 1041 Umbris' lobbing turrets (07) and their shot 882 | level07 0x30d4d8, 0x30bbc8 | [`umbris_lobber`] |
+//! | U118 | 1212 the path ships (02, 09): path, exhaust ([`engine_trail`], shared with [`batalia_fighter`]), glow quads | level02 0x2ec4b8, draw 0x2ec308 | [`path_ship`] |
+//! | U155 | 434 Eudora's crank lifts (04): posed by a bolt crank, sink back unwinding it | level04 0x2c6bb8 | [`eudora_crank_lift`] |
+//! | U154 | 432 / 1052 Eudora's crank followers (04): posed by a bolt crank, swap their own class (`class_swap`) | level04 0x2c6858 | [`eudora_crank_follower`] |
+//! | U225 | 1066 Blarg's creature wakers (06): the cuboid, then one dormant member of the group thrown out every 20 ticks | level06 0x2fda30 (the wake 0x2e9d10) | [`blarg_waker`] |
+//! | U140 | 899 Kerwan's path-mover lines (03) and the movers 898 they create: platforms 2.9 apart gliding along the path, carrying riders | level03 0x2db280, 0x2db198, 0x2db020 | [`kerwan_path_spawner`] |
+//! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
+//! | U521 | 1401 Kalebo's mine drones (16): wait in their cuboid, fly a path carrying a new race mine 933, drop it, fly back | level16 0x2e37a0 (0x2de298 the mine) | [`kalebo_mine_drone`] |
+//! | U363 | 1075 Pokitaru's boats: the path, the propellers and wake, the boarders' moving area, the lift (11) | level11 0x309ac0 | [`pokitaru_boat`] |
+//! | U130 | 574 Kerwan's gun troopers (03), and the rocket 833 they fire | level03 0x2c6fd0, 0x2d43c8 | [`kerwan_trooper`] |
+//! | U280 | 452 Batalia's runners (08) | level08 0x2e2df0 | [`batalia_runner`] |
+//! | U359 | 318 Pokitaru teleporter pads (11; the sibling of the pads 1135, `classes::teleporter`), and their beam | level11 0x2f2518, 0x2f2d58 | [`pokitaru_teleporter`] |
+//! | — | 787 the cave drips the ripple manager 751 spawns (01) | level01 0x2ffdc0 (spawner 0x2ffcd0) | [`drip`] |
+//! | U50 | 613 Novalis's water currents (01) | level01 0x2f3120 | [`water_current`] |
+//! | U129 | 573 Kerwan's charging creatures (03): wait, charge, bite, run a path, wait by a trooper | level03 0x2c5bb8 | [`kerwan_hound`] |
+//! | U353, U350 | 114 Pokitaru's commando (11): talks, follows Ratchet through four phases, starts and rides the boats 1075, gives the O2 Mask; and the gate 65 he opens | level11 0x2d0fa8, 0x2cb810 | [`pokitaru_commando`] |
+//! | U363 | 1157 Pokitaru's cutaway machine (11): its 24 slats 1207 open in a cutaway (fades, Ratchet held at the switch 830, the script camera's glide) | level11 0x30d800, 0x30dd18 | [`pokitaru_cutaway`] |
+//! | U564 | 1422 the boss of Veldin's last arena (18): every state, its phases, damage, the arena camera record, the boss meter (HUD slot 6), the scenes, the death and the finale | level18 0x2f2bf0 (draw 0x2f7880) | [`veldin_boss`] |
+//! | U557 | 644 the arena's cutaway camera (18), started by the boss | level18 0x2df608, 0x2dfaa0 | [`veldin_cutaway`] |
+//! | U556 | 587 the arena's floating platforms (18): bob, carry, sink by the difficulty word 0x1623a8 | level18 0x2d82c0 | [`veldin_floater`] |
+//! | U572 | 1906 the boss's hoppers (18), woken by the boss | level18 0x2fbb98 | [`veldin_hopper`] |
+//! | U554, U555 | 583 the boss's pads and 586 the button / countdown (18) | level18 0x2d6600, 0x2d7b20 (countdown draw 0x2d8098) | [`veldin_pads`] |
+//! | — | 564 / 624 / 628 / 983 / 1898 the boss's shots (18, created only by 1422 / 1906): shell, ring, aura, beam, flash | level18 0x2d5050, 0x2db460, 0x2dc260, 0x2e9e70, 0x2fb548 | [`veldin_shots`] |
+//! | U123, U124 | 822 Kerwan's train (03): the locomotive pulling the cars 1210 behind its lead 845 (the flyer driver), the ride, the arrival, the infobot's release | level03 0x292e98, 0x293c78 | [`kerwan_train`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -196,6 +250,59 @@ pub mod aridia_flamer;
 pub mod pokitaru_thrower;
 pub mod air_traffic;
 pub mod kerwan_mover;
+pub mod pokitaru_boat;
+pub mod kerwan_trooper;
+pub mod batalia_runner;
+pub mod kalebo_belt;
+pub mod fleet_laser;
+pub mod quartu_critter;
+pub mod veldin_diver;
+pub mod eudora_path_rider;
+pub mod rilgar_rocker;
+pub mod rilgar_flap;
+pub mod batalia_lift;
+pub mod gemlik_watch;
+pub mod gaspar_hazard;
+pub mod floating_pushable;
+pub mod umbris_sinker;
+pub mod kalebo_glow;
+pub mod orxon_sparks;
+pub mod blarg_doors;
+pub mod wandering_light;
+pub mod pokitaru_gate;
+pub mod rilgar_hatch;
+pub mod rilgar_spout;
+pub mod gemlik_breakable;
+pub mod umbris_lobber;
+pub mod engine_trail;
+pub mod path_ship;
+pub mod clank_section;
+pub mod giant_pad;
+pub mod blarg_clank_lift;
+pub mod giant_shockwave;
+pub mod giant_missile;
+pub mod giant_beam;
+pub mod quartu_giant_mission;
+pub mod riding_floats;
+pub mod eudora_crank_lift;
+pub mod eudora_crank_follower;
+pub mod blarg_waker;
+pub mod kerwan_path_spawner;
+pub mod pod_launcher;
+pub mod kalebo_mine_drone;
+pub mod pokitaru_teleporter;
+pub mod drip;
+pub mod water_current;
+pub mod kerwan_hound;
+pub mod pokitaru_commando;
+pub mod pokitaru_cutaway;
+pub mod veldin_boss;
+pub mod veldin_cutaway;
+pub mod veldin_floater;
+pub mod veldin_hopper;
+pub mod veldin_pads;
+pub mod veldin_shots;
+pub mod kerwan_train;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -326,6 +433,96 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U128", level: air_traffic::REFERENCE_LEVEL, func: air_traffic::UPDATE_FN, classes: &air_traffic::CLASSES, update: air_traffic::update, joints: &air_traffic::JOINTS },
     UnitPort { unit: "U128 235", level: air_traffic::REFERENCE_LEVEL, func: air_traffic::TRAIL_FN, classes: &air_traffic::TRAIL_CLASSES, update: air_traffic::trail_update, joints: &[] },
     UnitPort { unit: "U126", level: kerwan_mover::REFERENCE_LEVEL, func: kerwan_mover::UPDATE_FN, classes: &kerwan_mover::CLASSES, update: kerwan_mover::update, joints: &[] },
+    UnitPort { unit: "U363 1075", level: pokitaru_boat::REFERENCE_LEVEL, func: pokitaru_boat::UPDATE_FN, classes: &pokitaru_boat::CLASSES, update: pokitaru_boat::update, joints: &pokitaru_boat::JOINTS },
+    UnitPort { unit: "U130 574", level: kerwan_trooper::REFERENCE_LEVEL, func: kerwan_trooper::UPDATE_FN, classes: &kerwan_trooper::CLASSES, update: kerwan_trooper::update, joints: &kerwan_trooper::JOINTS },
+    UnitPort { unit: "U130 833", level: kerwan_trooper::REFERENCE_LEVEL, func: kerwan_trooper::ROCKET_FN, classes: &kerwan_trooper::ROCKET_CLASSES, update: kerwan_trooper::rocket_update, joints: &[] },
+    UnitPort { unit: "U280 452", level: batalia_runner::REFERENCE_LEVEL, func: batalia_runner::UPDATE_FN, classes: &batalia_runner::CLASSES, update: batalia_runner::update, joints: &batalia_runner::JOINTS },
+    UnitPort { unit: "U506 471", level: kalebo_belt::REFERENCE_LEVEL, func: kalebo_belt::UPDATE_FN, classes: &kalebo_belt::CLASSES, update: kalebo_belt::update, joints: &[] },
+    // Draw callback only (the belt's second quad layer: `Callback::UnitQuads` payload).
+    UnitPort { unit: "U506 471 layer", level: kalebo_belt::REFERENCE_LEVEL, func: kalebo_belt::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U541 99", level: fleet_laser::REFERENCE_LEVEL, func: fleet_laser::UPDATE_FN, classes: &fleet_laser::CLASSES, update: fleet_laser::update, joints: &[] },
+    UnitPort { unit: "U485 221", level: quartu_critter::REFERENCE_LEVEL, func: quartu_critter::UPDATE_FN, classes: &quartu_critter::CLASSES, update: quartu_critter::update, joints: &quartu_critter::CLASSES },
+    UnitPort { unit: "U567 1355", level: veldin_diver::REFERENCE_LEVEL, func: veldin_diver::UPDATE_FN, classes: &veldin_diver::CLASSES, update: veldin_diver::update, joints: &[] },
+    // Draw callback only (the group's trails: `Callback::UnitQuads` payload; the glows are `UnitGlow` of the row above).
+    UnitPort { unit: "U567 1355 trail", level: veldin_diver::REFERENCE_LEVEL, func: veldin_diver::TRAIL_FN, classes: &[], update: empty::update, joints: &[] },    // Draw callback only (the teleporter pads 1135's beam `0x3094f0`: `Callback::UnitQuads` payload; the pads are the
+    UnitPort { unit: "U162 617", level: eudora_path_rider::REFERENCE_LEVEL, func: eudora_path_rider::UPDATE_FN, classes: &eudora_path_rider::CLASSES, update: eudora_path_rider::update, joints: &[] },
+    UnitPort { unit: "U180 810", level: rilgar_rocker::REFERENCE_LEVEL, func: rilgar_rocker::UPDATE_FN, classes: &rilgar_rocker::CLASSES, update: rilgar_rocker::update, joints: &[] },
+    UnitPort { unit: "U195 895", level: rilgar_flap::REFERENCE_LEVEL, func: rilgar_flap::UPDATE_FN, classes: &rilgar_flap::CLASSES, update: rilgar_flap::update, joints: &[] },
+    UnitPort { unit: "U283 467", level: batalia_lift::REFERENCE_LEVEL, func: batalia_lift::UPDATE_FN, classes: &batalia_lift::CLASSES, update: batalia_lift::update, joints: &[] },
+    UnitPort { unit: "U436 1577", level: gemlik_watch::REFERENCE_LEVEL, func: gemlik_watch::UPDATE_FN, classes: &gemlik_watch::CLASSES, update: gemlik_watch::update, joints: &[] },
+    // Level04 0x2ce060 is `DeleteMoby(self)`: the markers' effect (`marker`, U139), separate code.
+    UnitPort { unit: "U158 484", level: 4, func: 0x2c_e060, classes: &[484], update: marker::update, joints: &[] },
+    UnitPort { unit: "U313 1206", level: gaspar_hazard::REFERENCE_LEVEL, func: gaspar_hazard::UPDATE_FN, classes: &gaspar_hazard::CLASSES, update: gaspar_hazard::update, joints: &[] },
+    UnitPort { unit: "U60 695", level: floating_pushable::REFERENCE_LEVEL, func: floating_pushable::UPDATE_FN, classes: &floating_pushable::CLASSES, update: floating_pushable::update, joints: &[] },
+    UnitPort { unit: "U256 1080", level: umbris_sinker::REFERENCE_LEVEL, func: umbris_sinker::UPDATE_FN, classes: &umbris_sinker::CLASSES, update: umbris_sinker::update, joints: &[] },
+    UnitPort { unit: "U505 470", level: kalebo_glow::REFERENCE_LEVEL, func: kalebo_glow::UPDATE_FN, classes: &kalebo_glow::CLASSES, update: kalebo_glow::update, joints: &[] },
+    UnitPort { unit: "U341 1240", level: orxon_sparks::REFERENCE_LEVEL, func: orxon_sparks::UPDATE_FN, classes: &orxon_sparks::CLASSES, update: orxon_sparks::update, joints: &[] },
+    UnitPort { unit: "U263 104", level: linked_mover::REFERENCE_LEVEL, func: linked_mover::PLATFORM_FN, classes: &linked_mover::PLATFORM_CLASSES, update: linked_mover::platform_update, joints: &[] },
+    UnitPort { unit: "U222 1054", level: blarg_doors::REFERENCE_LEVEL, func: blarg_doors::UPDATE_FN, classes: &blarg_doors::CLASSES, update: blarg_doors::update, joints: &[] },
+    UnitPort { unit: "U88 1504", level: wandering_light::REFERENCE_LEVEL, func: wandering_light::UPDATE_FN, classes: &wandering_light::CLASSES, update: wandering_light::update, joints: &[] },
+    UnitPort { unit: "U376 1248", level: pokitaru_gate::REFERENCE_LEVEL, func: pokitaru_gate::UPDATE_FN, classes: &pokitaru_gate::CLASSES, update: pokitaru_gate::update, joints: &[] },
+    UnitPort { unit: "U194 893", level: rilgar_hatch::REFERENCE_LEVEL, func: rilgar_hatch::UPDATE_FN, classes: &rilgar_hatch::CLASSES, update: rilgar_hatch::update, joints: &rilgar_hatch::CLASSES },
+    UnitPort { unit: "U191 855", level: rilgar_spout::REFERENCE_LEVEL, func: rilgar_spout::UPDATE_FN, classes: &rilgar_spout::CLASSES, update: rilgar_spout::update, joints: &[] },
+    UnitPort { unit: "U438 1805", level: gemlik_breakable::REFERENCE_LEVEL, func: gemlik_breakable::UPDATE_FN, classes: &gemlik_breakable::CLASSES, update: gemlik_breakable::update, joints: &[] },
+    UnitPort { unit: "U252 1041", level: umbris_lobber::REFERENCE_LEVEL, func: umbris_lobber::UPDATE_FN, classes: &umbris_lobber::CLASSES, update: umbris_lobber::update, joints: &umbris_lobber::CLASSES },
+    UnitPort { unit: "U252 882", level: umbris_lobber::REFERENCE_LEVEL, func: umbris_lobber::SHOT_FN, classes: &umbris_lobber::SHOT_CLASSES, update: umbris_lobber::shot_update, joints: &[] },
+    UnitPort { unit: "U118 1212", level: path_ship::REFERENCE_LEVEL, func: path_ship::UPDATE_FN, classes: &path_ship::CLASSES, update: path_ship::update, joints: &path_ship::CLASSES },
+    UnitPort { unit: "U155 434", level: eudora_crank_lift::REFERENCE_LEVEL, func: eudora_crank_lift::UPDATE_FN, classes: &eudora_crank_lift::CLASSES, update: eudora_crank_lift::update, joints: &eudora_crank_lift::CLASSES },
+    UnitPort { unit: "U154 432", level: eudora_crank_follower::REFERENCE_LEVEL, func: eudora_crank_follower::UPDATE_FN, classes: &eudora_crank_follower::CLASSES, update: eudora_crank_follower::update, joints: &[] },
+    UnitPort { unit: "U225 1066", level: blarg_waker::REFERENCE_LEVEL, func: blarg_waker::UPDATE_FN, classes: &blarg_waker::CLASSES, update: blarg_waker::update, joints: &[] },
+    UnitPort { unit: "U140 899", level: kerwan_path_spawner::REFERENCE_LEVEL, func: kerwan_path_spawner::UPDATE_FN, classes: &kerwan_path_spawner::CLASSES, update: kerwan_path_spawner::spawner_update, joints: &[] },
+    // The movers 899 creates (created only: not in the census's placed units).
+    UnitPort { unit: "U140 898", level: kerwan_path_spawner::REFERENCE_LEVEL, func: kerwan_path_spawner::MOVER_FN, classes: &kerwan_path_spawner::MOVER_CLASSES, update: kerwan_path_spawner::mover_update, joints: &[] },
+    UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
+    // The pods 1885 lobs (created only: not in the census's placed units).
+    UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
+    UnitPort { unit: "U521 1401", level: kalebo_mine_drone::REFERENCE_LEVEL, func: kalebo_mine_drone::UPDATE_FN, classes: &kalebo_mine_drone::CLASSES, update: kalebo_mine_drone::update, joints: &[] },
+    // class port `classes::teleporter`).
+    UnitPort { unit: "U85 1135 beam", level: 1, func: crate::moby_update::classes::teleporter::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U359 318", level: pokitaru_teleporter::REFERENCE_LEVEL, func: pokitaru_teleporter::UPDATE_FN, classes: &pokitaru_teleporter::CLASSES, update: pokitaru_teleporter::update, joints: &[] },
+    // Draw callback only (the beam of the Pokitaru pads: `Callback::UnitQuads` payload).
+    UnitPort { unit: "U359 318 beam", level: pokitaru_teleporter::REFERENCE_LEVEL, func: pokitaru_teleporter::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
+    // The cave drips 751 spawns (created only: not in the census's placed units).
+    UnitPort { unit: "787 drip", level: drip::REFERENCE_LEVEL, func: drip::UPDATE_FN, classes: &drip::CLASSES, update: drip::update, joints: &[] },
+    UnitPort { unit: "U50 613", level: water_current::REFERENCE_LEVEL, func: water_current::UPDATE_FN, classes: &water_current::CLASSES, update: water_current::update, joints: &[] },
+    UnitPort { unit: "U129 573", level: kerwan_hound::REFERENCE_LEVEL, func: kerwan_hound::UPDATE_FN, classes: &kerwan_hound::CLASSES, update: kerwan_hound::update, joints: &[] },
+    UnitPort { unit: "U353 114", level: pokitaru_commando::REFERENCE_LEVEL, func: pokitaru_commando::UPDATE_FN, classes: &pokitaru_commando::CLASSES, update: pokitaru_commando::update, joints: &[] },
+    UnitPort { unit: "U350 65", level: pokitaru_commando::REFERENCE_LEVEL, func: pokitaru_commando::GATE_FN, classes: &pokitaru_commando::GATE_CLASSES, update: pokitaru_commando::gate_update, joints: &[] },
+    UnitPort { unit: "U363 1157", level: pokitaru_cutaway::REFERENCE_LEVEL, func: pokitaru_cutaway::UPDATE_FN, classes: &pokitaru_cutaway::CLASSES, update: pokitaru_cutaway::update, joints: &[] },
+    // The boss of Veldin's last arena and its partners (level 18; 2026-10-01).
+    UnitPort { unit: "U564 1422", level: veldin_boss::REFERENCE_LEVEL, func: veldin_boss::UPDATE_FN, classes: &veldin_boss::CLASSES, update: veldin_boss::update, joints: &veldin_boss::JOINTS },
+    // Draw callback only (the boss's glows `0x2f7880`: `Callback::UnitGlow` payload).
+    UnitPort { unit: "U564 1422 glow", level: veldin_boss::REFERENCE_LEVEL, func: veldin_boss::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U557 644", level: veldin_cutaway::REFERENCE_LEVEL, func: veldin_cutaway::UPDATE_FN, classes: &veldin_cutaway::CLASSES, update: veldin_cutaway::update, joints: &[] },
+    UnitPort { unit: "U556 587", level: veldin_floater::REFERENCE_LEVEL, func: veldin_floater::UPDATE_FN, classes: &veldin_floater::CLASSES, update: veldin_floater::update, joints: &[] },
+    UnitPort { unit: "U572 1906", level: veldin_hopper::REFERENCE_LEVEL, func: veldin_hopper::UPDATE_FN, classes: &veldin_hopper::CLASSES, update: veldin_hopper::update, joints: &veldin_hopper::CLASSES },
+    UnitPort { unit: "U572 1906 glow", level: veldin_hopper::REFERENCE_LEVEL, func: veldin_hopper::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U572 1906 beam", level: veldin_hopper::REFERENCE_LEVEL, func: veldin_hopper::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U554 583", level: veldin_pads::REFERENCE_LEVEL, func: veldin_pads::PAD_FN, classes: &veldin_pads::PAD_CLASSES, update: veldin_pads::pad_update, joints: &[] },
+    UnitPort { unit: "U555 586", level: veldin_pads::REFERENCE_LEVEL, func: veldin_pads::BUTTON_FN, classes: &veldin_pads::BUTTON_CLASSES, update: veldin_pads::button_update, joints: &[] },
+    // Draw callback with a `rand` at draw time (586's countdown `0x2d8098`: `Callback::UnitFrame` payload).
+    UnitPort { unit: "U555 586 countdown", level: veldin_pads::REFERENCE_LEVEL, func: veldin_pads::COUNTDOWN_FN, classes: &[], update: empty::update, joints: &[] },
+    // The boss's created shots and effects (not placed: created only).
+    UnitPort { unit: "564 lob", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::LOB_FN, classes: &veldin_shots::LOB_CLASSES, update: veldin_shots::lob_update, joints: &[] },
+    // Draw callback only (564's target marker `0x2d5768`: `Callback::UnitQuads` payload).
+    UnitPort { unit: "564 lob marker", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::LOB_MARK_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "624 ring", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::RING_FN, classes: &veldin_shots::RING_CLASSES, update: veldin_shots::ring_update, joints: &[] },
+    UnitPort { unit: "628 aura", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::AURA_FN, classes: &veldin_shots::AURA_CLASSES, update: veldin_shots::aura_update, joints: &[] },
+    UnitPort { unit: "628 aura bands", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::AURA_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "983 beam", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::BEAM_FN, classes: &veldin_shots::BEAM_CLASSES, update: veldin_shots::beam_update, joints: &[] },
+    UnitPort { unit: "1898 flash", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::FLASH_FN, classes: &veldin_shots::FLASH_CLASSES, update: veldin_shots::flash_update, joints: &[] },
+    UnitPort { unit: "U123 822", level: kerwan_train::REFERENCE_LEVEL, func: kerwan_train::UPDATE_FN, classes: &kerwan_train::CLASSES, update: kerwan_train::update, joints: &kerwan_train::JOINTS },
+    UnitPort { unit: "U124 845", level: kerwan_train::REFERENCE_LEVEL, func: kerwan_train::LEAD_FN, classes: &kerwan_train::LEAD_CLASSES, update: kerwan_train::lead_update, joints: &[] },
+    UnitPort { unit: "U323 22", level: clank_section::REFERENCE_LEVEL, func: clank_section::UPDATE_FN, classes: &clank_section::CLASSES, update: clank_section::update, joints: &[] },
+    UnitPort { unit: "U500 1451", level: giant_pad::REFERENCE_LEVEL, func: giant_pad::UPDATE_FN, classes: &giant_pad::CLASSES, update: giant_pad::update, joints: &[] },
+    UnitPort { unit: "U220 1061", level: blarg_clank_lift::REFERENCE_LEVEL, func: blarg_clank_lift::UPDATE_FN, classes: &blarg_clank_lift::CLASSES, update: blarg_clank_lift::update, joints: &[] },
+    UnitPort { unit: "Giant Clank 0x593", level: giant_shockwave::REFERENCE_LEVEL, func: giant_shockwave::UPDATE_FN, classes: &giant_shockwave::CLASSES, update: giant_shockwave::update, joints: &[] },
+    UnitPort { unit: "Giant Clank 0x100", level: giant_missile::REFERENCE_LEVEL, func: giant_missile::UPDATE_FN, classes: &giant_missile::CLASSES, update: giant_missile::update, joints: &[] },
+    UnitPort { unit: "Giant Clank 0x5f3", level: giant_beam::REFERENCE_LEVEL, func: giant_beam::UPDATE_FN, classes: &giant_beam::CLASSES, update: giant_beam::update, joints: &[] },
+    UnitPort { unit: "U499 1446", level: quartu_giant_mission::REFERENCE_LEVEL, func: quartu_giant_mission::UPDATE_FN, classes: &quartu_giant_mission::CLASSES, update: quartu_giant_mission::update, joints: &[] },
+    UnitPort { unit: "U307 664", level: riding_floats::REFERENCE_LEVEL_664, func: riding_floats::UPDATE_FN_664, classes: &riding_floats::CLASSES_664, update: riding_floats::float_664, joints: &[] },
+    UnitPort { unit: "U316 1293", level: riding_floats::REFERENCE_LEVEL_1293, func: riding_floats::UPDATE_FN_1293, classes: &riding_floats::CLASSES_1293, update: riding_floats::float_1293, joints: &[] },
+    UnitPort { unit: "U255 1069", level: riding_floats::REFERENCE_LEVEL_1069, func: riding_floats::UPDATE_FN_1069, classes: &riding_floats::CLASSES_1069, update: riding_floats::float_1069, joints: &[] },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.
@@ -433,6 +630,8 @@ pub struct FxQuads {
 /// The quads of the draw callback unit row `i` registered for moby `id` (`Callback::UnitQuads(i)`; draw only).
 pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Option<FxQuads> {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
+        Some((1, crate::moby_update::classes::teleporter::BEAM_FN)) => crate::moby_update::classes::teleporter::beam_quads(table, svc, id),
+        Some((pokitaru_teleporter::REFERENCE_LEVEL, pokitaru_teleporter::BEAM_FN)) => pokitaru_teleporter::beam_quads(table, svc, id),
         Some((laser_fence::REFERENCE_LEVEL, laser_fence::UPDATE_FN)) => laser_fence::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
         Some((quartu_drone::REFERENCE_LEVEL, quartu_drone::UPDATE_FN)) => quartu_drone::fx_quads(table, svc, id),
@@ -441,6 +640,14 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((sweep_light::REFERENCE_LEVEL, sweep_light::UPDATE_FN)) => sweep_light::fx_quads(table, svc, id),
         Some((light_fixture::REFERENCE_LEVEL, light_fixture::UPDATE_FN)) => light_fixture::fx_quads(table, svc, id),
         Some((water_laser::REFERENCE_LEVEL, water_laser::UPDATE_FN)) => water_laser::fx_quads(table, svc, id),
+        Some((kalebo_belt::REFERENCE_LEVEL, kalebo_belt::UPDATE_FN)) => kalebo_belt::fx_quads(table, svc, id, false),
+        Some((kalebo_belt::REFERENCE_LEVEL, kalebo_belt::DRAW_FN)) => kalebo_belt::fx_quads(table, svc, id, true),
+        Some((fleet_laser::REFERENCE_LEVEL, fleet_laser::UPDATE_FN)) => fleet_laser::fx_quads(table, svc, id),
+        Some((veldin_diver::REFERENCE_LEVEL, veldin_diver::TRAIL_FN)) => veldin_diver::fx_quads(table, svc, id),
+        Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::LOB_MARK_FN)) => veldin_shots::lob_quads(table, svc, id),
+        Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::RING_FN)) => veldin_shots::ring_quads(table, svc, id),
+        Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::AURA_DRAW_FN)) => veldin_shots::aura_quads(table, svc, id),
+        Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::BEAM_FN)) => veldin_hopper::beam_quads(table, svc, id),
         _ => None,
     }
 }
@@ -450,6 +657,18 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((lamp::REFERENCE_LEVEL, lamp::UPDATE_FN)) => lamp::glow_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::GLOW_FN)) => hover_zapper::glow_quads(table, id),
+        Some((veldin_diver::REFERENCE_LEVEL, veldin_diver::UPDATE_FN)) => veldin_diver::glow_quads(table, svc, id),
+        Some((veldin_boss::REFERENCE_LEVEL, veldin_boss::DRAW_FN)) => veldin_boss::glow_quads(table, svc, id),
+        Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::GLOW_FN)) => veldin_hopper::glow_quads(table, svc, id),
+        Some((path_ship::REFERENCE_LEVEL, path_ship::UPDATE_FN)) => path_ship::glow_quads(table, svc, id),
         _ => Vec::new(),
+    }
+}
+
+/// The state part of the unit draw callback row `i` run for moby `id` by the frame's callbacks
+/// (`Callback::UnitFrame(i)`, `draw_callbacks::run_frame`): its `rand` draws and what it leaves for the renderer.
+pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
+    if let Some((veldin_pads::REFERENCE_LEVEL, veldin_pads::COUNTDOWN_FN)) = PORTS.get(i as usize).map(|u| (u.level, u.func)) {
+        veldin_pads::countdown_draw(w, id);
     }
 }

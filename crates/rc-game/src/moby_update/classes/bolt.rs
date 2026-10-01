@@ -426,9 +426,16 @@ fn pose(w: &mut World, id: MobyId, _want_base: bool) -> V4 {
     base
 }
 
-/// `FUN_002bcb90(a, b, m, target)`: start flying to `target` (the hero moby). The pickup sound plays at most
-/// once per 3 ticks; bolts started within that window get a random path bend instead.
+/// `FUN_002bcb90(a, b, m, target)` with the hero moby as the target ([`start_fly_to`]).
 pub fn start_fly(w: &mut World, id: MobyId, a: Pf, b: Pf) -> bool {
+    let t = w.hero_moby;
+    start_fly_to(w, id, a, b, t)
+}
+
+/// `FUN_002bcb90(a, b, m, target)`: start flying to `target` (+0x60; the spin axis is taken toward it). The pickup
+/// sound plays at most once per 3 ticks; bolts started within that window get a random path bend instead. (The flight
+/// itself, state 4 of `BoltUpdate` 0x2bb758, homes on Ratchet's body point 0x13f420 whatever the target.)
+pub fn start_fly_to(w: &mut World, id: MobyId, a: Pf, b: Pf, target: Option<MobyId>) -> bool {
     if w.m(id).state == 4 { return false; }
     let (mut a, mut b) = (a, b);
     let t = w.ticks(3);
@@ -447,7 +454,6 @@ pub fn start_fly(w: &mut World, id: MobyId, a: Pf, b: Pf) -> bool {
         let vel = ph::set_len3(rest[2], s * DT);
         p::set_v4(&mut w.mm(id).pvars, 0x20, vel);
     }
-    let target = w.hero_moby;
     let tpos = target.map(|t| pv(w.m(t).position)).unwrap_or(w.hero.pos);
     let spin = w.svc.bolt_spin;
     let m = w.mm(id);
@@ -559,6 +565,8 @@ pub fn collect(w: &mut World, id: MobyId) {
     }
     w.svc.counters.level_bolts[(lvl as usize).min(19)] += val;
     w.svc.counters.hud_bolt_refresh += 1;
+    // `queue_animation_update(2, 0x754e, …)`: the bolt counter (crate::hud).
+    w.svc.hud.queue(crate::hud::Request::BOLTS);
     let sp = w.rng.rand_vec(sv::fl(DT * Pf::b(0x3f33_3333)), sv::fl(DT));
     let sp: V4 = [sv::pf(sp[0]), sv::pf(sp[1]), sv::pf(sp[2]), Pf::ZERO];
     let at = ph::vadd(sv::scale3(sp, Pf::b(0x4120_0000)), pos);

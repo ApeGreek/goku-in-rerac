@@ -381,6 +381,9 @@ impl Hero {
         } else {
             if matches!(self.state, 0x11 | 0x1c) {
                 super::ledge::jump_horizontal(self, env, key);
+            } else if self.state == 0x4c {
+                // Clank's climb (L00 0x214658's 0x4c branch: super::bodies::clank).
+                super::bodies::clank::climb_horizontal(self, key);
             } else if matches!(self.state, 10 | 0x10) {
                 super::packs::jump_horizontal(self);
             } else {
@@ -409,8 +412,9 @@ impl Hero {
         }
         // The Thruster long jump smashes the crates ahead: super::packs.
         super::packs::thruster_crates(self, env, key);
-        // HeroLean 0x235638 on foot (0x1413f4 = 0): super::idle.
+        // HeroLean 0x235638 on foot (0x1413f4 = 0): super::idle; Clank's lean 0x215b68 in body 1 (super::bodies::clank).
         if self.mode == 0 { self.lean(); }
+        if self.mode == 1 { super::bodies::clank::lean(self); }
         self.jump_vertical(env);
         // The wall / ledge probe 0x22c9a0 (sets 0x13f504 / 0x13f838): super::ledge.
         super::ledge::wall_ledge_probe_a(self, env);

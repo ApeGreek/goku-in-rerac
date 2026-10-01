@@ -20,6 +20,12 @@ impl Hero {
                 self.f15d4 = 0;
                 self.fidget_timer = c.rng.rand_range(ticks(50), ticks(100));
                 self.idle.clear_look();
+                // In a body (L00 case 0, `0x1413f4 ≠ 0`): the per-body idle `0x227638` instead, and SetState returns 1
+                // (the nested SetState made its own epilogue; super::bodies).
+                if self.mode != 0 {
+                    super::bodies::body_idle(self, c);
+                    return Some(true);
+                }
                 self.momentum = self.eff;
                 // Sliding on a slippery floor (0x140632) → 0x2f (level00; super::surface).
                 if let Some(r) = super::surface::idle_entry(self, c) { return Some(r); }

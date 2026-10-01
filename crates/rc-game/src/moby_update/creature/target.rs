@@ -43,13 +43,23 @@ pub fn acquire(w: &World, id: MobyId, range: f32) -> Target { acquire_in(w, id, 
 
 /// `0x274df8(range, id, &out, cuboids, 0, points, count)` with a polygon region (spline `region`, its points as a 2-D
 /// polygon, [`super::region::point_in_polygon`]): as [`acquire`], but Ratchet (his feet, 0x13f3d0) and every decoy
-/// must be inside the region; Ratchet outside gives kind 2 and no target. (The cuboid-list form is not used by the
-/// ported classes.)
-pub fn acquire_in(w: &World, id: MobyId, range: f32, region: Option<usize>) -> Target {
+/// must be inside the region; Ratchet outside gives kind 2 and no target.
+pub fn acquire_in(w: &World, id: MobyId, range: f32, region: Option<usize>) -> Target { acquire_with(w, id, range, &[], region) }
+
+/// `0x274df8(range, id, &out, cuboids, n, points, count)` in full: with a cuboid list (`n ≥ 1`) the region is not
+/// tested; instead Ratchet and every decoy are refused when inside one of the cuboids `cuboids[0 .. n − 1]`
+/// (`PointInCuboid` 0x274820: the loop stops at `n − 1`, so the last cuboid of the list is never tested and a
+/// one-cuboid list excludes nothing). Without a list (`n < 1`), [`acquire_in`]'s region test. First consumer of the
+/// list form: the pod launchers 1885 (`units::pod_launcher`, a list of one).
+pub fn acquire_with(w: &World, id: MobyId, range: f32, cuboids: &[i32], region: Option<usize>) -> Target {
     let me = super::pos(w, id);
     let mut range = range;
     let (mut best, mut kind) = (w.hero_moby, 0u32);
-    let inside = |p: V| region.is_none_or(|r| super::region::point_in_polygon(w, r, p));
+    let tested = &cuboids[..cuboids.len().saturating_sub(1)];
+    let inside = |p: V| {
+        if cuboids.is_empty() { return region.is_none_or(|r| super::region::point_in_polygon(w, r, p)); }
+        !tested.iter().any(|&c| crate::moby_update::triggers::point_in_cuboid(&w.svc.volumes, [p[0], p[1], p[2]], c))
+    };
     if w.hero.group == 0x18 || w.hero.state == 0x72 || !inside(w.hero.pos.map(|x| f32::from_bits(x.0))) {
         best = None;
         kind = 2;

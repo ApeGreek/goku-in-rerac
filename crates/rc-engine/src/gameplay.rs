@@ -322,6 +322,8 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn run_list(&self, table: &MobyTable, camera: [rc_game::ps2v::Pf; 4]) -> Option<Vec<MobyId>> { self.world.run_list(table, camera) }
     fn volumes(&self) -> Option<std::sync::Arc<rc_formats::volumes::Volumes>> { self.world.volumes() }
     fn group(&self, g: i8) -> Vec<MobyId> { self.world.group(g) }
+    fn create_moby(&mut self, table: &mut MobyTable, o_class: i16, counter: u64) -> Option<MobyId> { self.world.create_moby(table, o_class, counter) }
+    fn delete_moby(&mut self, table: &mut MobyTable, id: MobyId, counter: u64) { self.world.delete_moby(table, id, counter) }
 }
 
 /// The hero's hit sink: the moby system's hit log and moby collision (borrowed per call: the moby hook borrows
@@ -462,6 +464,9 @@ struct TickBudget(u32);
 pub struct Play {
     pub game: Game,
     pub ratchet: RatchetAnim,
+    /// The body moby's hero animation while a body is the hero moby (`rc_game::hero::bodies`, bound through
+    /// `rc_game::hero::anim::HeroAnimCtl`).
+    pub body_anim: Option<rc_game::hero::anim::BodyAnim>,
     /// Ratchet's moby (`0x1acc00[his gameplay instance]`) and animation instance.
     hero_id: MobyId,
     hero_k: Option<usize>,
@@ -1020,6 +1025,7 @@ fn setup(
     // The moby loop's services and the load pass (counter 0) on the game's stream.
     let mut svc = Services::new();
     svc.level = level_index;
+    svc.death_z = lv.death_z;
     // The help system (rc_game::help): the level text and small font it sizes with, the help log's id table.
     help_setup(&mut svc, lv, level_index);
     // The map system's level entry (rc_game::map, FUN_0025a4c0): tables, the level's map file, its fog mask.
@@ -1050,6 +1056,9 @@ fn setup(
                 eprintln!("gameplay: camera moby links not remapped ({e})");
             }
             let lc = rc_game::follow_camera::level::LevelCameras::new(level_index, &c, Some(svc.volumes.clone()), *camera_ports());
+            // The records' classes and class-18 distance / pivot words for the moby loop (the boss 1422's camera tweak).
+            svc.camera_classes = c.iter().map(|x| x.record.class).collect();
+            svc.camera_focus = lc.slots.iter().map(|s| s.focus.as_ref().map_or([0.0; 2], |f| [f.distance, f.pivot_height])).collect();
             println!("gameplay: {} camera records, {} class-17 regions (ported: {})", c.len(), lc.slots.iter().filter(|s| s.region.is_some()).count(), lc.ports.region);
             game.camera.set_level(lc);
         }
@@ -1058,6 +1067,22 @@ fn setup(
     match class_joint_lists(lv) {
         Ok((j, t)) => (svc.joint_lists, svc.joint_targets) = (j, t),
         Err(e) => eprintln!("gameplay: no class joint lists ({e:#}): the Blarg flyers' exhaust sits at the flyer origin"),
+    }
+    // The other bodies' classes (Clank 0x57, Giant Clank 0x1a3, rc_game::hero::bodies): their joint lists for the hero's
+    // joint points and joint modifiers, and for the moby world's joint matrices (Clank's antenna glow and rotor).
+    match class_joint_data_where(lv, |o| o == rc_game::hero::bodies::CLANK_CLASS || o == rc_game::hero::bodies::GIANT_CLASS) {
+        Ok(m) => {
+            let mut bodies = Vec::new();
+            for (o, l) in m {
+                let targets: Vec<u8> = l.iter().map(|(_, s)| rc_formats::moby_anim::list_target(s).unwrap_or(0xff)).collect();
+                let chains: Vec<Vec<u8>> = l.into_iter().map(|(a, _)| a).collect();
+                svc.joint_lists.entry(o).or_insert_with(|| chains.clone());
+                svc.joint_targets.entry(o).or_insert_with(|| targets.clone());
+                bodies.push(rc_game::hero::bodies::BodyJoints { o_class: o, chains, targets });
+            }
+            game.hero.set_body_joints(bodies);
+        }
+        Err(e) => eprintln!("gameplay: no body joint lists ({e:#}): Clank / Giant Clank's joint points sit at the body's origin"),
     }
     let n_static = game.mobys.first_dynamic;
     svc.groups = statics.groups(&lv.gameplay);
@@ -1136,7 +1161,11 @@ fn setup(
 
     // The static mobys the table drives (a class with a Rust port), and the dynamic slots.
     let driven: Vec<(MobyId, usize, Option<usize>)> = (0..n_static)
-        .filter(|&id| game.mobys.mobys[id].update_fn.and_then(scheduler::ported).is_some())
+        .filter(|&id| {
+            let m = &game.mobys.mobys[id];
+            // The body mobys are driven by the hero code while they are the hero (rc_game::hero::bodies).
+            m.update_fn.and_then(scheduler::ported).is_some() || m.o_class == rc_game::hero::bodies::CLANK_CLASS || m.o_class == rc_game::hero::bodies::GIANT_CLASS
+        })
         .map(|id| { let ii = statics.moby_to_instance[id]; (id, ii, occl.anim_index(ii)) })
         .collect();
     let dynamic = DynMobys::new(lv, game.mobys.mobys.len() - n_static, &mut buffers);
@@ -1162,6 +1191,7 @@ fn setup(
     let mut play = Play {
         game,
         ratchet,
+        body_anim: None,
         hero_id,
         hero_k,
         class: placed.class,
@@ -1263,6 +1293,12 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
             }
             _ => None,
         };
+        // A run-time class swap (rc_game::moby_update::class_swap): the instance draws its live class.
+        if let Some(&ci) = p.dynamic.class_ix.get(&m.o_class) {
+            if occl.set_class(ii, ci) {
+                if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) { a.set_class(k, ci); }
+            }
+        }
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
         occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73 });
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
@@ -1347,6 +1383,13 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
     // The level's camera slots as the reload makes them (the slot init 0x20ef58).
     g.camera.set_level(p.game.camera.level_cams.restarted());
     p.game = g;
+    // The death reload's switch back into the checkpoint's body (`0x29adc8`), made by the next tick; the body moby's
+    // animation binding is dropped with the old hero.
+    p.body_anim = None;
+    if p.svc.save.checkpoint.is_some() {
+        let (body, st) = p.svc.save.checkpoint_body;
+        rc_game::hero::bodies::restore_from_checkpoint(&mut p.game.hero, &p.game.mobys, body, st);
+    }
     let hold = std::mem::take(&mut p.ratchet.hold);
     p.ratchet = RatchetAnim::new(class);
     p.ratchet.arm_joints = p.arm_joints.clone();
@@ -1529,14 +1572,18 @@ fn tick(
     p.game.hero.idle.counter = p.game.counter as i32;
     // Ratchet's own sounds (his animation triggers, his voices) inside the hero update; the listener is the
     // camera the hero update sees (the previous tick's).
+    // The other bodies' animation classes by o_class (rc_game::hero::bodies).
+    let body_class = |o: i16| lv.mobys.classes.iter().position(|c| c.o_class as i16 == o).map(|ci| &lv.mobys.anim[ci]);
     let mut hero_sounds = HeroClassSounds {
         audio: || std::cell::RefMut::filter_map(audio_cell.borrow_mut(), |a| a.as_deref_mut().map(|o| o.system())).ok(),
         class,
+        body_classes: Some(&body_class),
         listener: class_sounds::listener_of(&p.game.camera.out),
         hero: hero_id,
         counter: p.game.counter,
     };
-    let mut anim_ctl = p.ratchet.ctl(class);
+    // The hero's animation: Ratchet's, or the body moby's while a body is the hero moby (rc_game::hero::bodies).
+    let mut anim_ctl = rc_game::hero::anim::HeroAnimCtl { ratchet: p.ratchet.ctl(class), body: &mut p.body_anim, classes: &body_class };
     let sound = if has_audio { Some(&mut sound as &mut rc_game::tick::SoundHook) } else { None };
     let report = p.game.tick_with_hero_sounds(Some(&input.bytes()), coll, &mut anim_ctl, &mut hooks, &mut hits, sound, &mut hero_sounds);
     // … and back out.
@@ -1592,7 +1639,20 @@ fn tick(
     for ev in p.svc.sounds.drain(..) { *p.sounds.entry((ev.o_class, ev.index)).or_default() += 1; }
     // The talk system's saved-game writes (moby_update::interact::GameWrite).
     if let Some(gs) = state.as_mut() {
-        for w in p.svc.interact.apply_writes(&mut gs.0) { println!("interact: tick {}: game write {w:?}", p.game.counter); }
+        for w in p.svc.interact.apply_writes(&mut gs.0) {
+            println!("interact: tick {}: game write {w:?}", p.game.counter);
+            // A class's `GiveItem(item, equip)` (0x275760; Pokitaru's commando 114): the item tables from the disc.
+            if let rc_game::moby_update::interact::GameWrite::GiveItem { item, equip } = w {
+                let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+                let tables = crate::disc_source::read_path(&root, &root.join("boot/SCUS_971.99")).ok()
+                    .zip(crate::disc_source::level_file(&root, index, "overlay.bin").ok())
+                    .and_then(|(elf, ov)| ItemTables::load(&elf, &ov).ok());
+                match (tables, session.as_mut()) {
+                    (Some(t), Some(s)) if item < rc_formats::save_game::ITEM_COUNT => gs.0.give_item(item, equip, &t, &mut s.0),
+                    _ => println!("interact: GiveItem({item}) not applied (no item tables or session)"),
+                }
+            }
+        }
     }
     // The bolt counter (0x15ed98, 0x13df38[level]) into the persistent state the HUD and menus read.
     if let Some(gs) = state.as_mut() {
@@ -1628,6 +1688,11 @@ fn tick(
     for e in std::mem::take(&mut p.game.hero.swim.events) {
         if let rc_game::hero::swim::SwimEvent::Ripple { x, y, r, amp } = e {
             p.svc.water.disturb(x, y, r, amp, false);
+        }
+        // The surface jump's store `0x167494 = 0` (`0x2406b0`), made in the hero update after the moby loop (so it
+        // overrides a HeroTeleport store of the same tick, as in the game); the camera applies it before its test.
+        if e == rc_game::hero::swim::SwimEvent::UnderwaterOff {
+            p.svc.water.underwater_store = Some((p.game.counter.wrapping_sub(1), rc_game::water::world::UnderwaterStore::Off));
         }
     }
     // Hits taken and deaths (rc_game::hero::damage): the game state's counters (0x15eea8 / 0x13df88[level],

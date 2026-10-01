@@ -65,6 +65,13 @@ impl Camera {
         list.iter().filter_map(|id| w.mobys.get(id)).find(|m| 0 <= m.state as i8).map(|m| Some(*m)).ok_or(())
     }
 
+    /// The id of the region's moby as [`Self::focus_moby`] resolves it (+0x48).
+    fn focus_moby_id(&self, f: &MobyFocus) -> Option<usize> {
+        let w = &self.world;
+        if f.group < 0 { return usize::try_from(f.moby).ok(); }
+        w.groups.get(&f.group)?.iter().copied().find(|id| w.mobys.get(id).is_some_and(|m| 0 <= m.state as i8))
+    }
+
     /// `0x2fb9c8` (module doc).
     fn focus_update(&mut self, i: usize, inp: &CamInput) {
         let f = self.level_cams.slots[i].focus.unwrap();
@@ -91,7 +98,7 @@ impl Camera {
             self.focus_mut(i).counter = 0;
             return;
         }
-        if !self.focus_test(i, inp, m) {
+        if !self.focus_test(i, inp, m, self.focus_moby_id(&f)) {
             self.focus_mut(i).counter = 0;
             self.release_owner(i);
             return;
@@ -223,12 +230,14 @@ impl Camera {
         w.groups.get(&f.group).and_then(|l| l.iter().copied().find(|id| w.mobys.get(id).is_some_and(|m| 0 <= m.state as i8))) == Some(g)
     }
 
-    /// The region test `0x2fb648`: (the focus moby 0x16735c being this one: no ported writer); mode 6 → standing on it
-    /// (checked by the caller); +0x22 = 1 → Ratchet within +0x24 of the moby; else the first shape the header has
-    /// (cuboid +0x0c, cylinder +0x10, sphere +0x08, path +0x14) with Ratchet's feet, none → false.
-    fn focus_test(&self, i: usize, inp: &CamInput, m: Option<CamMoby>) -> bool {
+    /// The region test `0x2fb648`: the scripted focus moby (0x16735c, [`Camera::focus_moby`]) being the region's moby
+    /// (`id`, +0x48) → inside; mode 6 → standing on it (checked by the caller); +0x22 = 1 → Ratchet within +0x24 of the
+    /// moby; else the first shape the header has (cuboid +0x0c, cylinder +0x10, sphere +0x08, path +0x14) with
+    /// Ratchet's feet, none → false.
+    fn focus_test(&self, i: usize, inp: &CamInput, m: Option<CamMoby>, id: Option<usize>) -> bool {
         let f = self.level_cams.slots[i].focus.unwrap();
         let p = to_f32x3(inp.hero.pos);
+        if self.focus_moby.is_some() && self.focus_moby == id { return true; }
         if f.mode == 6 { return true; }
         if f.near_kind == 1 {
             let Some(m) = m else { return false };

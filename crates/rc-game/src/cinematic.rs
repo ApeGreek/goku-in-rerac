@@ -19,6 +19,11 @@
 //! | `memcard_Save(0, −1)` | [`save`] | logged: the in-memory game state is the save |
 //! | `SetMissionDone(m)` 0x265080 | [`set_mission_done`] | the level's mission byte done (the live bytes and the saved game) |
 //! | `0x317d88` / `0x317aa0` / `0x317e70` | [`camera_type6`] | the type-6 camera's switch / tracking / hand-back (the Visibomb) |
+//! | `0x313628` / `0x313690` | [`follow_distance`] / [`follow_pivot_height`] | the follow camera's distance / pivot-height targets set by a class (the Pokitaru boats) |
+//! | `0x313af0` / `0x3136c8` | [`follow_turn_toward`] / [`follow_look_height`] | the follow camera turned toward a direction / its look height (the collapsing platform 701's look, `0x2f9000`) |
+//! | `0x16735c = moby` | [`focus_moby`] | the follow camera's scripted focus moby (its auto-yaw, `0x3111d8`) |
+//! | a class-18 record's +0x34 / +0x38, level18 `0x306338` | [`focus_record`] / [`focus_suppress`] | the moby focus record's distance / pivot height (the boss 1422's tweak) and its leave word +0x50 |
+//! | `0x15f3fc = f` (gameplay) | [`set_fade`] | the full-screen fade to black a class writes in game mode 0 (`DrawWorld` 0x21a1b8 draws black at `min(f, 1)·128` at the end of the frame; the cutaway machine 1157, the boss 1422) |
 //!
 //! The camera calls are queued here and applied by the tick right after the moby loop ([`Cinematic::calls`],
 //! `crate::tick`); the hero calls go through the hero-block channel ([`crate::moby_update::services::HeroFields`]);
@@ -50,6 +55,26 @@ pub enum CinematicCall {
     /// A Swingshot target's call into the follow camera's look-up hint (`0x2eb3d0` / `0x2eb4c0`:
     /// [`crate::follow_camera::swing::LookHint`]).
     LookHint(crate::follow_camera::swing::HintCall),
+    /// The follow camera's distance setter `0x313628(d, rate, base)` called from a class update
+    /// ([`crate::follow_camera::Camera::set_distance`]: a no-op unless the follow camera is current).
+    FollowDistance { dist: f32, rate: f32, base: bool },
+    /// The follow camera's pivot-height setter `0x313690(h, rate)` called from a class update
+    /// ([`crate::follow_camera::Camera::set_pivot_height`]).
+    FollowPivotHeight { h: f32, rate: f32 },
+    /// The follow camera's turn `0x313af0(rate, tolerance, dir)` called from a class update
+    /// ([`crate::follow_camera::Camera::turn_toward`]).
+    FollowTurnToward { rate: f32, tolerance: f32, dir: [f32; 3] },
+    /// The follow camera's look-height setter `0x3136c8(h, rate, add)` called from a class update
+    /// ([`crate::follow_camera::Camera::set_look_height`]).
+    FollowLookHeight { h: f32, rate: f32, add: bool },
+    /// A class's store into 0x16735c, the follow camera's scripted focus moby
+    /// ([`crate::follow_camera::Camera::set_focus_moby`]).
+    FocusMoby(Option<MobyId>),
+    /// A class's stores into a class-18 camera record's pvar block (`0x15ef50 + i·0x20` +0x1c): +0x34 the distance,
+    /// +0x38 the pivot height ([`focus_record`]).
+    FocusRecord { record: usize, distance: f32, pivot: f32 },
+    /// `0x306338(slot)` (level18): a class-18 slot's record +0x50 = 1 (the region leaves this tick) ([`focus_suppress`]).
+    FocusSuppress(usize),
 }
 
 /// What the engine has to do for the moby loop (outside the gameplay tick).
@@ -70,6 +95,14 @@ pub enum EngineRequest {
     ShipHidden(bool),
     /// `memcard_Save(0, −1)`.
     Save,
+    /// `EnterSlideshowMode` 0x2ad558 (game mode 7) called from a class (the boss 1422's ending): the engine has no
+    /// slideshow yet (G-CUT-003), it logs the request and the game mode stays 0.
+    Slideshow,
+    /// `PlayMovieB(n)` 0x2ad050 (`StartPssMovie` of the table 0x1394b8, NTSC) from a class (the boss 1422: 11, the ending
+    /// movie): not played by the engine yet (G-CUT-003), logged.
+    MovieB { movie: i32 },
+    /// `PauseAllSounds(mask)` (level18 0x278118) from a class: logged (G-AUD-012).
+    PauseSounds { mask: u32 },
 }
 
 /// The cinematic layer's state in the moby services.
@@ -93,6 +126,10 @@ pub struct Cinematic {
     /// The banner buffer's last `ShowBanner(msg, ticks)` of the moby loop (0x179598 / 0x15f640: one banner, the last
     /// call wins), for the HUD; `seq` counts the calls.
     pub banner: BannerCall,
+    /// 0x15f3fc as the gameplay classes write it (the fade to black over the world, 0..1; drawn by the engine at
+    /// `trunc(min(f, 1)·128)` black when > 0, `DrawWorld` 0x21a1b8). The scene player keeps its own copy in mode 2 and
+    /// ends it at 0, so a scene start clears this one ([`start_scene`]) [L].
+    pub fade: f32,
 }
 
 /// `ShowBanner(msg, ticks)` 0x2789e0 as the HUD takes it (`HudState::show_banner_msg`).
@@ -140,13 +177,16 @@ pub fn letterbox(w: &mut World, on: bool) { w.svc.creatures.cutscene = on; }
 pub fn hero_state(w: &mut World, state: i32, play: bool) { w.hero_fields_mut().call(HeroCall::SetState { id: state, play }); }
 
 /// `HeroTeleport(pos, euler, state, reset_cam)` 0x2368e0: position and Euler stored, the motion block cleared,
-/// `SetState(state, 1)` (unless −1), and with `reset_cam` the follow camera reset behind him. Only the yaw of the
+/// `SetState(state, 1)` (unless −1), the underwater flag 0x167494 = Ratchet's group is 0x11 (under water), and with
+/// `reset_cam` the follow camera reset behind him. Only the yaw of the
 /// Euler is kept (the port's hero block has no pitch / roll of his own; every Novalis caller passes 0 for them).
 pub fn hero_teleport(w: &mut World, pos: [f32; 3], euler: [f32; 3], state: i32, reset_cam: bool) {
     let f = w.hero_fields_mut();
     f.clear_motion();
     f.pose = Some(HeroPose { pos, yaw: euler[2], target_yaw: euler[2] });
     if state != -1 { f.call(HeroCall::SetState { id: state, play: true }); }
+    // `0x167494 = (0x1413dc == 0x11)` after the SetState (the group of the state it sets: applied with the camera).
+    w.svc.water.underwater_store = Some((w.counter, crate::water::world::UnderwaterStore::HeroGroup));
     if reset_cam { w.svc.cinematic.calls.push(CinematicCall::CameraResetBehindHero); }
     // `EnvNearestSamplePoint(hero)`: the env sample point near the destination (reverb, music track; crate::audio).
     if let Some(s) = w.sound.as_deref_mut() { s.hero_teleported(pos); }
@@ -155,11 +195,45 @@ pub fn hero_teleport(w: &mut World, pos: [f32; 3], euler: [f32; 3], state: i32, 
 /// A call into the type-6 camera (`0x317d88` / `0x317aa0` / `0x317e70`).
 pub fn camera_type6(w: &mut World, c: crate::follow_camera::type6::Call) { w.svc.cinematic.calls.push(CinematicCall::Type6(c)); }
 
+/// `0x313628(d, rate, base)` from a class (the Pokitaru boats 1075 past their camera node).
+pub fn follow_distance(w: &mut World, dist: f32, rate: f32, base: bool) { w.svc.cinematic.calls.push(CinematicCall::FollowDistance { dist, rate, base }); }
+
+/// `0x313690(h, rate)` from a class.
+pub fn follow_pivot_height(w: &mut World, h: f32, rate: f32) { w.svc.cinematic.calls.push(CinematicCall::FollowPivotHeight { h, rate }); }
+
+/// `0x313af0(rate, tolerance, dir)` from a class (the collapsing platform 701's look).
+pub fn follow_turn_toward(w: &mut World, rate: f32, tolerance: f32, dir: [f32; 3]) {
+    w.svc.cinematic.calls.push(CinematicCall::FollowTurnToward { rate, tolerance, dir });
+}
+
+/// `0x3136c8(h, rate, add)` from a class.
+pub fn follow_look_height(w: &mut World, h: f32, rate: f32, add: bool) { w.svc.cinematic.calls.push(CinematicCall::FollowLookHeight { h, rate, add }); }
+
+/// The store `0x16735c = moby` (0: `None`) from a class: the follow camera's scripted focus moby.
+pub fn focus_moby(w: &mut World, moby: Option<MobyId>) { w.svc.cinematic.calls.push(CinematicCall::FocusMoby(moby)); }
+
+/// The stores `+0x34 = distance`, `+0x38 = pivot` into class-18 camera record `record`'s block (the boss 1422's camera
+/// tweak `0x2f7288`); the moby loop's mirror ([`crate::moby_update::Services::camera_focus`]) is updated at once.
+pub fn focus_record(w: &mut World, record: usize, distance: f32, pivot: f32) {
+    if let Some(f) = w.svc.camera_focus.get_mut(record) { *f = [distance, pivot]; }
+    w.svc.cinematic.calls.push(CinematicCall::FocusRecord { record, distance, pivot });
+}
+
+/// `0x306338(slot)`: a class-18 record's +0x50 = 1 for this tick.
+pub fn focus_suppress(w: &mut World, record: usize) { w.svc.cinematic.calls.push(CinematicCall::FocusSuppress(record)); }
+
 /// A Swingshot target's hint call (`0x2eb3d0` reset / `0x2eb4c0` offer), applied to the camera before its update.
 pub fn look_hint(w: &mut World, c: crate::follow_camera::swing::HintCall) { w.svc.cinematic.calls.push(CinematicCall::LookHint(c)); }
 
-/// `DialogStreamStart(k)`.
+/// `DialogStreamStart(k)` (level01 0x2ac330; the same code on other levels, e.g. level18 0x2983e8): with Ratchet's
+/// health 0x1415f8 at 0 the death sequence (`0x2319b0`) runs instead of the scene.
 pub fn start_scene(w: &mut World, scene: usize, arrival: bool) {
+    if w.hero.health == 0 {
+        w.hero_fields_mut().call(HeroCall::Death);
+        return;
+    }
+    // DialogStreamStart sets 0x15f3fc = 1.0 and the scene ramps it to 0 (the scene player's own copy).
+    w.svc.cinematic.fade = 0.0;
     // DialogStreamStart 0x2ac330 closes the help box at once (`FUN_002258b0`).
     w.svc.help.kill();
     w.svc.cinematic.requests.push(EngineRequest::StartScene { scene, arrival });
@@ -172,8 +246,23 @@ pub fn start_movie(w: &mut World, movie: i32) {
     w.svc.cinematic.requests.push(EngineRequest::StartMovie { movie });
 }
 
+/// `0x15f3fc = f` from a class update in gameplay ([`Cinematic::fade`]).
+pub fn set_fade(w: &mut World, f: f32) { w.svc.cinematic.fade = f; }
+
 /// `FadeToBlack(n)` from a class (see [`EngineRequest::FadeToBlack`]).
 pub fn fade_to_black(w: &mut World, frames: i32) { w.svc.cinematic.requests.push(EngineRequest::FadeToBlack { frames }); }
+
+/// `EnterSlideshowMode` 0x2ad558 from a class ([`EngineRequest::Slideshow`]).
+pub fn enter_slideshow(w: &mut World) { w.svc.cinematic.requests.push(EngineRequest::Slideshow); }
+
+/// `PlayMovieB(n)` 0x2ad050 from a class ([`EngineRequest::MovieB`]).
+pub fn play_movie_b(w: &mut World, movie: i32) {
+    w.svc.help.kill();
+    w.svc.cinematic.requests.push(EngineRequest::MovieB { movie });
+}
+
+/// `PauseAllSounds(mask)` from a class ([`EngineRequest::PauseSounds`]).
+pub fn pause_sounds(w: &mut World, mask: u32) { w.svc.cinematic.requests.push(EngineRequest::PauseSounds { mask }); }
 
 /// `memcard_Save(0, −1)`: the in-memory game state already holds every write; the engine logs the request (no
 /// memory-card writer yet).
@@ -258,6 +347,20 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             CinematicCall::HeroState { .. } => {}
             CinematicCall::Type6(c) => cam.type6_call(&c, inp),
             CinematicCall::LookHint(c) => cam.look_hint(c, inp.pad.ry.to_f32()),
+            CinematicCall::FollowDistance { dist, rate, base } => cam.set_distance(dist, rate, base),
+            CinematicCall::FollowPivotHeight { h, rate } => cam.set_pivot_height(h, rate),
+            CinematicCall::FollowTurnToward { rate, tolerance, dir } => cam.turn_toward(rate, tolerance, dir),
+            CinematicCall::FollowLookHeight { h, rate, add } => cam.set_look_height(h, rate, add),
+            CinematicCall::FocusMoby(m) => cam.set_focus_moby(m),
+            CinematicCall::FocusRecord { record, distance, pivot } => {
+                if let Some(f) = cam.level_cams.slots.get_mut(record).and_then(|s| s.focus.as_mut()) {
+                    f.distance = distance;
+                    f.pivot_height = pivot;
+                }
+            }
+            CinematicCall::FocusSuppress(record) => {
+                if let Some(f) = cam.level_cams.slots.get_mut(record).and_then(|s| s.focus.as_mut()) { f.suppress = 1; }
+            }
         }
     }
 }

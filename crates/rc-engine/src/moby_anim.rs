@@ -140,6 +140,14 @@ impl MobyAnim {
         self.pending[k] = None;
         self.hidden[k] = false;
     }
+
+    /// Instance `k`'s moby changed its class at run time (`MobyOcclusion::set_class`): its pose is evaluated with
+    /// class `class` (index into `LevelMobys::classes`) from now on; its palette range was made to fit it.
+    pub fn set_class(&mut self, k: usize, class: usize) {
+        let Some(i) = self.instances.get_mut(k) else { return };
+        i.class = class;
+        self.pose_dirty = true;
+    }
 }
 
 /// A sequence change waiting for the moby's first active update, with what the activity gate reads.

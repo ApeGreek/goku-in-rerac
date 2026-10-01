@@ -120,6 +120,9 @@ pub struct JointData {
     pub hero: std::sync::Arc<Vec<Vec<u8>>>,
     /// `(o_class, class scale +0x24, lists)` of the pack classes.
     pub packs: std::sync::Arc<Vec<PackLists>>,
+    /// The other bodies' classes' joint lists (Clank 0x57, Giant Clank 0x1a3: `super::bodies::BodyJoints`): what
+    /// `0x2645a8` reads while a body is the hero moby.
+    pub bodies: std::sync::Arc<Vec<super::bodies::BodyJoints>>,
 }
 
 /// One back pack class's joint lists: `(o_class, class scale +0x24, first byte lists)`.
@@ -382,7 +385,9 @@ pub(super) fn begin(h: &mut Hero, moby: &Moby) {
 /// Without the list or animation data the point is the moby's origin (as there). Native `f32`.
 pub fn joint_point(h: &Hero, anim: &dyn super::AnimCtl, list: usize) -> [f32; 4] {
     let f = &h.fx.frame;
-    let chain = h.fx.joints.hero.get(list).filter(|c| !c.is_empty());
+    // While a body is the hero moby, its class's lists (super::bodies).
+    let chains = h.body_joints().map_or(&*h.fx.joints.hero, |b| &b.chains);
+    let chain = chains.get(list).filter(|c| !c.is_empty());
     let t = chain
         .and_then(|c| anim.eval_chains_with(&[c.as_slice()], &h.weapons.layers, &f.mods).into_iter().next())
         .map_or([0.0, 0.0, 0.0, 1.0], |p| p[3]);
@@ -480,6 +485,12 @@ pub(super) fn flush(h: &mut Hero, moby: &Moby, sounds: &mut dyn HeroSounds, rng:
         }
     }
     if h.mode != 0 { return; }
+    voice_queue(h, moby, sounds, rng);
+}
+
+/// `0x236860`: the delayed-voice queue's countdown (mode 0 after the transitions; `HeroUpdateAlt` calls it in the bodies:
+/// super::bodies).
+pub(super) fn voice_queue(h: &mut Hero, moby: &Moby, sounds: &mut dyn HeroSounds, rng: &mut Rng) {
     for k in 0..h.fx.voices.len() {
         let e = &mut h.fx.voices[k];
         // FastDecTimer: 1 at 0 (no change), else t = max(t, 1) − 1, 2 when it reaches 0.

@@ -21,6 +21,15 @@
 //! callback registration. Their moby's collision (class +0x10: surface-0 faces at the moby's z) is the water Ratchet
 //! swims in, so the level moves with the moby.
 //!
+//! **Additions 2026-10-01 (G-REN-008)**:
+//!
+//! | address | what | port |
+//! |---|---|---|
+//! | 751 `0x2fd0e8` | the tick's phases in the game's order: zones + random drops, the clock, `RegisterDrawCallback(0x2fd0c0)`, the drip (zone 0 / 6: timer, `randi(5)` point of 0x1fa650, x / y + `randf(±0.15)`, `0x2ffcd0(0.2, point)`, `rand_range(300, 0x4b0)`), zone 5's foam | `update_751` (`RippleSim::tick_zones` / `drip_due` / `tick_mist`, `units::drip::spawn`) |
+//! | level13 `0x309e88` head | the vehicle 0x140940 ≠ 0 with class (+0xa6) 0x45, its state not 0xfe / 0xfd, and Ratchet in state 0x32 → return (nothing this tick, not even the patch tail) | `update_gemlik` (`Services::vehicle`: None until the flown ships write it, G-LVL-009) |
+//! | 831 state 3 | the flood button: Ratchet standing (`air_ticks` 0) on a class-0x33e moby (830, `FloorSwitch`) within 10 | `update_rilgar` (ported 2026-09-28; the button is the floor switch port) |
+//! | raise / lower | the managers take the group commands 8 / 4 (`scheduler::group_cmd` / `group_state`); the senders: the Hydrodisplacer's use (G-WPN-006, not ported), Umbris's timed switches 886 (`units::timed_switch`) | receivers here |
+//!
 //! **Arithmetic.** Native `f32` for the manager logic (spring, heights, distances); the ripple module keeps its
 //! existing PS2-float port ([`super::RippleSim`], one of the diagnosis layers kept as is).
 
@@ -407,10 +416,19 @@ fn update_751(w: &mut World, id: MobyId) {
     let cam = [w.camera[0].to_f32(), w.camera[1].to_f32(), w.camera[2].to_f32()];
     let counter = w.counter;
     let Some(sim) = w.svc.water.sim.as_mut() else { return };
-    let info = sim.tick_with(cam, &data.cuboids, w.rng, counter, w.particles.as_deref_mut());
+    let mut info = sim.tick_zones(cam, &data.cuboids, w.rng);
     // The underwater colours of the highest active zone.
     w.svc.water.look.set_from_ripple_zone(usize::try_from(info.zone).ok());
     w.svc.draw_callbacks.register(Callback::RipplePatches, id);
+    // The drip 787 (zone 0 or 6): its point, `0x2ffcd0(0.2, point)`, the timer re-armed.
+    let due = w.svc.water.sim.as_mut().and_then(|s| s.drip_due(info.zone, w.rng));
+    if let Some(at) = due {
+        crate::moby_update::classes::units::drip::spawn(w, crate::moby_update::classes::units::drip::SIZE, at);
+        let t = w.rng.rand_range(300, 0x4b0);
+        if let Some(s) = w.svc.water.sim.as_mut() { s.drip_timer = t; }
+        info.drips += 1;
+    }
+    if let Some(s) = w.svc.water.sim.as_mut() { s.tick_mist(&mut info, w.rng, counter, w.particles.as_deref_mut()); }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -840,6 +858,12 @@ fn update_hoven(w: &mut World, id: MobyId) {
 fn update_gemlik(w: &mut World, id: MobyId) {
     use l13::*;
     const P: usize = GEMLIK;
+    // The ship pause: the vehicle 0x140940 is a class-0x45 moby, alive (state not 0xfe / 0xfd), and Ratchet flies it
+    // (state 0x32) → nothing this tick.
+    if let Some(v) = w.svc.vehicle.filter(|&v| v < w.table.mobys.len()) {
+        let m = w.m(v);
+        if m.o_class == 0x45 && m.state != 0xfe && m.state != 0xfd && w.hero.state == 0x32 { return; }
+    }
     if w.m(id).pvars.len() < 0x14 { return; }
     let idx = pi(w, id, 0x10);
     match w.m(id).state {

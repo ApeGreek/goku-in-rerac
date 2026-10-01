@@ -9,6 +9,32 @@
 //! | 0–5 | 994 (03), 879 (05), 460 (07) and 317 (09, the same code), 1018 (07), 327 (08), 1260 (14) | per level (below) | the liquid grid module: level05 `0x2ce098` (init) … `0x2ce830` (draw), one [`rc_formats::sea::LiquidGrid`] each |
 //! | 6 | 1111 (11, 16) | level11 `0x30b358` (the same code on 16) | the camera-following ocean `0x30a908` |
 //! | 7 | 1901 (12) | level12 `0x30bff0` | the static liquid strips `0x30be68` |
+//! | 8 | 854 (02) | level02 `0x2ea198` | seven small liquid grids with one image and fog `0x2ea048` ([`aridia_ref`]) |
+//! | 9 | 293 (12) | level12 `0x2e7208` | 47 two-texture strips `0x2e71b0` → `0x2bc210` |
+//! | 10 | 1418 (14) | level14 `0x307a80` | 19 two-texture strips `0x307a28` → `0x2ab3e8` (the same module) |
+//! | 11 | 1848 (01) | level01 `0x30f208` | the reflective overlay `0x30f0e0` ([`env_overlay_ref`]) |
+//!
+//! **The liquid meshes (G-REN-026, 2026-10-01).** The callbacks that draw static strip meshes share two engine emitters
+//! (level01 `0x21fda8`: one pass; `0x21fa98`: the strip twice, the second in GS context 2 with a second ST set), each
+//! fed positions, colours and ST by the class's own code. One data model ([`MeshSet`]: meshes, a colour rule, one or
+//! two [`MeshPass`]es: texture, ST rule, FIX) and one draw (rc-engine `sea_render::mesh_prims`) cover every user; a new
+//! one is a [`SeaPort`] row and a loader of its tables:
+//!
+//! | address | what | port |
+//! |---|---|---|
+//! | level09 `0x2ef750` | `t = c/20 − ⌊c/20⌋`, `0x21e8c0(t, 0x1f3080, 108, 0x2c + (q & 15), 0x2c + ((q + 1) & 15))`, the grid `0x2c1920`, `0x2c1978(grid, 0x1f63c0, 10)` | [`GridData::extras`] ([`gaspar_ref`]) |
+//! | `0x21e8c0` → `0x21e560` | the two frames blended texel by texel by t (`0x26d240`, 64×64, PSMCT24) into TEX0_1 = TEX0_2 (the same frame twice: TEX0 = that FX) | [`MeshTex::Anim`] (the grid's image code) |
+//! | `0x21e8c0` | the packet `0x16eaa0` (TEST 0x50000 both contexts, TEX1 bilinear, CLAMP repeat, ALPHA_1 FIX 0x80, ALPHA_2 FIX 0x60: [`fs::strip_state_fix`]); 256 colours [`flow_colour`]; f = [`flow_offset`] | [`MeshColour::Flow`], [`MeshSt::Flow`] |
+//! | | per record (0x40 B): `FastBSphereCheck(256, record)`, each strip `0x21d250` (= `0x21fa98`) with ST1 = (s, t + f), ST2 = (s, t + 2f + 0.5) | `fs::parse_flow_meshes`, two passes |
+//! | `0x2c1978` | the grid's set-up (its fog from the record; with 0x15f458 = 1, the Visibomb's view, the level fog stays: NOT ported, G-REN-026; its image, ALPHA FIX = record +0x3f, TEST by FIX), colours 0x00757c8e, per record (0x20 B) `FastBSphereCheck(256)`, ST · 0.5, `0x21d560` (= `0x21fda8`); `0x2c1810` the fog restore | [`MeshTex::Grid`], [`MeshSt::Stored`] |
+//! | level02 `0x2ea048` | `0x2a4818(0, 260080, 255, 0, 0x0f, 0x0f, 0x19, 30, 0x28, 0x40, 0x1f3e80)`: the module's image / fog / GS set-up from a stack record (FIX 0x80), the strip order DMA | [`aridia_ref`], [`SeaData::GridSet`] |
+//! | | 0x15f608 ≠ 0, or pvar 0 ≠ −1 and the camera 0x1673c0 in it (`0x261928`) → record 0x1f3c00; likewise pvar 1 → 0x1f3cd0, 0x1f3d30, 0x1f3d90, 0x1f3dd0, 0x1f3e10; pvar 2 → 0x1f3c60: each `0x24f748` (block cull) + `0x24fa80` (blocks) | [`grid_set_drawn`]; the draw is the grid's |
+//! | | `0x2a4880` the fog restore | n/a (per-draw fog) |
+//! | level12 `0x2e71b0` | `0x2bc210(0x1f5480, 47, GetEffectTex(0x2c), GetEffectTex(0x2d))` | [`SeaKind::TwoTex`] |
+//! | `0x2bc210` | TEX0_1 / TEX0_2, the packet `0x1cb7a0` (ALPHA_1 FIX 0x80, ALPHA_2 FIX 0x40), 180 colours 0x80808080; per record (0x20 B) `FastBSphereCheck(256)`, ST2 = `0x2667fc` (sphere map: [`sphere_map_st`]), `0x220a58` (= `0x21fa98`) | `fs::parse_mesh_records`, [`MeshSt::SphereMap`] |
+//! | level14 `0x307a28` | `0x2ab3e8(0x1f5f80, 19, FX 0x2e, FX 0x2f)`, packet `0x1cba20` (the same values) | port 10 |
+//! | level01 `0x30f0e0` | TEX0 FX 40, ALPHA 0x2000000064, CLAMP 0, TEX1 bilinear, `DrawSpriteHelper_A`; 5 meshes: `0x30ef18` (ST: [`env_map_st`]), `0x21fda8` (stored colours, clip on) | [`SeaKind::EnvOverlay`] |
+//! | level15 `0x29642c` | class 28's callback `0x297808`: an FX 0xb glow quad (`FastDrawQuadReal`), not a liquid | n/a (U442) |
 //!
 //! **The liquid grid classes** are each level's own wrapper around the shared module: init once (`0x2ce098(scale, state,
 //! FIX)`: `state+0x3f = FIX`, the module's ST table · scale), then register the level's draw callback (which calls the
@@ -16,7 +42,7 @@
 //! (61.5 while Ratchet is on the Hoverboard, state group 0x16), and its callback skips the draw while the camera is in
 //! one of the moby's 8 cuboids (pvar words 0..7, −1 = none); 1018 (07) registers only while the camera is outside its
 //! cuboid (pvar 0); 327 (08) inits once per level (a `$gp` flag, not the moby state) and registers every tick without
-//! setting its update distance (its splash when Ratchet falls in, level 8's `0x2da0f0` second half, is not ported).
+//! setting its update distance, then makes its splash when Ratchet falls in (`0x2da0f0` second half: `batalia_splash`).
 //! Which list: `RegisterDrawCallback` (list 1, after the mobys) on 03, 08, 14; the list drained after the ties and before
 //! the shrubs (`0x16e100`, count `0x15f42c`) on 05, 07, 09.
 //!
@@ -76,6 +102,25 @@ pub enum SeaKind {
     Grid(GridPort),
     Ocean,
     Hoven,
+    /// Several small liquid grids drawn with one shared image and fog, each gated by a cuboid (02's 854).
+    GridSet,
+    /// Strip meshes drawn twice through the two-texture strip module (level12 `0x2bc210`, level14 `0x2ab3e8`): the
+    /// stored ST with one FX texture, then a sphere-mapped ST with another (12's 293, 14's 1418).
+    TwoTex(TwoTexPort),
+    /// Class 1848's reflective overlay (level01 `0x30f208` / `0x30f0e0`): five static meshes with a sphere-mapped,
+    /// scrolled FX 40 at FIX 0x20.
+    EnvOverlay,
+}
+
+/// A two-texture strip class: its mesh table (reference level labels), its two FX textures, the GS state packet the
+/// module sends (both contexts' ALPHA), and its gate (pvar offset of a camera cuboid, −1 = none; None: no gate).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TwoTexPort {
+    pub table: u32,
+    pub count: usize,
+    pub fx: [u16; 2],
+    pub packet: u32,
+    pub gate: Option<usize>,
 }
 
 /// One sea class port.
@@ -100,7 +145,7 @@ const fn grid(state: u32, scale: f32, fix: u8, list: DrawList, variant: GridVari
 pub const OCEAN: usize = 6;
 pub const HOVEN: usize = 7;
 
-pub const PORTS: [SeaPort; 8] = [
+pub const PORTS: [SeaPort; 12] = [
     // level03 0x2dc9b0: 0x291198(2/3, 0x1dc1a0, 0x20); callback 0x2dc990 via 0x1f2d48 (list 1).
     SeaPort { name: "994 liquid", level: 3, func: 0x2d_c9b0, classes: &[994], kind: grid(0x1d_c1a0, TWO_THIRDS, 0x20, DrawList::AfterMobys, GridVariant::Plain) },
     // level05 0x316110: 0x2ce110(1.0, 0x211b20) (FIX 0x80); callback 0x316070 via 0x228110 (after the ties).
@@ -116,7 +161,173 @@ pub const PORTS: [SeaPort; 8] = [
     SeaPort { name: "1260 liquid", level: 14, func: 0x30_3370, classes: &[1260], kind: grid(0x1e_9c60, TWO_THIRDS, 0x40, DrawList::AfterMobys, GridVariant::Plain) },
     SeaPort { name: "1111 ocean", level: fs::ocean_ref::LEVEL, func: fs::ocean_ref::UPDATE_FN, classes: &[1111], kind: SeaKind::Ocean },
     SeaPort { name: "1901 Hoven liquid", level: fs::hoven_ref::LEVEL, func: fs::hoven_ref::UPDATE_FN, classes: &[1901], kind: SeaKind::Hoven },
+    // level02 0x2ea198: state 0 the module init 0x2a47f8(1/6); state 1 registers 0x2ea048 via 0x20a390 (after the ties).
+    SeaPort { name: "854 Aridia liquids", level: 2, func: 0x2e_a198, classes: &[854], kind: SeaKind::GridSet },
+    // level12 0x2e7208 / callback 0x2e71b0: 0x2bc210(0x1f5480, 47, FX 0x2c, FX 0x2d), packet 0x1cb7a0; registered via
+    // 0x21bf18 (after the ties) while the camera (0x167240) is in the cuboid of pvar +0xc (−1: always).
+    SeaPort { name: "293 Hoven strips", level: 12, func: 0x2e_7208, classes: &[293], kind: SeaKind::TwoTex(TwoTexPort { table: 0x1f_5480, count: 0x2f, fx: [0x2c, 0x2d], packet: 0x1c_b7a0, gate: Some(0xc) }) },
+    // level14 0x307a80 / callback 0x307a28: 0x2ab3e8(0x1f5f80, 19, FX 0x2e, FX 0x2f), packet 0x1cba20; registered via
+    // 0x20c698 (the list counted by 0x15f42c: after the ties [L: by its count global]) with no gate.
+    SeaPort { name: "1418 Oltanis strips", level: 14, func: 0x30_7a80, classes: &[1418], kind: SeaKind::TwoTex(TwoTexPort { table: 0x1f_5f80, count: 0x13, fx: [0x2e, 0x2f], packet: 0x1c_ba20, gate: None }) },
+    // level01 0x30f208: the UV scroll 0x162110 / 0x162114 and RegisterDrawCallback(0x30f0e0) (list 1).
+    SeaPort { name: "1848 env overlay", level: env_overlay_ref::LEVEL, func: env_overlay_ref::UPDATE_FN, classes: &[1848], kind: SeaKind::EnvOverlay },
 ];
+
+pub const ARIDIA: usize = 8;
+pub const ENV_OVERLAY: usize = 11;
+
+/// Class 1848's tables (level01 labels; `0x30f0e0`): five meshes, the vertex counts, the position, normal and colour
+/// pointer tables (`0x208120`'s fourth table is passed to the vertex function, which does not read it); FX 40 (0x28),
+/// `ALPHA_1 = 0x2000000064` (FIX 0x20), CLAMP 0 (repeat), TEX1 0xff9000000260 (bilinear).
+pub mod env_overlay_ref {
+    pub const LEVEL: u32 = 1;
+    pub const UPDATE_FN: u32 = 0x30_f208;
+    pub const COUNTS: u32 = 0x20_2ea0;
+    pub const POSITIONS: u32 = 0x20_8108;
+    pub const NORMALS: u32 = 0x20_8138;
+    pub const COLOURS: u32 = 0x20_8150;
+    pub const MESHES: usize = 5;
+    pub const FX: u16 = 0x28;
+    pub const FIX: u8 = 0x20;
+}
+
+/// Level 9's extras in 317's draw callback `0x2ef750` (the reference level's labels; module doc).
+pub mod gaspar_ref {
+    pub const LEVEL: u32 = 9;
+    /// The callback: its copy on the loaded level makes the extras present.
+    pub const CALLBACK: u32 = 0x2e_f750;
+    /// `0x21e8c0(t, 0x1f3080, 0x6c, 0x2c + (q & 15), 0x2c + ((q + 1) & 15))`, q = counter / 20.
+    pub const FLOWS: u32 = 0x1f_3080;
+    pub const FLOW_COUNT: usize = 0x6c;
+    pub const FLOW_FX: u16 = 0x2c;
+    pub const FLOW_FRAMES: u8 = 16;
+    pub const FLOW_PERIOD: u8 = 20;
+    /// The strip state packet `0x21e8c0` sends (TEST, TEX1, CLAMP, ALPHA of both contexts).
+    pub const FLOW_PACKET: u32 = 0x16_eaa0;
+    /// `0x2c1978(0x1fc740, 0x1f63c0, 10)`: meshes textured with the grid's image.
+    pub const GRID_MESHES: u32 = 0x1f_63c0;
+    pub const GRID_MESH_COUNT: usize = 10;
+}
+
+/// Level 2's 854 (callback `0x2ea048`): the seven grid records in draw order and the pvar word of the cuboid that gates
+/// each (0: the first, 1: the next five, 2: the last), and the shared image / fog record the callback builds on its
+/// stack for `0x2a4818` (near 0, far 260080 (0x487dfc00), intensities 255 → 0, FOGCOL (0x0f, 0x0f, 0x19), 30 ticks a
+/// frame, FX 0x28 + 64 frames, FIX 0x80).
+pub mod aridia_ref {
+    pub const LEVEL: u32 = 2;
+    pub const CALLBACK: u32 = 0x2e_a048;
+    pub const RECORDS: [(u32, usize); 7] = [(0x1f_3c00, 0), (0x1f_3cd0, 1), (0x1f_3d30, 1), (0x1f_3d90, 1), (0x1f_3dd0, 1), (0x1f_3e10, 1), (0x1f_3c60, 2)];
+    /// The init `0x2a47f8` → `0x2a40d0(1/6)` (`0x3e2aaaab`).
+    pub const SCALE: f32 = f32::from_bits(0x3e2a_aaab);
+    pub const FOG: [f32; 4] = [0.0, 260080.0, 255.0, 0.0];
+    pub const FOG_RGB: [u8; 3] = [0x0f, 0x0f, 0x19];
+    pub const ANIM: super::GridAnim = super::GridAnim { tex: 0x28, frames: 0x40, period: 0x1e };
+    pub const FIX: u8 = 0x80;
+}
+
+/// An animated liquid image: frames `tex + (c/p mod frames)` and the next one blended by the tick's fraction
+/// (`0x277b20` / `0x26d240`; the renderer's `grid_image`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GridAnim {
+    pub tex: u16,
+    pub frames: u8,
+    pub period: u8,
+}
+
+/// Where a liquid mesh pass's texture comes from.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MeshTex {
+    /// FX texture n (`GetEffectTex`).
+    Fx(u16),
+    /// An animated blend of FX frames ([`GridAnim`]): the lava flows' `0x21e560` + `0x26d240`.
+    Anim(GridAnim),
+    /// The port's grid image, its fog and its FIX (the grid-textured meshes of `0x2c1978`).
+    Grid,
+}
+
+/// How a liquid mesh pass gets its ST.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MeshSt {
+    /// The stored ST · scale.
+    Stored { scale: f32 },
+    /// The lava flows' scroll: `(s, t + k·f + add)` with `f = 1 − (counter & 0x7ff)/2048`.
+    Flow { k: f32, add: f32 },
+    /// The two-texture module's sphere map `0x2667fc` from the position, the stored normal and the camera.
+    SphereMap,
+    /// Class 1848's reflection map `0x30ef18` plus the port's scroll ([`env_map_st`]).
+    EnvMap,
+}
+
+/// The vertex colours of a mesh set.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MeshColour {
+    /// One RGBA for every vertex (the two-texture module 0x80808080, the grid meshes 0x00757c8e).
+    Const(u32),
+    /// The lava flows' 256-entry pattern `0x80787070 + ((i·0x89) & 15)·0x20200` by vertex index.
+    Flow,
+    /// The strips' stored colours.
+    Stored,
+}
+
+/// One pass of a liquid mesh set: ALPHA `FIX << 32 | 0x64` (`(Cs − Cd)·FIX + Cd`), Z test GEQUAL (TEST 0x50000).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeshPass {
+    pub tex: MeshTex,
+    pub st: MeshSt,
+    /// The pass's FIX (ignored for [`MeshTex::Grid`], which uses the grid's).
+    pub fix: u8,
+}
+
+/// Liquid meshes drawn through the generic strip emitters (level01 `0x21fda8` one pass, `0x21fa98` two passes: the
+/// second in GS context 2), each mesh culled by `FastBSphereCheck(256, sphere)`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshSet {
+    pub meshes: Vec<fs::LiquidMesh>,
+    pub colour: MeshColour,
+    pub passes: Vec<MeshPass>,
+    /// In a grid port's extras: drawn before the grid's blocks (the lava flows: `0x21e8c0` precedes `0x2c1920`).
+    pub before_grid: bool,
+}
+
+/// Class 1848's per-vertex ST (`0x30ef18`): `e = unit(p − cam)` (0x167240), `n' = unit(−n)`, `r = unit(e − 2(n'·e)n')`,
+/// `r.z += 1`, `l = |r|`; ST = `2·(r.x/(2l) + 0.5) + scroll.s`, `2·(r.y/(2l) + 0.5) + scroll.t`.
+pub fn env_map_st(p: [f32; 3], n: [f32; 3], cam: [f32; 3], scroll: [f32; 2]) -> [f32; 2] {
+    let unit = |v: [f32; 3]| {
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        v.map(|x| x / l)
+    };
+    let e = unit([p[0] - cam[0], p[1] - cam[1], p[2] - cam[2]]);
+    let m = unit([-n[0], -n[1], -n[2]]);
+    let d = m[0] * e[0] + m[1] * e[1] + m[2] * e[2];
+    let mut r = unit(std::array::from_fn(|k| e[k] - m[k] * (d + d)));
+    r[2] += 1.0;
+    let l = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
+    let (u, v) = (r[0] / (l + l) + 0.5, r[1] / (l + l) + 0.5);
+    [u + u + scroll[0], v + v + scroll[1]]
+}
+
+/// The lava flows' vertex colour `i` (`0x21e8c0`'s 256 words at the scratchpad).
+pub fn flow_colour(i: usize) -> u32 { 0x8078_7070u32.wrapping_add(((i as u32).wrapping_mul(0x89) & 0xf) * 0x2_0200) }
+
+/// The lava flows' ST lane offset for tick `counter`: `1 − (counter & 0x7ff)·(1/2048)`.
+pub fn flow_offset(counter: u64) -> f32 { 1.0 - (counter & 0x7ff) as f32 * 0.000_488_281_25 }
+
+/// The two-texture module's sphere-map ST (`0x2667fc`, VU0): `e = 0.45·unit(cam − p)`, `v = −e`, `d = v·n` (n as
+/// stored); `d > 0` (as an integer: positive and not ±0) → `e`, else `v + 2(n·d − v)`; ST = that's (x, y) + 0.5.
+pub fn sphere_map_st(p: [f32; 3], n: [f32; 3], cam: [f32; 3]) -> [f32; 2] {
+    let d = [cam[0] - p[0], cam[1] - p[1], cam[2] - p[2]];
+    let q = 0.45 / (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    let e = d.map(|x| x * q);
+    let v = e.map(|x| 0.0 - x);
+    let dot = v[0] * n[0] + v[1] * n[1] + v[2] * n[2];
+    let r = if dot.to_bits() as i32 > 0 {
+        e
+    } else {
+        let m: [f32; 3] = std::array::from_fn(|k| n[k] * dot - v[k]);
+        std::array::from_fn(|k| v[k] + (m[k] + m[k]))
+    };
+    [r[0] + 0.5, r[1] + 0.5]
+}
 
 /// Port indices as the `ClassUpdate::Sea` payload.
 pub fn ids() -> impl Iterator<Item = u8> { 0..PORTS.len() as u8 }
@@ -126,7 +337,24 @@ pub fn ids() -> impl Iterator<Item = u8> { 0..PORTS.len() as u8 }
 pub struct GridData {
     pub grid: LiquidGrid,
     pub module: LiquidGridModule,
+    /// The level callback's own meshes after the grid (level 9's 317: [`gaspar_ref`]): the lava flows, then the
+    /// grid-textured meshes.
+    pub extras: Vec<MeshSet>,
 }
+
+/// 854's data: the grid records with their gate (pvar word), the module, and the shared image and fog.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridSetData {
+    pub grids: Vec<(LiquidGrid, usize)>,
+    pub module: LiquidGridModule,
+    pub anim: GridAnim,
+    pub fog: [f32; 4],
+    pub fog_rgb: [u8; 3],
+    pub fix: u8,
+}
+
+/// The animation of a grid record (+0x3c first FX, +0x3e frames, +0x33 ticks a frame).
+pub fn grid_anim(g: &LiquidGrid) -> GridAnim { GridAnim { tex: g.tex, frames: g.frames, period: g.period } }
 
 /// Class 1901's strips and globals on the loaded level.
 #[derive(Clone, Debug, PartialEq)]
@@ -146,6 +374,8 @@ pub enum SeaData {
     Grid(Box<GridData>),
     Ocean(OceanTables),
     Hoven(Box<HovenData>),
+    GridSet(Box<GridSetData>),
+    Meshes(Box<MeshSet>),
 }
 
 /// A port present on the loaded level (its update has a copy in the level's overlay) and its data.
@@ -185,13 +415,55 @@ pub fn load<'t>(ov: &Overlay, target: &'t LevelOverlay, rel_of: &dyn Fn(u32) -> 
                     continue;
                 };
                 match LiquidGrid::parse(ov, a) {
-                    Ok(grid) => SeaData::Grid(Box::new(GridData { grid, module: m })),
+                    Ok(grid) => {
+                        let extras = rel_of(gaspar_ref::LEVEL).filter(|r| r.func(gaspar_ref::CALLBACK).is_some()).map_or_else(Vec::new, |r| {
+                            gaspar_extras(ov, &r).unwrap_or_else(|e| {
+                                eprintln!("sea: {}: the lava meshes: {e}", p.name);
+                                Vec::new()
+                            })
+                        });
+                        SeaData::Grid(Box::new(GridData { grid, module: m, extras }))
+                    }
                     Err(e) => {
                         eprintln!("sea: {}: {e}", p.name);
                         continue;
                     }
                 }
             }
+            SeaKind::GridSet => {
+                let Some(Ok(m)) = module.clone() else {
+                    eprintln!("sea: {}: the liquid grid module's tables are not on this level", p.name);
+                    continue;
+                };
+                match aridia_grids(ov, &rel) {
+                    Ok(grids) => SeaData::GridSet(Box::new(GridSetData {
+                        grids,
+                        module: m,
+                        anim: aridia_ref::ANIM,
+                        fog: aridia_ref::FOG,
+                        fog_rgb: aridia_ref::FOG_RGB,
+                        fix: aridia_ref::FIX,
+                    })),
+                    Err(e) => {
+                        eprintln!("sea: {}: {e}", p.name);
+                        continue;
+                    }
+                }
+            }
+            SeaKind::EnvOverlay => match env_overlay_set(ov, &rel) {
+                Ok(set) => SeaData::Meshes(Box::new(set)),
+                Err(e) => {
+                    eprintln!("sea: {}: {e}", p.name);
+                    continue;
+                }
+            },
+            SeaKind::TwoTex(t) => match two_tex_set(ov, &rel, &t) {
+                Ok(set) => SeaData::Meshes(Box::new(set)),
+                Err(e) => {
+                    eprintln!("sea: {}: {e}", p.name);
+                    continue;
+                }
+            },
             SeaKind::Ocean => {
                 let (Some(s), Some(v)) = (rel.data(fs::ocean_ref::SCALE), rel.data(fs::ocean_ref::SPEED)) else { continue };
                 match OceanTables::parse(ov, s, v) {
@@ -213,6 +485,62 @@ pub fn load<'t>(ov: &Overlay, target: &'t LevelOverlay, rel_of: &dyn Fn(u32) -> 
         out.push(SeaPortData { port: i, data });
     }
     out
+}
+
+fn label(rel: &Relocation, l: u32) -> Result<u32, rc_formats::FormatError> { rel.data(l).ok_or_else(|| rc_formats::FormatError::Invalid(format!("label {l:#x} not found"))) }
+
+/// Level 9's 317 extras ([`gaspar_ref`]): the lava flows (two passes of the animated FX blend, FIX of the packet's
+/// contexts 1 / 2, ST scrolled by [`flow_offset`] once and twice + 0.5) and the ten grid-textured meshes (ST · 0.5,
+/// colour 0x00757c8e).
+fn gaspar_extras(ov: &Overlay, rel: &Relocation) -> Result<Vec<MeshSet>, rc_formats::FormatError> {
+    use gaspar_ref as g;
+    let fix = fs::strip_state_fix(ov, label(rel, g::FLOW_PACKET)?)?;
+    let anim = MeshTex::Anim(GridAnim { tex: g::FLOW_FX, frames: g::FLOW_FRAMES, period: g::FLOW_PERIOD });
+    let flows = MeshSet {
+        meshes: fs::parse_flow_meshes(ov, label(rel, g::FLOWS)?, g::FLOW_COUNT)?,
+        colour: MeshColour::Flow,
+        passes: vec![MeshPass { tex: anim, st: MeshSt::Flow { k: 1.0, add: 0.0 }, fix: fix[0] }, MeshPass { tex: anim, st: MeshSt::Flow { k: 2.0, add: 0.5 }, fix: fix[1] }],
+        before_grid: true,
+    };
+    let grid = MeshSet {
+        meshes: fs::parse_mesh_records(ov, label(rel, g::GRID_MESHES)?, g::GRID_MESH_COUNT, false)?,
+        colour: MeshColour::Const(0x0075_7c8e),
+        passes: vec![MeshPass { tex: MeshTex::Grid, st: MeshSt::Stored { scale: 0.5 }, fix: 0 }],
+        before_grid: false,
+    };
+    Ok(vec![flows, grid])
+}
+
+/// 854's grid records ([`aridia_ref`]), each a full liquid grid record (only its geometry, cull distance, colours and
+/// flags are read by the draw), with its gate.
+fn aridia_grids(ov: &Overlay, rel: &Relocation) -> Result<Vec<(LiquidGrid, usize)>, rc_formats::FormatError> {
+    aridia_ref::RECORDS.iter().map(|&(l, gate)| Ok((LiquidGrid::parse(ov, label(rel, l)?)?, gate))).collect()
+}
+
+/// A two-texture strip class's meshes and passes: FX a with the stored ST (FIX of context 1), FX b with the sphere map
+/// (FIX of context 2), colour 0x80808080.
+fn two_tex_set(ov: &Overlay, rel: &Relocation, t: &TwoTexPort) -> Result<MeshSet, rc_formats::FormatError> {
+    let fix = fs::strip_state_fix(ov, label(rel, t.packet)?)?;
+    Ok(MeshSet {
+        meshes: fs::parse_mesh_records(ov, label(rel, t.table)?, t.count, true)?,
+        colour: MeshColour::Const(0x8080_8080),
+        passes: vec![
+            MeshPass { tex: MeshTex::Fx(t.fx[0]), st: MeshSt::Stored { scale: 1.0 }, fix: fix[0] },
+            MeshPass { tex: MeshTex::Fx(t.fx[1]), st: MeshSt::SphereMap, fix: fix[1] },
+        ],
+        before_grid: false,
+    })
+}
+
+/// Class 1848's meshes ([`env_overlay_ref`]): one pass of FX 40 with the reflection map, the stored colours, FIX 0x20.
+fn env_overlay_set(ov: &Overlay, rel: &Relocation) -> Result<MeshSet, rc_formats::FormatError> {
+    use env_overlay_ref as e;
+    Ok(MeshSet {
+        meshes: fs::parse_pointer_meshes(ov, label(rel, e::COUNTS)?, label(rel, e::POSITIONS)?, label(rel, e::NORMALS)?, label(rel, e::COLOURS)?, e::MESHES)?,
+        colour: MeshColour::Stored,
+        passes: vec![MeshPass { tex: MeshTex::Fx(e::FX), st: MeshSt::EnvMap, fix: e::FIX }],
+        before_grid: false,
+    })
 }
 
 fn load_hoven(ov: &Overlay, rel: &Relocation) -> Result<HovenData, rc_formats::FormatError> {
@@ -272,7 +600,80 @@ pub fn update(w: &mut World, id: MobyId, port: u8) {
         SeaKind::Grid(g) => grid_update(w, id, port, g),
         SeaKind::Ocean => ocean_update(w, id, port),
         SeaKind::Hoven => hoven_update(w, id, port),
+        SeaKind::GridSet => grid_set_update(w, id, port),
+        SeaKind::TwoTex(t) => two_tex_update(w, id, port, &t),
+        SeaKind::EnvOverlay => env_overlay_update(w, id, port),
     }
+}
+
+/// 1848 (level01 `0x30f208`): state 0 zeroes the scroll (0x162110, 0x162114), → 1; state 1 adds `dt·0.025` (dt =
+/// 0x15ed7c) to each lane, wraps it (above 1 → −1, below −1 → +1) and registers the draw `0x30f0e0` on list 1.
+fn env_overlay_update(w: &mut World, id: MobyId, port: usize) {
+    match w.m(id).state {
+        0 => {
+            let r = &mut w.svc.water.sea.run[port];
+            (r.inited, r.scroll[0]) = (true, [0.0; 2]);
+            w.mm(id).state = 1;
+        }
+        1 => {
+            let s = &mut w.svc.water.sea.run[port].scroll[0];
+            for x in s.iter_mut() { *x = wrap(*x + DT * 0.025); }
+            register(w, id, port, DrawList::AfterMobys);
+        }
+        _ => {}
+    }
+}
+
+/// 854 (level02 `0x2ea198`): state 0 runs the module init `0x2a47f8` → `0x2a40d0(1/6)` (the module's ST · 1/6; its
+/// `sb 0x80, 0x3f(a0)` lands in the moby, whose +0x3f no one reads: n/a), update distance 0xff, → 1; state 1 registers
+/// the callback `0x2ea048` on the after-ties list (`0x20a390`).
+fn grid_set_update(w: &mut World, id: MobyId, port: usize) {
+    match w.m(id).state {
+        0 => {
+            let r = &mut w.svc.water.sea.run[port];
+            (r.inited, r.fix) = (true, aridia_ref::FIX);
+            let m = w.mm(id);
+            m.update_dist = 0xff;
+            m.state = 1;
+        }
+        1 => register(w, id, port, DrawList::AfterTies),
+        _ => {}
+    }
+}
+
+/// 293 (level12 `0x2e7208`) / 1418 (level14 `0x307a80`): state 0 → update distance 0xff, state 1; state 1 registers the
+/// callback on the after-ties list, 293 only while its pvar +0xc cuboid is −1 or holds the camera (0x167240,
+/// `0x278850`).
+fn two_tex_update(w: &mut World, id: MobyId, port: usize, t: &TwoTexPort) {
+    match w.m(id).state {
+        0 => {
+            w.svc.water.sea.run[port].inited = true;
+            let m = w.mm(id);
+            m.update_dist = 0xff;
+            m.state = 1;
+        }
+        1 => {
+            if let Some(o) = t.gate {
+                if w.m(id).pvars.len() < o + 4 { return; }
+                let cub = pvar::i32(&w.m(id).pvars, o);
+                let c = fv(w.camera);
+                if cub != -1 && !crate::moby_update::triggers::point_in_cuboid(&w.svc.volumes, [c[0], c[1], c[2]], cub) { return; }
+            }
+            register(w, id, port, DrawList::AfterTies);
+        }
+        _ => {}
+    }
+}
+
+/// 854's callback `0x2ea048`: record k is drawn when the occlusion fallback 0x15f608 is set (`all_visible`: the
+/// Visibomb's view) or its gate word (pvar 0 / 1 / 2) is not −1 and the camera (0x1673c0) is in that cuboid
+/// (`0x261928`).
+pub fn grid_set_drawn(gate: usize, pvars: &[u8], volumes: &rc_formats::volumes::Volumes, camera: [f32; 3], all_visible: bool) -> bool {
+    if all_visible { return true; }
+    let o = 4 * gate;
+    if pvars.len() < o + 4 { return false; }
+    let cub = pvar::i32(pvars, o);
+    cub != -1 && crate::moby_update::triggers::point_in_cuboid(volumes, camera, cub)
 }
 
 /// dt `0x15ed7c` (NTSC).
@@ -312,6 +713,7 @@ fn grid_update(w: &mut World, id: MobyId, port: usize, g: GridPort) {
         // 0x2da0f0: `if (!gp flag) { flag = 1; init }`, then register every tick.
         grid_init(w, port, &g);
         register(w, id, port, g.list);
+        batalia_splash(w, port);
         return;
     }
     match w.m(id).state {
@@ -339,6 +741,54 @@ fn grid_update(w: &mut World, id: MobyId, port: usize, g: GridPort) {
             register(w, id, port, g.list);
         }
         _ => {}
+    }
+}
+
+/// Level 08's splash when Ratchet falls into its liquid (the second half of `0x2da0f0`): on level 8 (`0x15ed84`), with
+/// his z below the record's z (+0x08) and his z less this tick's displacement (0x13f458) at or above it: the voice of
+/// his death fall 0x77 (0x141602) released when alive (`SoundIsAlive`, `release_voice_slot`) and forgotten (0xffff);
+/// at (his x, y, the liquid z): the splash 775 of size 3 with alpha 0x70 and 16 type-35 drops (`0x2f9718`,
+/// `PartType35Spawn`: [`bomb_water::splash_and_drops`]); then 16 type-46 rings, each at `rand_vec(1, 1)` from that
+/// point at z = liquid z + 0.05, size `randf(0.7, 1)`, spin 2 (the first) or −2, velocity 0 (0x15f580), on the liquid
+/// z (`PartType46Spawn` 0x27bdb0), and, when the ring was made, its timer +0x0a = `trunc(scale(randf(30, 60)))`.
+fn batalia_splash(w: &mut World, port: usize) {
+    use crate::moby_update::classes::bomb_water;
+    if w.svc.level != 8 { return; }
+    let z = w.svc.water.sea.run[port].z;
+    let (hz, dz) = (f32::from_bits(w.hero.pos[2].0), f32::from_bits(w.hero.disp[2].0));
+    if !(hz < z && z <= hz - dz) { return; }
+    if let Some(h) = w.hero_moby {
+        let slot = w.hero.damage.voice_slot;
+        if w.sound_alive(slot, h) {
+            w.release_sound(slot, h);
+            w.hero_fields_mut().fall_voice_clear = true;
+        }
+    }
+    let hp = w.hero.pos.map(|x| f32::from_bits(x.0));
+    let at = [hp[0], hp[1], z, hp[3]];
+    bomb_water::splash_and_drops(w, 3.0, at);
+    for i in 0..16 {
+        let v = w.rng.rand_vec(1.0, 1.0);
+        let p = [v[0] + at[0], v[1] + at[1], z + 0.05, at[3]];
+        let size = w.rng.randf(f32::from_bits(0x3f33_3333), 1.0);
+        let spin = if i == 0 { 2.0 } else { -2.0 };
+        *w.svc.fx.part_spawns.entry(crate::particles::type46::TYPE).or_default() += 1;
+        let Some(sys) = w.particles.as_deref_mut() else {
+            // `PartType46Spawn`'s two draws and the timer's (a record assumed, as the other callers without a particle
+            // system).
+            w.rng.randi(10);
+            w.rng.randf(0.0, 256.0);
+            w.rng.randf(30.0, 60.0);
+            continue;
+        };
+        match crate::particles::type46::spawn(sys, w.rng, size, spin, p, [0.0; 4], z) {
+            Some(r) => {
+                let t = w.rng.randf(30.0, 60.0);
+                let t = w.svc.timing.scale(crate::ps2v::Pf::f(t)).to_f32() as i32;
+                if let Some(sys) = w.particles.as_deref_mut() { crate::particles::rec::set_i16(&mut sys.pool.recs[r], 0xa, t as i16); }
+            }
+            None => w.svc.fx.part_failed += 1,
+        }
     }
 }
 

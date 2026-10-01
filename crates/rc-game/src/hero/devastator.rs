@@ -67,10 +67,13 @@ impl Default for Devastator {
     fn default() -> Self { Devastator { fire_timer: 0, lock: None, lock_timer: 0, aim_height: 0.0, light: -1, light_timer: 0, smoke: 0 } }
 }
 
-/// A live missile (class 153) already holds `t` as its target (`FUN_00274738` over the missile list 0x1b0bf0).
+/// A live missile already holds `t` as its target (`FUN_00274738` over the missile list 0x1b0bf0): the Devastator's
+/// (class 153) and, on levels 15 / 18, Giant Clank's (class 0x100, which joins the level's list 0x1b0d70 / 0x1b1170 too:
+/// `classes::units::giant_missile`; the same pvar +0x18).
 pub fn already_targeted(table: &MobyTable, t: MobyId) -> bool {
     use crate::moby_update::classes::devastator_missile as dm;
-    table.mobys.iter().any(|m| m.o_class == dm::CLASS && m.state < 0xfd && m.pvars.len() >= 0x20 && (i32::from_le_bytes(m.pvars[dm::pv::TARGET..dm::pv::TARGET + 4].try_into().unwrap()) as usize).checked_sub(1) == Some(t))
+    use crate::moby_update::classes::units::giant_missile as gm;
+    table.mobys.iter().any(|m| (m.o_class == dm::CLASS || m.o_class == gm::CLASS) && m.state < 0xfd && m.pvars.len() >= 0x20 && (i32::from_le_bytes(m.pvars[dm::pv::TARGET..dm::pv::TARGET + 4].try_into().unwrap()) as usize).checked_sub(1) == Some(t))
 }
 
 /// The search's result.

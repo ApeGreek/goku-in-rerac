@@ -153,6 +153,9 @@ None. The loader and every renderer ran on all 19 levels.
 - A 5×2 grid of identical helicopters sits in mid-air over the missing sea, all overlapping (`diag/12_crop_heli.png`).
 - It looks like a parked enemy pool that the game keeps hidden or inactive until triggered. Check its
   spawn/visibility rule.
+- **Resolved 2026-10-01** (gaps.md G-CLS-018): not a pool. They are class 336 (11 placed, census U392, unported),
+  path flyers whose state 0 moves them onto their spline (pvar +0x74, point +0xa0); without a port they stay where
+  they were placed.
 - The fighter grids on 17 look like intended formations. Lower priority.
 
 **M4 (moby, info). Moby positions outside the tfrag sphere bounds.**

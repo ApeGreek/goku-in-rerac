@@ -98,6 +98,20 @@ pub trait AnimCtl {
     /// The rate word of key `frame` of sequence `seq` (`*(seq +0x1c)[frame]`, frame header +0; what a key step of
     /// an advance continues with). 1 without class data.
     fn key_rate(&self, _seq: u8, _frame: u8) -> f32 { 1.0 }
+    /// The hero moby `0x1413d0` changed (`SwitchCharacter` 0x231348 / leaving the body 0x231450,
+    /// `crate::hero::bodies`): from now on every call above is the body moby's (`Some((moby, o_class, its anim
+    /// fields))`: the hero code drives it with Ratchet's own advance 0x247d48 and `SetAnim` 0x247a90, as the game
+    /// does through 0x1413d0) or Ratchet's again (None). Default: nothing (no animation data; [`HeroAnimCtl`] binds).
+    fn bind_body(&mut self, _body: Option<(crate::moby_runtime::MobyId, i16, rc_formats::moby_anim::AnimState)>) {}
+    /// The moby the calls drive now (None: Ratchet's).
+    fn bound_body(&self) -> Option<crate::moby_runtime::MobyId> { None }
+    /// The bound body's pose snapshot (what a blend from a snapshot key reads: the body moby's snapshot slot, for its
+    /// joint points and its draw). None: none or no body bound.
+    fn body_snapshot(&self) -> Option<rc_formats::moby_anim::MobyFrame> { None }
+    /// Giant Clank's `0x2061f0` on Ratchet's own moby (the pilot in the cockpit; the generic moby animation, not the
+    /// hero's): `moby_set_anim_snapshot(Ratchet, seq, 0, blend)` when his key B is not `seq`, then
+    /// `MobyAnimAdvance(Ratchet)` (`fun_0020d580`). Default: nothing.
+    fn ratchet_generic(&mut self, _seq: u8, _blend: i32) {}
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -363,6 +377,20 @@ pub struct RatchetAnimCtl<'a> {
 }
 
 impl RatchetAnimCtl<'_> {
+    /// The read-only view of the same animation ([`RatchetAnimRef`]).
+    fn r(&self) -> RatchetAnimRef<'_> { RatchetAnimRef { a: &*self.a, class: self.class } }
+    fn frame_readout(&self) -> Pf { self.r().frame_readout() }
+}
+
+/// The read-only half of [`RatchetAnimCtl`] (the fields the hero code reads back), shared with [`HeroAnimCtl`].
+#[derive(Clone, Copy)]
+pub struct RatchetAnimRef<'a> {
+    pub a: &'a RatchetAnim,
+    pub class: &'a MobyAnimClass,
+}
+
+impl RatchetAnimRef<'_> {
+    /// `0x263920`: the key time (frame index + t, in key-time units of 1/16).
     fn frame_readout(&self) -> Pf {
         let s = &self.a.state;
         let c = self.class;
@@ -377,6 +405,134 @@ impl RatchetAnimCtl<'_> {
             return (ta * (Pf::ONE - t) + tb * t) * k;
         }
         ta * k + t
+    }
+
+    pub fn view(&self) -> AnimView {
+        let s = &self.a.state;
+        let fb = self.class.frame(s.seq_b, s.frame_b);
+        AnimView {
+            seq_a: s.seq_a,
+            seq_b: s.seq_b,
+            frame_a: s.frame_a,
+            frame_b: s.frame_b,
+            t: s.t,
+            flags: self.a.flags,
+            rate: self.a.rate.to_f32(),
+            frame: self.a.frame.to_f32(),
+            frame_count_b: self.class.sequence(s.seq_b).map(|q| q.header.frame_count).unwrap_or(0),
+            frame_b_rate: fb.map(|f| f.header.rate).unwrap_or(1.0),
+            frame_step: self.a.frame_step.to_f32(),
+        }
+    }
+
+    pub fn frame_count(&self, seq: u8) -> u8 { self.class.sequence(seq).map(|q| q.header.frame_count).unwrap_or(0) }
+
+    pub fn eval_chains(&self, chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> {
+        rc_formats::moby_anim::evaluate_chains(self.class, &self.a.state, self.a.snapshot.as_ref(), chains)
+    }
+
+    pub fn eval_chains_with(&self, chains: &[&[u8]], layers: &PoseNodes, mods: &[rc_formats::moby_anim::JointModifier]) -> Vec<rc_formats::moby_anim::Rows> {
+        let pl = pose_layers_with(layers, &self.a.arm_joints, &self.a.hold);
+        rc_formats::moby_anim::evaluate_chains_posed(self.class, &self.a.state, self.a.snapshot.as_ref(), chains, &pl, mods)
+    }
+
+    pub fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> { snapshot(self.class, &self.a.state, self.a.snapshot.as_ref()) }
+
+    pub fn key_rate(&self, seq: u8, frame: u8) -> f32 { self.class.frame(seq, frame).map_or(1.0, |f| f.header.rate) }
+
+    pub fn loop_state(&self) -> (bool, i32) { (self.a.loop_range.is_some(), self.a.loop_end) }
+}
+
+/// The hero's animation while another body may be the hero moby (`crate::hero::bodies`): every [`AnimCtl`] call goes
+/// to Ratchet's [`RatchetAnim`] or, after [`AnimCtl::bind_body`], to the body moby's own [`BodyAnim`] (the body
+/// class's sequences, driven by the same advance 0x247d48 and `SetAnim` 0x247a90: the game's hero code reads and
+/// writes the animation of 0x1413d0, whichever moby that is). `classes` finds a body class's animation by o_class (a
+/// body whose class is missing stays unbound: the calls go to Ratchet, as with no data).
+pub struct HeroAnimCtl<'a> {
+    pub ratchet: RatchetAnimCtl<'a>,
+    pub body: &'a mut Option<BodyAnim>,
+    pub classes: &'a dyn Fn(i16) -> Option<&'a MobyAnimClass>,
+}
+
+/// The body moby's animation state while it is the hero moby ([`HeroAnimCtl`]): its moby, class and the hero
+/// animation's own fields (the same globals 0x13fde4.. Ratchet's use: one set, the game keeps them in the hero block).
+#[derive(Clone, Debug)]
+pub struct BodyAnim {
+    pub moby: crate::moby_runtime::MobyId,
+    pub o_class: i16,
+    pub anim: RatchetAnim,
+}
+
+impl<'a> HeroAnimCtl<'a> {
+    fn body_class(&self) -> Option<&'a MobyAnimClass> { self.body.as_ref().and_then(|b| (self.classes)(b.o_class)) }
+
+    /// `f` on the controller of the hero moby now.
+    fn with<R>(&mut self, f: impl FnOnce(&mut dyn AnimCtl) -> R) -> R {
+        if let Some(class) = self.body_class() {
+            if let Some(b) = self.body.as_mut() { return f(&mut RatchetAnimCtl { a: &mut b.anim, class }); }
+        }
+        f(&mut self.ratchet)
+    }
+
+    /// The read-only view of the hero moby's animation now.
+    fn r(&self) -> RatchetAnimRef<'_> {
+        if let (Some(class), Some(b)) = (self.body_class(), self.body.as_ref()) { return RatchetAnimRef { a: &b.anim, class }; }
+        self.ratchet.r()
+    }
+}
+
+impl AnimCtl for HeroAnimCtl<'_> {
+    fn set_anim(&mut self, blend: Pf, seq: u8, frame: i32) { self.with(|a| a.set_anim(blend, seq, frame)) }
+    fn advance(&mut self, speed: Pf) { self.with(|a| a.advance(speed)) }
+    fn view(&self) -> AnimView { self.r().view() }
+    fn frame_count(&self, seq: u8) -> u8 { self.r().frame_count(seq) }
+    fn set_loop(&mut self, start: i32, end: i32) { self.with(|a| a.set_loop(start, end)) }
+    fn clear_loop(&mut self) { self.with(|a| a.clear_loop()) }
+    fn exit_loop(&mut self, to: i32) { self.with(|a| a.exit_loop(to)) }
+    fn loop_state(&self) -> (bool, i32) { self.r().loop_state() }
+    fn curve_step(&mut self) { self.with(|a| a.curve_step()) }
+    fn eval_chains(&self, chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> { self.r().eval_chains(chains) }
+    fn eval_chains_with(&self, chains: &[&[u8]], layers: &PoseNodes, mods: &[rc_formats::moby_anim::JointModifier]) -> Vec<rc_formats::moby_anim::Rows> {
+        // The weapon-arm layers are Ratchet's (his +0x60 list); a body moby has none.
+        if self.body_class().is_some() { return self.r().eval_chains_with(chains, &[None, None, None, None], mods); }
+        self.r().eval_chains_with(chains, layers, mods)
+    }
+    fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> { self.r().pose_frame() }
+    fn key_rate(&self, seq: u8, frame: u8) -> f32 { self.r().key_rate(seq, frame) }
+
+    /// `SwitchCharacter`'s rebinding: the body's animation starts from the moby's own fields (what its placed
+    /// update left: +0x50..+0x70), rate `0x13fde4` = 1 (the switch writes it), no loop (`0x247d00`, the switch's
+    /// call), no pending blend curve. Rebinding the moby already bound keeps its state.
+    fn bind_body(&mut self, body: Option<(crate::moby_runtime::MobyId, i16, rc_formats::moby_anim::AnimState)>) {
+        match body {
+            None => *self.body = None,
+            Some((moby, o_class, state)) => {
+                if self.body.as_ref().is_some_and(|b| b.moby == moby && b.o_class == o_class) { return; }
+                let Some(class) = (self.classes)(o_class) else {
+                    *self.body = None;
+                    return;
+                };
+                let mut anim = RatchetAnim::new(class);
+                anim.state = state;
+                anim.rate = Pf::ONE;
+                *self.body = Some(BodyAnim { moby, o_class, anim });
+            }
+        }
+    }
+
+    fn bound_body(&self) -> Option<crate::moby_runtime::MobyId> { self.body.as_ref().filter(|_| self.body_class().is_some()).map(|b| b.moby) }
+
+    fn body_snapshot(&self) -> Option<rc_formats::moby_anim::MobyFrame> { self.body.as_ref().and_then(|b| b.anim.snapshot.clone()) }
+
+    fn ratchet_generic(&mut self, seq: u8, blend: i32) {
+        let a = &mut *self.ratchet.a;
+        let class = self.ratchet.class;
+        if a.state.seq_b != seq {
+            let mut snap = a.snapshot.take();
+            rc_formats::moby_anim::set_sequence(&mut a.state, class, seq, 0, blend, &mut snap);
+            a.snapshot = snap;
+        }
+        rc_formats::moby_anim::advance(&mut a.state, class);
     }
 }
 
@@ -485,25 +641,9 @@ impl AnimCtl for RatchetAnimCtl<'_> {
         self.a.frame = f;
     }
 
-    fn view(&self) -> AnimView {
-        let s = &self.a.state;
-        let fb = self.class.frame(s.seq_b, s.frame_b);
-        AnimView {
-            seq_a: s.seq_a,
-            seq_b: s.seq_b,
-            frame_a: s.frame_a,
-            frame_b: s.frame_b,
-            t: s.t,
-            flags: self.a.flags,
-            rate: self.a.rate.to_f32(),
-            frame: self.a.frame.to_f32(),
-            frame_count_b: self.class.sequence(s.seq_b).map(|q| q.header.frame_count).unwrap_or(0),
-            frame_b_rate: fb.map(|f| f.header.rate).unwrap_or(1.0),
-            frame_step: self.a.frame_step.to_f32(),
-        }
-    }
+    fn view(&self) -> AnimView { self.r().view() }
 
-    fn frame_count(&self, seq: u8) -> u8 { self.class.sequence(seq).map(|q| q.header.frame_count).unwrap_or(0) }
+    fn frame_count(&self, seq: u8) -> u8 { self.r().frame_count(seq) }
 
     fn set_loop(&mut self, start: i32, end: i32) {
         let fc = self.frame_count(self.a.state.seq_b) as i32;
@@ -523,7 +663,7 @@ impl AnimCtl for RatchetAnimCtl<'_> {
         self.a.loop_end = to;
     }
 
-    fn loop_state(&self) -> (bool, i32) { (self.a.loop_range.is_some(), self.a.loop_end) }
+    fn loop_state(&self) -> (bool, i32) { self.r().loop_state() }
     fn curve_step(&mut self) {
         let a = &mut *self.a;
         if a.curve < 0 || a.state.seq_a == a.state.seq_b { return; }
@@ -532,20 +672,15 @@ impl AnimCtl for RatchetAnimCtl<'_> {
         a.curve_pos += 1;
     }
 
-    fn eval_chains(&self, chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> {
-        rc_formats::moby_anim::evaluate_chains(self.class, &self.a.state, self.a.snapshot.as_ref(), chains)
-    }
+    fn eval_chains(&self, chains: &[&[u8]]) -> Vec<rc_formats::moby_anim::Rows> { self.r().eval_chains(chains) }
 
     fn eval_chains_with(&self, chains: &[&[u8]], layers: &PoseNodes, mods: &[rc_formats::moby_anim::JointModifier]) -> Vec<rc_formats::moby_anim::Rows> {
-        let pl = pose_layers_with(layers, &self.a.arm_joints, &self.a.hold);
-        rc_formats::moby_anim::evaluate_chains_posed(self.class, &self.a.state, self.a.snapshot.as_ref(), chains, &pl, mods)
+        self.r().eval_chains_with(chains, layers, mods)
     }
 
-    fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> {
-        snapshot(self.class, &self.a.state, self.a.snapshot.as_ref())
-    }
+    fn pose_frame(&self) -> Option<rc_formats::moby_anim::MobyFrame> { self.r().pose_frame() }
 
-    fn key_rate(&self, seq: u8, frame: u8) -> f32 { self.class.frame(seq, frame).map_or(1.0, |f| f.header.rate) }
+    fn key_rate(&self, seq: u8, frame: u8) -> f32 { self.r().key_rate(seq, frame) }
 }
 
 #[cfg(test)]

@@ -144,16 +144,48 @@ pub struct Hud2d {
     scissor: [i32; 4],
     /// Texture size of every HUD frame.
     pub frame_sizes: Vec<(i32, i32)>,
+    /// The primitives sent with 1/16-pixel corners (`fun_00200080`, `fun_00200e08(…, 1)`): their index in
+    /// [`Hud2d::prims`] and their corners in 1/16 pixels (the prim's own `pos` holds them rounded down).
+    pub fine: Vec<(usize, [[i32; 2]; 4])>,
 }
 
 impl Default for Hud2d {
-    fn default() -> Self { Hud2d { prims: Vec::new(), scissor: FULL_SCISSOR, frame_sizes: Vec::new() } }
+    fn default() -> Self { Hud2d { prims: Vec::new(), scissor: FULL_SCISSOR, frame_sizes: Vec::new(), fine: Vec::new() } }
 }
 
 impl Hud2d {
     pub fn clear(&mut self) {
         self.prims.clear();
+        self.fine.clear();
         self.scissor = FULL_SCISSOR;
+    }
+
+    /// A primitive with 1/16-pixel corners (strip order).
+    fn push_fine(&mut self, tex: Tex, pos16: [[i32; 2]; 4], uv: [[i32; 2]; 4], rgba: u32) {
+        self.fine.push((self.prims.len(), pos16));
+        self.push(tex, pos16.map(|p| [p[0] >> 4, p[1] >> 4]), uv, rgba);
+    }
+
+    /// `fun_00200080(frame, x, y, w, h, alpha)` (0x250928): the whole frame over a `w×h` rectangle at (x, y), all in
+    /// 1/16 pixels (the same `v + OF − 8` convention as `HudSprite`).
+    pub fn sprite_fine(&mut self, frame: usize, x: i32, y: i32, w: i32, h: i32, alpha: i32) {
+        let (tw, th) = self.frame_sizes.get(frame).copied().unwrap_or((0, 0));
+        let rgba = ((alpha as u32) & 0xff) << 24 | 0x007f_7f7f;
+        let (x1, y1) = (x + w, y + h);
+        self.push_fine(Tex::Frame(frame), [[x, y], [x1, y], [x, y1], [x1, y1]], [[0, 0], [tw, 0], [0, th], [tw, th]], rgba);
+    }
+
+    /// `fun_00200e08(x0, y0, x1, y1, rgba, 1)` (0x2516b0): an untextured blended rectangle between two corners in 1/16
+    /// pixels.
+    pub fn rect_fine(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, rgba: u32) {
+        self.push_fine(Tex::None, [[x0, y0], [x1, y0], [x0, y1], [x1, y1]], [[0, 0]; 4], rgba);
+    }
+
+    /// `HudSpriteSubRect(frame, x, y, w, h, alpha)` (0x2502c8): the first `w×h` texels of the frame at their own size.
+    pub fn sprite_sub(&mut self, frame: usize, x: i32, y: i32, w: i32, h: i32, alpha: i32) {
+        let rgba = ((alpha as u32) & 0xff) << 24 | 0x007f_7f7f;
+        let (x1, y1) = (x + w, y + h);
+        self.push(Tex::Frame(frame), [[x, y], [x1, y], [x, y1], [x1, y1]], [[0, 0], [w, 0], [0, h], [w, h]], rgba);
     }
 
     /// `VU1_setScissor(x0, x1, y0, y1)`.
@@ -411,6 +443,10 @@ struct HudRuntime {
     cine_banner_seq: u32,
     /// The last [`HudFeed::reset`] applied.
     reset: u32,
+    /// The last game-side HUD call applied (`rc_game::hud::Calls::since`, `Services::hud`).
+    calls_cursor: Option<u64>,
+    /// The calls not applied yet (kept while the HUD loop is frozen: the page menus, scenes).
+    pending: Vec<rc_game::hud::Call>,
 }
 
 #[derive(Component)]
@@ -433,6 +469,9 @@ pub struct HudFeed {
     pub weapon: Option<Option<(u16, i32, i32)>>,
     /// Bumped by `FUN_0024fb00` callers (the vendor's open): every HUD slot is emptied at once.
     pub reset: u32,
+    /// The slot calls the engine-side callers made this frame (the quick select's opening and `PageMenuClose`: health and
+    /// bolts kept up, `rc_game::hud::Call::ShowHealthBolts`); applied and cleared before the HUD's next tick.
+    pub calls: Vec<rc_game::hud::Call>,
 }
 
 /// Other 2D layers drawn through this pass (crate::menu_render: the quick-select ring, which is HUD slot 3,
@@ -581,10 +620,12 @@ fn setup(
         draws: Vec::new(),
         hud2d: Hud2d { frame_sizes, ..default() },
         // Until the first frame reads the game state (Persistent / Session / HeldWeapon): 4/4, no bolts, no slot.
-        game: Inputs { hp: 4, max_hp: 4, bolts: 0, weapon: None, lang: lh.lang, hero_state: 0 },
+        game: Inputs { lang: lh.lang, ..Default::default() },
         banner_seq: 0,
         cine_banner_seq: 0,
         reset: 0,
+        calls_cursor: None,
+        pending: Vec::new(),
     });
 }
 
@@ -606,12 +647,19 @@ fn tick_and_build(
     scene: Res<SceneLayer>,
     mut meshes: ResMut<Assets<Mesh>>,
     (state, session, held): GameInputs,
-    feed: Res<HudFeed>,
-    play: Option<Res<crate::gameplay::Play>>,
+    mut feed: ResMut<HudFeed>,
+    (mut play, mut audio): (Option<ResMut<crate::gameplay::Play>>, Option<ResMut<crate::audio_out::AudioOut>>),
     dyn_images: Option<Res<crate::hud_images::HudImages>>,
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
+    // The slot calls since the last frame: the game's (the classes', `Services::hud`) then the engine's (the menus').
+    if let Some(p) = play.as_deref() {
+        let (c, cursor) = p.svc.hud.since(rt.calls_cursor);
+        rt.pending.extend(c);
+        rt.calls_cursor = cursor;
+    }
+    rt.pending.append(&mut feed.calls);
     // The pickups' banner (`ShowBannerf` in the ammo pickup 0x2db028: "+n" of the item's ammo text).
     if let Some(b) = play.as_ref().map(|p| p.svc.pickups_banner).filter(|b| b.seq != rt.banner_seq) {
         rt.banner_seq = b.seq;
@@ -633,7 +681,12 @@ fn tick_and_build(
         rt.game.weapon = held.as_ref().and_then(|h| h.0);
         if let Some(w) = feed.weapon { rt.game.weapon = w; }
         // Ratchet's state 0x1413d4 (mounted, 0x32: the health and bolt draws skip).
-        if let Some(p) = play.as_deref() { rt.game.hero_state = p.game.hero.state; }
+        if let Some(p) = play.as_deref() {
+            rt.game.hero_state = p.game.hero.state;
+            // The body (rc_game::hero::bodies): Clank's orbs, Giant Clank's no health.
+            (rt.game.body, rt.game.clank_max) = (p.game.hero.mode, p.game.hero.bodies.clank_health);
+            hero_inputs(&mut rt.game, p);
+        }
     }
     if feed.reset != rt.reset {
         rt.reset = feed.reset;
@@ -657,7 +710,13 @@ fn tick_and_build(
         }
         // The help box of the game tick (rc_game::help runs in crate::gameplay's tick; the HUD draws it).
         if let Some(p) = play.as_deref() { rt.state.set_help(&p.svc.help.bx); }
+        if !rt.pending.is_empty() { rt.state.apply_calls(&std::mem::take(&mut rt.pending)); }
+        rt.game.tick = play.as_deref().map_or(t, |p| p.game.counter.saturating_sub(target - t));
         rt.draws = rt.state.tick(rt.game);
+        // Ratchet's class sounds of the HUD (`0x236738(11, 0)`: the low-air beep of the oxygen meter's blink).
+        if let (Some(p), Some(a)) = (play.as_deref_mut(), audio.as_deref_mut()) {
+            for &index in &rt.state.sounds { play_hero_sound(p, a, index); }
+        }
         if let Some(text) = rt.env.text.clone().filter(|_| rt.env.text_window) { window_text_demo(&rt.state, &rt.glyphs, &text, &mut rt.draws); }
     }
     rt.hud2d.clear();
@@ -670,8 +729,46 @@ fn tick_and_build(
     rt.hud2d.prims.extend(hook.prims.iter().copied());
     rt.hud2d.prims.extend(scene.prims.iter().copied());
     let dyns = dyn_images.as_deref().map_or([None; crate::hud_images::SLOTS], |d| d.rects());
-    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.atlas_frames, &rt.atlas_fx, &dyns));
-    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &rt.atlas_frames, &rt.atlas_fx, &dyns)); }
+    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.atlas_frames, &rt.atlas_fx, &dyns));
+    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &[], &rt.atlas_frames, &rt.atlas_fx, &dyns)); }
+}
+
+/// The HUD inputs the hero and the classes hold (rc_game::hud::Inputs: the callers the HUD sees through the state).
+fn hero_inputs(g: &mut Inputs, p: &crate::gameplay::Play) {
+    let h = &p.game.hero;
+    let react = &p.svc.creatures.react;
+    let morph = &h.weapons.reactive.morph;
+    g.level = p.svc.level as i32;
+    g.mode = p.svc.game_mode;
+    g.pressed = p.game.pad.pressed;
+    g.hero_pos = [h.pos[0].to_f32(), h.pos[1].to_f32(), h.pos[2].to_f32()];
+    g.group = h.group;
+    g.o2_mask = h.owned.has(rc_game::hero::swim::ITEM_O2_MASK);
+    g.oxygen = h.swim.oxygen;
+    g.held_item = h.items.slot.id;
+    // `0x303000` runs from the slot loop for a Suck Cannon in the hand (not being put away), on foot.
+    g.suck_active = h.mode == 0 && h.items.slot.item.is_some() && h.items.slot.id == 9 && h.items.slot.state != 3;
+    (g.suck_held, g.suck_gold) = (react.held, react.gold);
+    (g.morph_hud, g.morph_target, g.morph_value) = (morph.hud, morph.target.map_or(-1, |t| t as i32), morph.hud_value);
+    (g.energy, g.beam_lock) = (h.bodies.energy, h.bodies.beam_lock);
+    g.bolt_alert = p.svc.buried.alert;
+}
+
+/// `0x236738(index, 0)`: Ratchet's class sound (`PlayClassSound` on the hero moby), as `HeroClassSounds::voice`.
+fn play_hero_sound(p: &mut crate::gameplay::Play, audio: &mut crate::audio_out::AudioOut, index: i32) {
+    let hero = p.game.hero.hero_moby(p.game.hero_moby);
+    let Some(m) = p.game.mobys.mobys.get(hero) else { return };
+    let ev = rc_game::moby_update::services::SoundEvent {
+        index,
+        flags: 0,
+        moby: hero,
+        o_class: m.o_class,
+        sound_class: m.o_class,
+        pos: [m.position[0], m.position[1], m.position[2]],
+        tick: p.game.counter,
+    };
+    let listener = rc_game::audio::class_sounds::listener_of(&p.game.camera.out);
+    audio.system().play_class_sound(&ev, Some(hero), &listener, &mut p.game.rng);
 }
 
 /// `RC_HUD_TEXT_WINDOW=1`: the text in a `DrawUIFrame` sized from a `FontPrintWindow` measure (regular font,
@@ -700,12 +797,14 @@ fn empty_mesh() -> Mesh {
 }
 
 /// The primitives as one triangle list in submission order (the GPU blends triangles of one draw in order).
-fn build_mesh(prims: &[Prim], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>]) -> Mesh {
+fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>]) -> Mesh {
     if prims.is_empty() { return empty_mesh(); }
+    let mut fine = fine.iter().peekable();
     let n = prims.len() * 4;
     let (mut pos, mut uv, mut rgba, mut tex, mut sc, mut idx) =
         (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n / 4 * 6));
-    for p in prims {
+    for (i, p) in prims.iter().enumerate() {
+        let pos16 = fine.next_if(|(k, _)| *k == i).map(|(_, q)| *q);
         let rect = match p.tex {
             Tex::None => None,
             Tex::Frame(i) => frames.get(i).copied(),
@@ -719,7 +818,10 @@ fn build_mesh(prims: &[Prim], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns
         let s = p.scissor.map(|v| v.clamp(-1, 0xffff) as u32);
         let base = pos.len() as u32;
         for k in 0..4 {
-            pos.push([p.pos[k][0] as f32, p.pos[k][1] as f32, 0.0]);
+            pos.push(match pos16 {
+                Some(q) => [q[k][0] as f32 / 16.0, q[k][1] as f32 / 16.0, 0.0],
+                None => [p.pos[k][0] as f32, p.pos[k][1] as f32, 0.0],
+            });
             uv.push([p.uv[k][0] as f32, p.uv[k][1] as f32]);
             rgba.push(p.rgba);
             tex.push(t);
@@ -770,7 +872,7 @@ mod tests {
         h.prims[2].nearest = true;
         h.rect(0, 4, 0, 4, 0x8000_0000);
         let fx = vec![None; 26].into_iter().chain([Some([64u32, 0, 32, 32])]).collect::<Vec<_>>();
-        let m = build_mesh(&h.prims, &[], &fx, &[]);
+        let m = build_mesh(&h.prims, &[], &[], &fx, &[]);
         let Some(VertexAttributeValues::Uint32x4(t)) = m.attribute(ATTRIBUTE_TEX) else { panic!("no tex attribute") };
         assert_eq!([t[0][2], t[4][2], t[8][2], t[12][2]], [1, 3, 7, 0]);
     }

@@ -59,7 +59,8 @@
 //! overlay per level ([`FireFieldTables`]). Both equations blend on the frame's display bytes like every effect
 //! (crate::display_blend; the shared draw-callback material crate::fx_draw::FxPrimMaterial, `fx_prim.wgsl`), As > 0x80 included (the curtain's A = 0xff).
 //!
-//! Not drawn: 1848 (env overlay), drips (787).
+//! Elsewhere: 1848's env overlay is drawn by crate::sea_render (the shared liquid mesh path), the drips 787 are mobys
+//! (`rc_game::moby_update::classes::units::drip`) drawn by the moby renderer.
 
 use crate::game_camera::{game_eye, GameFog, GameProjection, TfragFog};
 use crate::fx_draw::{FxPrimMaterial, FxPrimParams, PrimBuf};
