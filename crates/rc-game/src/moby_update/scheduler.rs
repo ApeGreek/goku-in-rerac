@@ -531,3 +531,17 @@ pub fn spawn_save(level: &crate::game_state::LevelState) -> rc_formats::moby_spa
     for (slot, d) in s.spawner.iter_mut().zip(&level.bolt_drops) { *slot = d.first; }
     s
 }
+
+/// The visit's bits for the death reload's spawn test (`LoadLevelCoreData(0, 1)`, G-CLS-030): the death bits of this
+/// visit `0x1ba950` ([`SaveBits::death_level`]), the per-id flags `0x1bbb04` ([`SaveBits::collected`]) and the persistent
+/// death bits `0x14c190 + L·0x100` this visit set ([`SaveBits::death`], not yet in the saved game's chunk the loader's
+/// `spawn_save` copied).
+pub fn add_visit_bits(s: &mut rc_formats::moby_spawn::SpawnSave, v: &crate::moby_update::services::SaveBits, level: u32) {
+    s.visit_death.extend(v.death_level.iter().map(|&id| id as i32));
+    for (&id, &f) in &v.collected { s.id_flags.insert(id as i32, f); }
+    for &(l, id) in &v.death {
+        if l != level || id < 0 { continue; }
+        let id = id as usize;
+        if let Some(b) = s.killed.get_mut(id >> 3) { *b |= 1 << (id & 7); }
+    }
+}

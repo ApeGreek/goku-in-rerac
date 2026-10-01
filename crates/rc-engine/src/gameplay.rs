@@ -236,6 +236,7 @@ impl Plugin for GameplayPlugin {
                 (setup, input_map::sample_system, set_budget, keys).chain().after(bevy::input::InputSystems),
             )
             .add_systems(FixedUpdate, tick.in_set(GameTick).before(crate::particle_render::tick))
+            .add_systems(Update, show_reloaded)
             .add_systems(RunFixedMainLoop, play_camera::apply.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop))
             .add_systems(
                 PostUpdate,
@@ -540,6 +541,9 @@ pub struct Play {
     frozen_hint: bool,
     /// Ratchet's entities hidden (his moby's mode bit 1: the first-person view hides him, `HeroSyncMoby`).
     ratchet_hidden: bool,
+    /// The instances a death reload made spawn that the level's load did not (their entities still hidden): shown by
+    /// [`show_reloaded`].
+    reload_shown: Vec<usize>,
     /// The weapon arm layers' joints (Ratchet's joint lists 12 / 13, `rc_game::hero::weapons::ARM_LISTS`).
     arm_joints: [Vec<u8>; 2],
     /// The help voice line loaded for the dialogue player (rc_game::help::VoiceCmd::Load), played on its `Play`.
@@ -873,12 +877,15 @@ fn spawnable_count(gameplay: &[u8]) -> usize {
 /// links through the instance → moby map), the spawnable count of dynamic slots, the ship created in the first
 /// of them (hidden while the level's mission NPC has its mission open: `moby_spawn::ship_hidden_on_arrival`).
 /// Returns the table, the statics' maps and the ship's id.
-fn moby_table(lv: &crate::level_load::LoadedLevel, classes: &mut ClassTable, ship: Option<usize>, state: Option<&GameState>, level: u32) -> anyhow::Result<(MobyTable, scheduler::LevelStatics, Option<MobyId>)> {
+fn moby_table(lv: &crate::level_load::LoadedLevel, classes: &mut ClassTable, ship: Option<usize>, state: Option<&GameState>, level: u32, visit: Option<&rc_game::moby_update::services::SaveBits>) -> anyhow::Result<(MobyTable, scheduler::LevelStatics, Option<MobyId>)> {
     use rc_formats::moby_spawn as ms;
     let m = &lv.mobys;
     let n_inst = ship.unwrap_or(m.instances.len());
     let insts = &m.instances[..n_inst];
-    let save = state.and_then(|s| s.levels.get(level as usize)).map(scheduler::spawn_save).unwrap_or_default();
+    let mut save = state.and_then(|s| s.levels.get(level as usize)).map(scheduler::spawn_save).unwrap_or_default();
+    // The death reload (G-CLS-030): this visit's bits as the loader reads them again, `0x1ba950` (the death bits),
+    // `0x1bbb04` (the per-id flags: the collected placed bolts) and the persistent death bits written this visit.
+    if let Some(v) = visit { scheduler::add_visit_bits(&mut save, v, level); }
     let tests = ms::loader_spawns(insts, &mut save.clone());
     let spawned: Vec<bool> = tests.iter().map(|t| t.spawn).collect();
     let pvars = rc_formats::gameplay::parse_pvars_spawned(&lv.gameplay, &spawned)?;
@@ -995,7 +1002,7 @@ fn setup(
     // The loader: class table, static mobys, dynamic slots, the ship.
     let mut classes = class_table(lv, &external_update_fn);
     let ship_ii = spawn.as_ref().and_then(|s| s.ship);
-    let (mut table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state.as_ref().map(|s| &s.0), level_index) {
+    let (mut table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state.as_ref().map(|s| &s.0), level_index, None) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("gameplay: moby table not built ({e:#}): no game tick");
@@ -1301,6 +1308,7 @@ fn setup(
         dynamic,
         sounds: HashMap::new(),
         ratchet_hidden: false,
+        reload_shown: Vec::new(),
         arm_joints,
         help_vag: None,
         help_debug: std::env::var("RC_HUD_HELP").ok().and_then(|v| v.trim().parse().ok()),
@@ -1433,6 +1441,101 @@ fn publish_anim(p: &mut Play, anim: Option<&mut MobyAnim>) {
     s.skip_advance = true;
     a.instances[k].state = s;
     a.snapshots[k] = p.ratchet.snapshot.clone();
+}
+
+/// The death reload's moby side (`LoadLevelCoreData(0, 1)` after the death flag 0x141401, G-CLS-030): the loader's
+/// instance loop and spawn test run again, now with this visit's bits (`scheduler::add_visit_bits`: the death bits
+/// 0x1ba950, the per-id flags 0x1bbb04, the death bits set this visit), so every placed moby restarts from its record
+/// (crates, enemies, switches back) and the ones killed or collected this visit stay gone; the dynamic slots are freed
+/// (the hero's items, bodies, shots, effects); the ship is created again; the load pass runs. The table is compacted
+/// as the game's is, so the engine's maps follow it: Ratchet's moby, the ship, the driven statics, the class-27
+/// emitters, and the instances whose spawn changed are hidden / shown. [`respawn`] then makes the hero side.
+#[allow(clippy::too_many_arguments)]
+fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, coll: &rc_formats::collision::Collision, state: Option<&GameState>, occl: Option<&mut MobyOcclusion>, anim: Option<&mut MobyAnim>, particles: Option<&mut ParticleSim>) {
+    // The class table as the load builds it (the loader ORs each instance's mode bits into it again).
+    let mut classes = class_table(lv, &external_update_fn);
+    let ship_ii = p.ship.map(|(_, ii)| ii);
+    let (table, statics, ship_id) = match moby_table(lv, &mut classes, ship_ii, state, p.level, Some(&p.svc.save)) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("gameplay: death reload: moby table not rebuilt ({e:#}): the old table stays");
+            return;
+        }
+    };
+    let Some(hero_ii) = p.moby_to_instance.get(p.hero_id).copied() else { return };
+    let Some(hero_id) = statics.instance_to_moby.get(hero_ii).copied().flatten() else {
+        eprintln!("gameplay: death reload: Ratchet's instance not created: the old table stays");
+        return;
+    };
+    // The instances whose spawn changed since the last load (the renderer draws per instance).
+    let was: std::collections::HashSet<usize> = p.moby_to_instance.iter().copied().collect();
+    let now: std::collections::HashSet<usize> = statics.moby_to_instance.iter().copied().collect();
+    let mut occl = occl;
+    let mut anim = anim;
+    for &ii in was.difference(&now) {
+        if let Some(o) = occl.as_deref_mut() { o.drive(ii, [0.0; 3], [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], 1.0, None, true); }
+        if let (Some(a), Some(k)) = (anim.as_deref_mut(), occl.as_deref().and_then(|o| o.anim_index(ii))) { a.hidden[k] = true; }
+    }
+    let shown: Vec<usize> = now.difference(&was).copied().collect();
+    p.game.mobys = table;
+    p.classes = std::sync::Arc::new(classes);
+    p.hero_id = hero_id;
+    p.spawn_moby = p.game.mobys.mobys[hero_id].clone();
+    p.ship = ship_id.zip(ship_ii);
+    p.moby_to_instance = statics.moby_to_instance.clone();
+    let n_static = p.game.mobys.first_dynamic;
+    let mut driven: Vec<(MobyId, usize, Option<usize>)> = (0..n_static)
+        .filter(|&id| {
+            let m = &p.game.mobys.mobys[id];
+            m.update_fn.and_then(scheduler::ported).is_some() || m.o_class == rc_game::hero::bodies::CLANK_CLASS || m.o_class == rc_game::hero::bodies::GIANT_CLASS
+        })
+        .map(|id| { let ii = statics.moby_to_instance[id]; (id, ii, occl.as_deref().and_then(|o| o.anim_index(ii))) })
+        .collect();
+    if let (Some(id), Some(ii)) = (ship_id, ship_ii) { driven.push((id, ii, occl.as_deref().and_then(|o| o.anim_index(ii)))); }
+    p.driven = driven;
+    p.lit.clear();
+    // The emitters (owner k of gameplay instance i) by the new instance → moby map.
+    if let Some(ps) = particles.as_deref() {
+        p.emitters = ps.sys.owners.iter().enumerate().filter_map(|(k, o)| Some((statics.instance_to_moby.get(o.instance).copied().flatten()?, k))).collect();
+    }
+    // The services that hold the old table's ids or per-visit moby state.
+    p.svc.groups = statics.groups(&lv.gameplay);
+    p.svc.hits = Default::default();
+    // The "use" system's talk slots and save values by the new instance → moby map (before the load pass, as the load).
+    crate::interact_render::install(&mut p.svc, lv, &statics.instance_to_moby, state);
+    p.svc.build_grid(&mut p.game.mobys);
+    // The load pass on the running stream and counter.
+    let mut sched = Scheduler::new();
+    let n_load = {
+        let hero = p.game.hero.clone();
+        let mut ext = Externals { level: p.level, emitters: &p.emitters, view: None };
+        let mut w = World::new(&mut p.game.mobys, &hero, &mut p.game.rng, &*p.classes, &mut p.svc, p.game.counter);
+        w.camera = p.game.camera.out.pos;
+        w.coll = Some(coll);
+        w.particles = particles.map(|ps| &mut ps.sys);
+        w.external = Some(&mut ext);
+        w.missions = &p.missions;
+        sched.load_pass(&mut w)
+    };
+    p.sched = sched;
+    p.reload_shown = shown;
+    println!(
+        "gameplay: death reload: {} static mobys ({} gone this visit, {} back), {n_load} run by the load pass",
+        n_static, was.difference(&now).count(), p.reload_shown.len()
+    );
+}
+
+/// The entities of instances a death reload made spawn (their level load had hidden them: `SpawnHidden`).
+fn show_reloaded(play: Option<ResMut<Play>>, mut commands: Commands, gameplay_entities: GameplayEntities, occl: Option<Res<MobyOcclusion>>, mut anim: Option<ResMut<MobyAnim>>) {
+    let Some(mut p) = play else { return };
+    if p.reload_shown.is_empty() { return; }
+    let shown = std::mem::take(&mut p.reload_shown);
+    for (e, tag) in &gameplay_entities {
+        if shown.contains(&(tag.0 as usize)) { commands.entity(e).remove::<SpawnHidden>().insert(Visibility::Inherited); }
+    }
+    for &ii in &shown {
+        if let (Some(a), Some(k)) = (anim.as_deref_mut(), occl.as_deref().and_then(|o| o.anim_index(ii))) { a.hidden[k] = false; }
+    }
 }
 
 /// Respawn (the death reload's hero side): the hero, pad and camera as at load, at the checkpoint record when one
@@ -1838,6 +1941,7 @@ fn tick(
     if p.game.hero.fell_out != 0 {
         let (at, st) = (p.game.hero.position(), p.game.hero.state);
         budget.0 = 0;
+        death_reload(p, lv, coll, state.as_deref().map(|s| &s.0), occl.as_deref_mut(), anim.as_deref_mut(), particles.as_deref_mut());
         respawn(p, coll, class, lv.death_z, state.as_deref().map(|s| &s.0), session.as_deref_mut().map(|s| &mut s.0));
         // 0x29adc8 also puts the checkpoint's reverb back (rc_game::audio::reverb).
         if p.svc.save.checkpoint.is_some() {
