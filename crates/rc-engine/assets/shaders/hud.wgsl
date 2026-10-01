@@ -21,7 +21,7 @@ struct HudVertex {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) rgba: u32,
-    // atlas x | y << 16, texture w | h << 16, flags (1 = textured, 2 = REPEAT, 4 = NEAREST), 0
+    // atlas x | y << 16, texture w | h << 16, flags (1 = textured, 2 = REPEAT, 4 = NEAREST, 8 = ALPHA_1 0x48), 0
     @location(3) tex: vec4<u32>,
     // x0, x1, y0, y1 (inclusive pixels)
     @location(4) scissor: vec4<u32>,
@@ -94,7 +94,10 @@ fn fragment(in: HudVarying) -> @location(0) vec4<f32> {
         cs = cf.rgb;
         a = cf.a;
     }
-    return vec4<f32>(cs / 255.0, a / 128.0);
+    // Premultiplied (the pipeline blends One / OneMinusSrcAlpha): ALPHA_1 0x44 `Cs·As + Cd·(1 − As)`; flag 8 = 0x48
+    // `Cs·As + Cd` (coverage 0).
+    let cov = select(a / 128.0, 0.0, (in.tex.z & 8u) != 0u);
+    return vec4<f32>(cs / 255.0 * (a / 128.0), cov);
 }
 #endif
 

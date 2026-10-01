@@ -136,13 +136,15 @@ pub struct ScreenPrim {
     pub pos: [[f32; 2]; 4],
     pub uv: [[f32; 2]; 4],
     pub rgba: u32,
+    /// Drawn under ALPHA_1 0x48 (`Cs·As + Cd`, additive) instead of 0x44.
+    pub add: bool,
 }
 
 impl ScreenPrim {
     /// A GS triangle strip as primitives (one per triangle).
     pub fn strip(out: &mut Vec<ScreenPrim>, pts: &[[f32; 2]], rgba: u32) {
         for t in pts.windows(3) {
-            out.push(ScreenPrim { tex: ScreenTex::None, pos: [t[0], t[1], t[2], t[2]], uv: [[0.0; 2]; 4], rgba });
+            out.push(ScreenPrim { tex: ScreenTex::None, pos: [t[0], t[1], t[2], t[2]], uv: [[0.0; 2]; 4], rgba, add: false });
         }
     }
 }

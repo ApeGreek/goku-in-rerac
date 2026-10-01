@@ -26,6 +26,7 @@
 //!   `RC_SETTINGS_PAGE=0` no "Port Options" page in the Options menu, crate::menu_render
 //! - `RC_SHADOWS=0|1`, `RC_SHADOW_DEBUG=1`, `RC_SHADOW_TRACE=1` the moby shadows, crate::shadow_render
 
+mod crash_log;
 mod audio_out;
 mod determinism;
 mod display_blend;
@@ -112,6 +113,7 @@ struct ScreenshotRequest {
 }
 
 fn main() -> anyhow::Result<()> {
+    crash_log::install();
     // `--version-json` exits here; a missing or wrong data folder exits with a clear error (crate::disc_source).
     let root = disc_source::startup();
     let index = level_load::level_index();

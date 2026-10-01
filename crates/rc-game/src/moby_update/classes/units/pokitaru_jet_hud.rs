@@ -12,7 +12,7 @@
 //! ## Coverage
 //! | address | what | port |
 //! |---|---|---|
-//! | 0x311d50 | ALPHA 0x44; `DrawTexturedQuad(368, h − 144, 128, 128, 0, 0, 128, 128, 0x70808080)` with FX 0x3c (its CLUT cut, below) and FX 0x3d; ALPHA 0x48 | [`hud_frame`] (`ScreenTex::FxCut`; the 0x48 blend of the rest: drawn with 0x44, G-REN-035) |
+//! | 0x311d50 | ALPHA 0x44; `DrawTexturedQuad(368, h − 144, 128, 128, 0, 0, 128, 128, 0x70808080)` with FX 0x3c (its CLUT cut, below) and FX 0x3d; ALPHA 0x48 | [`hud_frame`] (`ScreenTex::FxCut`; the rest under 0x48: `ScreenPrim::add`) |
 //! | 0x311d50 | FX 0x3e; each live member of the convoys' group (+0x108): it and its cars (`0x318050`) a blip (`0x311710(camera Euler, camera, m, 0, 0x75808080)`) | [`hud_frame`], [`blip`] (`pokitaru_convoy::members`) |
 //! | 0x311d50 | the missile pips (0x140947 of them): Gemlik's strip (0x1f0cf8 = 0x1cbc60) from (24, 64), 18 apart, the second column after the half; 0x50008f00 / 0x20004f00 | [`hud_frame`] (`gemlik_ship_hud::{strip, PIP}`) |
 //! | 0x311d50 | the crosshair at +0xe0 / +0xe4: FX 0x11 and 0x12 40 × 40, FX 8 10 × 10 (0xff20ff20) | [`hud_frame`] (`gemlik_ship_hud::sprite`) |
@@ -100,7 +100,7 @@ fn blip(w: &World, out: &mut Vec<ScreenPrim>, m: MobyId, kind: usize, rgba: u32)
     let (bw, bh, u, vv) = (bw as f32, bh as f32, u as f32, vv as f32);
     let pos = [[sx, sy], [sx + bw, sy], [sx, sy + bh], [sx + bw, sy + bh]];
     let uv = [[u, vv], [u + bw, vv], [u, vv + bh], [u + bw, vv + bh]];
-    out.push(ScreenPrim { tex: ScreenTex::Fx(tex as usize), pos, uv, rgba: colour });
+    out.push(ScreenPrim { tex: ScreenTex::Fx(tex as usize), pos, uv, rgba: colour, add: false });
 }
 
 /// `0x311a88(m, target)`: the target's distance from the crosshair (module doc).
@@ -210,8 +210,8 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
     let (x, y) = (368.0, H - 144.0);
     let pos = [[x, y], [x + 128.0, y], [x, y + 128.0], [x + 128.0, y + 128.0]];
     let uv = [[0.0, 0.0], [128.0, 0.0], [0.0, 128.0], [128.0, 128.0]];
-    out.push(ScreenPrim { tex: ScreenTex::FxCut { fx: GAUGE_FX, cut: cut as u8 }, pos, uv, rgba: 0x7080_8080 });
-    out.push(ScreenPrim { tex: ScreenTex::Fx(FRAME_FX), pos, uv, rgba: 0x7080_8080 });
+    out.push(ScreenPrim { tex: ScreenTex::FxCut { fx: GAUGE_FX, cut: cut as u8 }, pos, uv, rgba: 0x7080_8080, add: false });
+    out.push(ScreenPrim { tex: ScreenTex::Fx(FRAME_FX), pos, uv, rgba: 0x7080_8080, add: false });
     for cv in convoys(w, id) {
         for m in super::pokitaru_convoy::members(w, cv) { blip(w, &mut out, m, 0, BLIP_WHITE); }
     }
@@ -256,5 +256,7 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
         let text = w.svc.interact.msg(DONE_MSG);
         w.svc.draw_callbacks.screen_texts.push(ScreenText { x: 256, y: 200, rgba: 0x8000_5080, text, len: 0x11, font: rc_formats::font::Font::Regular });
     }
+    // ALPHA_1 0x48 (`VU1_addGSregister(0x42, 0x8000000048)`) after the gauge's two quads.
+    for q in out.iter_mut().skip(2) { q.add = true; }
     w.svc.draw_callbacks.screen.extend(out);
 }

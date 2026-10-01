@@ -147,16 +147,20 @@ pub struct Hud2d {
     /// The primitives sent with 1/16-pixel corners (`fun_00200080`, `fun_00200e08(…, 1)`): their index in
     /// [`Hud2d::prims`] and their corners in 1/16 pixels (the prim's own `pos` holds them rounded down).
     pub fine: Vec<(usize, [[i32; 2]; 4])>,
+    /// The primitives (indices into `prims`, ascending) drawn under ALPHA_1 0x48 (`Cs·As + Cd`) instead of 0x44: the
+    /// vehicle HUDs' screen primitives after their gauge (`ScreenPrim::add`).
+    pub add: Vec<usize>,
 }
 
 impl Default for Hud2d {
-    fn default() -> Self { Hud2d { prims: Vec::new(), scissor: FULL_SCISSOR, frame_sizes: Vec::new(), fine: Vec::new() } }
+    fn default() -> Self { Hud2d { prims: Vec::new(), scissor: FULL_SCISSOR, frame_sizes: Vec::new(), fine: Vec::new(), add: Vec::new() } }
 }
 
 impl Hud2d {
     pub fn clear(&mut self) {
         self.prims.clear();
         self.fine.clear();
+        self.add.clear();
         self.scissor = FULL_SCISSOR;
     }
 
@@ -189,7 +193,8 @@ impl Hud2d {
     }
 
     /// A frame callback's screen primitive (`rc_game`'s `ScreenPrim`: pixels, its corners kept to 1/16 pixel).
-    pub fn screen_prim(&mut self, tex: Tex, pos: [[f32; 2]; 4], uv: [[f32; 2]; 4], rgba: u32) {
+    pub fn screen_prim(&mut self, tex: Tex, pos: [[f32; 2]; 4], uv: [[f32; 2]; 4], rgba: u32, add: bool) {
+        if add { self.add.push(self.prims.len()); }
         let pos16 = pos.map(|p| [(p[0] * 16.0) as i32, (p[1] * 16.0) as i32]);
         self.push_fine(tex, pos16, uv.map(|u| [u[0] as i32, u[1] as i32]), rgba);
     }
@@ -371,6 +376,12 @@ impl From<&HudMaterial> for HudMaterialKey {
     fn from(m: &HudMaterial) -> Self { HudMaterialKey { additive: m.additive } }
 }
 
+/// ALPHA_1 0x44 and 0x48 on a premultiplied fragment (`Cs·As`, coverage As, or 0 under 0x48).
+const PREMULT_BLEND: BlendState = BlendState {
+    color: BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::OneMinusSrcAlpha, operation: BlendOperation::Add },
+    alpha: BlendComponent::OVER,
+};
+
 /// ALPHA_1 0x68 with FIX: `Cd + Cs·FIX/128` (the fragment outputs `Cs·FIX/128` and coverage 0, so the target's
 /// premultiplied colour grows and its coverage stays).
 const ADD_FIX_BLEND: BlendState = BlendState {
@@ -404,6 +415,11 @@ impl Material2d for HudMaterial {
         if let Some(f) = descriptor.fragment.as_mut() { f.shader_defs.push(ShaderDefVal::Bool("HUD_PRIMS".into(), true)); }
         descriptor.primitive.cull_mode = None;
         GsPass::Hud.specialize(descriptor);
+        // The GS blends 0x44 / 0x48 as `Cs·As + Cd·(1 − As)` / `Cs·As + Cd`: the fragment outputs `Cs·As` and its coverage
+        // (0 for a 0x48 primitive), blended premultiplied.
+        if let Some(f) = descriptor.fragment.as_mut() {
+            for t in f.targets.iter_mut().flatten() { t.blend = Some(PREMULT_BLEND); }
+        }
         if key.bind_group_data.additive {
             if let Some(f) = descriptor.fragment.as_mut() {
                 f.shader_defs.push("HUD_ADD".into());
@@ -792,7 +808,7 @@ fn tick_and_build(
                 ScreenTex::None => Tex::None,
                 ScreenTex::Fx(n) | ScreenTex::FxCut { fx: n, .. } => Tex::Fx(n),
             };
-            rt.hud2d.screen_prim(tex, q.pos, q.uv, q.rgba);
+            rt.hud2d.screen_prim(tex, q.pos, q.uv, q.rgba, q.add);
         }
         for t in &cb.screen_texts {
             let g = rt.glyphs[t.font as usize];
@@ -806,8 +822,8 @@ fn tick_and_build(
     rt.hud2d.prims.extend(hook.prims.iter().copied());
     rt.hud2d.prims.extend(scene.prims.iter().copied());
     let dyns = dyn_images.as_deref().map_or([None; crate::hud_images::SLOTS], |d| d.rects());
-    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.atlas_frames, &rt.atlas_fx, &dyns));
-    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &[], &rt.atlas_frames, &rt.atlas_fx, &dyns)); }
+    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.hud2d.add, &rt.atlas_frames, &rt.atlas_fx, &dyns));
+    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &[], &[], &rt.atlas_frames, &rt.atlas_fx, &dyns)); }
 }
 
 /// The HUD inputs the hero and the classes hold (rc_game::hud::Inputs: the callers the HUD sees through the state).
@@ -874,23 +890,26 @@ fn empty_mesh() -> Mesh {
 }
 
 /// The primitives as one triangle list in submission order (the GPU blends triangles of one draw in order).
-fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>]) -> Mesh {
+fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], add: &[usize], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>]) -> Mesh {
     if prims.is_empty() { return empty_mesh(); }
     let mut fine = fine.iter().peekable();
+    let mut add = add.iter().peekable();
     let n = prims.len() * 4;
     let (mut pos, mut uv, mut rgba, mut tex, mut sc, mut idx) =
         (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n / 4 * 6));
     for (i, p) in prims.iter().enumerate() {
         let pos16 = fine.next_if(|(k, _)| *k == i).map(|(_, q)| *q);
+        let additive = add.next_if(|&&k| k == i).is_some();
         let rect = match p.tex {
             Tex::None => None,
             Tex::Frame(i) => frames.get(i).copied(),
             Tex::Fx(i) => fx.get(i).copied().flatten(),
             Tex::Dyn(i) => dyns.get(i).copied().flatten(),
         };
+        let blend = if additive { 8 } else { 0 };
         let t = match rect {
-            Some([x, y, w, hh]) => [x | y << 16, w | hh << 16, 1 | if p.repeat { 2 } else { 0 } | if p.nearest { 4 } else { 0 }, 0],
-            None => [0, 0x0001_0001, 0, 0],
+            Some([x, y, w, hh]) => [x | y << 16, w | hh << 16, 1 | if p.repeat { 2 } else { 0 } | if p.nearest { 4 } else { 0 } | blend, 0],
+            None => [0, 0x0001_0001, blend, 0],
         };
         let s = p.scissor.map(|v| v.clamp(-1, 0xffff) as u32);
         let base = pos.len() as u32;
@@ -972,7 +991,7 @@ mod tests {
         h.prims[2].nearest = true;
         h.rect(0, 4, 0, 4, 0x8000_0000);
         let fx = vec![None; 26].into_iter().chain([Some([64u32, 0, 32, 32])]).collect::<Vec<_>>();
-        let m = build_mesh(&h.prims, &[], &[], &fx, &[]);
+        let m = build_mesh(&h.prims, &[], &[], &[], &fx, &[]);
         let Some(VertexAttributeValues::Uint32x4(t)) = m.attribute(ATTRIBUTE_TEX) else { panic!("no tex attribute") };
         assert_eq!([t[0][2], t[4][2], t[8][2], t[12][2]], [1, 3, 7, 0]);
     }

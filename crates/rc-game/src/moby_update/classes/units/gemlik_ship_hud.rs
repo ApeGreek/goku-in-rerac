@@ -106,7 +106,7 @@ pub(super) fn marker(out: &mut Vec<ScreenPrim>, fx: usize, x: f32, y: f32, s: f3
         let av = [side * sn, side * cs];
         let bv = [side * cs, -side * sn];
         let pos = [[x + av[0] - bv[0], y + av[1] - bv[1]], [x + av[0], y + av[1]], [x - bv[0], y - bv[1]], [x, y]];
-        out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[1.0, 1.0], [63.0, 0.0], [0.0, 63.0], [63.0, 63.0]], rgba: colour });
+        out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[1.0, 1.0], [63.0, 0.0], [0.0, 63.0], [63.0, 63.0]], rgba: colour, add: false });
         ang = add_rot(ang, std::f32::consts::FRAC_PI_2);
     }
 }
@@ -115,7 +115,7 @@ pub(super) fn marker(out: &mut Vec<ScreenPrim>, fx: usize, x: f32, y: f32, s: f3
 pub(super) fn sprite(out: &mut Vec<ScreenPrim>, x: f32, y: f32, side: f32, uv: f32, fx: usize, rgba: u32) {
     let h = side * 0.5;
     let pos = [[x - h, y + h], [x + h, y + h], [x - h, y - h], [x + h, y - h]];
-    out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[1.0, 1.0], [uv, 1.0], [1.0, uv], [uv, uv]], rgba });
+    out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[1.0, 1.0], [uv, 1.0], [1.0, uv], [uv, uv]], rgba, add: false });
 }
 
 /// `0x2b89f8(euler, camera, m, kind, rgba, set)`: a radar blip (module doc).
@@ -148,7 +148,7 @@ pub(super) fn blip_from(w: &World, out: &mut Vec<ScreenPrim>, from: [f32; 3], m:
     let (bw, bh, u, vv) = (bw as f32, bh as f32, u as f32, vv as f32);
     let pos = [[x, y], [x + bw, y], [x, y + bh], [x + bw, y + bh]];
     let uv = [[u, vv], [u + bw, vv], [u, vv + bh], [u + bw, vv + bh]];
-    out.push(ScreenPrim { tex: ScreenTex::Fx((set + tex + 0x28) as usize), pos, uv, rgba: colour });
+    out.push(ScreenPrim { tex: ScreenTex::Fx((set + tex + 0x28) as usize), pos, uv, rgba: colour, add: false });
 }
 
 fn class_type(w: &World, m: MobyId) -> Option<u8> { w.classes.info(w.m(m).o_class).map(|i| i.ty) }
@@ -366,7 +366,7 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
     let (x, y) = (368.0, H - 144.0);
     let pos = [[x, y], [x + 128.0, y], [x, y + 128.0], [x + 128.0, y + 128.0]];
     let uv = [[0.0, 0.0], [128.0, 0.0], [0.0, 128.0], [128.0, 128.0]];
-    out.push(ScreenPrim { tex: ScreenTex::FxCut { fx: (set + 0x28) as usize, cut: cut as u8 }, pos, uv, rgba: 0x7080_8080 });
-    out.push(ScreenPrim { tex: ScreenTex::Fx((set + 0x29) as usize), pos, uv, rgba: 0x7080_8080 });
+    out.push(ScreenPrim { tex: ScreenTex::FxCut { fx: (set + 0x28) as usize, cut: cut as u8 }, pos, uv, rgba: 0x7080_8080, add: false });
+    out.push(ScreenPrim { tex: ScreenTex::Fx((set + 0x29) as usize), pos, uv, rgba: 0x7080_8080, add: false });
     w.svc.draw_callbacks.screen.extend(out);
 }

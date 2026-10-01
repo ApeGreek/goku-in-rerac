@@ -10,7 +10,7 @@
 //! ## Coverage
 //! | address | what | port |
 //! |---|---|---|
-//! | 0x2eb9a8 | ALPHA 0x44; the gauge (FX set + 0x28 with its CLUT cut, FX set + 0x29 over it) at (368, h − 144); ALPHA 0x48 | [`hud_frame`] (the 0x48 blend: G-REN-035) |
+//! | 0x2eb9a8 | ALPHA 0x44; the gauge (FX set + 0x28 with its CLUT cut, FX set + 0x29 over it) at (368, h − 144); ALPHA 0x48 | [`hud_frame`] (the rest under 0x48: `ScreenPrim::add`) |
 //! | 0x2eb9a8 | the lock (`0x2eb768`); a lock: locking past 500: f of 100, the marker (FX 0x2e) at f·5 + 1 turned by frame / 30, green, `trunc(min(2·(1 − f), 1)·96)`, +0xec = 0; locked: red / green blinking every `ticks(20)`, 0x60, +0xec = the lock | [`hud_frame`] (`gemlik_ship_hud::marker`) |
 //! | 0x2eb9a8 | the pips (0x1d99e0 = Gemlik's), the crosshair, the low-health text (msg 0x5269 every other 90 ticks below a tenth), state 8: `font_print_center_small(256, 200, 0x80005080, msg 0x523e, 100)` | [`hud_frame`] |
 //! | 0x2eb9a8 | the gauge's cut (Gemlik's) | [`hud_frame`] (`ScreenTex::FxCut`) |
@@ -235,8 +235,8 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
     let (x, y) = (368.0, H - 144.0);
     let pos = [[x, y], [x + 128.0, y], [x, y + 128.0], [x + 128.0, y + 128.0]];
     let uv = [[0.0, 0.0], [128.0, 0.0], [0.0, 128.0], [128.0, 128.0]];
-    out.push(ScreenPrim { tex: ScreenTex::FxCut { fx: (set + 0x28) as usize, cut: cut as u8 }, pos, uv, rgba: 0x7080_8080 });
-    out.push(ScreenPrim { tex: ScreenTex::Fx((set + 0x29) as usize), pos, uv, rgba: 0x7080_8080 });
+    out.push(ScreenPrim { tex: ScreenTex::FxCut { fx: (set + 0x28) as usize, cut: cut as u8 }, pos, uv, rgba: 0x7080_8080, add: false });
+    out.push(ScreenPrim { tex: ScreenTex::Fx((set + 0x29) as usize), pos, uv, rgba: 0x7080_8080, add: false });
     lock_update(w, id, &mut out);
     if let Some(l) = link(w, id, pvo::LOCK) {
         let p = w.m(l).position;
@@ -282,5 +282,7 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
         let text = w.svc.interact.msg(DONE_MSG);
         w.svc.draw_callbacks.screen_texts.push(ScreenText { x: 256, y: 200, rgba: 0x8000_5080, text, len: 100, font: rc_formats::font::Font::Small });
     }
+    // ALPHA_1 0x48 (`VU1_addGSregister(0x42, 0x8000000048)`) after the gauge's two quads.
+    for q in out.iter_mut().skip(2) { q.add = true; }
     w.svc.draw_callbacks.screen.extend(out);
 }
