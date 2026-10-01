@@ -196,12 +196,19 @@ pub fn update(w: &mut World, id: MobyId) {
         w.delete_moby(id);
         return;
     };
+    hit_sparks(w, p, vel, h.normal);
+    w.delete_moby(id);
+}
+
+/// The five sparks of a laser hit (`PartType27Spawn(90000, …)`, module doc); the fighters' shot 1017
+/// ([`super::fighter_shot`]) has the same lines.
+pub fn hit_sparks(w: &mut World, p: [f32; 4], vel: [f32; 4], normal: [f32; 3]) {
     let v3 = [vel[0], vel[1], vel[2]];
     for _ in 0..5 {
         let x = w.rng.randf(-1.0, 1.0);
         let y = w.rng.randf(-1.0, 1.0);
         let z = w.rng.randf(-1.0, 1.0);
-        let r = crate::hero::guns::reflect(v3, h.normal);
+        let r = crate::hero::guns::reflect(v3, normal);
         let l = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
         let q = set_len3([x, y, z, 0.0], l * 0.5);
         let s = w.rng.randf(DT * 5.0, DT * 9.0);
@@ -210,5 +217,4 @@ pub fn update(w: &mut World, id: MobyId) {
         let life = w.rng.rand_range(t10, t15);
         part27(w, 90000.0, p, q, 0x7f2f_4f6f, life);
     }
-    w.delete_moby(id);
 }

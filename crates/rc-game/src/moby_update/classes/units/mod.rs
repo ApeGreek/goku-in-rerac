@@ -185,6 +185,12 @@
 //! | — | 184 the gun shot (04, 12; created by code: the spawner 0x2d4150) | level12 0x2d4378 | [`gun_shot`] |
 //! | — | 1009 the ships' laser shot (11, 13, 17; created by code: the spawner 0x3025f8, the search 0x302420) | level13 0x302780 | [`ship_laser`] |
 //! | — | 295 the ships' homing missile (13, 17; created by code: the spawner 0x2e6a58) | level13 0x2e6c08 | [`ship_missile`] |
+//! | — | 1034 its earlier copy (11, 13, 17; created by code: the spawner level11 0x309378) | level11 0x3094f8 | [`ship_missile`] |
+//! | U384 | 1242 Pokitaru's jet (the convoy mission: the flight, the guns, the missiles, the edge bend, the ambush calls), its HUD 0x311d50 (the convoys left, the lock, the gauge) (11) | level11 0x313290 | [`pokitaru_jet`], [`pokitaru_jet_hud`] |
+//! | U387 | 1264 Pokitaru's convoys (the jet mission's targets), their cars 1265 and the sludge 1524 they drop (11) | level11 0x3172c0, 0x3181f0, 0x31ab08 | [`pokitaru_convoy`] |
+//! | U389 | 1319 Pokitaru's fighters (the convoys' escorts and the jet's ambushers: paths, attack runs, shots, pickups), their contrails 0x3192c8 (11) | level11 0x319838 | [`pokitaru_fighter`] |
+//! | — | 1218 / 1220 the ship pickups (missiles / health) and their parachute 1219 (11; created by code: the spawner 0x30f5a8) | level11 0x30f728, 0x310028 | [`ship_pickup`] |
+//! | — | 1017 the fighters' laser shot (11, 13, 17; created by code: the spawner level11 0x308f48) | level11 0x309098 | [`fighter_shot`] |
 //! | U397 | 326 Hoven's gun drones (ordinary and the turret game's attackers) and their shot 409 (12) | level12 0x2e9f68, 0x2ece00 | [`hoven_drone`] |
 //! | — | 1371 the drones' rider (12, 15; created by code: 0x308670, knocked off by 0x308708) | level12 0x308918 | [`drone_rider`] |
 //! | U538 | 1455 Kalebo III's grind-race host (the Hologuise, skill point 0x13d422; the race itself: G-LVL-007) (16) | level16 0x2e6808 | [`kalebo_race`] |
@@ -369,6 +375,12 @@ pub mod hoven_carrier;
 pub mod gun_shot;
 pub mod ship_laser;
 pub mod ship_missile;
+pub mod fighter_shot;
+pub mod ship_pickup;
+pub mod pokitaru_fighter;
+pub mod pokitaru_convoy;
+pub mod pokitaru_jet;
+pub mod pokitaru_jet_hud;
 pub mod hoven_drone;
 pub mod drone_rider;
 pub mod kalebo_race;
@@ -650,6 +662,17 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "184 shot", level: gun_shot::REFERENCE_LEVEL, func: gun_shot::UPDATE_FN, classes: &gun_shot::CLASSES, update: gun_shot::update, joints: &[] },
     UnitPort { unit: "1009 laser", level: ship_laser::REFERENCE_LEVEL, func: ship_laser::UPDATE_FN, classes: &ship_laser::CLASSES, update: ship_laser::update, joints: &[] },
     UnitPort { unit: "295 missile", level: ship_missile::REFERENCE_LEVEL, func: ship_missile::UPDATE_FN, classes: &ship_missile::CLASSES, update: ship_missile::update, joints: &ship_missile::CLASSES },
+    UnitPort { unit: "1034 missile", level: ship_missile::EARLY_LEVEL, func: ship_missile::EARLY_UPDATE_FN, classes: &ship_missile::EARLY_CLASSES, update: ship_missile::update, joints: &ship_missile::EARLY_CLASSES },
+    UnitPort { unit: "U389 1319", level: pokitaru_fighter::REFERENCE_LEVEL, func: pokitaru_fighter::UPDATE_FN, classes: &pokitaru_fighter::CLASSES, update: pokitaru_fighter::update, joints: &[] },
+    UnitPort { unit: "U389 1319 trails", level: pokitaru_fighter::REFERENCE_LEVEL, func: pokitaru_fighter::TRAIL_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U384 1242", level: pokitaru_jet::REFERENCE_LEVEL, func: pokitaru_jet::UPDATE_FN, classes: &pokitaru_jet::CLASSES, update: pokitaru_jet::update, joints: &pokitaru_jet::CLASSES },
+    UnitPort { unit: "U384 1242 hud", level: pokitaru_jet::REFERENCE_LEVEL, func: pokitaru_jet_hud::HUD_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U387 1264", level: pokitaru_convoy::REFERENCE_LEVEL, func: pokitaru_convoy::UPDATE_FN, classes: &pokitaru_convoy::CLASSES, update: pokitaru_convoy::update, joints: &[] },
+    UnitPort { unit: "U387 1265 car", level: pokitaru_convoy::REFERENCE_LEVEL, func: pokitaru_convoy::CAR_FN, classes: &pokitaru_convoy::CAR_CLASSES, update: pokitaru_convoy::car_update, joints: &[] },
+    UnitPort { unit: "U387 1524 sludge", level: pokitaru_convoy::REFERENCE_LEVEL, func: pokitaru_convoy::SLUDGE_FN, classes: &pokitaru_convoy::SLUDGE_CLASSES, update: pokitaru_convoy::sludge_update, joints: &[] },
+    UnitPort { unit: "1218 pickups", level: ship_pickup::REFERENCE_LEVEL, func: ship_pickup::UPDATE_FN, classes: &ship_pickup::CLASSES, update: ship_pickup::update, joints: &ship_pickup::CLASSES },
+    UnitPort { unit: "1219 parachute", level: ship_pickup::REFERENCE_LEVEL, func: ship_pickup::CHUTE_FN, classes: &ship_pickup::CHUTE_CLASSES, update: ship_pickup::chute_update, joints: &ship_pickup::CHUTE_CLASSES },
+    UnitPort { unit: "1017 shot", level: fighter_shot::REFERENCE_LEVEL, func: fighter_shot::UPDATE_FN, classes: &fighter_shot::CLASSES, update: fighter_shot::update, joints: &[] },
     UnitPort { unit: "U397 326", level: hoven_drone::REFERENCE_LEVEL, func: hoven_drone::UPDATE_FN, classes: &hoven_drone::CLASSES, update: hoven_drone::update, joints: &hoven_drone::JOINTS },
     UnitPort { unit: "U397 409", level: hoven_drone::REFERENCE_LEVEL, func: hoven_drone::SHOT_FN, classes: &hoven_drone::SHOT_CLASSES, update: hoven_drone::shot_update, joints: &[] },
     UnitPort { unit: "1371 rider", level: drone_rider::REFERENCE_LEVEL, func: drone_rider::UPDATE_FN, classes: &drone_rider::CLASSES, update: drone_rider::update, joints: &[] },
@@ -782,6 +805,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::AURA_DRAW_FN)) => veldin_shots::aura_quads(table, svc, id),
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::BEAM_FN)) => veldin_hopper::beam_quads(table, svc, id),
         Some((qwark_ship::REFERENCE_LEVEL, qwark_ship::BEAM_FN)) => qwark_ship::beam_quads(table, svc, id),
+        Some((pokitaru_fighter::REFERENCE_LEVEL, pokitaru_fighter::TRAIL_FN)) => pokitaru_fighter::trail_quads(table, svc, id),
         _ => None,
     }
 }
@@ -806,6 +830,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((veldin_pads::REFERENCE_LEVEL, veldin_pads::COUNTDOWN_FN)) => veldin_pads::countdown_draw(w, id),
         Some((hoven_turret::REFERENCE_LEVEL, hoven_turret::HUD_FN)) => hoven_turret::hud_frame(w, id),
         Some((gemlik_ship::REFERENCE_LEVEL, gemlik_ship_hud::HUD_FN)) => gemlik_ship_hud::hud_frame(w, id),
+        Some((pokitaru_jet::REFERENCE_LEVEL, pokitaru_jet_hud::HUD_FN)) => pokitaru_jet_hud::hud_frame(w, id),
         _ => {}
     }
 }

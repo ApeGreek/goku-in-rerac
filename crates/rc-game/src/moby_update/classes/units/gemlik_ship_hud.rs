@@ -44,7 +44,7 @@ use crate::moby_update::services::World;
 pub const HUD_FN: u32 = 0x2b_97f8;
 
 /// 0x1cbc60: the missile pip (25 corners).
-const PIP: [[i16; 2]; 25] = [
+pub(super) const PIP: [[i16; 2]; 25] = [
     [-32, -14], [-16, -12], [-24, -2], [-12, -6], [-24, 2], [-4, -8], [-32, 14], [-12, 6], [-16, 12], [-16, 12], [-16, 12], [-12, 6], [-12, 6], [-4, -8],
     [-4, 8], [4, -9], [4, 9], [12, -8], [12, 8], [18, -6], [18, 6], [22, -3], [22, 4], [24, -1], [24, 2],
 ];
@@ -73,7 +73,7 @@ fn pi(w: &World, id: MobyId, o: usize) -> i32 { c::pi32(w, id, o) }
 fn seti(w: &mut World, id: MobyId, o: usize, v: i32) { c::set_pi32(w, id, o, v) }
 fn link(w: &World, id: MobyId, o: usize) -> Option<MobyId> { usize::try_from(pi(w, id, o) - 1).ok().filter(|&m| m < w.table.mobys.len()) }
 fn set_link(w: &mut World, id: MobyId, o: usize, m: Option<MobyId>) { seti(w, id, o, m.map_or(0, |m| m as i32 + 1)) }
-fn wrap(x: f32) -> f32 { crate::moby_update::classes::flyer::wrap_frac(x) }
+pub(super) fn wrap(x: f32) -> f32 { crate::moby_update::classes::flyer::wrap_frac(x) }
 fn alive(w: &World, m: MobyId) -> bool { let s = w.m(m).state; s != 0xfe && s != 0xfd }
 
 fn drop_lock(w: &mut World, id: MobyId) {
@@ -83,7 +83,7 @@ fn drop_lock(w: &mut World, id: MobyId) {
 }
 
 /// A flat strip of `table` scaled by `s` and turned by `a`, at (x, y) (`0x2b7d50`; `0x2b7b30` with `a` = 0).
-fn strip(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, table: &[[i16; 2]], rgba: u32) {
+pub(super) fn strip(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, table: &[[i16; 2]], rgba: u32) {
     let (sn, cs) = a.sin_cos();
     let pts: Vec<[f32; 2]> = table.iter().map(|v| {
         let (vx, vy) = (v[0] as f32, v[1] as f32);
@@ -95,8 +95,9 @@ fn strip(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, table: &[[i1
 /// `0x2b7d50(x, y, s, a, 0x1cbd40, 30, ·, rgba)`: a target ring.
 fn ring(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, rgba: u32) { strip(out, x, y, s, a, &RING, rgba) }
 
-/// `0x2b8320(x, y, s, a, r, g, b, alpha)`: the lock marker's four quarters (module doc).
-fn marker(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, rgba: [u8; 4]) {
+/// `0x2b8320(x, y, s, a, r, g, b, alpha)`: the lock marker's four quarters of FX `fx` (module doc; 0x37 here, Pokitaru's
+/// jet `0x311048` the same with FX 0x42).
+pub(super) fn marker(out: &mut Vec<ScreenPrim>, fx: usize, x: f32, y: f32, s: f32, a: f32, rgba: [u8; 4]) {
     let side = s * 20.0;
     let colour = u32::from_le_bytes(rgba);
     let mut ang = a;
@@ -105,13 +106,13 @@ fn marker(out: &mut Vec<ScreenPrim>, x: f32, y: f32, s: f32, a: f32, rgba: [u8; 
         let av = [side * sn, side * cs];
         let bv = [side * cs, -side * sn];
         let pos = [[x + av[0] - bv[0], y + av[1] - bv[1]], [x + av[0], y + av[1]], [x - bv[0], y - bv[1]], [x, y]];
-        out.push(ScreenPrim { tex: ScreenTex::Fx(0x37), pos, uv: [[63.0, 0.0], [0.0, 63.0], [63.0, 63.0], [0.0, 0.0]], rgba: colour });
+        out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[63.0, 0.0], [0.0, 63.0], [63.0, 63.0], [0.0, 0.0]], rgba: colour });
         ang = add_rot(ang, std::f32::consts::FRAC_PI_2);
     }
 }
 
 /// A `fun_001f5ab0(x, y, w, w, 0, ½, ½, uv, uv, tex, …)` sprite (the crosshair).
-fn sprite(out: &mut Vec<ScreenPrim>, x: f32, y: f32, side: f32, uv: f32, fx: usize, rgba: u32) {
+pub(super) fn sprite(out: &mut Vec<ScreenPrim>, x: f32, y: f32, side: f32, uv: f32, fx: usize, rgba: u32) {
     let h = side * 0.5;
     let pos = [[x - h, y + h], [x + h, y + h], [x - h, y - h], [x + h, y - h]];
     out.push(ScreenPrim { tex: ScreenTex::Fx(fx), pos, uv: [[1.0, 1.0], [uv, 1.0], [1.0, uv], [uv, uv]], rgba });
@@ -316,12 +317,12 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
             let a = ((1.0 - f / total) * 2.0).min(1.0);
             let alpha = (a * 96.0) as i32 as u8;
             let ang = wrap(w.counter as f32 / 30.0);
-            marker(&mut out, x, y, (f / total) * 5.0 + 1.0, ang, [0, 0xff, 0, alpha]);
+            marker(&mut out, 0x37, x, y, (f / total) * 5.0 + 1.0, ang, [0, 0xff, 0, alpha]);
             set_link(w, id, pvo::MISSILE_TARGET, None);
         } else {
             let n = w.ticks(0x14).max(1);
             let g = if (t / n) & 1 != 0 { 0 } else { 0xff };
-            marker(&mut out, x, y, 1.0, 0.0, [0xff, g, 0, 0x60]);
+            marker(&mut out, 0x37, x, y, 1.0, 0.0, [0xff, g, 0, 0x60]);
             set_link(w, id, pvo::MISSILE_TARGET, Some(l));
         }
     }
@@ -343,7 +344,7 @@ pub fn hud_frame(w: &mut World, id: MobyId) {
     let v = &w.svc.vehicle;
     if v.health < v.health_max / 10.0 && (w.counter / 90) & 1 != 0 {
         let text = w.svc.interact.msg(WARNING);
-        w.svc.draw_callbacks.screen_texts.push(ScreenText { x: 256, y: 0x186, rgba: 0x8000_0080, text, len: 100 });
+        w.svc.draw_callbacks.screen_texts.push(ScreenText { x: 256, y: 0x186, rgba: 0x8000_0080, text, len: 100, font: rc_formats::font::Font::Small });
     }
     let (health, full) = (w.svc.vehicle.health, w.svc.vehicle.health_max);
     let g = c::pf(w, id, pvo::GAUGE);

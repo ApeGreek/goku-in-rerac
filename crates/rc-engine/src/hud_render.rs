@@ -794,10 +794,10 @@ fn tick_and_build(
             };
             rt.hud2d.screen_prim(tex, q.pos, q.uv, q.rgba);
         }
-        let g = rt.glyphs[rc_formats::font::Font::Small as usize];
         for t in &cb.screen_texts {
+            let g = rt.glyphs[t.font as usize];
             let width = rc_formats::font::measure_text_width(&t.text, t.len, &g);
-            crate::text_render::font_print(&mut rt.hud2d, &mut st, &g, rc_formats::font::Font::Small, t.x - (width >> 1), t.y, t.rgba, &t.text, t.len);
+            crate::text_render::font_print(&mut rt.hud2d, &mut st, &g, t.font, t.x - (width >> 1), t.y, t.rgba, &t.text, t.len);
         }
     }
     // HudDraw 0x24fb50 skips the HUD in a frame whose tick set 0x17e988 (the Visibomb's flight: crate::visibomb_view).

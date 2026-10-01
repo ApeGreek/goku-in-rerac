@@ -816,6 +816,12 @@ pub mod ocean_pvar {
     pub const FADE: usize = 0x2c;
 }
 
+/// The ocean 1111's sea z (`0x161e18` on level 11) as its last update left it: the level's classes (the convoys'
+/// sludge 1524) read it through a pointer; 0 without the ocean (the data's initial word).
+pub fn ocean_z(water: &WaterWorld) -> f32 {
+    PORTS.iter().position(|p| matches!(p.kind, SeaKind::Ocean)).and_then(|i| water.sea.run.get(i)).map_or(0.0, |r| r.sea_z)
+}
+
 fn ocean_update(w: &mut World, id: MobyId, port: usize) {
     let Some(SeaData::Ocean(t)) = data(&w.svc.water, port).cloned() else { return };
     let cam = fv(w.camera);

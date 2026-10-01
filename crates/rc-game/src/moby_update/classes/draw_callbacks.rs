@@ -147,7 +147,8 @@ impl ScreenPrim {
     }
 }
 
-/// `font_print_center_small(x, y, rgba, text, len)`.
+/// `font_print_center_small(x, y, rgba, text, len)` (`font` Small), `font_print_center_large` (`font` Regular: the FX-1
+/// font Lombyte calls "large").
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScreenText {
     pub x: i32,
@@ -155,6 +156,7 @@ pub struct ScreenText {
     pub rgba: u32,
     pub text: Vec<u8>,
     pub len: i32,
+    pub font: rc_formats::font::Font,
 }
 
 impl DrawCallbacks {

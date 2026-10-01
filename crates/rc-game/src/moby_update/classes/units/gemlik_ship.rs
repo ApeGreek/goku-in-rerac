@@ -212,7 +212,7 @@ fn music(w: &mut World, track: i16, stinger: i16) { if let Some(s) = w.sound.as_
 
 /// `Spring(t, k, d, max, &x, &v)` 0x270780 on two pvar floats.
 #[allow(clippy::too_many_arguments)]
-fn spring(w: &mut World, id: MobyId, t: f32, k: f32, d: f32, max: f32, x: usize, v: usize) {
+pub(super) fn spring(w: &mut World, id: MobyId, t: f32, k: f32, d: f32, max: f32, x: usize, v: usize) {
     let (mut a, mut b) = (Pf::f(pf(w, id, x)), Pf::f(pf(w, id, v)));
     crate::hero::physics::spring(Pf::f(t), Pf::f(k), Pf::f(d), Pf::f(max), &mut a, &mut b);
     set(w, id, x, a.to_f32());
@@ -221,7 +221,7 @@ fn spring(w: &mut World, id: MobyId, t: f32, k: f32, d: f32, max: f32, x: usize,
 
 /// `SpringAngle(t, k, d, max, &a, &v, 0)` 0x270b58 on two pvar floats.
 #[allow(clippy::too_many_arguments)]
-fn spring_angle(w: &mut World, id: MobyId, t: f32, k: f32, d: f32, max: f32, x: usize, v: usize) {
+pub(super) fn spring_angle(w: &mut World, id: MobyId, t: f32, k: f32, d: f32, max: f32, x: usize, v: usize) {
     let (mut a, mut b) = (Pf::f(pf(w, id, x)), Pf::f(pf(w, id, v)));
     crate::hero::physics::turn_spring(Pf::f(t), Pf::f(k), Pf::f(d), Pf::f(max), &mut a, &mut b, 0);
     set(w, id, x, a.to_f32());
@@ -818,8 +818,9 @@ fn part74(w: &mut World, id: MobyId, p: [f32; 4], v: [f32; 3], d: crate::particl
     if crate::particles::type74::spawn(sys, w.rng, id, mp, rows, p, v, d, true).is_none() { w.svc.fx.part_failed += 1; }
 }
 
-/// `0x2b8590` (module doc).
-fn exhaust(w: &mut World, id: MobyId) {
+/// `0x2b8590` (module doc); Pokitaru's jet 1242 runs the same code (`0x3112b8`, the same descriptors, its pvars at the
+/// same offsets).
+pub(super) fn exhaust(w: &mut World, id: MobyId) {
     for j in 1..3 {
         let f = (pf(w, id, pvo::SPEED) / (DT * 24.0)).clamp(0.35, 1.0);
         let jp = w.joint_point(id, j);
