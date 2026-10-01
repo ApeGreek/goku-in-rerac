@@ -10,7 +10,7 @@ areas: [classes, world, hud, render]
 
 ## 1. Summary
 
-Planet 14 (Pokitaru) was blocked: Gemlik's story director 1353 waits for Qwark's ship 388 to die, and the only way to
+Planet 14 (Oltanis) was blocked: Gemlik's story director 1353 waits for Qwark's ship 388 to die, and the only way to
 fight it is Gemlik's flown ship 69. Ported both, with everything they make, as per-class code on shared mechanisms;
 the shared pieces (the shots, the vehicle record) are written once and bind by code identity on every level that has
 them.
