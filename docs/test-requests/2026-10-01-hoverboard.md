@@ -51,3 +51,8 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
 - **Claim:** as soon as Ratchet is on his board the four racers set off from their lanes on their own boards with a
   start boost, join the racing line, take its branches and ramp jumps (a trick in a long jump), boost through hoops and
   pads, and keep near Ratchet: slower while ahead of him, faster while behind. Odd-numbered racers lean mirrored.
+
+### B7. The roaming boost pickups (133)
+- **Claim:** small pickups wander the course in five clusters (each toward a point of its path, a new one every ten
+  seconds or when reached), dripping glowing goo; riding into one on the board bursts it into a goo spray with its
+  sound and boosts Ratchet for a second; it reappears once he is 48 away.

@@ -504,7 +504,11 @@ pub fn goo_drips(w: &mut World, id: MobyId, size: f32) {
 /// `ticks(30)`; each blob moves the clump's point by `randf(±0.2)` and its phase-B velocity by `randf(±0.5)·dt` (both
 /// kept for the next blob), sizes `r·0.125` / `r·0.065` (r = `randf(0.5, 1.5)`), colours tweened between
 /// 0x8000eeee / 0x8000ff90 and 0xffee, phases `ticks(10)`, `ticks(30)`, `randf(5, 25)` ticks, texture `def[23]`.
-pub fn goo_burst(w: &mut World, id: MobyId, dir: V, size: f32) {
+pub fn goo_burst(w: &mut World, id: MobyId, dir: V, size: f32) { goo_burst_k(w, id, dir, size, 0.0) }
+
+/// [`goo_burst`] with the clumps' share of `dir` drawn as `randf(0, k)` (the amoeboids 0; Rilgar's boost pickups 133 1,
+/// their copy `0x2db238` with size 0.5).
+pub fn goo_burst_k(w: &mut World, id: MobyId, dir: V, size: f32, k: f32) {
     for _ in 0..20 {
         let mut p = w.m(id).position;
         jitter(w, 0.5 * size, &mut p);
@@ -512,7 +516,7 @@ pub fn goo_burst(w: &mut World, id: MobyId, dir: V, size: f32) {
         let a = w.rng.rand_angle();
         let s1 = w.rng.randf(1.0, 8.0) * super::DT;
         let s2 = w.rng.randf(2.0, 6.0) * super::DT;
-        let s3 = w.rng.randf(0.0, 0.0);
+        let s3 = w.rng.randf(0.0, k);
         let mut v1 = scale(dir, s3 * super::DT);
         let (cs_, sn) = cs(a);
         v1[0] += cs_ * s1;

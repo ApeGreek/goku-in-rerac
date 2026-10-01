@@ -96,6 +96,7 @@
 //! | U155 | 481 bobbing floats with three spinning parts (04; look-at records `manip::look`, a platform) | level04 0x2cdda0 | [`spinner_float`] |
 //! | U203 | 1139 hoverboard-course sparkles (05, 16) | level05 0x31abe0 | [`board_sparkle`] |
 //! | U177 | 717 Rilgar's hoverboard racers (05; their boards are created 439s) | level05 0x307910 | [`rilgar_racer`] |
+//! | U171 | 133 the hoverboard course's roaming boost pickups (05) | level05 0x2dac80 | [`board_boost`] |
 //! | U174 | 439 the Hoverboard (05, 16; mounts Ratchet, its thrusters, and the hero code's stores: `crate::hero::hoverboard`) | level05 0x2f87a8 | [`hoverboard`] |
 //! | U440 | 30 Oltanis pop-up turrets (14), and their shot 681 | level14 0x2b3bf0, 0x2ece00 | [`popup_turret`] |
 //! | U212 | 1021 Blarg petal doors (06) | level06 0x2f4f00 | [`petal_door`] |
@@ -284,6 +285,7 @@ pub mod sweep_light;
 pub mod spinner_float;
 pub mod board_sparkle;
 pub mod hoverboard;
+pub mod board_boost;
 pub mod rilgar_racer;
 pub mod popup_turret;
 pub mod petal_door;
@@ -511,6 +513,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U155 481", level: spinner_float::REFERENCE_LEVEL, func: spinner_float::UPDATE_FN, classes: &spinner_float::CLASSES, update: spinner_float::update, joints: &spinner_float::CLASSES },
     UnitPort { unit: "U203 1139", level: board_sparkle::REFERENCE_LEVEL, func: board_sparkle::UPDATE_FN, classes: &board_sparkle::CLASSES, update: board_sparkle::update, joints: &[] },
     UnitPort { unit: "U177 717", level: rilgar_racer::REFERENCE_LEVEL, func: rilgar_racer::UPDATE_FN, classes: &rilgar_racer::CLASSES, update: rilgar_racer::update, joints: &rilgar_racer::JOINTS },
+    UnitPort { unit: "U171 133", level: board_boost::REFERENCE_LEVEL, func: board_boost::UPDATE_FN, classes: &board_boost::CLASSES, update: board_boost::update, joints: &[] },
     UnitPort { unit: "U174 439", level: hoverboard::REFERENCE_LEVEL, func: hoverboard::UPDATE_FN, classes: &hoverboard::CLASSES, update: hoverboard::update, joints: &hoverboard::JOINTS },
     UnitPort { unit: "U440 30", level: popup_turret::REFERENCE_LEVEL, func: popup_turret::UPDATE_FN, classes: &popup_turret::CLASSES, update: popup_turret::update, joints: &[] },
     UnitPort { unit: "U440 681", level: popup_turret::REFERENCE_LEVEL, func: popup_turret::SHOT_FN, classes: &popup_turret::SHOT_CLASSES, update: popup_turret::shot_update, joints: &[] },

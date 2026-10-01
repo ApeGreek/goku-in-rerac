@@ -1142,6 +1142,8 @@ pub struct HeroFields {
     pub death_z: Option<f32>,
     /// 0x13fbbc = the board moby (the Hoverboard's class 439 before its `SetState(0x6b, 1)`; `hero::hoverboard`).
     pub board: Option<MobyId>,
+    /// 0x13fc14 += n: the Hoverboard's boost from a pickup 133 (`classes::units::board_boost`).
+    pub board_boost: i32,
 }
 
 /// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
@@ -1230,6 +1232,7 @@ impl HeroFields {
             no_vel_clamp: None,
             death_z: None,
             board: None,
+            board_boost: 0,
         }
     }
 
@@ -1287,6 +1290,7 @@ impl HeroFields {
         if let Some(v) = self.clank_hidden { h.back_slot.clank_hidden = v; }
         if let Some(v) = self.no_vel_clamp { h.no_vel_clamp = v; }
         if let Some(b) = self.board { h.board.moby = Some(b); }
+        h.board.boost_timer += self.board_boost;
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
             h.rot[2] = pf(p.yaw);
