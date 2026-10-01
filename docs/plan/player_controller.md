@@ -861,7 +861,7 @@ in pvar +0x24 on 08 / 16), 23 ×12, 18 ×8, 19 ×6, 14 ×4 (kind 4, Kerwan), 1 �
 | 18 | L02 0x2fc298 (0) / three empty hooks | the moby focus (never current) | `focus.rs` (below; 7 levels) |
 | 22 | L15 0x2f8ba8 (−1) → 0x2f88e8 / three empty | class 18's modes 1 / 2 for **giant Clank only** (body 0x1413f4 = 2; its target a point of the table 0x1600ec + i·0x80 + 0x30; D+0x230 = 2) | NOT (G-HERO-005: body 2 is not reachable; no consumer) |
 | 19 | L10 0x2f65f8 / 0x2f5b58 / 0x2f5f18 / 0x2f66c0 (+ arm 0x2f5a50) | the armed fly-by (10, 13, 14, 15; below) | NOT: no ported class arms it (G-HERO-027) |
-| 8 | L05 0x32a6d8 (0) / 0x32a6e0 / 0x32a758 / 0x32a788 (empty) | the hoverboard camera (kind 7, camera mode 8: hero states 0x6b / 0x6c; 05, 16) | NOT: G-HERO-008 (no hoverboard) |
+| 8 | L05 0x32a6d8 (0) / 0x32a6e0 / 0x32a758 / 0x32a788 (empty) | the hoverboard camera (kind 7, camera mode 8: hero states 0x6b / 0x6c; 05, 16) | `board.rs` (2026-10-01; the orbit `0x3298d8` is level 16's: G-HERO-008) |
 | 20, 21 | L14 0x315920 / 0x314f00 / 0x315290 / 0x3159d0; 0x316748 / 0x3159d8 / 0x315d48 / 0x3167e0 | the level-14 grind race: its intro fly-by (20) and race camera (21) | NOT: G-LVL-007 (the race) |
 
 **Coverage: class 17** (module doc of `follow_camera/level.rs` has the full rules)
@@ -1073,9 +1073,7 @@ camera turned along the trigger cuboid's x row at 8° a tick, distance 7, pivot 
   start `0x2d6570(moby +0x50)` (puts Ratchet on its rail, state 0x28), the camera 10 ahead on his rail, 2 up); 21: the
   race camera over three grind paths +0x34 / +0x38 / +0x3c (their cumulative lengths in 0x1f6c80 / 0x1f7c20 /
   0x1f8bc0)). G-LVL-007.
-* **Class 8, the hoverboard camera** (L05 / L16: hook 0 (kind 7, camera mode 8 = hero states 0x6b / 0x6c), init
-  0x32a6e0 (the pose copied, `0x2873e0`, `0x3296e0`), update 0x32a758 (`0x329358`, `0x329ce8`), pre 0x32a788 (empty);
-  records 05 #0, 16 #6: k / d 0.03 / 0.2, distances 5.7, heights 1.4, 0.5 …). G-HERO-008.
+* **Class 8, the hoverboard camera**: ported 2026-10-01 (`follow_camera/board.rs`, its coverage table in the module doc).
 * **Class 22** (L15 0x2f8ba8): class 18's modes 1 / 2 for giant Clank (body 2). G-HERO-005.
 
 **The setters** (`Camera::…` in follow_camera.rs; each a no-op unless the follow camera is current): `0x313628`

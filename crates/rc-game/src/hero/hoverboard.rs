@@ -1,5 +1,6 @@
-//! **The Hoverboard: hero states 0x6b..0x6f and the race the board keeps** (movement group 0x16; levels 5 and 16, the
-//! same source compiled into both overlays: level05's copy carries level 16's branches too). Read from the level05
+//! **The Hoverboard: hero states 0x6b..0x6f and the race the board keeps** (movement group 0x16; levels 5 and 16;
+//! level05's code, which carries level 16's branches, though level 16's own copy has more: its physics `0x214598`
+//! writes 0x13fbde (the board camera's orbit) and is not ported: G-HERO-008). Read from the level05
 //! decomp and disassembly: SetState `0x24cee8`, the physics `0x244a70`, the transitions `0x255960` and the board's
 //! helpers. docs/plan/hero_states.md "Hoverboard".
 //!

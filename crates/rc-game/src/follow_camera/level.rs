@@ -120,10 +120,12 @@ pub struct CameraPorts {
     pub fixed: bool,
     /// Class 14's four functions and helpers are level 03's (the side view, [`super::cuboid`]).
     pub side: bool,
+    /// Class 8's four functions and helpers are level 05's (the hoverboard camera, [`super::board`]).
+    pub board: bool,
 }
 
 impl Default for CameraPorts {
-    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true } }
+    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true, board: true } }
 }
 
 impl CameraPorts {
@@ -134,7 +136,7 @@ impl CameraPorts {
     /// level's overlay; a class whose reference is missing is not run).
     pub fn from_overlays(target: &LevelOverlay, reference: &dyn Fn(u32) -> Option<Arc<LevelOverlay>>) -> CameraPorts {
         let Some(level01) = reference(1) else {
-            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false };
+            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false, board: false };
         };
         let rel = rc_formats::level_overlay::Relocation::new(&level01, target);
         let region = target.camvtbl().iter().find(|e| e.class == CLASS_REGION).is_some_and(|e| {
@@ -191,7 +193,8 @@ impl CameraPorts {
         let rail = four(rail::CLASS_RAIL, 1, [rail::RAIL_ACTIVATE, rail::RAIL_INIT, rail::RAIL_UPDATE, rail::RAIL_PRE], &[rail::RAIL_DATA_INIT]);
         let fixed = four(cuboid::CLASS_FIXED, 3, cuboid::FIXED_FNS, &cuboid::FIXED_HELPERS);
         let side = four(cuboid::CLASS_SIDE, 3, cuboid::SIDE_FNS, &cuboid::SIDE_HELPERS);
-        CameraPorts { region, swing, placed, focus, rail, fixed, side }
+        let board = four(super::board::CLASS_BOARD, 5, super::board::BOARD_FNS, &super::board::BOARD_HELPERS);
+        CameraPorts { region, swing, placed, focus, rail, fixed, side, board }
     }
 
     /// Whether the port runs `class` as a current camera (the follow, first-person, script and type-6 cameras always).
@@ -202,6 +205,7 @@ impl CameraPorts {
             super::rail::CLASS_RAIL => self.rail,
             super::cuboid::CLASS_FIXED => self.fixed,
             super::cuboid::CLASS_SIDE => self.side,
+            super::board::CLASS_BOARD => self.board,
             _ => false,
         }
     }
@@ -227,6 +231,8 @@ pub struct Slot {
     pub rail_cam: Option<super::rail::RailSlot>,
     /// Class 14's block ([`super::cuboid`]).
     pub side: Option<SideView>,
+    /// Class 8's block with its run-time word ([`super::board`]).
+    pub board: Option<super::board::BoardRec>,
 }
 
 /// The level's camera slots and the follow camera's lock words.
@@ -268,7 +274,8 @@ impl LevelCameras {
                 let rail = if c.record.class == 3 && p.len() >= 0x28 { i32::from_le_bytes(p[0x24..0x28].try_into().unwrap()) } else { -1 };
                 let rail_cam = if c.record.class == super::rail::CLASS_RAIL { RailCamera::parse(p).map(super::rail::RailSlot::new) } else { None };
                 let side = if c.record.class == super::cuboid::CLASS_SIDE { SideView::parse(p) } else { None };
-                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side }
+                let board = if c.record.class == super::board::CLASS_BOARD { super::board::BoardRec::parse(p) } else { None };
+                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side, board }
             })
             .collect();
         LevelCameras {

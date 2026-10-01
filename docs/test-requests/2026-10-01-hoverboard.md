@@ -61,3 +61,9 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
 - **Claim:** while on the board, a bar across the bottom shows "Lap: n/3" on the left, "Time: m:ss:hh" in the
   middle and "Place: 1st..5th" on the right (shadowed large text); off the board it is gone. After the race has been
   won once, a second bar above shows "Score: n".
+
+### B9. The board camera (class 8)
+- **Claim:** on the board the camera sits about 5.7 behind and 1.4 above the board, looking a little above it, and
+  swings slightly to the side the board faces; in the air more than 2 above the ground it eases to the record's air
+  distance and height; passing under something it rises over it. Thrown off the board, the normal camera takes over
+  and comes back when he is riding again.

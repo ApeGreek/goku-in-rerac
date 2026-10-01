@@ -1,4 +1,5 @@
-//! **The level-class cameras that become current** (classes 3, 1 and 14: [`super::rail`], [`super::cuboid`]) and the
+//! **The level-class cameras that become current** (classes 3, 1, 14 and 8: [`super::rail`], [`super::cuboid`],
+//! [`super::board`]) and the
 //! part of the camera switch `FUN_0020d110` they share with every other camera: the blend by the new camera's record
 //! (pvar +0x1d) and the old camera's +0x7e. Spec: docs/plan/player_controller.md §15.
 //!
@@ -37,9 +38,10 @@ use super::{level::pos4, rows_f, rows_pf, CamInput, Camera, R3, V4};
 use super::cuboid::{CLASS_FIXED, CLASS_SIDE};
 use super::level::CLASS_FOLLOW;
 use super::rail::CLASS_RAIL;
+use super::board::CLASS_BOARD;
 
 /// The level classes the port runs as a current camera through this module.
-pub const CLASS_CAMS: [i32; 3] = [CLASS_RAIL, CLASS_FIXED, CLASS_SIDE];
+pub const CLASS_CAMS: [i32; 4] = [CLASS_RAIL, CLASS_FIXED, CLASS_SIDE, CLASS_BOARD];
 
 /// `0x20d110`'s rates blend rate with UpdateCam +0x78 = −1 (`0.018`; the level-1 copy path's 0.01 is separate).
 const BLEND_RATE: f32 = 0.018;
@@ -68,6 +70,8 @@ pub struct ClassCam {
     pub fixed: super::cuboid::FixedState,
     /// Class 14's D words.
     pub side: super::cuboid::SideState,
+    /// Class 8's D words.
+    pub board: super::board::BoardCamState,
 }
 
 impl Camera {
@@ -127,6 +131,7 @@ impl Camera {
                 CLASS_RAIL => return self.class_cam.rail.vel[0],
                 CLASS_FIXED => return self.class_cam.fixed.vel,
                 CLASS_SIDE => return self.class_cam.side.at[0],
+                CLASS_BOARD => return self.class_cam.board.vel[0],
                 _ => {}
             }
         }
@@ -172,6 +177,7 @@ impl Camera {
                 self.fixed_init();
             }
             CLASS_SIDE => self.side_init(inp),
+            CLASS_BOARD => self.board_init(inp, prev),
             _ => {}
         }
         self.class_cam.prev_pos = self.class_cam.pos;
@@ -260,6 +266,7 @@ impl Camera {
             CLASS_RAIL => self.rail_update(inp),
             CLASS_FIXED => self.fixed_update(inp),
             CLASS_SIDE => self.side_update(inp),
+            CLASS_BOARD => self.board_update(inp),
             _ => {}
         }
     }

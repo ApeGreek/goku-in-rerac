@@ -52,6 +52,7 @@ use crate::ps2v::Pf;
 use rc_formats::collision::Collision;
 
 pub mod camera_moby;
+pub mod board;
 pub mod class_cam;
 pub mod cuboid;
 pub mod focus;
