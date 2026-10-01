@@ -63,7 +63,8 @@
 //! | 0x27b028 `NpcTalkUpdate` | bolt counter queued and kept up `ScaleTicks(60)` for NPC nodes of kind 1 / 6 | `interact::talk_update_at` → `Services::hud` |
 //! | 0x2bc4f0 `CollectBolt` | the bolt counter queued | `classes::bolt` → `Services::hud` (and the count's change, `frame_calls`) |
 //! | 0x24fb50 second banner line 0x1795e8 (countdown > 1000) | | NOT ported (G-UI-011) |
-//! | level05 0x24cee8 / level16 0x21e398 race HUD (slot 0 `0x262ae8`.., slots 5 / 7 `0x2661a0` / `0x266320` / `0x266710`) | lap, position, time | NOT ported (G-LVL-007) |
+//! | level05 0x24cee8 / level16 0x21e398 race HUD, slots 5 / 7 (`0x2661a0` init, `0x2661e8` update, draws `0x266320` / `0x266710`) | lap and place, time (and the score once the race is won), on the board only | [`Element::RaceLap`] / [`Element::RaceTime`] (queued by the board's 0x6b entry: `crate::hero::hoverboard`); level 16's weapon count in slot 5: G-HERO-008 |
+//! | level05 race HUD slot 0 \| 0x10 (`0x262ae8` / `0x262b58` / `0x262f50`, data 0x13fbb4) | the boost meter, the trick-combo texts, the wrong-way warning (time trials) | NOT ported (G-LVL-007) |
 //! | level02 0x2e1fb8 counters (slots 5 / 7, icons 2000 / 2001, `0x23c990` / `0x23ccc8` / `0x23cda8`) | | NOT ported (G-UI-011, level 02's own element) |
 
 use rc_formats::font::{measure_text_width, Font, GlyphTable};
@@ -243,6 +244,10 @@ pub enum Element {
     /// The boss meter, slot 6 | 0x10: init 0x24b418, update 0x24b538, the boss draw (level18 0x23cd60), data the
     /// consumer's word published under `key` ([`calls::Calls::boss_meter`]).
     Boss { key: u32 },
+    /// The race's lap and place, slot 5 (levels 5 / 16): init 0x2661a0, update 0x2661e8, draw level05 0x266320, no data.
+    RaceLap,
+    /// The race's time (and the time trial's score), slot 7: init 0x2661a0, update 0x2661e8, draw level05 0x266710.
+    RaceTime,
 }
 
 /// A request: the arguments `queue_animation_update` compares (the element stands for init / update / draw / data).
@@ -417,6 +422,14 @@ pub struct Inputs {
     /// scores: written by the races (G-LVL-007), 0 until they are ported.
     pub race_best_time: [i32; 2],
     pub race_best_score: [i32; 2],
+    /// The Hoverboard's race (`crate::hero::hoverboard`): the lap 0x13fbea, the place 0x13fc10, the race ticks 0x13fbe4,
+    /// the score 0x13fbf8; global flag 0 (0x13d388: Rilgar's race won once); PAL 0x15ed80.
+    pub race_lap: i32,
+    pub race_place: i32,
+    pub race_ticks: i32,
+    pub race_score: i32,
+    pub race_won: bool,
+    pub pal: bool,
 }
 
 impl Default for Inputs {
@@ -451,6 +464,12 @@ impl Default for Inputs {
             bolt_alert: false,
             race_best_time: [0; 2],
             race_best_score: [0; 2],
+            race_lap: 0,
+            race_place: 0,
+            race_ticks: 0,
+            race_score: 0,
+            race_won: false,
+            pal: false,
         }
     }
 }
@@ -654,6 +673,12 @@ impl HudState {
             // 0x24ce30 (= 0x24b418), 0x24b418.
             Element::SuckCannon | Element::GiantEnergy | Element::Boss { .. } => self.init_generic(slot),
             Element::BoltAlert => self.init_alert(slot),
+            Element::RaceLap | Element::RaceTime => {
+                // 0x2661a0: timer ticks(180) + 30, size 0x80 × 0x80, offset 0.
+                s.timer = scale_ticks(0xb4) + 0x1e;
+                s.size = (0x80, 0x80);
+                s.offset = (0, 0);
+            }
         }
     }
 
@@ -697,7 +722,7 @@ impl HudState {
     fn data(&self, e: Element) -> Option<i32> {
         let i = &self.inputs;
         Some(match e {
-            Element::Empty | Element::Prompt => return None,
+            Element::Empty | Element::Prompt | Element::RaceLap | Element::RaceTime => return None,
             Element::Health => i.hp,
             Element::Bolts => i.bolts,
             Element::Weapon { .. } => i.weapon.map_or(0, |w| w.1),
@@ -894,6 +919,17 @@ impl HudState {
                 }
                 Element::SuckCannon => self.update_suck(i),
                 Element::BoltAlert => self.update_alert(i),
+                Element::RaceLap | Element::RaceTime => {
+                    // 0x2661e8: on the board (group 0x16) timer ticks(30), +0x6c = 5; else +0x6c = −6.
+                    let on = self.inputs.group == 0x16;
+                    let s = &mut self.slots[i];
+                    if on {
+                        s.timer = scale_ticks(0x1e);
+                        s.counter = 5;
+                    } else {
+                        s.counter = -6;
+                    }
+                }
             }
         }
     }
@@ -1056,6 +1092,8 @@ impl HudState {
                 Element::BoltAlert => self.draw_alert(i, out),
                 Element::GiantEnergy => self.draw_giant(i, out),
                 Element::Boss { .. } => self.draw_boss(i, out),
+                Element::RaceLap => self.draw_race_lap(i, out),
+                Element::RaceTime => self.draw_race_time(i, out),
             }
         }
         self.draw_banner(out);
@@ -1313,6 +1351,90 @@ impl HudState {
         out.push(Draw::Text { font: Font::Large, x: left, y: y + 1, rgba: colour & 0xff00_0000, text: text.clone() });
         self.stretch_frame(left - 0x20, y - 8, (x - (left - 0x20)) * 2, 0x20, a, out);
         out.push(Draw::Text { font: Font::Large, x: x - (w >> 1), y, rgba: colour, text });
+    }
+
+    /// Level05 0x266320: the race's lap and place on a bar across the bottom (`FontPrintLarge`, each with a black shadow
+    /// one pixel off): "Lap: n/3" from x 30 (the lap + 1, at most 3), "Place: nst / nd / rd / th" ending at x 480.
+    /// (Level 16's weapon count box, the board weapon's, is G-HERO-008's.)
+    fn draw_race_lap(&self, i: usize, out: &mut Vec<Draw>) {
+        if self.slots[i].counter < 1 { return; }
+        let inp = &self.inputs;
+        let pad = if inp.pal { 10 } else { 0x12 };
+        let frame_y = SCREEN_H - (0x14 + pad);
+        let y = SCREEN_H - (0xc + pad);
+        self.stretch_frame(0, frame_y, 0x208, 0x20, 0x60, out);
+        let label = |id: i32| strings::lookup(&self.assets.messages, id).to_vec();
+        let width = |t: &[u8]| self.assets.text_width(Font::Large, t);
+        let text = |x: i32, y: i32, rgba: u32, t: &[u8], out: &mut Vec<Draw>| out.push(Draw::Text { font: Font::Large, x, y, rgba, text: t.to_vec() });
+        let (c1, c2) = (0x80e0_8060u32, 0x80ff_b080u32);
+        let x = 0x1e;
+        let mut t = label(0x523f);
+        t.extend_from_slice(b": ");
+        text(x - 1, y + 1, 0x8000_0000, &t, out);
+        text(x, y, c1, &t, out);
+        let w = width(&t);
+        let lap = format!(" {}/3", (inp.race_lap + 1).min(3)).into_bytes();
+        text(x + w - 1, y + 2, 0x8000_0000, &lap, out);
+        text(x + w, y, c2, &lap, out);
+        let place = match inp.race_place {
+            1 => " 1st".to_string(),
+            2 => " 2nd".to_string(),
+            3 => " 3rd".to_string(),
+            n => format!(" {n}th"),
+        };
+        let place = place.into_bytes();
+        let px = 0x1e0 - width(&place);
+        text(px + 1, y + 1, 0x8000_0000, &place, out);
+        text(px, y, c2, &place, out);
+        let mut l = b" ".to_vec();
+        l.extend_from_slice(&label(0x5240));
+        l.push(b':');
+        let lx = px - width(&l);
+        text(lx + 1, y + 1, 0x8000_0000, &l, out);
+        text(lx, y, c1, &l, out);
+    }
+
+    /// Level05 0x266710: the race's time "Time:  m:ss:hh" centred on x 256 (3600 ticks a minute, 3000 on PAL); after
+    /// the race is won (global flag 0) a bar above it with the score "Score: n".
+    fn draw_race_time(&self, i: usize, out: &mut Vec<Draw>) {
+        if self.slots[i].counter < 1 { return; }
+        let inp = &self.inputs;
+        let pad = if inp.pal { 10 } else { 0x12 };
+        let label = |id: i32| strings::lookup(&self.assets.messages, id).to_vec();
+        let width = |t: &[u8]| self.assets.text_width(Font::Large, t);
+        let text = |x: i32, y: i32, rgba: u32, t: &[u8], out: &mut Vec<Draw>| out.push(Draw::Text { font: Font::Large, x, y, rgba, text: t.to_vec() });
+        let (c1, c2) = (0x80e0_8060u32, 0x80ff_b080u32);
+        let minute = if inp.pal { 3000 } else { 0xe10 };
+        let second = minute / 0x3c;
+        let (m, rest) = (inp.race_ticks / minute, inp.race_ticks % minute);
+        let secs = rest / second;
+        if inp.race_won {
+            self.stretch_frame(0x8c, SCREEN_H - (0x2e + pad), 0xeb, 0x20, 0x60, out);
+            let y = SCREEN_H - (0x26 + pad);
+            let mut full = label(0x50a6);
+            full.extend_from_slice(format!(": {}", inp.race_score).as_bytes());
+            let x = 0x100 - (width(&full) >> 1);
+            let mut t = label(0x50a6);
+            t.extend_from_slice(b": ");
+            text(x + 1, y + 1, 0x8000_0000, &t, out);
+            text(x, y, c1, &t, out);
+            let w = width(&t);
+            let n = format!(" {}", inp.race_score).into_bytes();
+            text(x + w + 1, y + 1, 0x8000_0000, &n, out);
+            text(x + w, y, c2, &n, out);
+        }
+        let y = SCREEN_H - (0xc + pad);
+        let mut probe = label(0x5241);
+        probe.extend_from_slice(b":  0:00:00");
+        let x = 0x100 - (width(&probe) >> 1);
+        let mut t = label(0x5241);
+        t.extend_from_slice(b":  ");
+        text(x + 1, y + 1, 0x8000_0000, &t, out);
+        text(x, y, c1, &t, out);
+        let w = width(&t);
+        let n = format!("{}:{:02}:{:02}", m, secs, ((rest - secs * second) * 100) / second).into_bytes();
+        text(x + w + 1, y + 1, 0x8000_0000, &n, out);
+        text(x + w, y, c2, &n, out);
     }
 
     /// `draw_stretchable_ui_frame` 0x251ab0: cap, stretched middle, rotated cap.

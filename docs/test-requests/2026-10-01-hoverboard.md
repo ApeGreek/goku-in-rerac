@@ -56,3 +56,8 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
 - **Claim:** small pickups wander the course in five clusters (each toward a point of its path, a new one every ten
   seconds or when reached), dripping glowing goo; riding into one on the board bursts it into a goo spray with its
   sound and boosts Ratchet for a second; it reappears once he is 48 away.
+
+### B8. The race HUD (slots 5 / 7)
+- **Claim:** while on the board, a bar across the bottom shows "Lap: n/3" on the left, "Time: m:ss:hh" in the
+  middle and "Place: 1st..5th" on the right (shadowed large text); off the board it is gone. After the race has been
+  won once, a second bar above shows "Score: n".

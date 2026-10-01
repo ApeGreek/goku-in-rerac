@@ -24,7 +24,8 @@
 //! | skill points 7 / 9 (jingle, banner) | `0x255208`, `0x254608` | [`apply`] (`story::award_skill_point`) |
 //! | the best time / score records 0x15ee58 / 0x15ee68 (+4 on level 16) and +1000 bolts for each new one; 0x15ee38 / 0x15ee3c + 1 | `0x254608` | [`apply`] ([`Records`]) |
 //! | move record 30 bumped | `0x254058` | [`apply`] |
-//! | the race HUD (slot 0x10 and slots 5 / 7, `update_resource_counter`) | `0x24cee8`, `0x254608` | logged (G-LVL-007) |
+//! | the race HUD's slots 5 / 7 (lap / place, time) | `0x24cee8` | [`apply`] (`Services::hud`) |
+//! | the boost meter slot 0x10, `update_resource_counter` | `0x24cee8`, `0x254608` | logged (G-LVL-007) |
 
 use crate::hero::hoverboard::{BoardCmd, BoardWorld, Member};
 use crate::moby_runtime::{MobyId, MobyTable};
@@ -147,6 +148,11 @@ pub fn apply(w: &mut World) {
             BoardCmd::Finished(k) => w.svc.board.records.finished[k] += 1,
             BoardCmd::MoveBump(rec) => {
                 if rec < w.svc.help.records.moves.len() { super::hints::bump_move(w, rec); }
+            }
+            BoardCmd::RaceHud => {
+                use crate::hud::{Element, Request};
+                w.svc.hud.queue(Request::new(5, 0xffff, Element::RaceLap, 0));
+                w.svc.hud.queue(Request::new(7, 0xffff, Element::RaceTime, 0));
             }
             BoardCmd::Hud(what) => w.svc.unported(what),
         }

@@ -848,6 +848,9 @@ fn hero_inputs(g: &mut Inputs, p: &crate::gameplay::Play) {
     // The race records the Hoverboard writes (0x15ee58.. / 0x15ee68..: rc_game::moby_update::classes::units::hoverboard).
     let r = &p.svc.board.records;
     (g.race_best_time, g.race_best_score) = (r.best_time, r.best_score);
+    let b = &h.board;
+    (g.race_lap, g.race_place, g.race_ticks, g.race_score) = (b.lap as i32, b.place, b.race_ticks, b.score);
+    g.race_won = p.svc.interact.game.flags.first().is_some_and(|&f| f != 0);
 }
 
 /// `0x236738(index, 0)`: Ratchet's class sound (`PlayClassSound` on the hero moby), as `HeroClassSounds::voice`.

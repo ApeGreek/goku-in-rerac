@@ -21,7 +21,7 @@
 //! ## Coverage
 //! | address | what | port |
 //! |---|---|---|
-//! | 0x24cee8 0x6b | group 0x16, 0x1415d4 = 8, 0x141402 = 1, 0x1413f7 = 1, jump / airborne 0; from 0x6d..0x6f: the waypoint back to the race line's point nearest Ratchet when that is behind, 0x13fbff / 0x13fc14 / 0x13fc08 / 0x13fc1e = 0; from another group: −(gravity · displacement) kept (group 0x16 again) or the start: level 5 places Ratchet at (247, 287, 76) yaw −2.1, the block 0x13fa10..0x13fc1f cleared (the board moby kept), gravity 22·dt², the host, 0x13fbcc = 70°, the HUD handle −1; global flag 0 set: the slot-0x10 meter queued; the board yaw = the facing; HUD slots 5 / 7 queued; SetAnim(ticks(5), 0x52 / 0x7d, 0) | [`entry`] (the HUD elements: G-LVL-007, logged) |
+//! | 0x24cee8 0x6b | group 0x16, 0x1415d4 = 8, 0x141402 = 1, 0x1413f7 = 1, jump / airborne 0; from 0x6d..0x6f: the waypoint back to the race line's point nearest Ratchet when that is behind, 0x13fbff / 0x13fc14 / 0x13fc08 / 0x13fc1e = 0; from another group: −(gravity · displacement) kept (group 0x16 again) or the start: level 5 places Ratchet at (247, 287, 76) yaw −2.1, the block 0x13fa10..0x13fc1f cleared (the board moby kept), gravity 22·dt², the host, 0x13fbcc = 70°, the HUD handle −1; global flag 0 set: the slot-0x10 meter queued; the board yaw = the facing; HUD slots 5 / 7 queued; SetAnim(ticks(5), 0x52 / 0x7d, 0) | [`entry`] (slots 5 / 7: [`BoardCmd::RaceHud`]; the slot-0x10 meter: G-LVL-007, logged) |
 //! | 0x24cee8 0x6c | group 0x16, 0x1415d4 = 8, 0x1413f7, 0x13fbc0 = 0; SetAnim(ticks(8), 0x55 / 0x7f, 5) | [`entry`] |
 //! | 0x24cee8 0x6d | 0x1413f7, 0x1415d4 = 0, loops stopped, 0x13fc14 = 0, vel = eff·0.7, vel.z = 10·dt; SetAnim(ticks(4), 0x61, 3) | [`entry`] |
 //! | 0x24cee8 0x6e | as 0x6d; water timer ticks(70), water level = 0x13fbf0, splash (3, min(300·\|disp.z\|, 40), 1), voice 3, the float's fields, momentum = eff in the plane (≤ 9.5·dt), blink 0x68; SetAnim(ticks(17), 0x3a, 0) | [`entry`] |
@@ -357,7 +357,10 @@ pub enum BoardCmd {
     Finished(usize),
     /// Move record `rec` bumped (`count + 1`, time, the level's bit).
     MoveBump(usize),
-    /// The HUD calls of the race (slot 0x10 queued / killed, slots 5 / 7: G-LVL-007), logged.
+    /// `queue_animation_update(5, …)` / `(7, …)`: the race's lap / place and time elements (`crate::hud::Element::RaceLap`
+    /// / `RaceTime`).
+    RaceHud,
+    /// The HUD calls of the race not ported (slot 0x10's boost meter, `update_resource_counter`: G-LVL-007), logged.
     Hud(&'static str),
 }
 
@@ -471,7 +474,7 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, _old_sub: i3
                     h.board.cmds.push(BoardCmd::Hud("0x264298; queue_animation_update(0x10, 0x262ae8 / 0x262b58 / 0x262f50, 0x13fbb4, ticks(17)·60)"));
                 }
                 h.board.yaw = f(h.rot[2]);
-                h.board.cmds.push(BoardCmd::Hud("queue_animation_update(5 / 7, 0x2661a0 / 0x2661e8, 0x266320 / 0x266710)"));
+                h.board.cmds.push(BoardCmd::RaceHud);
             }
             if play {
                 let seq = if h.board.weapons == 0 { 0x52 } else { 0x7d };
