@@ -32,6 +32,15 @@ pub const PERIOD: i64 = 600;
 /// The game's 2π (`0x40c90fd0` = 6.28318).
 const TWO_PI: f32 = f32::from_bits(0x40c9_0fd0);
 
+/// Level06 `0x300f70(m, velocity, spin)`: a block set drifting (state 2; Blarg's shuttle's blast,
+/// `super::blarg_shuttle`).
+pub fn drift(w: &mut World, id: MobyId, vel: [f32; 4], spin: [f32; 4]) {
+    if w.m(id).pvars.len() < 0x20 { w.mm(id).pvars.resize(0x20, 0); }
+    w.mm(id).state = 2;
+    set_pv4(w, id, 0, vel);
+    set_pv4(w, id, 0x10, spin);
+}
+
 /// Level06 0x300df0 (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x20 { w.delete_moby(id); return; }

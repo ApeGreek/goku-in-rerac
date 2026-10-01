@@ -176,6 +176,7 @@
 //! | U31 | 834 Veldin's Clank (flag 8, the trip to Novalis) (00) | level00 0x2d9dc8 | [`veldin_story`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
+//! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
 //! | U405 | 1267 Hoven's turret mini-game (Gemlik's unlock, planet 13), its HUD 0x304218 and red screen 0x304d98 (12) | level12 0x303540 | [`hoven_turret`] |
 //! | U424 | 69 Gemlik's ship (the base battle: the flight, the guns, the missiles, the vehicle record), its HUD 0x2b97f8 (the lock, the targets left, the gauge) (13) | level13 0x2bb068 | [`gemlik_ship`], [`gemlik_ship_hud`] |
 //! | U434 | 388 Qwark's ship (the Gemlik base battle's boss: paths, phases, tractor beam, shield, taunts), its parts 389..401, shield 352, missile 82 and mine 83 (13) | level13 0x2eb098 | [`qwark_ship`], [`qwark_ship_parts`] |
@@ -215,6 +216,7 @@ pub mod vent;
 pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
+pub mod blarg_shuttle;
 pub mod marker;
 pub mod smoke_emitter;
 pub mod hydro_pad;
@@ -634,6 +636,7 @@ pub const PORTS: &[UnitPort] = &[
     // Draw callbacks only (no class runs them): the HUD (`Callback::UnitFrame`) and the red screen (`Callback::UnitQuads`).
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
     UnitPort { unit: "U424 69", level: gemlik_ship::REFERENCE_LEVEL, func: gemlik_ship::UPDATE_FN, classes: &gemlik_ship::CLASSES, update: gemlik_ship::update, joints: &gemlik_ship::CLASSES },
     UnitPort { unit: "U424 69 hud", level: gemlik_ship::REFERENCE_LEVEL, func: gemlik_ship_hud::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U434 388", level: qwark_ship::REFERENCE_LEVEL, func: qwark_ship::UPDATE_FN, classes: &qwark_ship::CLASSES, update: qwark_ship::update, joints: &qwark_ship::CLASSES },

@@ -72,6 +72,9 @@ pub struct ScriptCamera {
     pub curve: [f32; 2],
     /// `CameraScript2(kind)` waiting for the next camera update, with the level (kind 4's rate).
     pub release: Option<(u8, u32)>,
+    /// `0x312b40`'s springs (position, Euler: k, damping, max at D+0x10..0x18 / D+0x50..0x58) after the init's
+    /// (0.3, 0.3, 1) / (0.05, 0.3, 1); None: the init's. The next `CameraScript` restores the init's.
+    pub springs: Option<[[f32; 3]; 2]>,
     /// Updates run since the switch (reports).
     pub ticks: u32,
 }
@@ -194,8 +197,9 @@ impl ScriptCamera {
                 for k in 0..3 { self.euler[k] = rot_ease(self.euler[k], self.target_euler[k], t); }
             }
             _ => {
-                for k in 0..3 { self.pos[k] = spring(self.pos[k], self.target_pos[k], 0.3, 0.3, 1.0, &mut self.vel[k]); }
-                for k in 0..3 { self.euler[k] = angle_spring(self.euler[k], self.target_euler[k], 0.05, 0.3, 1.0, &mut self.avel[k]); }
+                let [p, e] = self.springs.unwrap_or([[0.3, 0.3, 1.0], [0.05, 0.3, 1.0]]);
+                for k in 0..3 { self.pos[k] = spring(self.pos[k], self.target_pos[k], p[0], p[1], p[2], &mut self.vel[k]); }
+                for k in 0..3 { self.euler[k] = angle_spring(self.euler[k], self.target_euler[k], e[0], e[1], e[2], &mut self.avel[k]); }
             }
         }
         self.rows = euler_rows(self.euler);
@@ -223,6 +227,7 @@ impl Camera {
         // FUN_0020d110 + the init 0x3171b8 (velocities 0, rows from its old Euler; +0x7e = 0).
         s.active = true;
         s.release = None;
+        s.springs = None;
         s.vel = [0.0; 3];
         s.avel = [0.0; 3];
         s.ticks = 0;
@@ -256,6 +261,10 @@ impl Camera {
         if let Some(p) = pos { self.script.target_pos = p; }
         if let Some(e) = euler { self.script.target_euler = e; }
     }
+
+    /// `0x312b40(d_p, k_p, max_p, d_e, k_e, max_e)` (level06; the script camera's data block D+0x10..0x18 /
+    /// D+0x50..0x58): its position and Euler springs, each (k, damping, max).
+    pub fn camera_script_springs(&mut self, pos: [f32; 3], euler: [f32; 3]) { self.script.springs = Some([pos, euler]); }
 
     /// `0x316e88(a, b)`: mode 3's distance curve end slopes (D+0x124 = a, D+0x128 = b).
     pub fn camera_script_curve(&mut self, a: f32, b: f32) { self.script.curve = [a, b]; }

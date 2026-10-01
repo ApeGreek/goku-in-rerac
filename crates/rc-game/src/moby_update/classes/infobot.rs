@@ -395,6 +395,16 @@ fn init(w: &mut World, id: MobyId) {
     }
 }
 
+/// Level06 `0x2e6148` (the copy's `InfobotUpdate` + 0x1140): an infobot shown by another class (Blarg's shuttle 1109
+/// at its last stop): state 2, mode &= ~0x41, the glow init (`0x2e5e10` = level01 `0x2fcd88`).
+pub fn show(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < pv::LEN { return; }
+    let m = w.mm(id);
+    m.state = 2;
+    m.mode &= !(mode::HIDDEN | mode::NO_ANIM);
+    glow_init(w, id, pv::GLOW);
+}
+
 /// The ride moby (+0x54) when it is a class-822 moby.
 fn ride(w: &World, id: MobyId) -> Option<MobyId> {
     let r = usize::try_from(pi32(w, id, pv::RIDE)).ok()?;

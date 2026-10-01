@@ -45,6 +45,8 @@ pub enum CinematicCall {
     CameraTargets { pos: Option<[f32; 3]>, euler: Option<[f32; 3]> },
     /// `0x316e88(a, b)`: mode 3's distance curve (D+0x124 / D+0x128).
     CameraCurve { a: f32, b: f32 },
+    /// `0x312b40`: the script camera's springs, (k, damping, max) for its position and its Euler.
+    ScriptSprings { pos: [f32; 3], euler: [f32; 3] },
     /// `CameraScript2(kind)` on level `level`.
     CameraRelease { kind: u8, level: u32 },
     /// `HeroTeleport(…, reset_cam = 1)`'s `CameraResetBehindHero` 0x20ee80 (after the hero calls of the tick).
@@ -182,6 +184,11 @@ pub fn camera_script(w: &mut World, pos: [f32; 3], euler: [f32; 3], mode: u8, ti
 /// `0x316dd0` / `0x316e28`.
 pub fn camera_targets(w: &mut World, pos: Option<[f32; 3]>, euler: Option<[f32; 3]>) {
     w.svc.cinematic.calls.push(CinematicCall::CameraTargets { pos, euler });
+}
+
+/// `0x312b40(d_p, k_p, max_p, d_e, k_e, max_e)` (level06; the arguments in the game's order).
+pub fn script_springs(w: &mut World, a: [f32; 6]) {
+    w.svc.cinematic.calls.push(CinematicCall::ScriptSprings { pos: [a[1], a[0], a[2]], euler: [a[4], a[3], a[5]] });
 }
 
 /// `0x316e88(a, b)`.
@@ -413,6 +420,7 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
                 if !cam.script_active() { cam.camera_script(pos, euler, mode, ticks, collide, crate::hero::physics::to_f32x3(inp.hero.pos)) }
             }
             CinematicCall::CameraCurve { a, b } => cam.camera_script_curve(a, b),
+            CinematicCall::ScriptSprings { pos, euler } => cam.camera_script_springs(pos, euler),
             CinematicCall::CameraTargets { pos, euler } => cam.camera_script_targets(pos, euler),
             CinematicCall::CameraRelease { kind, level } => cam.camera_script2(kind, level),
             // CameraResetBehindHero 0x20ee80 on the follow camera (the hero's pose is this tick's: the class stores
