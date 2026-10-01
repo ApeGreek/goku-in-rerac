@@ -12,8 +12,7 @@ areas: [hero, classes, menus]
 
 Rilgar's (and Kalebo III's) hoverboard had no port: the board class 439 did nothing and the hero froze in 0x6b. The
 hero's board states, the race the board keeps (laps, places, wrong way, the finish) and the board class are ported
-from level05's source (`hero/hoverboard.rs`, `moby_update/classes/units/hoverboard.rs`). Not yet: the bot racers 717
-(they stand at the start line), the boost pickups 133, the race HUD, the hoverboard camera (class 8: the follow camera
+from level05's source (`hero/hoverboard.rs`, `moby_update/classes/units/hoverboard.rs`). The bot racers 717 race too (their own commit). Not yet: the boost pickups 133, the race HUD, the hoverboard camera (class 8: the follow camera
 is used), level 16's state 0x3e and its board weapon.
 
 ## 2. Where it lives
@@ -47,3 +46,8 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
 - **Claim:** after three laps: first place in the first race tells the race girl (she returns to the finish);
   otherwise (or once the race is won) the "Quit Race?" dialog shows the place, the time and the score; "No"
   restarts the race at the start.
+
+### B6. The racers (717)
+- **Claim:** as soon as Ratchet is on his board the four racers set off from their lanes on their own boards with a
+  start boost, join the racing line, take its branches and ramp jumps (a trick in a long jump), boost through hoops and
+  pads, and keep near Ratchet: slower while ahead of him, faster while behind. Odd-numbered racers lean mirrored.
