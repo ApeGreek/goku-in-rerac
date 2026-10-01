@@ -2,7 +2,7 @@
 status: open
 job: hero-bodies
 date: 2026-10-01
-commit: <filled in by the coordinator at commit time>
+commit: 58c8b71
 areas: [hero, classes, ui]
 ---
 
