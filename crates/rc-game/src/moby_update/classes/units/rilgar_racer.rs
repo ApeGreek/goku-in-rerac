@@ -3,6 +3,10 @@
 //! (movement group 0x16): its start lane, then the racing line with its branches and ramp jumps, boosted by the course's
 //! hoops and pads, its speed pulled toward Ratchet's place. Read from the level05 decomp. Native `f32`.
 //!
+//! **Shared with Kalebo III's racers 556** ([`super::kalebo_racer`]): the level's copies of the waypoint, pickup, jump and
+//! jump-arc code differ only in where the fields sit and in the branch rule, so [`advance`], [`pickups`], [`jumps`] and
+//! [`jump_arc`] take a [`Layout`].
+//!
 //! **Pvars** (0x280): +0x00 / +0x80 / +0x100 / +0x180 four look-at records (`manip::look`, joint lists 0 / 2 / 1 / 3),
 //! +0x200 the point on the track (its z the track height), +0x210 the jump's landing point, +0x220 the racing line,
 //! +0x224.. the branches (by a branch node's w − 1), +0x234 the start lane, +0x238 / +0x23c the speed and boosted
@@ -62,27 +66,64 @@ mod pv {
     pub const LEN: usize = 0x280;
 }
 
-const DT: f32 = 1.0 / 60.0;
-const DT2: f32 = 1.0 / 3600.0;
+pub(super) const DT: f32 = 1.0 / 60.0;
+pub(super) const DT2: f32 = 1.0 / 3600.0;
 const HALF_PI: f32 = std::f32::consts::FRAC_PI_2;
 
-fn atan(dx: f32, dy: f32) -> f32 { c::atan(dx, dy) }
-fn pt(path: &[[f32; 4]], i: i32) -> [f32; 4] { usize::try_from(i).ok().and_then(|i| path.get(i)).copied().unwrap_or([0.0; 4]) }
-fn path(w: &World, i: i32) -> Vec<[f32; 4]> {
+pub(super) fn atan(dx: f32, dy: f32) -> f32 { c::atan(dx, dy) }
+pub(super) fn pt(path: &[[f32; 4]], i: i32) -> [f32; 4] { usize::try_from(i).ok().and_then(|i| path.get(i)).copied().unwrap_or([0.0; 4]) }
+pub(super) fn path(w: &World, i: i32) -> Vec<[f32; 4]> {
     usize::try_from(i).ok().and_then(|i| w.svc.splines.get(i)).map(|p| p.iter().map(|q| q.map(f32::from_bits)).collect()).unwrap_or_default()
 }
-fn track(w: &World, id: MobyId) -> [f32; 4] { [0, 1, 2, 3].map(|k| c::pf(w, id, pv::TRACK + 4 * k)) }
-fn set_track(w: &mut World, id: MobyId, p: [f32; 4]) { for (k, &v) in p.iter().enumerate() { c::set_pf(w, id, pv::TRACK + 4 * k, v); } }
+pub(super) fn track(w: &World, id: MobyId, l: &Layout) -> [f32; 4] { [0, 1, 2, 3].map(|k| c::pf(w, id, l.track + 4 * k)) }
+pub(super) fn set_track(w: &mut World, id: MobyId, l: &Layout, p: [f32; 4]) { for (k, &v) in p.iter().enumerate() { c::set_pf(w, id, l.track + 4 * k, v); } }
 fn board(w: &World, id: MobyId) -> Option<MobyId> { usize::try_from(c::pi32(w, id, pv::BOARD) - 1).ok().filter(|&b| b < w.table.mobys.len()) }
-fn cur_path(w: &World, id: MobyId) -> Vec<[f32; 4]> { path(w, c::pi32(w, id, pv::PATH)) }
-fn dist2(a: [f32; 4], b: [f32; 4]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt() }
-fn dist3(a: [f32; 4], b: [f32; 4]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() }
+pub(super) fn cur_path(w: &World, id: MobyId, l: &Layout) -> Vec<[f32; 4]> { path(w, c::pi32(w, id, l.path)) }
+pub(super) fn dist2(a: [f32; 4], b: [f32; 4]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt() }
+pub(super) fn dist3(a: [f32; 4], b: [f32; 4]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() }
 
-/// `0x306d30(m, i)`: the current path's point `i` (the sideways offset is 0).
-fn point(w: &World, id: MobyId, i: i32) -> [f32; 4] { pt(&cur_path(w, id), i) }
+/// `0x306d30(m, i)` (level16 `0x2cf9d0`): the current path's point `i` (the sideways offset is 0).
+pub(super) fn point(w: &World, id: MobyId, l: &Layout, i: i32) -> [f32; 4] { pt(&cur_path(w, id, l), i) }
 
 /// `0x287a18(path, i, step, closed)` on a closed path.
-fn step(n: i32, i: i32, s: i32) -> i32 { if n == 0 { 0 } else { (i + s + n) % n } }
+pub(super) fn step(n: i32, i: i32, s: i32) -> i32 { if n == 0 { 0 } else { (i + s + n) % n } }
+
+/// Where a racer family keeps its race fields, and the few constants its copies of the shared race code differ in
+/// (Rilgar's 717 [`RILGAR`], Kalebo III's 556 `kalebo_racer::LAYOUT`).
+pub(super) struct Layout {
+    pub track: usize,
+    pub land: usize,
+    pub line: usize,
+    pub branches: usize,
+    pub base: usize,
+    pub boosted: usize,
+    pub speed: usize,
+    /// The current path (the game keeps its pointer; the port the spline index).
+    pub path: usize,
+    pub yaw_vel: usize,
+    pub vz: usize,
+    pub wp: usize,
+    pub boost: usize,
+    pub cooldown: usize,
+    pub jump: usize,
+    pub land_wp: usize,
+    /// The landing waypoint is an s16 (Kalebo's) rather than a word.
+    pub land_wp_s16: bool,
+    /// A racing-line node branches when its w is above `branch_min`, on `branch_chance < randi(100)`, to the branch
+    /// `w − branch_first`.
+    pub branch_min: f32,
+    pub branch_chance: i32,
+    pub branch_first: i32,
+    /// The jumps start only off the racing line.
+    pub jump_off_line: bool,
+}
+
+const RILGAR: Layout = Layout {
+    track: pv::TRACK, land: pv::LAND, line: pv::LINE, branches: pv::BRANCHES, base: pv::BASE, boosted: pv::BOOSTED,
+    speed: pv::SPEED, path: pv::PATH, yaw_vel: pv::YAW_VEL, vz: pv::VZ, wp: pv::WP, boost: pv::BOOST,
+    cooldown: pv::COOLDOWN, jump: pv::JUMP, land_wp: pv::LAND_WP, land_wp_s16: false, branch_min: 0.0, branch_chance: 0, branch_first: 1,
+    jump_off_line: true,
+};
 
 /// Level05 `0x307910` (module doc).
 pub fn update(w: &mut World, id: MobyId) {
@@ -103,10 +144,10 @@ pub fn update(w: &mut World, id: MobyId) {
             }
             let lane = c::pi32(w, id, pv::LANE);
             c::set_pi32(w, id, pv::PATH, lane);
-            let p0 = point(w, id, 0);
+            let p0 = point(w, id, &RILGAR, 0);
             w.mm(id).position = p0;
-            set_track(w, id, p0);
-            let p1 = point(w, id, 1);
+            set_track(w, id, &RILGAR, p0);
+            let p1 = point(w, id, &RILGAR, 1);
             let m = w.mm(id);
             m.rotation[0] = 0.0;
             m.rotation[1] = 0.0;
@@ -178,35 +219,12 @@ fn ride(w: &mut World, id: MobyId) {
         w.mm(id).state = 0;
         return;
     }
-    advance(w, id);
-    pickups(w, id);
-    jumps(w, id);
-    if c::pi32(w, id, pv::JUMP) != 0 {
-        let j = c::pi32(w, id, pv::JUMP) + 1;
-        c::set_pi32(w, id, pv::JUMP, j);
-        if j < w.ticks(0x11) {
-            let p = cur_path(w, id);
-            let n = p.len() as i32;
-            let (from, to) = (c::pi16(w, id, pv::WP) as i32, c::pi32(w, id, pv::LAND_WP));
-            let mut d = 0.0;
-            let mut k = from;
-            while k < to {
-                let k2 = step(n, k, 1);
-                d += dist2(pt(&p, k), pt(&p, k2));
-                k = k2;
-                if k == from { break; }
-            }
-            let t = d / c::pf(w, id, pv::SPEED);
-            let (z0, z1) = (pt(&p, from)[2], pt(&p, to)[2]);
-            let g = DT2 * 21.0;
-            if c::pf(w, id, pv::VZ) < 0.0 { c::set_pf(w, id, pv::VZ, 0.0); }
-            let mut v = c::pf(w, id, pv::VZ);
-            turn::approach((z1 - z0) / t + g * t * 0.5, DT2 * 110.0, &mut v);
-            c::set_pf(w, id, pv::VZ, v);
-        }
-    }
+    advance(w, id, &RILGAR);
+    pickups(w, id, &RILGAR);
+    jumps(w, id, &RILGAR);
+    jump_arc(w, id, &RILGAR);
     anims(w, id);
-    let q = point(w, id, c::pi16(w, id, pv::WP) as i32);
+    let q = point(w, id, &RILGAR, c::pi16(w, id, pv::WP) as i32);
     let pos = c::pos(w, id);
     let to = atan(q[0] - pos[0], q[1] - pos[1]);
     {
@@ -215,7 +233,7 @@ fn ride(w: &mut World, id: MobyId) {
         c::set_yaw(w, id, a.to_f32());
         c::set_pf(w, id, pv::YAW_VEL, v.to_f32());
     }
-    let mut p = track(w, id);
+    let mut p = track(w, id, &RILGAR);
     if p[2] < q[2] - 5.0 { p[2] = q[2]; }
     let yaw = c::yaw(w, id);
     let speed = c::pf(w, id, pv::SPEED);
@@ -265,7 +283,7 @@ fn ride(w: &mut World, id: MobyId) {
         p[2] = gz;
         c::set_pi32(w, id, pv::JUMP, 0);
     }
-    set_track(w, id, p);
+    set_track(w, id, &RILGAR, p);
     // The lean records (the big-head cheat's scale on the head's).
     manip::big_head_scale(w, 3.0, id, 0x180);
     let lim = DT * 2.617_993_8;
@@ -295,55 +313,86 @@ fn ride(w: &mut World, id: MobyId) {
     }
 }
 
-/// `0x306e10`: the waypoint (module doc).
-fn advance(w: &mut World, id: MobyId) {
-    let line = c::pi32(w, id, pv::LINE);
-    let mut wp = c::pi16(w, id, pv::WP) as i32;
+fn land_wp(w: &World, id: MobyId, l: &Layout) -> i32 {
+    if l.land_wp_s16 { c::pi16(w, id, l.land_wp) as i32 } else { c::pi32(w, id, l.land_wp) }
+}
+
+/// The jump's vertical speed (`0x307910` state 2; level16 `0x2d04a0`): for ticks(17) from the take-off, toward the
+/// speed that lands at the landing waypoint (21·dt² gravity, by 110·dt²).
+pub(super) fn jump_arc(w: &mut World, id: MobyId, l: &Layout) {
+    if c::pi32(w, id, l.jump) == 0 { return; }
+    let j = c::pi32(w, id, l.jump) + 1;
+    c::set_pi32(w, id, l.jump, j);
+    if j >= w.ticks(0x11) { return; }
+    let p = cur_path(w, id, l);
+    let n = p.len() as i32;
+    let (from, to) = (c::pi16(w, id, l.wp) as i32, land_wp(w, id, l));
+    let mut d = 0.0;
+    let mut k = from;
+    while k < to {
+        let k2 = step(n, k, 1);
+        d += dist2(pt(&p, k), pt(&p, k2));
+        k = k2;
+        if k == from { break; }
+    }
+    let t = d / c::pf(w, id, l.speed);
+    let (z0, z1) = (pt(&p, from)[2], pt(&p, to)[2]);
+    let g = DT2 * 21.0;
+    if c::pf(w, id, l.vz) < 0.0 { c::set_pf(w, id, l.vz, 0.0); }
+    let mut v = c::pf(w, id, l.vz);
+    turn::approach((z1 - z0) / t + g * t * 0.5, DT2 * 110.0, &mut v);
+    c::set_pf(w, id, l.vz, v);
+}
+
+/// `0x306e10` (level16 `0x2cf9f8`): the waypoint (module doc).
+pub(super) fn advance(w: &mut World, id: MobyId, l: &Layout) {
+    let line = c::pi32(w, id, l.line);
+    let mut wp = c::pi16(w, id, l.wp) as i32;
     for _ in 0..1024 {
         let pos = c::pos(w, id);
-        let q = point(w, id, wp);
+        let q = point(w, id, l, wp);
         let a = atan(q[0] - pos[0], q[1] - pos[1]);
-        let q2 = point(w, id, c::pi16(w, id, pv::WP) as i32);
-        let d = dist2(q2, track(w, id));
+        let q2 = point(w, id, l, c::pi16(w, id, l.wp) as i32);
+        let d = dist2(q2, track(w, id, l));
         let ahead = c::diff_rots(a, c::yaw(w, id)) < HALF_PI;
         if (ahead || 4.0 < d) && 2.0 < d { return; }
-        let p = cur_path(w, id);
+        let p = cur_path(w, id, l);
         let n = p.len() as i32;
         if n == 0 { return; }
-        let next = (c::pi16(w, id, pv::WP) as i32 + 1) % n;
-        c::set_pi16(w, id, pv::WP, next as i16);
+        let next = (c::pi16(w, id, l.wp) as i32 + 1) % n;
+        c::set_pi16(w, id, l.wp, next as i16);
         wp = next;
-        let on_line = c::pi32(w, id, pv::PATH) == line;
+        let on_line = c::pi32(w, id, l.path) == line;
         if !on_line {
             if next == n - 1 {
-                c::set_pi32(w, id, pv::PATH, line);
+                c::set_pi32(w, id, l.path, line);
                 let lp = path(w, line);
                 let pts: Vec<crate::path::Point> = lp.iter().map(|q| q.map(f32::to_bits)).collect();
-                let k = crate::path::nearest_at_distance(&pts, 0.0, track(w, id));
+                let k = crate::path::nearest_at_distance(&pts, 0.0, track(w, id, l));
                 let k = step(lp.len() as i32, k, 5);
-                c::set_pi16(w, id, pv::WP, k as i16);
+                c::set_pi16(w, id, l.wp, k as i16);
                 wp = k;
             }
             continue;
         }
-        if pt(&p, next)[3] <= 0.0 { continue; }
-        if 0 < w.rng.randi(100) {
+        if pt(&p, next)[3] <= l.branch_min { continue; }
+        if l.branch_chance < w.rng.randi(100) {
             let b = pt(&p, next)[3] as i32;
-            let to = c::pi32(w, id, pv::BRANCHES + 4 * (b - 1).max(0) as usize);
-            c::set_pi16(w, id, pv::WP, 0);
-            c::set_pi32(w, id, pv::PATH, to);
+            let to = c::pi32(w, id, l.branches + 4 * (b - l.branch_first).max(0) as usize);
+            c::set_pi16(w, id, l.wp, 0);
+            c::set_pi32(w, id, l.path, to);
             wp = 0;
         }
     }
 }
 
-/// `0x307010`: the boost hoops and pads of Ratchet's board's groups.
-fn pickups(w: &mut World, id: MobyId) {
+/// `0x307010` (level16 `0x2cfc00`): the boost hoops and pads of Ratchet's board's groups.
+pub(super) fn pickups(w: &mut World, id: MobyId, l: &Layout) {
     if w.hero.board.race_ticks < w.ticks(0xb4) { return; }
-    if c::dec_timer_pvar_i32(w, id, pv::COOLDOWN) == 0 { return; }
+    if c::dec_timer_pvar_i32(w, id, l.cooldown) == 0 { return; }
     let Some(hb) = w.hero.board.moby.filter(|&b| b < w.table.mobys.len()) else { return };
     let (hoops, pads) = (c::pi32(w, hb, 0x44), c::pi32(w, hb, 0x48));
-    let tp = track(w, id);
+    let tp = track(w, id, l);
     let members = |w: &World, g: i32| -> Vec<MobyId> {
         usize::try_from(g).ok().and_then(|g| w.svc.groups.lists.get(g)).and_then(|l| l.clone()).unwrap_or_default().into_iter().map(|m| m as MobyId).collect()
     };
@@ -353,42 +402,43 @@ fn pickups(w: &mut World, id: MobyId) {
         std::array::from_fn(|k| d[0] * x.rows[k][0] + d[1] * x.rows[k][1] + d[2] * x.rows[k][2])
     };
     let hit = |w: &mut World| {
-        let n = c::pi16(w, id, pv::BOOST).wrapping_add(w.ticks(0x78) as i16);
-        c::set_pi16(w, id, pv::BOOST, n);
+        let n = c::pi16(w, id, l.boost).wrapping_add(w.ticks(0x78) as i16);
+        c::set_pi16(w, id, l.boost, n);
         let t = w.ticks(0x3c);
-        c::set_pi32(w, id, pv::COOLDOWN, t);
+        c::set_pi32(w, id, l.cooldown, t);
     };
     if hoops != -1 {
         let at = [tp[0], tp[1], tp[2] + 0.8, tp[3]];
         for m in members(w, hoops) {
             if w.m(m).o_class != crate::hero::hoverboard::HOOP_CLASS || !(dist3(w.m(m).position, at) <= 8.0) { continue; }
-            let l = local(w, m, at);
-            if l[0].abs() < 0.5 && l[1].abs() < 2.5 && l[2].abs() < 2.5 { hit(w); }
+            let q = local(w, m, at);
+            if q[0].abs() < 0.5 && q[1].abs() < 2.5 && q[2].abs() < 2.5 { hit(w); }
         }
     }
     if pads != -1 {
         for m in members(w, pads) {
             if w.m(m).o_class != crate::hero::hoverboard::PAD_CLASS || !(dist3(w.m(m).position, tp) <= 8.0) { continue; }
-            let l = local(w, m, tp);
-            if l[0].abs() < 2.8 && l[1].abs() < 1.4 && l[2].abs() < 0.5 { hit(w); }
+            let q = local(w, m, tp);
+            if q[0].abs() < 2.8 && q[1].abs() < 1.4 && q[2].abs() < 0.5 { hit(w); }
         }
     }
 }
 
-/// `0x307358`: a jump starts at a branch's node with w = 1 (falling or level); its landing is the next w = 2 node.
-fn jumps(w: &mut World, id: MobyId) {
-    if c::pi32(w, id, pv::PATH) == c::pi32(w, id, pv::LINE) || 0.0 < c::pf(w, id, pv::VZ) { return; }
-    let p = cur_path(w, id);
+/// `0x307358` (level16 `0x2cff48`): a jump starts at a node with w = 1 (falling or level; Rilgar's only off the racing
+/// line); its landing is the next w = 2 node.
+pub(super) fn jumps(w: &mut World, id: MobyId, l: &Layout) {
+    if (l.jump_off_line && c::pi32(w, id, l.path) == c::pi32(w, id, l.line)) || 0.0 < c::pf(w, id, l.vz) { return; }
+    let p = cur_path(w, id, l);
     let n = p.len() as i32;
-    let mut k = c::pi16(w, id, pv::WP) as i32;
+    let mut k = c::pi16(w, id, l.wp) as i32;
     if pt(&p, k)[3] != 1.0 { return; }
     for _ in 0..n {
         if pt(&p, k)[3] == 2.0 { break; }
         k = step(n, k, 1);
     }
-    c::set_pi32(w, id, pv::LAND_WP, k);
-    for (i, &v) in pt(&p, k).iter().enumerate() { c::set_pf(w, id, pv::LAND + 4 * i, v); }
-    c::set_pi32(w, id, pv::JUMP, 1);
+    if l.land_wp_s16 { c::set_pi16(w, id, l.land_wp, k as i16); } else { c::set_pi32(w, id, l.land_wp, k); }
+    for (i, &v) in pt(&p, k).iter().enumerate() { c::set_pf(w, id, l.land + 4 * i, v); }
+    c::set_pi32(w, id, l.jump, 1);
 }
 
 /// `0x307480(m, seq, frame, ticks)`: the racer's blend and its board's (5 → 6, the frame scaled by the rate ratio).
@@ -404,7 +454,7 @@ fn blend(w: &mut World, id: MobyId, seq: u8, frame: i32, ticks: i32) {
 }
 
 /// `Quad(a, b, c, &r0, &r1)`'s count and first root `r0 = (−b + √D) / 2a` (−b / 2a for D = 0).
-fn quad_first(a: f32, b: f32, cc: f32) -> (i32, f32) {
+pub(super) fn quad_first(a: f32, b: f32, cc: f32) -> (i32, f32) {
     let d = b * b - (a * 4.0) * cc;
     if d == 0.0 { return (1, -b / (a + a)); }
     let s = d.abs().sqrt();

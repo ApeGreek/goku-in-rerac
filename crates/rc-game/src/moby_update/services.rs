@@ -1195,6 +1195,8 @@ pub enum HeroCall {
     /// A class's store `0x141401 = 1` without the death sequence (the reload of the level, `Hero::fell_out`; no death
     /// counted): Kerwan's train 822 when Ratchet falls off it (its `FadeToBlack(ticks(16))` goes with it).
     Reload,
+    /// The race score 0x13fbf8 += n (Kalebo's racers 556 when shot: `hero::hoverboard`'s score).
+    RaceScore(i32),
 }
 
 impl HeroFields {
@@ -1327,6 +1329,7 @@ impl HeroFields {
                 HeroCall::LeaveBody { game_mode } => crate::hero::bodies::leave_body(h, c, game_mode),
                 HeroCall::BodyIdle => crate::hero::bodies::body_idle(h, c),
                 HeroCall::Reload => h.fell_out = 1,
+                HeroCall::RaceScore(n) => h.board.score += n,
             }
         }
         // After the calls: the gold bolt stores 0x1413ff after its HeroTeleport's SetState (which clears it).

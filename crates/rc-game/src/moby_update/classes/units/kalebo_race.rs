@@ -1,4 +1,4 @@
-//! **Kalebo III's grind-race host, class 1455** (level16 `0x2e6808`, census U538, one instance): the twin of Rilgar's
+//! **Kalebo III's hoverboard-race host, class 1455** (level16 `0x2e6808`, census U538, one instance): the twin of Rilgar's
 //! race girl 918 (`rilgar_story`; her talk update and teleport are the same code, level05 `0x2903a8` / `0x244090` =
 //! level16 `0x261888` / `0x213dc0`). Her talk's node 3 starts the race: Ratchet is teleported to the start, the finish
 //! becomes his entry pose (0x141050 / 0x141060), the race's moby groups are switched on and the others off

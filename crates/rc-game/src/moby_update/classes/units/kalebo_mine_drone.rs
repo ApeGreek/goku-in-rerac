@@ -1,18 +1,18 @@
 //! Kalebo's mine drones, class 1401 (level 16, 14 placed; census U521): level16 0x2e37a0 with its private helpers
 //! 0x2e3e20 (the path setup), 0x2e3fa0 (the path follow), 0x2e4110 (the carried mine), 0x2e4190 (the exhaust), and the
-//! two calls into the race mines' family it makes: `0x2de298` (create a mine 933 for it to carry) and `0x2de3a8`
+//! two calls into the mines' family it makes: `0x2de298` (create a mine 933 for it to carry) and `0x2de3a8`
 //! (release it). Read from the level16 decomp and disassembly. Native `f32`; the `rand` draws in the game's order.
 //!
 //! A drone waits hidden at the start of its path until Ratchet enters its cuboid, then appears and (mode 0) flies
-//! the path carrying a new race mine, springs onto the path's last point, drops the mine (the mine's state 1) and
+//! the path carrying a new mine, springs onto the path's last point, drops the mine (the mine's state 1) and
 //! flies back along its second path to wait again; mode 1 only plays its appear animation and then turns to face
 //! Ratchet; mode 2 faces Ratchet from the start. It blows its exhaust (type-23 glows) while it flies, flinches when
 //! Ratchet touches it (`0x13f58c`), and a hit on it or on its mine knocks it out of the air (`SetDeathBits`: its
 //! bolts) into a death explosion where it lands.
 //!
-//! **System or not**: the mine creation is the race mines' own family code (level 16 only), ported here with its one
-//! caller ([`make_mine`], [`release_mine`]); the mine's update `0x2ddde0` is class 933's (not ported: G-CLS-001, its
-//! unit U517). Shared calls used: `spline::advance` (0x2726c8), `Spring` 0x270780, `SpringTurn2` 0x26d058, the
+//! **System or not**: the mine creation is the mines' own family code (level 16 only), ported here with its one
+//! caller ([`make_mine`], [`release_mine`]); the mine's update `0x2ddde0` is class 933's ([`super::kalebo_mine`]).
+//! Shared calls used: `spline::advance` (0x2726c8), `Spring` 0x270780, `SpringTurn2` 0x26d058, the
 //! knockback start / flight (`creature::knock`), `SetDeathBits`, the death explosion `0x273f50`, the hit flash,
 //! `PartType23Spawn`, `PointInCuboid`, the hero's contact moby (`Hero::cap_moby`).
 //!
@@ -48,7 +48,7 @@
 //! | 0x2e4190 | p = pos + row 0·(−0.5) + row 2·0.6; twice: k = `randi(16)`, `randi(2)` = 0 → +k else −k; `PartType23Spawn(0.2, 1, 0.9, 99840, p, ±k, zero, 0x7f204080)` (0x268440 = L01 0x282060); a record: timer +0x0a = `ticks(12)`, phase +0x24 = 2, +0x2a = 0x7f, +0x2b = the timer | [`exhaust`] (`particles::type23`) |
 //! | | p = pos + row 0·(−0.4) + row 2·0.7; t = `ticks(2)`; three: `PartType23Spawn(0.05, 1, 1, size, p, spin, zero, 0x7fffffff)` with size 80000, 60000, 40000 and spin 16, −16, 16; a record: timer = t, rotation +0x08 = `randi(255)`, phase 2, +0x2a = 0x7f, +0x2b = t; t doubles (s16) each time | [`exhaust`] |
 //! | 0x2de298 | `CreateMoby(0x3a5)` (933); mine +0x00 = the drone, +0x08 = +0x0c = 0, +0x04 = −1.0, +0x10 = `randf(π/300, π/150)`, +0x14 = `randf(π/450, π/225)`, +0x18 = `randf(π/900, π/450)`; position = the drone's (four words), state 0, yaw = the drone's, +0x30 = 0xff, +0x32 = 0xff, +0x31 = 1; `MobyBuildMatrix` | [`make_mine`] |
-//! | 0x2de3a8 | the mine's state = 1 | [`release_mine`] (the mine's own update, 933, is not ported: G-CLS-001) |
+//! | 0x2de3a8 | the mine's state = 1 | [`release_mine`] (the mine's own update: [`super::kalebo_mine`]) |
 
 #![allow(clippy::needless_range_loop)] // the game's per-lane writes, spelled out.
 
@@ -63,7 +63,7 @@ use crate::spline::{self, Cursor};
 pub const REFERENCE_LEVEL: u32 = 16;
 pub const UPDATE_FN: u32 = 0x2e_37a0;
 pub const CLASSES: [i16; 1] = [1401];
-/// The race mine the drone carries (0x3a5).
+/// The mine the drone carries (0x3a5).
 pub const MINE: i16 = 933;
 
 /// Pvar offsets (module doc).
@@ -373,7 +373,7 @@ pub fn exhaust(w: &mut World, id: MobyId) {
     }
 }
 
-/// Level16 0x2de298(drone, &pos): a race mine 933 for the drone to carry (module table). None when the table is
+/// Level16 0x2de298(drone, &pos): a mine 933 for the drone to carry (module table). None when the table is
 /// full.
 pub fn make_mine(w: &mut World, drone: MobyId, at: [f32; 4]) -> Option<MobyId> {
     let m = w.create_moby(MINE)?;

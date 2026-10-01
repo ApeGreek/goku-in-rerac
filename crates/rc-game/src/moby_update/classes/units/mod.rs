@@ -97,6 +97,7 @@
 //! | U203 | 1139 hoverboard-course sparkles (05, 16) | level05 0x31abe0 | [`board_sparkle`] |
 //! | U177 | 717 Rilgar's hoverboard racers (05; their boards are created 439s) | level05 0x307910 | [`rilgar_racer`] |
 //! | U171 | 133 the hoverboard course's roaming boost pickups (05) | level05 0x2dac80 | [`board_boost`] |
+//! | U503 | 556 Kalebo III's hover racers (16; Rilgar's racer code through `rilgar_racer::Layout`, shot down and back) | level16 0x2d04a0 | [`kalebo_racer`] |
 //! | U174 | 439 the Hoverboard (05, 16; mounts Ratchet, its thrusters, and the hero code's stores: `crate::hero::hoverboard`) | level05 0x2f87a8 | [`hoverboard`] |
 //! | U440 | 30 Oltanis pop-up turrets (14), and their shot 681 | level14 0x2b3bf0, 0x2ece00 | [`popup_turret`] |
 //! | U212 | 1021 Blarg petal doors (06) | level06 0x2f4f00 | [`petal_door`] |
@@ -144,6 +145,7 @@
 //! | U225 | 1066 Blarg's creature wakers (06): the cuboid, then one dormant member of the group thrown out every 20 ticks | level06 0x2fda30 (the wake 0x2e9d10) | [`blarg_waker`] |
 //! | U140 | 899 Kerwan's path-mover lines (03) and the movers 898 they create: platforms 2.9 apart gliding along the path, carrying riders | level03 0x2db280, 0x2db198, 0x2db020 | [`kerwan_path_spawner`] |
 //! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
+//! | U509 | 933 Kalebo's floating mines (16): bob, spin, pulse; blown up by a hit or a touch, the placed ones back out of view | level16 0x2ddde0 | [`kalebo_mine`] |
 //! | U521 | 1401 Kalebo's mine drones (16): wait in their cuboid, fly a path carrying a new race mine 933, drop it, fly back | level16 0x2e37a0 (0x2de298 the mine) | [`kalebo_mine_drone`] |
 //! | U363 | 1075 Pokitaru's boats: the path, the propellers and wake, the boarders' moving area, the lift (11) | level11 0x309ac0 | [`pokitaru_boat`] |
 //! | U130 | 574 Kerwan's gun troopers (03), and the rocket 833 they fire | level03 0x2c6fd0, 0x2d43c8 | [`kerwan_trooper`] |
@@ -200,7 +202,7 @@
 //! | — | 1017 the fighters' laser shot (11, 13, 17; created by code: the spawner level11 0x308f48) | level11 0x309098 | [`fighter_shot`] |
 //! | U397 | 326 Hoven's gun drones (ordinary and the turret game's attackers) and their shot 409 (12) | level12 0x2e9f68, 0x2ece00 | [`hoven_drone`] |
 //! | — | 1371 the drones' rider (12, 15; created by code: 0x308670, knocked off by 0x308708) | level12 0x308918 | [`drone_rider`] |
-//! | U538 | 1455 Kalebo III's grind-race host (the Hologuise, skill point 0x13d422; the race itself: G-LVL-007) (16) | level16 0x2e6808 | [`kalebo_race`] |
+//! | U538 | 1455 Kalebo III's hoverboard-race host (the Hologuise, skill point 0x13d422; the race itself: G-LVL-007) (16) | level16 0x2e6808 | [`kalebo_race`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -286,6 +288,7 @@ pub mod spinner_float;
 pub mod board_sparkle;
 pub mod hoverboard;
 pub mod board_boost;
+pub mod kalebo_racer;
 pub mod rilgar_racer;
 pub mod popup_turret;
 pub mod petal_door;
@@ -344,6 +347,7 @@ pub mod blarg_waker;
 pub mod kerwan_path_spawner;
 pub mod pod_launcher;
 pub mod kalebo_mine_drone;
+pub mod kalebo_mine;
 pub mod pokitaru_teleporter;
 pub mod drip;
 pub mod water_current;
@@ -514,6 +518,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U203 1139", level: board_sparkle::REFERENCE_LEVEL, func: board_sparkle::UPDATE_FN, classes: &board_sparkle::CLASSES, update: board_sparkle::update, joints: &[] },
     UnitPort { unit: "U177 717", level: rilgar_racer::REFERENCE_LEVEL, func: rilgar_racer::UPDATE_FN, classes: &rilgar_racer::CLASSES, update: rilgar_racer::update, joints: &rilgar_racer::JOINTS },
     UnitPort { unit: "U171 133", level: board_boost::REFERENCE_LEVEL, func: board_boost::UPDATE_FN, classes: &board_boost::CLASSES, update: board_boost::update, joints: &[] },
+    UnitPort { unit: "U503 556", level: kalebo_racer::REFERENCE_LEVEL, func: kalebo_racer::UPDATE_FN, classes: &kalebo_racer::CLASSES, update: kalebo_racer::update, joints: &kalebo_racer::CLASSES },
     UnitPort { unit: "U174 439", level: hoverboard::REFERENCE_LEVEL, func: hoverboard::UPDATE_FN, classes: &hoverboard::CLASSES, update: hoverboard::update, joints: &hoverboard::JOINTS },
     UnitPort { unit: "U440 30", level: popup_turret::REFERENCE_LEVEL, func: popup_turret::UPDATE_FN, classes: &popup_turret::CLASSES, update: popup_turret::update, joints: &[] },
     UnitPort { unit: "U440 681", level: popup_turret::REFERENCE_LEVEL, func: popup_turret::SHOT_FN, classes: &popup_turret::SHOT_CLASSES, update: popup_turret::shot_update, joints: &[] },
@@ -579,6 +584,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
+    UnitPort { unit: "U509 933", level: kalebo_mine::REFERENCE_LEVEL, func: kalebo_mine::UPDATE_FN, classes: &kalebo_mine::CLASSES, update: kalebo_mine::update, joints: &[] },
     UnitPort { unit: "U521 1401", level: kalebo_mine_drone::REFERENCE_LEVEL, func: kalebo_mine_drone::UPDATE_FN, classes: &kalebo_mine_drone::CLASSES, update: kalebo_mine_drone::update, joints: &[] },
     // class port `classes::teleporter`).
     UnitPort { unit: "U85 1135 beam", level: 1, func: crate::moby_update::classes::teleporter::BEAM_FN, classes: &[], update: empty::update, joints: &[] },

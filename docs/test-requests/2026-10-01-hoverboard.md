@@ -74,3 +74,15 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
   (three or four trick kinds: its name and score, less when it repeats one of the last three; else "trick + N Flips")
   and, a moment later, adds the score to the race score and five times it to the fuel; crashing shows the texts in red
   and gives nothing. Riding the wrong way for two seconds flashes the wrong-way banner.
+
+### B11. Kalebo III's board race (level 16)
+- **Claim:** the board, the race HUD and the board camera work on Kalebo III as on Rilgar (the level's board code is
+  the same). Five hover racers set off from their lanes, join the racing line, take its branches and ramp jumps (a
+  trick in a long jump) and pitch with the slopes, trailing blue exhaust from two jets (brighter, with sparks, while
+  boosted). Shooting one blows it up into pieces and adds 250 to the race score; it comes back where it fell once the
+  camera no longer looks at it.
+
+### B12. Kalebo III's floating mines (933)
+- **Claim:** the mines along the grind rails float 0.7 above the rail, bobbing into place, spinning slowly and
+  pulsing their glow. A hit blows one up; touching one blows it up and hurts Ratchet. A blown-up mine comes back
+  once it is out of view. The mines the drones carry and drop disappear whenever Ratchet is not grinding.
