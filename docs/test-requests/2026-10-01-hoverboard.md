@@ -67,3 +67,10 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
   swings slightly to the side the board faces; in the air more than 2 above the ground it eases to the record's air
   distance and height; passing under something it rises over it. Thrown off the board, the normal camera takes over
   and comes back when he is riding again.
+
+### B10. The time trial's boost meter (after the race is won once)
+- **Claim:** on the board a boost bar sits at the top left and fills as tricks earn fuel; □ boosts while it has fuel.
+  A jump with at least one flip shows the spin in degrees and "xN Poses" at the top right; landing it shows the combo
+  (three or four trick kinds: its name and score, less when it repeats one of the last three; else "trick + N Flips")
+  and, a moment later, adds the score to the race score and five times it to the fuel; crashing shows the texts in red
+  and gives nothing. Riding the wrong way for two seconds flashes the wrong-way banner.

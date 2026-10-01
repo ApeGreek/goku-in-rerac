@@ -255,6 +255,142 @@ pub struct Board {
     pub cmds: Vec<BoardCmd>,
     /// The board's carry under Ratchet this tick (`0x24bdc0`'s tail), applied by the tick after the hero update.
     pub carry: Option<([f32; 4], [[f32; 4]; 3])>,
+    /// The time trials' boost meter (the slot-0x10 element's update and its combo, [`Meter`]).
+    pub meter: Meter,
+}
+
+/// The time trials' boost meter (level05 slot 0 \| 0x10: init `0x262ae8`, update `0x262b58`, draw `0x262f50`; queued by
+/// 0x6b's entry once Rilgar's race is won, the HUD handle 0x13fbd0). Its update is gameplay (the jump's score and fuel,
+/// the trick counters reset), so the port runs it here every tick after the hero update ([`meter_tick`]) and the HUD
+/// element (`crate::hud::Element::RaceMeter`) draws from it. Its draw's part that writes the game (the combo's score
+/// 0x15fb00 and its id 0x15faf0) runs here too, right after the update.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Meter {
+    /// The element is in its slot and updating (queued at 0x6b's start, released at the race's end) [L: the game's
+    /// keeps updating until another element takes slot 0].
+    pub on: bool,
+    /// Slot +0x72 phase (0 idle, 1 in the air, 2 crashed, 3 landed), +0x70 its counter (u8), +0x71 the colour fade.
+    pub phase: u8,
+    pub t: u8,
+    pub fade: u8,
+    /// 0x15fad4 the flips shown, 0x15fad8 the trick kinds, 0x15fae0 the tricks used, 0x15faf0..0x15fafc the last four
+    /// combos (−1 none), 0x15fb00 the combo's score.
+    pub flips: i32,
+    pub kinds: i32,
+    pub used: [i32; 4],
+    pub recent: [i32; 4],
+    pub combo: i32,
+}
+
+/// 0x17e918: the combos' scores (by combo + 5 · flip tier).
+pub const COMBO_SCORES: [i32; 15] = [200, 215, 225, 235, 300, 325, 350, 375, 400, 500, 525, 550, 575, 600, 650];
+
+/// `0x262ae8`'s part outside the slot: the last four combos cleared.
+pub fn meter_init(h: &mut Hero) {
+    h.board.meter = Meter { on: true, recent: [-1; 4], ..Meter::default() };
+}
+
+/// `0x262b58` (and `0x262f50`'s combo) for one tick (module doc of [`Meter`]).
+pub fn meter_tick(h: &mut Hero) {
+    if !h.board.meter.on { return; }
+    meter_update(h);
+    meter_combo(h);
+}
+
+/// `0x262b58`.
+fn meter_update(h: &mut Hero) {
+    let fade_len = 0x14u8;
+    let (state, grounded, air, max_flips) = (h.state, h.grounded_ticks, h.air_ticks, h.board.max_flips);
+    let b = &mut h.board;
+    let m = &mut b.meter;
+    match m.phase {
+        1 => {
+            if m.t < 10 { m.t += 1; }
+            if m.fade != 0 { m.fade -= 1; }
+            m.kinds = b.kinds;
+            m.used = b.used;
+            if m.flips < b.max_flips {
+                m.flips = b.max_flips;
+                m.fade = fade_len;
+            }
+            if grounded == 0 && !(id::CRASH..=id::WALL).contains(&state) { return; }
+            m.combo = 0;
+            b.max_flips = 0;
+            b.kinds = 0;
+            b.used = [0; 4];
+            b.flips = [0; 3];
+            if state == id::RIDE {
+                if 2 < m.kinds {
+                    m.recent = [-1, m.recent[0], m.recent[1], m.recent[2]];
+                }
+                m.phase = 3;
+                m.fade = fade_len;
+                m.t = ticks(0x78) as u8;
+            } else {
+                m.phase = 2;
+                m.fade = fade_len;
+                m.t = ticks(0x3c) as u8;
+            }
+        }
+        0 => {
+            if (air as i32) < 6 || (max_flips as f32) < 1.0 { return; }
+            m.flips = max_flips;
+            m.kinds = 0;
+            m.used = [0; 4];
+            m.phase = 1;
+            m.t = 0;
+            m.fade = fade_len;
+        }
+        2 | 3 => {
+            if m.t == 0 {
+                m.combo = 0;
+                m.flips = 0;
+                m.kinds = 0;
+                m.used = [0; 4];
+                m.phase = 0;
+            } else if m.phase == 3 && m.t as i32 == ticks(0x6e) {
+                b.score += m.combo;
+                b.fuel += m.combo * 5;
+                let cap = (ticks(0x11) as f32 * 60.0) as i32;
+                if cap < b.fuel { b.fuel = cap; }
+            }
+            m.t = m.t.wrapping_sub(1);
+        }
+        _ => {}
+    }
+}
+
+/// `0x262f50`'s combo (phase 3, on the board): the combo of three or four trick kinds (by which ones) and the flip
+/// tier, its score 0x17e918 divided by one plus the times it is among the last three; else the flips · 10 (one kind) or
+/// · 20 (two).
+fn meter_combo(h: &mut Hero) {
+    let m = &mut h.board.meter;
+    if m.phase != 3 || h.group != GROUP { return; }
+    let mut combo = -1;
+    if m.kinds == 3 {
+        combo = 0;
+        if m.used[3] != 0 { combo = if m.used[2] == 0 { 1 } else if m.used[1] != 0 { 3 } else { 2 }; }
+    } else if m.kinds == 4 {
+        combo = 4;
+    }
+    if 0 <= combo {
+        let tier = if 4 <= m.flips { 2 } else { (2 <= m.flips) as i32 };
+        let k = combo + tier * 5;
+        m.recent[0] = k;
+        let n = 1 + m.recent[1..].iter().filter(|&&r| r == k).count() as i32;
+        m.combo = COMBO_SCORES[k as usize] / n;
+    } else if 0 < m.kinds {
+        m.combo = m.flips * if m.kinds == 1 { 10 } else { 20 };
+    }
+}
+
+/// The meter as the HUD draws it (`0x262f50`): the phase and its counters, the texts' values, the combo, the wrong-way
+/// counter 0x13fbfe and the fuel 0x13fbb4.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeterView {
+    pub meter: Meter,
+    pub wrong_way: u8,
+    pub fuel: i32,
 }
 
 impl Default for Board {
@@ -268,6 +404,7 @@ impl Default for Board {
             jump: 0, jump_lock: 0, water: 0.0, wall_yaw: 0.0, score: 0, ramp: 0, wrong_way: 0, fading: false, race_line: false,
             last_ground_z: 0.0, airborne: 0, water_timer: 0, place: 0, boost_timer: 0, nearest: 0, weapon_hold: 0, boost_hold: 0,
             weapons: 0, weapon_lock: 0, f141402: 0, trial_done: false, fade: Fade::default(), freeze: false, cmds: Vec::new(), carry: None,
+            meter: Meter::default(),
         }
     }
 }
@@ -276,7 +413,7 @@ impl Board {
     /// `FastMemSet(0x13fa10, 0, 0x210)`: the block cleared but for the board moby (SetState 0x6b restores it) and the
     /// globals outside the block.
     fn clear_block(&mut self) {
-        let keep = Board { moby: self.moby, f141402: self.f141402, trial_done: self.trial_done, fade: self.fade, freeze: self.freeze, cmds: std::mem::take(&mut self.cmds), carry: self.carry, hud: 0, ..Board::default() };
+        let keep = Board { moby: self.moby, f141402: self.f141402, trial_done: self.trial_done, fade: self.fade, freeze: self.freeze, cmds: std::mem::take(&mut self.cmds), carry: self.carry, meter: self.meter, hud: 0, ..Board::default() };
         *self = keep;
     }
 
@@ -361,6 +498,8 @@ pub enum BoardCmd {
     /// `queue_animation_update(5, …)` / `(7, …)`: the race's lap / place and time elements (`crate::hud::Element::RaceLap`
     /// / `RaceTime`).
     RaceHud,
+    /// The time trial's meter queued (`queue_animation_update(0x10, …)`) / its flags set to 0 (`FUN_0024b090(h, 0)`).
+    Meter(bool),
     /// The HUD calls of the race not ported (slot 0x10's boost meter, `update_resource_counter`: G-LVL-007), logged.
     Hud(&'static str),
 }
@@ -471,8 +610,12 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, _old_sub: i3
                 h.board.boost_spring = f32::from_bits(0x3f9c_61aa);
                 h.board.hud = -1;
                 if world(c.env).is_some_and(|w| w.flag0) {
-                    // 0x264298: the slot of 0x15f980 killed; queue_animation_update(0x10, …, 0x13fbb4, ticks(17)·60).
-                    h.board.cmds.push(BoardCmd::Hud("0x264298; queue_animation_update(0x10, 0x262ae8 / 0x262b58 / 0x262f50, 0x13fbb4, ticks(17)·60)"));
+                    // 0x264298: the slot of 0x15f980 released (another of the level's elements; logged); the meter:
+                    // queue_animation_update(0x10, …, 0x13fbb4, ticks(17)·60) (the handle 0x13fbd0: the request itself).
+                    h.board.cmds.push(BoardCmd::Hud("0x264298"));
+                    h.board.cmds.push(BoardCmd::Meter(true));
+                    meter_init(h);
+                    h.board.hud = 1;
                 }
                 h.board.yaw = f(h.rot[2]);
                 h.board.cmds.push(BoardCmd::RaceHud);
@@ -1295,7 +1438,9 @@ fn race(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut Rng) {
     h.board.cmds.push(BoardCmd::Records { k, ticks: h.board.race_ticks, score: h.board.score });
     h.board.cmds.push(BoardCmd::Byte30 { id: host, v: 0xff });
     if h.board.hud != -1 {
-        h.board.cmds.push(BoardCmd::Hud("FUN_0024b090(0x13fbd0, 0)"));
+        // FUN_0024b090(0x13fbd0, 0): the meter no longer persistent.
+        h.board.cmds.push(BoardCmd::Meter(false));
+        h.board.meter.on = false;
         h.board.hud = -1;
     }
     h.board.cmds.push(BoardCmd::Hud("update_resource_counter"));

@@ -351,6 +351,8 @@ impl Game {
                 m.rows[..3].copy_from_slice(&rows);
             }
         }
+        // The time trial's meter (the HUD element's update `0x262b58`, which is gameplay: hero::hoverboard::meter_tick).
+        crate::hero::hoverboard::meter_tick(&mut self.hero);
         let board_cmds = std::mem::take(&mut self.hero.board.cmds);
         if !board_cmds.is_empty() {
             if let Some(w) = hooks.world.as_deref_mut() { w.queue_board(board_cmds); }

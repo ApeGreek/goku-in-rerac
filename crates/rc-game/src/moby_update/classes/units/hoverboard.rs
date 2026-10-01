@@ -154,6 +154,10 @@ pub fn apply(w: &mut World) {
                 w.svc.hud.queue(Request::new(5, 0xffff, Element::RaceLap, 0));
                 w.svc.hud.queue(Request::new(7, 0xffff, Element::RaceTime, 0));
             }
+            BoardCmd::Meter(on) => {
+                let r = crate::hud::Request::race_meter(w.ticks(0x11));
+                if on { w.svc.hud.queue(r) } else { w.svc.hud.set_flags(r, 0) }
+            }
             BoardCmd::Hud(what) => w.svc.unported(what),
         }
     }

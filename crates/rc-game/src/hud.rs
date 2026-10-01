@@ -64,7 +64,7 @@
 //! | 0x2bc4f0 `CollectBolt` | the bolt counter queued | `classes::bolt` → `Services::hud` (and the count's change, `frame_calls`) |
 //! | 0x24fb50 second banner line 0x1795e8 (countdown > 1000) | | NOT ported (G-UI-011) |
 //! | level05 0x24cee8 / level16 0x21e398 race HUD, slots 5 / 7 (`0x2661a0` init, `0x2661e8` update, draws `0x266320` / `0x266710`) | lap and place, time (and the score once the race is won), on the board only | [`Element::RaceLap`] / [`Element::RaceTime`] (queued by the board's 0x6b entry: `crate::hero::hoverboard`); level 16's weapon count in slot 5: G-HERO-008 |
-//! | level05 race HUD slot 0 \| 0x10 (`0x262ae8` / `0x262b58` / `0x262f50`, data 0x13fbb4) | the boost meter, the trick-combo texts, the wrong-way warning (time trials) | NOT ported (G-LVL-007) |
+//! | level05 race HUD slot 0 \| 0x10 (`0x262ae8` / `0x262b58` / `0x262f50`, data 0x13fbb4) | the boost meter, the trick-combo texts, the wrong-way warning (time trials) | [`Element::RaceMeter`] (its game part: `crate::hero::hoverboard::meter_tick`) |
 //! | level02 0x2e1fb8 counters (slots 5 / 7, icons 2000 / 2001, `0x23c990` / `0x23ccc8` / `0x23cda8`) | | NOT ported (G-UI-011, level 02's own element) |
 
 use rc_formats::font::{measure_text_width, Font, GlyphTable};
@@ -248,6 +248,9 @@ pub enum Element {
     RaceLap,
     /// The race's time (and the time trial's score), slot 7: init 0x2661a0, update 0x2661e8, draw level05 0x266710.
     RaceTime,
+    /// The time trial's boost meter, slot 0 | 0x10 (levels 5 / 16): init level05 0x262ae8, update 0x262b58 (its game part:
+    /// `crate::hero::hoverboard::meter_tick`), draw 0x262f50; data 0x13fbb4 (the fuel), max ticks(17)·60.
+    RaceMeter,
 }
 
 /// A request: the arguments `queue_animation_update` compares (the element stands for init / update / draw / data).
@@ -263,6 +266,10 @@ pub struct Request {
 }
 
 impl Request {
+    /// The time trial's meter: `queue_animation_update(0x10, 0xffff, 0x262ae8, 0x262b58, 0x262f50, 0x13fbb4, ticks(17)·60)`
+    /// with `t17` = ticks(17).
+    pub fn race_meter(t17: i32) -> Request { Request { slot: 0, flags: 0x10, icon: 0xffff, element: Element::RaceMeter, max: (t17 as f32 * 60.0) as i32 } }
+
     /// `slot | flags` as the game passes it.
     pub fn new(slot_flags: u32, icon: u16, element: Element, max: i32) -> Request {
         Request { slot: (slot_flags & 0xf) as u8, flags: slot_flags & 0xfff0, icon, element, max }
@@ -430,6 +437,8 @@ pub struct Inputs {
     pub race_score: i32,
     pub race_won: bool,
     pub pal: bool,
+    /// The time trial's meter (`crate::hero::hoverboard::MeterView`; its pulse reads [`Inputs::tick`]).
+    pub race_meter: crate::hero::hoverboard::MeterView,
 }
 
 impl Default for Inputs {
@@ -470,6 +479,7 @@ impl Default for Inputs {
             race_score: 0,
             race_won: false,
             pal: false,
+            race_meter: Default::default(),
         }
     }
 }
@@ -673,6 +683,12 @@ impl HudState {
             // 0x24ce30 (= 0x24b418), 0x24b418.
             Element::SuckCannon | Element::GiantEnergy | Element::Boss { .. } => self.init_generic(slot),
             Element::BoltAlert => self.init_alert(slot),
+            Element::RaceMeter => {
+                // 0x262ae8: offset 0, timer ticks(180) + 30, the value (0x24b318); the last combos: the game side's.
+                s.offset = (0, 0);
+                s.timer = scale_ticks(0xb4) + 0x1e;
+                self.init_value(slot);
+            }
             Element::RaceLap | Element::RaceTime => {
                 // 0x2661a0: timer ticks(180) + 30, size 0x80 × 0x80, offset 0.
                 s.timer = scale_ticks(0xb4) + 0x1e;
@@ -731,6 +747,7 @@ impl HudState {
             Element::SuckCannon => i.suck_held,
             Element::BoltAlert => i.bolt_alert as i32,
             Element::GiantEnergy => i.energy,
+            Element::RaceMeter => i.race_meter.fuel,
             Element::Boss { key } => self.words.get(&key).copied().unwrap_or(0),
         })
     }
@@ -919,6 +936,17 @@ impl HudState {
                 }
                 Element::SuckCannon => self.update_suck(i),
                 Element::BoltAlert => self.update_alert(i),
+                Element::RaceMeter => {
+                    // 0x262b58's slot part: the shown value approaches the fuel by 6 (`Approach`, truncated).
+                    let fuel = self.data(Element::RaceMeter).unwrap_or(0) as f32;
+                    let s = &mut self.slots[i];
+                    // 0x262f50 writes the size before placing: 256 × 64.
+                    s.size = (0x100, 0x40);
+                    let mut v = s.shown as f32;
+                    let d = fuel - v;
+                    if d.abs() <= 6.0 { v = fuel; } else if 0.0 < d { v += 6.0; } else { v -= 6.0; }
+                    s.shown = v as i32;
+                }
                 Element::RaceLap | Element::RaceTime => {
                     // 0x2661e8: on the board (group 0x16) timer ticks(30), +0x6c = 5; else +0x6c = −6.
                     let on = self.inputs.group == 0x16;
@@ -1094,6 +1122,7 @@ impl HudState {
                 Element::Boss { .. } => self.draw_boss(i, out),
                 Element::RaceLap => self.draw_race_lap(i, out),
                 Element::RaceTime => self.draw_race_time(i, out),
+                Element::RaceMeter => self.draw_race_meter(i, out),
             }
         }
         self.draw_banner(out);
@@ -1351,6 +1380,76 @@ impl HudState {
         out.push(Draw::Text { font: Font::Large, x: left, y: y + 1, rgba: colour & 0xff00_0000, text: text.clone() });
         self.stretch_frame(left - 0x20, y - 8, (x - (left - 0x20)) * 2, 0x20, a, out);
         out.push(Draw::Text { font: Font::Large, x: x - (w >> 1), y, rgba: colour, text });
+    }
+
+    /// Level05 0x262f50: on the board, the trick texts by the meter's phase (1 in the air / 2 crashed: the spin in degrees
+    /// and "xN Poses" centred at (350, 27) / (350, 47), faded in over 10 ticks, coloured by the fade (red when crashed);
+    /// 3 landed: the combo's score and name (msg 0x5092 + combo) or "trick + N Flips" (msgs 0x517e + trick) as banners at
+    /// (250, 101) / (250, 125)); the meter bar (icon 0x7558: frame 1 cut at `shown·221/max + 27`, frame 0 over it, 256 × 64
+    /// at the slot's place); the wrong-way banner 0x531a at (256, 180) pulsing once a second past ticks(120) the wrong way.
+    fn draw_race_meter(&self, i: usize, out: &mut Vec<Draw>) {
+        if self.inputs.group != 0x16 { return; }
+        let v = self.inputs.race_meter;
+        let m = v.meter;
+        let label = |id: i32| strings::lookup(&self.assets.messages, id).to_vec();
+        let width = |t: &[u8]| self.assets.text_width(Font::Large, t);
+        let centred = |x: i32, y: i32, rgba: u32, t: &[u8], out: &mut Vec<Draw>| out.push(Draw::Text { font: Font::Large, x: x - (width(t) >> 1), y, rgba, text: t.to_vec() });
+        if m.phase != 0 {
+            let f = (m.t as f32 / 10.0).min(1.0);
+            let n = scale_ticks(0x14);
+            let base = if m.phase == 1 || m.phase == 3 { tween_color(m.fade as f32 / n as f32, 0x00e0_8060, 0x00ff_b080) } else { 0x0000_00ff };
+            let alpha = ((f * 128.0) as i32 as u32) << 24;
+            let c = base.wrapping_add(alpha);
+            if m.phase == 1 || m.phase == 2 {
+                let t = format!("{}", m.flips * 0x168).into_bytes();
+                centred(0x15f, 0x1c, alpha, &t, out);
+                centred(0x15e, 0x1b, c, &t, out);
+                let t = format!("x{} Poses", m.kinds).into_bytes();
+                centred(0x15f, 0x30, alpha, &t, out);
+                centred(0x15e, 0x2f, c, &t, out);
+            } else {
+                let mut combo = -1;
+                if m.kinds == 3 {
+                    combo = 0;
+                    if m.used[3] != 0 { combo = if m.used[2] == 0 { 1 } else if m.used[1] != 0 { 3 } else { 2 }; }
+                } else if m.kinds == 4 {
+                    combo = 4;
+                }
+                if 0 <= combo {
+                    let tier = if 4 <= m.flips { 2 } else { (2 <= m.flips) as i32 };
+                    self.draw_banner_text(0xfa, 0x7d - 0x18, c, format!("{}", m.combo).into_bytes(), out);
+                    self.draw_banner_text(0xfa, 0x7d, c, label(combo + tier * 5 + 0x5092), out);
+                } else if 0 < m.kinds {
+                    let tricks: Vec<i32> = (0..4).filter(|&k| m.used[k as usize] != 0).take(m.kinds as usize).collect();
+                    let name = |k: usize| tricks.get(k).map_or(Vec::new(), |&t| label(t + 0x517e));
+                    self.draw_banner_text(0xfa, 0x7d - 0x18, c, format!("{}", m.combo).into_bytes(), out);
+                    let mut t = name(0);
+                    if m.kinds == 1 {
+                        t.extend_from_slice(format!(" + {} Flips", m.flips).as_bytes());
+                    } else {
+                        t.extend_from_slice(b" + ");
+                        t.extend_from_slice(&name(1));
+                        t.extend_from_slice(format!(" + {} Flips", m.flips).as_bytes());
+                    }
+                    self.draw_banner_text(0xfa, 0x7d, c, t, out);
+                }
+            }
+        }
+        let (x, y) = self.place(i);
+        let s = &self.slots[i];
+        let w = if s.max == 0 { 0 } else { (s.shown * 0xdd) / s.max + 0x1b };
+        out.push(Draw::SpriteSub { frame: self.assets.icon_frame(0x7558, 1), x, y, w, h: 0x40, alpha: 0x80 });
+        out.push(Self::sprite(self.assets.icon_frame(0x7558, 0), x, y, 0x100, 0x40, 0x80, Rot::None));
+        if scale_ticks(0x78) < v.wrong_way as i32 {
+            let n = scale_ticks(0x3c);
+            let f = (self.inputs.tick % n.max(1) as u64) as f32 / n as f32;
+            // The game's literals 6.28318 / 3.14159 (0x40c90fd0 / 0x40490fd0).
+            let k = (f * f32::from_bits(0x40c9_0fd0) - f32::from_bits(0x4049_0fd0)).sin() * 0.5 + 0.5;
+            let c = tween_color(k, 0x8020_2080, 0x8020_20c0);
+            let t = label(0x531a);
+            self.draw_banner_text(0x101, 0xb5, 0x8000_0000, t.clone(), out);
+            self.draw_banner_text(0x100, 0xb4, c, t, out);
+        }
     }
 
     /// Level05 0x266320: the race's lap and place on a bar across the bottom (`FontPrintLarge`, each with a black shadow
