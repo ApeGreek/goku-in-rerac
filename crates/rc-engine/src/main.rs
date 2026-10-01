@@ -15,7 +15,11 @@
 //! - `RC_PLAY=0`, `RC_PLAY_SCRIPT`, `RC_PLAY_TRACE=1` the game tick / scripted pad / per-tick trace, crate::gameplay
 //! - `RC_PLAY_FLY=1` start on the fly camera with the game ticking; `RC_DEBUG_HIT=moby@tick,...` debug hits
 //!   (flags 0x10000, damage 1) before those ticks' moby loop, crate::gameplay
+//! - `RC_FRONTEND=1` start in the front end (card check, logos, title, main menu), crate::saves; `RC_SAVE_DIR=<dir>` the
+//!   memory-card folder (`0`: no card), `RC_SAVE_TRACE=1` the card's states
 //! - `RC_SCENE=0` / `RC_SCENE=<k>`, `RC_SUBTITLES=0` in-engine scenes (Novalis arrival = scene 5), crate::scene_render
+//! - `RC_UNLOCK_PLANETS=<p>,…` planets unlocked from the start (the ship's planet page), crate::gameplay;
+//!   `RC_TRAVEL_TRACE=1` the ship / mode-6 / transition trace, crate::travel_render
 //! - `RC_HUD=0`, `RC_HUD_DEMO=1`, `RC_HUD_TEXT`, `RC_HUD_HELP=<id>`, `RC_LANG` the HUD and its demos, crate::hud_render
 //! - `RC_MSAA=0|2|4|8` world-camera multisampling at start (default 0 = off, like the GS), crate::render_settings
 //! - `RC_SETTINGS_FILE=<path>` the port-settings file (`0` or empty: none), crate::render_settings;
@@ -37,8 +41,11 @@ mod hud_images;
 mod input_map;
 mod interact_render;
 mod level_load;
+mod level_switch;
+mod media_render;
 mod menu_models;
 mod menu_render;
+mod mirror_render;
 mod moby_anim;
 mod moby_attach;
 mod moby_light;
@@ -57,6 +64,7 @@ mod walloper_render;
 mod visibomb_view;
 mod gs_post;
 mod reactive_render;
+mod saves;
 mod scene_render;
 mod sea_render;
 mod screen_canvas;
@@ -73,6 +81,9 @@ mod tfrag_render;
 mod tie_light;
 mod tie_lod;
 mod tie_render;
+mod travel_render;
+mod flight_render;
+mod title_world;
 mod vendor_render;
 mod water_render;
 mod afterimage_render;
@@ -104,11 +115,10 @@ fn main() -> anyhow::Result<()> {
     // `--version-json` exits here; a missing or wrong data folder exits with a clear error (crate::disc_source).
     let root = disc_source::startup();
     let index = level_load::level_index();
-    let mut level = level_load::load_level(&root, index)?;
-    // The loader's ship and the load-time update pass (crate::moby_spawn; RC_SPAWN_RULES=0 skips it).
-    let spawn = moby_spawn::apply_load_pass(&root, index, &mut level)?;
-    // Fog zones and the underwater test (crate::fog_state).
-    let fog_state = fog_state::FogState::new(fog_state::load(&root, index)?, &level.fog);
+    // The one level load (the boot's and every runtime level change's, crate::level_switch): the level data, the loader's
+    // ship and the load-time update pass (crate::moby_spawn; RC_SPAWN_RULES=0 skips it), the fog zones and the
+    // underwater test (crate::fog_state).
+    let level_switch::LevelBundle { mut level, spawn, fog: fog_state, .. } = level_switch::load_bundle(&root, index)?;
     let t = &level.timings;
     let bg = level.background;
     println!(
@@ -171,6 +181,7 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(scene_render::SceneRenderPlugin)
     // PSS movies (mode 1) played from the original files (crate::movie_render; RC_PLAY_MOVIE=<n>).
     .add_plugins(movie_render::MovieRenderPlugin)
+    .add_plugins(mirror_render::MirrorRenderPlugin)
     // Sound slots, 989snd, music and the software SPU2 mixed per game tick (crate::audio_out; RC_AUDIO=0 off).
     .add_plugins(audio_out::AudioOutPlugin::new(level.audio.take()))
     .insert_resource(fog_state)
@@ -178,7 +189,13 @@ fn main() -> anyhow::Result<()> {
     // srgb_u8: the bytes are display-encoded like every GS colour; the sRGB view target stores them back exactly.
     .insert_resource(ClearColor(Color::srgb_u8(bg[0], bg[1], bg[2])))
     .insert_resource(Level(level))
-    .add_systems(Startup, setup)
+    // The runtime level change and the level start's schedules (crate::level_switch), planet travel (crate::travel_render).
+    .add_plugins(level_switch::LevelSwitchPlugin)
+    .add_plugins(travel_render::TravelPlugin)
+    .add_plugins(flight_render::FlightRenderPlugin)
+    .add_plugins(title_world::TitleWorldPlugin)
+    .add_systems(Startup, setup_camera)
+    .add_systems(level_switch::LevelStartup, setup)
     .add_systems(Update, report_fps);
 
     if let Some(path) = std::env::var_os("RC_SCREENSHOT").filter(|_| determinism::screenshot_frame().is_none()) {
@@ -217,9 +234,15 @@ fn setup(
     let level = &level.0;
     let s = tfrag_render::spawn_tfrags(&mut commands, level, &mut meshes, &mut images, &mut materials, &mut buffers);
     println!(
-        "tfrags: {} tfrags, {} LOD-0 triangles, {} vertices, {} meshes ({} with the GS alpha-test split), {} images; mesh build {:.1} ms, asset upload {:.1} ms",
-        s.tfrags, s.triangles, s.vertices, s.meshes, s.blended_meshes, s.images, ms(s.mesh_build), ms(s.upload)
+        "tfrags: {} tfrags, {} LOD-0 triangles, {} vertices, {} meshes ({} with the GS alpha-test split), {} images; mesh build {:.1} ms, asset upload {:.1} ms; vertex AABB {:.1?} .. {:.1?}",
+        s.tfrags, s.triangles, s.vertices, s.meshes, s.blended_meshes, s.images, ms(s.mesh_build), ms(s.upload), s.min, s.max
     );
+}
+
+/// The main world camera, once per process (crate::level_switch keeps it across level changes); framed on the boot
+/// level's tfrags (the play camera takes over from the first tick).
+fn setup_camera(mut commands: Commands, level: Res<Level>) {
+    let level = &level.0;
 
     // Camera framing from the tfrag bounding spheres. They are stored in integer position units
     // (x1024 like origin + local), not world units: on Novalis the raw centroid is ~(166138, 189596, 59301)
@@ -228,10 +251,7 @@ fn setup(
     let n = spheres.len().max(1) as f32;
     let c = spheres.iter().fold(Vec3::ZERO, |a, s| a + Vec3::new(s[0], s[1], s[2])) / n;
     let extent = spheres.iter().map(|s| (Vec3::new(s[0], s[1], s[2]) - c).length() + s[3]).fold(0.0f32, f32::max);
-    println!(
-        "bounds (game units): sphere centroid {:.1?}, extent {:.1}; vertex AABB {:.1?} .. {:.1?}",
-        c.to_array(), extent, s.min, s.max
-    );
+    println!("bounds (game units): sphere centroid {:.1?}, extent {:.1}", c.to_array(), extent);
     let (eye, target) = match std::env::var("RC_CAM").ok().and_then(|v| parse_cam(&v)) {
         Some((e, t)) => (game_to_bevy(e), game_to_bevy(t)),
         // Up (game +Z) and back (game -Y) from the centroid, looking at it.
@@ -247,6 +267,7 @@ fn setup(
         render_settings::WorldCamera,
         FlyCam::from_transform(&transform, (extent / 20.0).clamp(5.0, 200.0)),
         transform,
+        level_switch::KeepAcrossLevels,
     ));
 }
 

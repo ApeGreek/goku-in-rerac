@@ -36,6 +36,7 @@ module that reads it: `grep -rn '"RC_' crates/` lists them all.
 | `RC_PERF_LOG` | `1`: print one line per game-data lump request (engine cache, memory or decompressed; MiB, ms) |
 | `RC_AUDIO` | `0`: no audio (the level's sound bank and music are not loaded); the `cargo xtask test-*` commands set it |
 | `RC_LEVEL` | Level index to load (default 1, Novalis) |
+| `RC_LANDING` | `1`: the boot's level enters as after a level change (`entry`: the music pause / unpause and `ShipLandingStart`'s landing scene); default: the level's start in mode 0 (or `RC_HERO_AT`) |
 | `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target, game units) |
 | `RC_SCREENSHOT` | Save a screenshot to this path, then exit |
 | `RC_SCREENSHOT_DELAY` | Seconds before the screenshot (default 3) |

@@ -87,7 +87,8 @@ pub struct OcclusionPlugin;
 
 impl Plugin for OcclusionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, init)
+        app.add_systems(crate::level_switch::LevelStartup, init)
+            .add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<OcclusionFrame>)
             .add_systems(PostUpdate, update_occlusion.in_set(OcclusionSet))
             .add_systems(Last, print_stats);
     }

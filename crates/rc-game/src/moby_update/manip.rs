@@ -26,6 +26,9 @@
 //! | 0x277904..0x277918 | inactive and attached: `DetachManipulator(moby, rec)` | [`detach`] |
 //!
 //! Side effects: only the record and the target's list (no sounds, particles or other mobys).
+//!
+//! The big-head cheats (`crate::cheats`): [`big_head`] (`0x278720` and its level copies, 0x15edb7) and
+//! [`big_head_scale`] (`0x251d70`, a look-at record's scale).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::{pvar as p, World};
@@ -193,6 +196,73 @@ pub fn look(w: &mut World, moby: MobyId, owner: MobyId, ofs: usize, list: u8, k:
     pv[ofs + rec::TARGET..ofs + rec::TARGET + 16].fill(0);
     p::set_ff(pv, ofs + rec::REC_SCALE, 1.0);
     sync(w, moby, owner, ofs);
+}
+
+/// `FUN_00278720(scale, moby, list, rec)` (L01; one copy per overlay with the same code, e.g. L00 0x263ac8, L02
+/// 0x264dd0, L03 0x251d00, L04 0x2563b8, L05 0x28dcd8, L07 0x28c2f0, L08 0x26dae0, L09 0x256da0, L11 0x288f40, L12
+/// 0x27c220, L13 0x282a90, L15 0x2531c0, L16 0x25e9f0, L17 0x25d928, L18 0x266098 — the names the class ports cite): the
+/// enemies' big-head cheat 0x15edb7 ("Enemies have massive domes", `crate::cheats`) on the node at `ofs` of `owner`'s
+/// pvars, linked into `moby`'s list `list`. Cheat off: an attached node is detached (`DetachManipulator`). Cheat on: the
+/// node attached when it is not (`AttachManipulator`), then its scale +0x20 / +0x24 / +0x28 = `scale`.
+pub fn big_head(w: &mut World, scale: f32, moby: MobyId, list: u8, owner: MobyId, ofs: usize) {
+    let on = w.svc.cheats.on(crate::cheats::slot::ENEMIES);
+    head_node(w, on, scale, moby, list, owner, ofs);
+}
+
+/// The same node code on the actors' cheat 0x15edb0 (the mouse 0x1b1's head, `MouseCritterUpdate` 0x30df40 in states
+/// ≥ 3: list 5, 2.1, its record at P+0x90).
+pub fn actor_big_head(w: &mut World, scale: f32, moby: MobyId, list: u8, owner: MobyId, ofs: usize) {
+    let on = w.svc.cheats.on(crate::cheats::slot::ACTORS);
+    head_node(w, on, scale, moby, list, owner, ofs);
+}
+
+/// [`big_head`]'s body: off → detach an attached node; on → attach once, scale xyz = `scale`.
+fn head_node(w: &mut World, on: bool, scale: f32, moby: MobyId, list: u8, owner: MobyId, ofs: usize) {
+    if !on {
+        if attached(w, owner, ofs) { detach(w, moby, owner, ofs); }
+        return;
+    }
+    if !attached(w, owner, ofs) { attach(w, moby, list, owner, ofs); }
+    let pv = &mut w.mm(owner).pvars;
+    for k in 0..3 { p::set_ff(pv, ofs + rec::SCALE + 4 * k, scale); }
+    sync(w, moby, owner, ofs);
+}
+
+/// The key of the scene head record 0x17c8c0's node in an actor's list ([`scene_big_head`]).
+pub const SCENE_HEAD_KEY: u32 = 0xffff_fff0;
+
+/// The scene actors' big head ("Actors have oversized craniums", the cheat 0x15edb0): L01 `FUN_002ff028` (the talking
+/// NPC's: its own class or 0x32b), `FUN_002fac80` (the mission NPC's: 0x32b, 2.75), `FUN_002fb4b8` (the camera trigger's:
+/// 0x398 / 0x1bf, 2.1), level11 `0x2d0ec0`, level18 `0x2f2b18`, … — one per class family, the same code. In game mode
+/// 2 with the cheat, each scene actor (0x16ce58[0..0x16cd24]) whose class is in `classes`: when the record 0x17c8c0 is
+/// not attached (+0x01), `AttachManipulator(actor, list, 0x17c8c0)` and its scale +0x20 / +0x24 / +0x28 = `scale` (so
+/// only the first matching actor of a scene gets it; `DialogStreamStart` clears the record: `Services::scene_head`).
+/// `list` is 0 but for level15's `0x2ec678` (Quartu's Giant Clank mission NPC: 1).
+pub fn scene_big_head(w: &mut World, classes: &[i16], list: u8, scale: f32) {
+    if w.svc.game_mode != 2 || !w.svc.cheats.on(crate::cheats::slot::ACTORS) || w.svc.scene_head.is_some() { return; }
+    let actors: Vec<(Option<MobyId>, i16)> = w.svc.cinematic.scene.as_ref().map(|s| s.actors.iter().map(|a| (a.moby, a.o_class)).collect()).unwrap_or_default();
+    for (moby, oc) in actors {
+        let Some(id) = moby.filter(|_| classes.contains(&oc)) else { continue };
+        if w.svc.scene_head.is_some() { break; }
+        w.svc.scene_head = Some(id);
+        let Some(joint) = target_joint(w, id, list) else {
+            w.svc.unported("scene big head: the actor's joint list 0 not loaded");
+            continue;
+        };
+        let node = JointModifier { joint, mode: 0, weight: 0.0, quat: [0.0, 0.0, 0.0, 1.0], scale: [scale; 3], trans: [0.0; 3] };
+        let m = w.mm(id);
+        if m.joint_mod_keys.len() != m.joint_mods.len() { m.joint_mod_keys.resize(m.joint_mods.len(), u32::MAX); }
+        m.joint_mods.insert(0, node);
+        m.joint_mod_keys.insert(0, SCENE_HEAD_KEY);
+    }
+}
+
+/// `FUN_00251d70(scale, rec)` (L03; its copy per overlay, e.g. L16 0x25ea60): the big-head cheat 0x15edb7 on a look-at
+/// record ([`look`]): its scale request +0x70 = `scale` with the cheat, else 1.0.
+pub fn big_head_scale(w: &mut World, scale: f32, owner: MobyId, ofs: usize) {
+    ensure(w, owner, ofs, rec::SIZE);
+    let s = if w.svc.cheats.on(crate::cheats::slot::ENEMIES) { scale } else { 1.0 };
+    p::set_ff(&mut w.mm(owner).pvars, ofs + rec::REC_SCALE, s);
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@
 //!
 //! | address | what | port |
 //! |---|---|---|
-//! | entry | `MobyGroupCount(P+0x0c, −1)` = 0 and skill point 0x13d41c not earned → skill point, level sound 1, banner 0x53d6 | NOT ported (G-SAV-007 [deferred]) |
+//! | entry | `MobyGroupCount(P+0x0c, −1)` = 0 and skill point 0x13d41c not earned → skill point, level sound 1, banner 0x53d6 | [`update`] (`story::award_skill_point`) |
 //! | | `H[0x6d]` count 0: hero state 0x81 → count := 1; time / mask refreshed; in cuboid +0x00 → `Help_Request(12003, 0x6d)` | [`update`] |
 //! | | `H[0x6e]` count 0, or count 1 with more than `ScaleTicks(72000)` of play since its time: in state 0x81, +0x04 += 1; the pad's L2 / R2 (0x13cae0 & 3) held with the stick past 0.3 (0x1415ec) → +0x08 += 1, else +0x08 := 0; +0x08 > `ScaleTicks(40)` → +0x04 := 0 and `H[0x6e]` bumped; +0x04 > count·`ScaleTicks(7200)` + `ScaleTicks(1800)` → `Help_Request(12004, 0x6e)` | [`update`] |
 //! | | item 4 owned (0x13d4c4) and `H[0x3e]` count 0 → `Help_Request(12000, 0x3e)` | [`update`] |
@@ -21,6 +21,10 @@ pub const CLASSES: [i16; 1] = [422];
 
 /// Level12 0x2ed280 (module doc).
 pub fn update(w: &mut World, id: MobyId) {
+    // Its moby group (P+0x0c) emptied: skill point 0x13d41c.
+    if crate::moby_update::scheduler::group_count(w, pvi(w, id, 0xc), -1) == 0 {
+        crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d41c));
+    }
     if w.svc.help.records.help[0x6d].count == 0 {
         if w.hero.state == 0x81 { w.svc.help.records.help[0x6d].count = 1; }
         touch(w, 0x6d);

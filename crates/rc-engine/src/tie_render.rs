@@ -182,7 +182,8 @@ pub struct TieRenderPlugin;
 impl Plugin for TieRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<TieMaterial>::default())
-            .add_systems(Startup, spawn_system)
+            .add_systems(crate::level_switch::LevelStartup, spawn_system)
+            .add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<crate::tie_lod::TieLodState>)
             .add_systems(
                 PostUpdate,
                 // Before visibility propagation: the Visibility it writes applies to this frame (tie_lod.rs).
@@ -356,6 +357,33 @@ fn spawn_ties(
     materials: &mut Assets<TieMaterial>,
     buffers: &mut Assets<ShaderBuffer>,
 ) -> Stats {
+    spawn_ties_on(commands, level, meshes, images, materials, buffers, None)
+}
+
+/// The ties of `level` (their LOD state inserted as the resource the per-frame LOD system drives), on render layer
+/// `layer` (None: the default layer; crate::title_world draws the title world on its own layer). Returns the entity
+/// count.
+pub(crate) fn spawn_ties_layered(
+    commands: &mut Commands,
+    level: &LoadedLevel,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<TieMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+    layer: &bevy::camera::visibility::RenderLayers,
+) -> usize {
+    spawn_ties_on(commands, level, meshes, images, materials, buffers, Some(layer)).entities
+}
+
+fn spawn_ties_on(
+    commands: &mut Commands,
+    level: &LoadedLevel,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<TieMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+    layer: Option<&bevy::camera::visibility::RenderLayers>,
+) -> Stats {
     let t0 = Instant::now();
     let ties = &level.ties;
     let mut st = Stats::default();
@@ -481,6 +509,7 @@ fn spawn_ties(
                     Name::new(format!("tie {ii} class {} tex {} {pass:?}", inst.o_class, part.texture)),
                 ));
                 if !exact { e.insert(NoFrustumCulling); }
+                if let Some(l) = layer { e.insert(l.clone()); }
                 spawned.push(e.id());
                 st.entities += 1;
             }

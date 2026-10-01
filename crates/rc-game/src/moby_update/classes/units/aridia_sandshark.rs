@@ -60,7 +60,7 @@
 //! |---|---|---|
 //! | the freeze word gp−0x5258 ≠ 0 → nothing | (never written) | [`update`] |
 //! | `REG_RCNT0` writes | a profiling timer | n/a |
-//! | `0x264dd0(2.1, m, 0, +0x2a0)` (= `0x278720`) | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x264dd0(2.1, m, 0, +0x2a0)` (= `0x278720`) | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn within 28 of the camera: `0x25c788` shadow probe, +0x7f = 0x16 | | [`update`] (`shadows::probe_down`) |
 //! | 0: no area path (−1, or no points): `STUB_printf`, `DeleteMoby`; the counter moby's +0x14c +1; home and +0x230 = pos; meter 1, health 1, +0x5c 1, keep 1, column 1, alert 0, +0x58 10; `SeedJumpPattern(J)`, J: 0x200, 0.5, 2, 2, top speed +0x254·dt; `rand() & 1` → mirror; +0xd0 the sequence table; no ambush cuboid: a lair (+0x278) → J probe 0.2, 3 (blend 2); none: a moby to wait for (+0x258) → 0x1d hidden (mode & ~0x1000 \| 0x41, no collision), else 1 (blend 2); an ambush cuboid: no ambush moby → `DeleteMoby`, else 0xc, 10 up, hidden (mode & ~0x1000 \| 1), no collision (blend 0) | init | [`init`] |
 //! | 1 → 0x12 (blend 0) | | [`update`] |
@@ -952,7 +952,8 @@ fn surface(w: &mut World, id: MobyId) {
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     if w.svc.units.word(k::FREEZE) != 0 { return; }
-    // 0x264dd0(2.1, m, 0, +0x2a0): the big-head manipulator (the cheat flag 0x15edb7; G-SAV-006): not modelled.
+    // 0x264dd0(2.1, m, 0, +0x2a0): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.1, id, 0, id, 0x2a0);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 28.0 {

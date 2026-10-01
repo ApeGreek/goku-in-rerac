@@ -264,6 +264,20 @@ pub fn spawn_tfrags(
     materials: &mut Assets<TfragMaterial>,
     buffers: &mut Assets<ShaderBuffer>,
 ) -> TfragSceneStats {
+    spawn_tfrags_on(commands, level, meshes, images, materials, buffers, None)
+}
+
+/// [`spawn_tfrags`] with the entities on render layer `layer` (None: the default layer; crate::title_world draws the
+/// title world on its own layer).
+pub fn spawn_tfrags_on(
+    commands: &mut Commands,
+    level: &LoadedLevel,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<TfragMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+    layer: Option<&bevy::camera::visibility::RenderLayers>,
+) -> TfragSceneStats {
     let t0 = Instant::now();
     let (slot_bytes, vinfo_bytes, _slot_base, vinfo_base, missing_rgba) = build_storage(level);
     if missing_rgba > 0 { warn!("{missing_rgba} tfrag positions had no RGBA entry; used 0x80 grey"); }
@@ -378,7 +392,7 @@ pub fn spawn_tfrags(
                 .with_inserted_indices(Indices::U32(b.indices)),
         );
         for pass in passes {
-            commands.spawn((
+            let mut e = commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(TfragMaterial {
                     texture: image.clone(),
@@ -393,6 +407,7 @@ pub fn spawn_tfrags(
                 NoFrustumCulling,
                 Name::new(format!("tfrag tex {tex_index} {pass:?}")),
             ));
+            if let Some(l) = layer { e.insert(l.clone()); }
         }
     }
 

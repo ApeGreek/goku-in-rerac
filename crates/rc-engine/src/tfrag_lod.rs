@@ -203,6 +203,7 @@ pub struct TfragLodPlugin;
 impl Plugin for TfragLodPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, no_vsync)
+            .add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<TfragLodState>)
             .add_systems(PostUpdate, (update_tfrag_modes.after(crate::occlusion::OcclusionSet), update_lod_constants.after(crate::fog_state::FogSet)));
     }
 }

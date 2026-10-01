@@ -20,9 +20,12 @@
 //!   0x2756d0, level `entry` 0x259c40 (visited, record 3007), hero init 0x226b70 → [`GameState::apply_level_start`].
 //! * `DoSpaceTransition` [0x231ff0] → [`GameState::apply_transition`].
 //! * Veldin class 834 (L00 0x2d9dc8) first update → [`GameState::on_veldin_clank_init`].
+//! * The landmark capture `fun_00208770` (L01 0x25eb68) → [`GameState::capture_landmarks`]; challenge mode's state
+//!   `fun_00226b08` (L01 0x29a710) → [`GameState::challenge_reset`]. The card itself, `memcard_Save`'s queueing, the slot
+//!   previews and the whole saves of the menus are [`crate::memcard`].
 //!
 //! Not modelled (presentation only): item-pickup help sounds (0x1b07c0 / 0x2789e0), the new-planet message
-//! (0x277c38), space cutscenes, the card slot preview (0x13d2b0).
+//! (0x277c38), space cutscenes.
 
 use crate::follow_camera::{CameraOptions, YAW_RATES};
 use crate::ps2v::Pf;
@@ -339,6 +342,7 @@ impl Options {
         GameOptions {
             mirror: self.mirror,
             camera: CameraOptions { pitch_normal: self.pitch_normal, yaw_normal: self.yaw_normal, yaw_rate: self.rotation_speed, mirror: self.mirror },
+            ..GameOptions::default()
         }
     }
 }
@@ -612,6 +616,61 @@ impl GameState {
     pub fn on_veldin_clank_init(&mut self, session: &mut SessionState) {
         session.clank_hidden = 1;
         self.global.flags[FLAG_VELDIN_CLANK] = 1;
+    }
+
+    /// `fun_00208770` (L01 0x25eb68): before a save, every landmark hook of `level` (0x179638, registered by the loader's
+    /// `MobyUnknown74Hook` 0x25e7b0 at index `base[level] + k`) copies its moby's x (+0x10), y (+0x14) and angle (+0x48)
+    /// into landmark `base[level] + k` (chunk 15); the flags word stays. Levels ≥ 0x13 have no range. `hooks`: (k, (x, y,
+    /// angle)) of the registered mobys; `base`: the level ranges 0x1c4938 (`TalkTables::base`).
+    pub fn capture_landmarks(&mut self, level: i32, base: &[i32], hooks: &[(i32, (f32, f32, f32))]) {
+        let Some(l) = usize::try_from(level).ok().filter(|&l| l < 0x13) else { return };
+        let (Some(&lo), Some(&hi)) = (base.get(l), base.get(l + 1)) else { return };
+        for &(k, (x, y, rot)) in hooks {
+            let i = lo + k;
+            if !(lo..hi).contains(&i) { continue; }
+            if let Some(m) = usize::try_from(i).ok().and_then(|i| self.global.landmarks.get_mut(i)) {
+                m.x = x;
+                m.y = y;
+                m.rot = rot;
+            }
+        }
+    }
+
+    /// The state part of challenge mode `fun_00226b08` (L01 0x29a710): keeps the gold weapons (0x13e520), the owned flags
+    /// of the items in `keep_owned` (the list L01 0x1ba120), the ammo (0x13d428), the gold bolts of every level (0x14bec0,
+    /// 0x50 bytes = chunk 3003 × 20), the quick select (0x141ea0; an item no longer owned → 0), the vendor stock (0x15edd0),
+    /// the skill points (0x13d408) and the bolts across `reset` (`load_and_initialize_level_chunk`: the template restore,
+    /// level 0); then the nanotech flags [4] / [5] (max HP 5 / 8), HelpDesk voice and text off, times completed + 1.
+    pub fn challenge_reset(&mut self, keep_owned: &[usize], reset: impl FnOnce(&mut GameState)) {
+        let g = self.global.clone();
+        let gold_bolts: Vec<[u8; 4]> = self.levels.iter().map(|l| l.gold_bolts).collect();
+        let (premium, ultra) = (g.flags[4] != 0, g.flags[5] != 0);
+        reset(self);
+        let n = &mut self.global;
+        n.gold_weapons = g.gold_weapons;
+        for &i in keep_owned {
+            if let (Some(d), Some(&s)) = (n.owned.get_mut(i), g.owned.get(i)) { *d = s; }
+        }
+        n.ammo = g.ammo;
+        for (l, b) in self.levels.iter_mut().zip(gold_bolts) { l.gold_bolts = b; }
+        let n = &mut self.global;
+        for (d, &q) in n.quick_select.iter_mut().zip(&g.quick_select) {
+            *d = if usize::try_from(q).ok().and_then(|q| n.owned.get(q)).is_some_and(|&o| o != 0) { q } else { 0 };
+        }
+        n.vendor = g.vendor;
+        n.skill_points = g.skill_points;
+        n.bolts = g.bolts;
+        if premium {
+            n.flags[4] = 1;
+            n.max_hp = 5;
+        }
+        if ultra {
+            n.flags[5] = 1;
+            n.max_hp = 8;
+        }
+        n.helpdesk_voice = 0;
+        n.helpdesk_text = 0;
+        n.completes = g.completes.wrapping_add(1);
     }
 
     /// The options, typed.

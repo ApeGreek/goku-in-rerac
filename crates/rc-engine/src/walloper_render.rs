@@ -16,7 +16,7 @@ pub struct WalloperPlugin;
 
 impl Plugin for WalloperPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WalloperDraw>().add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
+        app.init_resource::<WalloperDraw>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<WalloperDraw>).add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
     }
 }
 

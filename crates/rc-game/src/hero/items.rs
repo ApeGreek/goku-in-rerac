@@ -353,6 +353,8 @@ fn create_hand(hero: &mut Hero, g: &ItemGlobals, env: &ItemEnv) {
     }
     it.f13fb = def.b18;
     it.slot.item = Some(m);
+    // The hand records cleared (joint −1) and the new moby's +0xbc / pvars clear (super::gadgets).
+    hero.gadgets.on_create();
     // A new glove moby's pvars (warm-up, lockout, the object in the glove) start clear [L] (super::gloves).
     if is_glove(id) { hero.weapons.glove = Default::default(); }
 }
@@ -505,6 +507,8 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
     if hero.items.slot.id != super::devastator::DEVASTATOR { super::devastator::item_gone(hero, hits); }
     if hero.items.slot.id != super::tesla::TESLA { super::tesla::item_gone(hero, hits); }
     if hero.items.slot.id != super::morph_ray::MORPH && hero.weapons.reactive.morph.beam.drawn.is_some() { super::morph_ray::item_gone(hero, hits); }
+    // The PDA's `OpenVendorMenu(0)` of this tick's weapon check (super::pda).
+    super::pda::open(hero, table, env, hits, rng);
     // The item's sequence loop goes with its moby.
     if hero.items.slot.item.is_none() && hero.fx.item_loops[super::fx::LOOP_SEQ].is_some() {
         hero.fx.item_voices.push(super::packs::SoundCmd::ItemRelease { n: super::fx::LOOP_SEQ });
@@ -520,7 +524,9 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
             hero.items.slot.ticks_ready += 1;
             update_hand_selected(hero, g, rng, env);
             super::gadgets::launch_drones(hero, table, env, hits, rng);
-            // (slot 0: the joint-modifier records 0x140ce0.. are refreshed by FUN_00227050: not ported.)
+            // Slot 0: the hand records 0x140c40.. (kind 5) through `0x227050` (super::gadgets::hand_records).
+            let targets = hero.items.slot.item.as_ref().map(|it| super::gadgets::item_targets(hero, it.o_class)).unwrap_or_default();
+            super::gadgets::hand_records(hero, &targets);
             if let Some(it) = hero.items.slot.item.as_mut() {
                 if it.anim.flags & 2 != 0 && it.anim.seq_b == 0 { blend(it, env.data, 1, 0, 2); }
             }
@@ -536,6 +542,11 @@ fn slot_loop(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable, anim: 
     // The item moby's update `(*moby+0x74)(moby)`: the hand item's row of super::gadgets::HAND_ITEMS (the
     // wrench's here; one that needs the hero's context runs right after the slot loop, gadgets::after_items).
     super::gadgets::slot_item_update(hero, table, anim, env, hits, rng);
+    // The hand moby's modifier list as the frame draws it (the records', the item's own node written by its update).
+    if let Some(o) = hero.items.slot.item.as_ref().map(|it| it.o_class) {
+        let targets = super::gadgets::item_targets(hero, o);
+        super::gadgets::hand_modifiers(hero, &targets);
+    }
 }
 
 /// `FUN_002305e8(0, frame)`: the slot is emptied (its update would run once more with state 3, which the
@@ -588,10 +599,21 @@ pub fn update_hand_selected(hero: &mut Hero, g: &mut ItemGlobals, rng: &mut Rng,
         }
     }
     // 0x141345: the Drone Device's launch (`0x2e8c20`), made right after this function by the slot loop (it creates
-    // mobys: `super::gadgets::launch_drones`); the request is cleared. Request 0x1f (FUN_00230770 path) is not reachable on foot here.
+    // mobys: `super::gadgets::launch_drones`); the request is cleared.
     if g.drone {
         g.drone = false;
         hero.gadgets.drone_launch = true;
+        g.request = 0;
+    }
+    // Request 0x1f, the Hologuise (super::hologuise): the gate passed → its timer (voice 0x18, squash) unless it runs,
+    // and the swap to it (target, previous, saved); the request is cleared either way.
+    if g.request == super::hologuise::HOLOGUISE {
+        if super::hologuise::request(hero) {
+            changed = true;
+            hero.items.target = g.request;
+            g.previous = g.saved;
+            g.saved = g.request;
+        }
         g.request = 0;
     }
     let it = &mut hero.items;

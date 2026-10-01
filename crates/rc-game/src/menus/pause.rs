@@ -14,9 +14,14 @@
 //!
 //! **The Gadgets page** (and the grids, name label and 3D model of the Weapons page it shares): [`gadgets`].
 //!
-//! **Not ported (stubs, counted in [`PageMenu::stub_calls`]):** the Quick Select / Items / Help / Goodies page
-//! contents, the Weapons page's other widgets, streamed images and maps, the 3D globe, the gold-bolt panel, the cheat entry
-//! (0x298f80), the save / load freeze dialogs and the pad-removed dialog.
+//! **The Goodies unlocks, the Cheats page, the code entry `MenuInput` 0x298f80 and the end-of-game page:** [`media`].
+//!
+//! **Every widget callback of the page tree** (the 41 pages and 145 widgets reached from the roots on level 01) is
+//! dispatched; [`PageMenu::stub_calls`] counts a callback this code does not know (none on the disc's levels). The
+//! no-ops: the enters 0x28dd10 / 0x295200, the leaves 0x28dd18, 0x28f7a8 (the map file stream's break: no stream here),
+//! 0x290508 (the Sound page's group-2 volume back to sfx·8/10: the port's mixer derives it every frame, G-AUD-013),
+//! 0x290bf8, the stream-buffer enters / leaves (memory only). Not ported: the Gadgets page's 3D Ratchet's streamed
+//! per-item animations and drones (G-UI-002).
 //!
 //! **Port-only:** [`port`] adds a "Port Options" page (not in the game) built from the same machinery, reached
 //! from an extra entry of the Options list ([`PageMenu::install_port_page`]; the engine skips it with
@@ -25,10 +30,12 @@
 pub mod frame;
 pub mod gadgets;
 pub mod map_page;
+pub mod media;
 mod options;
 pub mod pages;
 pub mod planet_select;
 pub mod port;
+pub mod saves;
 
 use super::{scale_ticks, screen_static, text, text_plain, tween, MenuAssets, MenuDraw, MenuInput, MenuSound, Overlay};
 use crate::game_state::GameState;
@@ -50,7 +57,11 @@ pub mod page {
     /// Self-transitions to these play forward (0x28c990).
     pub const FORWARD_ON_SELF: [u32; 6] = [0x1b7670, 0x1b8250, 0x1b8560, 0x1b6878, 0x1b7d70, 0x1b6ca0];
     /// The pages the code forms (the page walk's starting points on another level, `menus::Overlay::relocated`).
-    pub const ROOTS: [u32; 12] = [ROOT, MAP, MAP_MISSIONS, PLANET_SELECT, PLANET_CONFIRM, KIND22, KIND23, KIND2D, 0x1b8250, 0x1b8560, 0x1b7d70, 0x1b6ca0];
+    pub const ROOTS: [u32; 20] = [
+        ROOT, MAP, MAP_MISSIONS, PLANET_SELECT, PLANET_CONFIRM, KIND22, KIND23, KIND2D, 0x1b8250, 0x1b8560, 0x1b7d70, 0x1b6ca0,
+        // The memory-card pages (`saves::page::ROOTS`: the confirm pages are named by code only).
+        0x1b5b48, 0x1b5bd0, 0x1b6af8, 0x1b9208, 0x1b93b8, 0x1b9180, 0x1b9440, 0x1b9518,
+    ];
 }
 
 /// `0x1c23a8`: the galaxy-map point table the planet map forms (16 bytes per level; the map reads level 1.. at +0x10).
@@ -82,6 +93,12 @@ pub struct Addrs {
     pub help_texts: [u32; 3],
     /// The Moves label's tables (Heli-Pack owned / not: `pages::data::MOVES_HELI`, `MOVES_NO_HELI`).
     pub moves_tables: [u32; 2],
+    /// The memory-card pages the code names (`saves::page::ROOTS`).
+    pub saves_pages: [u32; 8],
+    /// The missions page's description label 0x1b3dc0 and picture widget 0x1b3c80 (the missions widget writes their
+    /// +0x34 id 0x1b3df4 and +0x58 index 0x1b3cd8).
+    pub missions_label: u32,
+    pub missions_image: u32,
 }
 
 impl Addrs {
@@ -108,6 +125,9 @@ impl Addrs {
             port_model_many: a(port::MODEL_MANY),
             help_texts: [a(pages::data::WEAPON_TEXTS), a(pages::data::GADGET_TEXTS_A), a(pages::data::GADGET_TEXTS_B)],
             moves_tables: [a(pages::data::MOVES_HELI), a(pages::data::MOVES_NO_HELI)],
+            saves_pages: saves::page::ROOTS.map(a),
+            missions_label: a(wiring::MISSIONS_LABEL),
+            missions_image: a(wiring::MISSIONS_IMAGE),
         }
     }
 }
@@ -148,7 +168,10 @@ pub fn correlate(reference: &Overlay, target: &Overlay, roots: &[(u32, u32)]) ->
             let (ri, ti) = (read_items(reference, u(reference, r, 0x34)), read_items(target, u(target, t, 0x34)));
             if ri.len() == ti.len() {
                 at.insert(u(reference, r, 0x34), u(target, t, 0x34));
-                pages.extend(ri.iter().zip(&ti).filter(|(a, b)| a.action == 3 && b.action == 3).map(|(a, b)| (a.arg, b.arg)));
+                // Action 3 pages and the locked Goodies entries' (−1 until `0x29aa60`).
+                pages.extend(ri.iter().zip(&ti).filter(|(a, b)| a.action == b.action && (a.action == 3 || a.action == -1)).map(|(a, b)| (a.arg, b.arg)));
+                // Save / Load / New Game / Load Game (actions 4 / 5) open their pages too.
+                pages.extend(ri.iter().zip(&ti).filter(|(a, b)| a.action == b.action && (a.action == 4 || a.action == 5)).map(|(a, b)| (a.arg, b.arg)));
             }
             widgets.push((u(reference, r, 0x38), u(target, t, 0x38)));
             widgets.push((u(reference, r, 0x3c), u(target, t, 0x3c)));
@@ -162,6 +185,9 @@ pub mod wiring {
     pub const WEAPONS: u32 = 0x1b2b38;
     pub const OPTIONS: u32 = 0x1b2cc8;
     pub const GOODIES: u32 = 0x1b2d18;
+    /// The missions page's description label and picture widget (`map_page::missions_enter`).
+    pub const MISSIONS_LABEL: u32 = 0x1b3dc0;
+    pub const MISSIONS_IMAGE: u32 = 0x1b3c80;
 }
 
 /// Widget callbacks by address (level01).
@@ -194,6 +220,16 @@ pub mod func {
     pub const GLOBE_ENTER: u32 = 0x2904d0;
     pub const CONFIRM_UPDATE: u32 = 0x295370;
     pub const MISSIONS_UPDATE: u32 = 0x28fec8;
+    /// The missions widget's draw `DrawMissionsMenu2` and enter `fun_0021c420`.
+    pub const MISSIONS_DRAW: u32 = 0x293090;
+    pub const MISSIONS_ENTER: u32 = 0x28fe28;
+    /// The streamed picture of the missions page / the planet select (`fun_0021f990`, `draw_transition_overlay`).
+    pub const PICTURE_UPDATE: u32 = 0x293398;
+    pub const PICTURE_DRAW: u32 = 0x293670;
+    /// The map widgets' leave (`fun_0021bda0`: the map file stream's break).
+    pub const MAP_LEAVE: u32 = 0x28f7a8;
+    /// The confirm page's gold-bolt panel `DrawGBsShipMenu`.
+    pub const SHIP_GOLD_DRAW: u32 = 0x292980;
 }
 
 /// Colours (`*0x160270` navy; the list tween ends from 0x28f0e0; disabled colours of 0x28ebd0).
@@ -317,7 +353,11 @@ pub enum Data {
     /// 0x28f868 with its passive flag (+0x34 & 0x40).
     Map { passive: bool },
     Confirm,
-    Missions,
+    /// The missions widget (`map_page::Missions`) and the streamed picture (`map_page::Picture`).
+    Missions(map_page::Missions),
+    Picture(map_page::Picture),
+    /// The kind-0x23 page's scrolling text (`media::Scroller`).
+    Scroller(media::Scroller),
     /// Port-only: the "Port Options" list ([`port`]).
     Port(port::PortList),
     /// The icon grids, the item preview and the 3D Ratchet of the Gadgets / Weapons pages ([`gadgets`]).
@@ -389,6 +429,24 @@ pub struct MenuOut {
     /// The transition started / finished this frame.
     pub transition: Option<(u32, u32)>,
     pub entered: Option<u32>,
+    /// `MenuInput` 0x298f80 recognised a code this frame: its effect (applied to the game state) and what is left for
+    /// the engine (the banner, the skill point jingle).
+    pub code: Option<(crate::cheats::CodeEffect, crate::cheats::CodeOut)>,
+    /// The end-of-game page's choice ([`media::EndChoice`]).
+    pub end_choice: Option<media::EndChoice>,
+    /// `0x15f5c0 = dest, 0x15f570 = 1`: leave the level for `dest` (−1: Quit Game, back to the title; 0: the challenge
+    /// mode's restart on Veldin), `DoSpaceTransition` after the frame (the `travel` lane's level change).
+    pub level_exit: Option<i32>,
+    /// `0x13e05a`: the level exit runs its story trip (1: New Game's opening) or not (0: a loaded game).
+    pub story: Option<bool>,
+    /// Action 9 (the front end's Language list): the language 0x15ed88 = arg.
+    pub language: Option<u32>,
+    /// 0x1516ec = id: a dialogue line requested (the end page's Helpdesk girl, `media::girl_update`).
+    pub voice: Option<i32>,
+    /// `continue_audio_stream_if_ready` 0x279e78: the loaded line starts (0x151720 ≠ 0 and 0x15172a = 3 → 4).
+    pub voice_continue: bool,
+    /// 0x15172a ∉ {6, 7} → 5: the line stops (the girl's leave).
+    pub voice_stop: bool,
 }
 
 /// The per-frame values the menus read from outside.
@@ -477,6 +535,10 @@ pub struct PageMenu {
     pub gold_spin: Option<f32>,
     /// The map page (`map_page`; the live map system moved in while the menu is open).
     pub map: map_page::MapPage,
+    /// The Goodies unlocks, the Cheats page, the code entry and the end-of-game page ([`media`]).
+    pub media: media::MediaMenu,
+    /// The memory-card pages and the card ([`saves`]).
+    pub saves: saves::SaveMenu,
 }
 
 fn stub(m: &mut BTreeMap<&'static str, u64>, name: &'static str) { *m.entry(name).or_default() += 1; }
@@ -526,9 +588,15 @@ impl PageMenu {
             ammo_records: Vec::new(),
             gold_spin: None,
             map: map_page::MapPage::new(ov),
+            media: media::MediaMenu::default(),
+            saves: saves::SaveMenu::read(ov),
         };
         let a = &m.addrs;
-        let mut todo = vec![a.root, a.map, a.map_missions, a.planet_select, a.planet_confirm];
+        // The kinds 0x21 / 0x23 / 0x2d roots (the end-of-game page, the front end) and the end page's save page.
+        let mut todo = vec![a.root, a.map, a.map_missions, a.planet_select, a.planet_confirm, a.kind22, a.kind23, a.kind2d, ov.at(media::label::SAVE_PAGE)];
+        // The memory-card pages and the front end's Options pages (the list the enter 0x28dbb8 installs).
+        todo.extend(a.saves_pages);
+        todo.extend(m.saves.front_options.iter().flatten().filter(|it| it.action == 3).map(|it| it.arg));
         while let Some(p) = todo.pop() {
             if p == 0 || m.pages.contains_key(&p) { continue; }
             let Some(pg) = read_page(ov, p) else { continue };
@@ -537,31 +605,42 @@ impl PageMenu {
                 if m.widgets.contains_key(&w) { continue; }
                 let Some(wd) = read_widget(ov, w) else { continue };
                 if let Data::List(l) = &wd.data {
+                    // Action 3 pages, and the locked Goodies entries' pages (action −1 until `0x29aa60` unlocks them).
                     for it in &l.items {
-                        if it.action == 3 { todo.push(it.arg); }
+                        if it.action == 3 || it.action == -1 { todo.push(it.arg); }
+                        // Save / Load (actions 4 / 5).
+                        if it.action == 4 || it.action == 5 { todo.push(it.arg); }
                     }
                 }
                 m.widgets.insert(w, wd);
             }
             m.pages.insert(p, pg);
         }
+        m.media = media::MediaMenu::read(ov, &m.pages);
         m.pages.contains_key(&m.addrs.root).then_some(m)
     }
 
     fn page(&self, p: u32) -> Option<&Page> { self.pages.get(&p) }
+
+    /// This level's address of a memory-card page `label` (`saves::page`).
+    pub fn addrs_saves(&self, label: u32) -> u32 {
+        saves::page::ROOTS.iter().position(|&l| l == label).map_or(label, |i| self.addrs.saves_pages[i])
+    }
     fn w(&self, a: u32) -> Option<&Widget> { self.widgets.get(&a) }
     fn wm(&mut self, a: u32) -> Option<&mut Widget> { self.widgets.get_mut(&a) }
 
     /// `EnterMenuMode` 0x28bf50 (the caller sets mode 3). `hand_item` = 0x141660[0] (0x24 → 0 not modelled).
     pub fn enter(&mut self, kind: i32, gs: &GameState) {
         let g = &gs.global;
-        self.goodies = g.game_beaten != 0 || g.completes != 0;
+        self.goodies = g.game_beaten != 0 || g.completes != 0 || self.media.goodies_extra;
         let ad = &self.addrs;
         let (a, b) = if self.goodies { (ad.goodies, ad.goodies) } else { (ad.options, ad.weapons) };
         let (weapons, options) = (ad.weapons, ad.options);
         if let Some(Data::List(l)) = self.wm(weapons).map(|w| &mut w.data) { l.above = a; }
         if let Some(Data::List(l)) = self.wm(options).map(|w| &mut w.data) { l.below = b; }
         self.kind = kind;
+        // 0x1ba24c = (kind == 0x23): the kind-0x23 page's scroller closes the menu at its end.
+        self.media.kind23 = kind == 0x23;
         self.ticks = 0;
         self.post = 0;
         self.dest = if g.level < 0x13 { g.level } else { 0 };
@@ -571,6 +650,8 @@ impl PageMenu {
         self.unusable_head = g.level == 0xd;
         self.unusable_back = g.level == 0 || g.level == 0xe;
         self.active = true;
+        // FUN_0029aa60: the Goodies entries the skill points and gold weapons unlock.
+        media::goodies_unlocks(self, gs);
     }
 
     /// `FUN_0028c128`, the first tick (kind → first page, the saved items copied, the moby spawn).
@@ -638,7 +719,15 @@ impl PageMenu {
             return out;
         }
         if matches!(self.kind, 0 | 10 | 0xe | 0x11 | 0x21 | 0x2d | 0x23) { self.first_tick(gs); }
-        stub(&mut self.stub_calls, "cheat entry 0x298f80");
+        // A changed memory card (0x15eeb4 & 1) holds the menu in the card dialog (`mode_freezeInit(3, page)`).
+        if self.saves.card.flags & 1 != 0 {
+            out.freeze = Some(self.current);
+            return out;
+        }
+        // MenuInput 0x298f80: the debug code entry (R2 + L1 held, 20 presses).
+        let codes = std::mem::take(&mut self.media.cheats.codes);
+        if let Some(e) = self.media.code.step(inp.held_u, inp.pressed_u, &codes) { out.code = Some((e, crate::cheats::apply_code(e, gs))); }
+        self.media.cheats.codes = codes;
         if self.kind == 1 {
             let done = self.trans < 1;
             self.trans -= 1;
@@ -706,6 +795,7 @@ impl PageMenu {
         // Items page's gold bolt turns).
         if let Some(f) = self.frames.as_mut() { f.update(); }
         pages::gold_tick(self);
+        media::girl_tick(self);
         if self.post != 0 && self.ticks >= 10 {
             // PageMenuClose 0x28c6c8.
             let ws = self.page(self.current).map(|p| p.widgets).unwrap_or([0; 14]);
@@ -744,7 +834,10 @@ impl PageMenu {
                 if let Some(Data::List(l)) = self.wm(w).map(|x| &mut x.data) { planet_select::build_list(l, gs, dest, &names); }
                 self.level_names = names;
             }
+            // 0x2936e8, shared by the image widgets and the streamed pictures.
+            pages::func::IMAGE_ENTER if matches!(self.w(w).map(|x| &x.data), Some(Data::Picture(_))) => map_page::picture_enter(self, w),
             pages::func::IMAGE_ENTER => pages::image_enter(self, w),
+            func::MISSIONS_ENTER => map_page::missions_enter(self, w, gs),
             func::GLOBE_ENTER => map_page::globe_enter(self),
             pages::func::SLOTS_ENTER => pages::slots_enter(self, w, gs),
             pages::func::GOLD_ENTER => pages::gold_enter(self, w),
@@ -760,23 +853,40 @@ impl PageMenu {
             pages::func::MOVIES_ENTER => pages::movies_enter(self, w, gs),
             // fun_00225ac0(1): the stream buffers' layout (memory only).
             pages::func::STREAM_LAYOUT_ENTER => {}
+            saves::func::SLOTS_ENTER => saves::slots_enter(self, w),
+            saves::func::CONFIRM_ENTER => saves::confirm_enter(self),
+            saves::func::FRONT_OPTIONS_ENTER => {
+                let pal = self.saves.card.pal;
+                saves::front_options_enter(self, w, pal);
+            }
+            media::func::CHEATS_ENTER => media::cheats_enter(self, w, gs),
+            media::func::SCROLL_ENTER => media::scroller_enter(self, w),
+            media::func::GIRL_ENTER => media::girl_enter(self),
             _ => stub(&mut self.stub_calls, "widget enter"),
         }
     }
 
-    fn call_leave(&mut self, w: u32, _out: &mut MenuOut, gs: &mut GameState) {
+    fn call_leave(&mut self, w: u32, out: &mut MenuOut, gs: &mut GameState) {
         let Some(leave) = self.w(w).map(|x| x.leave) else { return };
         match leave {
             0 | 0x28dd10 | 0x28dd18 => {}
-            // 0x290508: 0x13e5a0 = sfx·8/10 (mixer, audio port).
-            func::SOUND_LEAVE => stub(&mut self.stub_calls, "sound leave mixer 0x290508"),
+            // 0x290508: 0x13e5a0 (group 2's master volume) = sfx·8/10: the port's `sound_update` derives group 2 from the
+            // sfx option every frame (`audio::voices::master_volumes`), which is this value; the Sound page's preview
+            // of group 2 at the music volume and the options reaching the mixer: G-AUD-013.
+            func::SOUND_LEAVE => {}
+            // 0x28f7a8: the map file stream's break (the port reads the files at once: no stream).
+            func::MAP_LEAVE => {}
             gadgets::func::MODEL_LEAVE => gadgets::model_leave(self, w),
             gadgets::func::PREVIEW_LEAVE => gadgets::preview_leave(self, w),
+            pages::func::IMAGE_LEAVE if matches!(self.w(w).map(|x| &x.data), Some(Data::Picture(_))) => map_page::picture_leave(self, w),
             pages::func::IMAGE_LEAVE => pages::image_leave(self, w),
             pages::func::SLOTS_LEAVE => pages::slots_leave(self, w, gs),
             pages::func::GOLD_LEAVE => pages::gold_leave(self, w),
             pages::func::LOG_LIST_LEAVE => {}
+            // The stream buffers of the slot and confirm pages (memory only).
+            saves::func::SLOTS_LEAVE | saves::func::CONFIRM_LEAVE => {}
             pages::func::TEXT_LEAVE => pages::text_leave(self),
+            media::func::GIRL_LEAVE => media::girl_leave(self, out),
             _ => stub(&mut self.stub_calls, "widget leave"),
         }
     }
@@ -827,6 +937,7 @@ impl PageMenu {
             }
             func::CONFIRM_UPDATE => planet_select::confirm_update(self, inp, gs, out),
             func::MISSIONS_UPDATE => planet_select::missions_update(self, w, inp, gs, out),
+            func::PICTURE_UPDATE => map_page::picture_update(self, w),
             port::UPDATE => port::update(self, w, inp, out),
             gadgets::func::GRID_UPDATE => gadgets::grid_update(self, w, inp, gs, out),
             // `LoadHandGadget` 0x297d70: the models follow the page's copy of the saved items (engine side).
@@ -846,6 +957,15 @@ impl PageMenu {
                 self.generic_keys(inp, false, gs.global.level).unwrap_or(0)
             }
             pages::func::ICONS_UPDATE => pages::icons_update(self, w, inp, gs, out),
+            saves::func::SAVE_UPDATE => saves::save_update(self, w, inp, gs, out),
+            saves::func::LOAD_UPDATE => saves::load_update(self, w, inp, gs, out),
+            saves::func::NEW_GAME_UPDATE => saves::new_game_update(self, w, inp, gs, out),
+            saves::func::CONFIRM_UPDATE => saves::confirm_update(self, inp),
+            media::func::STATS_UPDATE => media::stats_update(self, inp, out),
+            media::func::SKETCH_PAGER => media::sketch_pager(self, w, inp, out),
+            media::func::EPILOGUE_PAGER => media::epilogue_pager(self, w, inp, out),
+            media::func::GIRL_UPDATE => media::girl_update(self, gs, out),
+            media::func::SCROLL_UPDATE => media::scroller_update(self, w, inp),
             _ => {
                 let _ = env;
                 stub(&mut self.stub_calls, "widget update");
@@ -887,9 +1007,14 @@ impl PageMenu {
                     3 => self.target = it.arg,
                     4 | 5 => {
                         out.sounds.push(MenuSound::Confirm);
-                        // Save / Load: straight to the page when 0x15eeb0 ∈ {1, 0x10} (not modelled: the
-                        // freeze dialog path is taken).
-                        out.freeze = Some(it.arg);
+                        // Save / Load: straight to the page when the card is ready (0x15eeb0 ∈ {1, 0x10}), else flag
+                        // 2 (save) / 4 (load) and the card dialog `mode_freezeInit(3, page)`.
+                        if self.saves.card.ready() {
+                            self.target = it.arg;
+                        } else {
+                            self.saves.card.flags |= if it.action == 4 { 2 } else { 4 };
+                            out.freeze = Some(it.arg);
+                        }
                     }
                     6 | 7 | 8 | 10 | 11 => {
                         self.post = match it.action {
@@ -910,7 +1035,9 @@ impl PageMenu {
                         return 0;
                     }
                     9 => {
-                        // Language 0x15ed88 = arg (session state; not in the in-level Options).
+                        // Language 0x15ed88 = arg (session state; the front end's Language list), no sound.
+                        self.lang = it.arg;
+                        out.language = Some(it.arg);
                         return 0;
                     }
                     _ => {}
@@ -968,6 +1095,7 @@ impl PageMenu {
         out.push(MenuDraw::Snapshot);
         out.push(MenuDraw::Darken { alpha: DARKEN });
         self.view = gadgets::GadgetsView::default();
+        self.media.girl_view = None;
         if self.kind == 0x14 { return; }
         let cur = self.page(self.current).cloned();
         let mut rects: [Option<[i32; 4]>; 14] = [None; 14];
@@ -1026,6 +1154,8 @@ impl PageMenu {
             gadgets::func::GRID_DRAW => gadgets::grid_draw(self, w, a, gs, env.vsync, out),
             gadgets::func::MODEL_DRAW => gadgets::model_draw(self, w, gs),
             gadgets::func::PREVIEW_DRAW => gadgets::preview_draw(self, w, a, gs),
+            // 0x293d50 with flag 0x100 and no picture yet: the card's busy text (`saves::busy_draw`).
+            pages::func::IMAGE_DRAW if matches!(self.w(w).map(|x| &x.data), Some(Data::Image(i)) if i.state < 2 && i.flags & 0x100 != 0) => saves::busy_draw(self, w, a, out),
             pages::func::IMAGE_DRAW => pages::image_draw(self, w, gs, out),
             pages::func::CONTROLS_DRAW => {
                 let lang = self.lang;
@@ -1048,6 +1178,16 @@ impl PageMenu {
             func::MAP_DRAW => map_page::draw(self, w, a, gs, out),
             func::MAP_LEGEND_DRAW => map_page::legend_draw(self, w, a, gs, out),
             func::GLOBE_DRAW => map_page::globe_draw(self, w, env.vsync, out),
+            func::MISSIONS_DRAW => map_page::missions_draw(self, w, a, out),
+            func::PICTURE_DRAW => map_page::picture_draw(self, w, out),
+            func::SHIP_GOLD_DRAW => map_page::gold_panel_draw(self, w, a, gs, out),
+            saves::func::SLOTS_DRAW => saves::slots_draw(self, w, a, env.pal, out),
+            saves::func::SLOT_INFO_DRAW => saves::slot_info_draw(self, w, a, out),
+            saves::func::CONFIRM_DRAW => saves::confirm_draw(self, w, a, out),
+            media::func::STATS_DRAW => media::stats_draw(self, w, a, gs, out),
+            media::func::EPILOGUE_ARROWS => media::epilogue_arrows(self, w, a, out),
+            media::func::GIRL_DRAW => media::girl_draw(self, w),
+            media::func::SCROLL_DRAW => media::scroller_draw(self, w, a, out),
             _ => {
                 stub(&mut self.stub_calls, "widget draw");
                 out.push(MenuDraw::Stub("widget draw"));
@@ -1336,7 +1476,7 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
     // The callbacks as their level-01 labels (widgets dispatch on them).
     let (update, draw) = (ov.label(u(0)?), ov.label(u(4)?));
     let data = match (update, draw) {
-        (func::LIST_UPDATE, _) | (0, func::LIST_DRAW) => Data::List(List {
+        (func::LIST_UPDATE, _) | (0, func::LIST_DRAW) | (media::func::SKETCH_PAGER, func::LIST_DRAW) => Data::List(List {
             flags: raw[0],
             items_addr: raw[1],
             items: read_items(ov, raw[1]),
@@ -1355,7 +1495,9 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
         (func::GALAXY_UPDATE, _) => Data::Galaxy,
         (func::MAP_UPDATE, _) => Data::Map { passive: raw[1] & 0x40 != 0 },
         (func::CONFIRM_UPDATE, _) => Data::Confirm,
-        (func::MISSIONS_UPDATE, _) => Data::Missions,
+        (func::MISSIONS_UPDATE, _) => Data::Missions(map_page::Missions::default()),
+        (func::PICTURE_UPDATE, _) => Data::Picture(map_page::Picture::read(&raw)),
+        (media::func::SCROLL_UPDATE, _) => Data::Scroller(media::Scroller::default()),
         (gadgets::func::GRID_UPDATE, _) => Data::Grid(gadgets::Grid::read(ov, a)?),
         (gadgets::func::PREVIEW_UPDATE, _) => Data::Preview(gadgets::Preview { flags: raw[0], angle: f32::from_bits(raw[2]), class: -1, ..Default::default() }),
         (gadgets::func::MODEL_UPDATE, _) => Data::Model,

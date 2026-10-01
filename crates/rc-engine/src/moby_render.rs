@@ -157,12 +157,17 @@ fn decode_env_maps(core: &LevelCore, gs_ram: &[u8]) -> [Option<Texture>; 2] {
 
 /// Parses the classes, their sequences and the instances, and builds every instance's light block.
 pub fn load_mobys(root: &Path, core: &LevelCore, core_data: &[u8], gameplay_file: &[u8]) -> Result<LevelMobys> {
+    let gs_ram = crate::disc_source::level_file(root, crate::level_load::level_index(), "gs_ram.bin").context("reading gs_ram for the moby env maps")?;
+    load_mobys_with_gs(root, core, core_data, gameplay_file, &gs_ram)
+}
+
+/// [`load_mobys`] with the GS image given (the level's gs_ram, or the title world's GS upload, crate::title_world).
+pub fn load_mobys_with_gs(root: &Path, core: &LevelCore, core_data: &[u8], gameplay_file: &[u8], gs_ram: &[u8]) -> Result<LevelMobys> {
     let t0 = Instant::now();
     let classes = moby::parse_level_mobys(core, core_data).context("parsing moby classes")?;
     let anim = moby_anim::load_anim_classes(core, core_data, &classes);
     let instances = gameplay::parse_moby_instances(gameplay_file).context("parsing moby instances")?;
-    let gs_ram = crate::disc_source::level_file(root, crate::level_load::level_index(), "gs_ram.bin").context("reading gs_ram for the moby env maps")?;
-    let env_maps = decode_env_maps(core, &gs_ram);
+    let env_maps = decode_env_maps(core, gs_ram);
     let parse_time = t0.elapsed();
 
     let t0 = Instant::now();
@@ -547,7 +552,9 @@ impl Plugin for MobyRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((MaterialPlugin::<MobyMaterial>::default(), MaterialPlugin::<MobyMetalMaterial>::default(), moby_anim::MobyAnimPlugin))
             .init_resource::<PointLightFrame>()
-            .add_systems(Startup, spawn_system)
+            // A runtime level change (crate::level_switch): `spawn_system` builds them again.
+            .add_systems(crate::level_switch::LevelUnload, (crate::level_switch::reset::<PointLightFrame>, crate::level_switch::remove::<MobyOcclusion>, crate::level_switch::remove::<crate::moby_anim::MobyAnim>))
+            .add_systems(crate::level_switch::LevelStartup, spawn_system)
             .add_systems(
                 PostUpdate,
                 update_moby_occlusion

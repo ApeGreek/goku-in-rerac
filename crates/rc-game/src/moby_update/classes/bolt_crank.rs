@@ -211,8 +211,8 @@ fn held(w: &mut World, id: MobyId) -> bool {
     let r = {
         let wr: &World = w;
         let ground = |q: [f32; 3]| wr.ground_height(Pf::f(0.5), [Pf::f(q[0]), Pf::f(q[1]), Pf::f(q[2]), Pf::ZERO], 0).to_f32();
-        // The mirrored-animation cheat 0x15edb5 is not visible to the moby loop in the port: taken as off.
-        crank::turn(&seen, bolt, &mut t, false, ground)
+        // The mirrored-animation cheat 0x15edb5 (`crate::cheats`): the tangent the other way round.
+        crank::turn(&seen, bolt, &mut t, wr.svc.cheats.on(crate::cheats::slot::MIRROR_ANIM), ground)
     };
     set_f(w, id, SPEED, t.speed);
     set_f(w, id, FALL, t.fall);

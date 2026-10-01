@@ -22,7 +22,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x26f7a8(2.5, m, 0, +0x230)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x26f7a8(2.5, m, 0, +0x230)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn, within 28 of the camera: `0x2661a8` (= `0x26f020`), +0x7f = 0x16 | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | game mode 2 (0x15f5c4): +0x94 = 0, mode \| 0x41, done; else the class's collision, mode & ~0x41 | hidden in cutscenes | [`update`] |
 //! | `0x26bd00(range + 4, m)` (= `0x274b78`); no moby, or not alerted with a cuboid +0x22c the target is outside (`0x26b9a8` = `PointInCuboid`) → no target (zero) | the target search (decoys win), the sight box | [`sight`] (`target::acquire`, `World::in_cuboid`) |
@@ -701,7 +701,8 @@ fn fly_path(w: &mut World, id: MobyId, t: &target::Target) {
 /// Level13 `0x2b50d8` (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
-    // 0x26f7a8(2.5, m, 0, +0x230): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x26f7a8(2.5, m, 0, +0x230): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 0, id, 0x230);
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), cam) < 28.0 {
         crate::shadows::probe_down(w, id);

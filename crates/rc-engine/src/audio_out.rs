@@ -205,6 +205,19 @@ pub struct AudioOut {
 impl AudioOut {
     pub fn system(&mut self) -> &mut AudioSystem { &mut self.system }
 
+    /// A runtime level change (crate::level_switch): the next level's sound data (bank, defs, sound instances, music) in a
+    /// new audio system, with the options, the reverb switch and the logs of the old one; the output (ring, WAV capture,
+    /// frame count) goes on.
+    pub fn swap_level(&mut self, data: LevelAudio) {
+        let old = &self.system;
+        let mut system = AudioSystem::new(data);
+        (system.music_option, system.sfx_option) = (old.music_option, old.sfx_option);
+        system.spu.reverb.enabled = old.spu.reverb.enabled;
+        if old.play_log.is_some() { system.play_log = Some(Vec::new()); }
+        if old.reverb_log.is_some() { system.reverb_log = Some(Vec::new()); }
+        self.system = system;
+    }
+
     pub fn stats(&self) -> audio::AudioStats { self.system.stats }
 
     /// The audio system and the frame buffer, borrowed together (the sound step renders into `buf`).

@@ -83,6 +83,8 @@ pub fn opt_byte(g: &Global, addr: u32) -> Option<u8> {
         0x15eddc => g.cam_pitch_normal as u8,
         0x15ede4 => g.cam_speed as u8,
         0x15ede8 => g.stereo as u8,
+        // The Cheats page's entries (0x28dbe8): the cheat bytes 0x15edb0[12].
+        a if crate::cheats::slot_of(a).is_some() => g.cheats_active[crate::cheats::slot_of(a)?],
         _ => return None,
     })
 }
@@ -98,6 +100,9 @@ pub fn set_opt_byte(g: &mut Global, addr: u32, v: u8) -> bool {
         0x15eddc => lo(&mut g.cam_pitch_normal),
         0x15ede4 => lo(&mut g.cam_speed),
         0x15ede8 => lo(&mut g.stereo),
+        a if crate::cheats::slot_of(a).is_some() => {
+            if let Some(i) = crate::cheats::slot_of(a) { g.cheats_active[i] = v; }
+        }
         _ => return false,
     }
     true
@@ -228,7 +233,11 @@ pub fn quit_update(m: &mut PageMenu, _w: u32, inp: &MenuInput, _gs: &mut GameSta
             return -1;
         }
     }
-    if inp.pressed_u & button::CIRCLE != 0 { out.quit = true; }
+    if inp.pressed_u & button::CIRCLE != 0 {
+        out.quit = true;
+        // 0x15f5c0 = −1, 0x15f570 = 1: the level loop ends for the title.
+        out.level_exit = Some(-1);
+    }
     0
 }
 

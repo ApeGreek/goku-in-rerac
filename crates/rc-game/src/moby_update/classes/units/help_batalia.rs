@@ -6,7 +6,7 @@
 //! | address | what | port |
 //! |---|---|---|
 //! | 0x307558 | +0x10 = 0: in cuboid +0x08 while grinding (group 0xf) → 1; = 1: state 0x42 → 0 | [`update`] |
-//! | | = 1, in cuboid +0x0c and skill point 0x13d413 not earned → skill point, level sound 1, banner 0x53d6 | NOT ported (G-SAV-007 [deferred]) |
+//! | | = 1, in cuboid +0x0c and skill point 0x13d413 not earned → skill point, level sound 1, banner 0x53d6 | [`update`] (`story::award_skill_point`) |
 //! | 0x307618 | Grindboots (item 29) not owned, in cuboid +0x00: the reminder on `H[0x30]` → `Help_Request(8000, 0x30)` | [`update`] ([`super::hints::remind`]) |
 //! | 0x307728 | owned, in cuboid +0x00 and global flag 0x2f (0x13d3b7) clear: the arm / reminder on `H[0x31]` → `(8001, 0x31)` | [`update`] |
 //! | 0x3077f8 | Magneboots (item 28) not owned, in cuboid +0x04 with planet 10 unlocked (0x13dd4a): the reminder on `H[0x32]` → `(8002, 0x32)` | [`update`] |
@@ -30,6 +30,7 @@ pub fn update(w: &mut World, id: MobyId) {
     match pvi(w, id, 0x10) {
         0 if in_cuboid(w, id, 8) && w.hero.group == 0xf => set_pvi(w, id, 0x10, 1),
         1 if w.hero.state == 0x42 => set_pvi(w, id, 0x10, 0),
+        1 if in_cuboid(w, id, 0xc) => { crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d413)); }
         _ => {}
     }
     if !owned(w, 29) {

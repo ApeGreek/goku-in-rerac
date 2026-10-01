@@ -49,8 +49,8 @@
 //! |---|---|---|
 //! | `0x2f5e18` | the death latch: +0x3e4 = 0: Ratchet's grounded ticks 0x13f650 ≠ 0 → +0x3e8 = his ground moby (0x13f64c); Ratchet in state 0x77 → +0x3e4 = 1 and, +0x3e8 a floater 587, 0x1623a8 += 1 | [`death_watch`] |
 //! | `0x2f5e80` | the hits, the riders, the target, the countdown, the phase change (below) | [`intake`] |
-//! | `0x2f2b18` | game mode 2 and the cheat 0x15edb0: the scene actors of class 0x4e1 get `AttachManipulator(·, 0, 0x17ce40)` at 2.5 | NOT ported (G-SAV-006: the big-head cheat) |
-//! | the pilot exists and its state < 0x80: `0x266098(2.5, pilot, 0, +0x1c0)` | the big-head cheat's manipulator on the pilot | NOT ported (G-SAV-006) |
+//! | `0x2f2b18` | game mode 2 and the cheat 0x15edb0: the scene actors of class 0x4e1 get `AttachManipulator(·, 0, 0x17ce40)` at 2.5 | [`update`] (`manip::scene_big_head`) |
+//! | the pilot exists and its state < 0x80: `0x266098(2.5, pilot, 0, +0x1c0)` | the big-head cheat's manipulator on the pilot | [`update`] (`manip::big_head`) |
 //! | drawn and within 32 of the camera (0x1677c0): `0x25c460` (= `0x26f020`), +0x7f = 0x1a | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | states 0..0x1b | (the state table below) | [`update`] |
 //! | `0x2f7288` | the camera tweak and the HUD meter | [`camera_and_meter`] |
@@ -850,15 +850,18 @@ fn lob_from(w: &mut World, id: MobyId, joint: usize, at: c::V, kind: i32) -> c::
 /// | 0x1b | collision off, mode \| 0x41, & ~0x1000; phase < 7: scene 3, phase 7, the scene's end place = cuboid +0x294 (0x16d270 / 0x16d280, 0x16d2a6 = 1), 7 (after it 0x1b) | | [`update`] (`interact::scene_end_place`) |
 /// | | phase 7: Ratchet on a pad 583 in state 0x22 (+0x3ac 0 → 1); else +0x3ac 0 → the pads armed; +0x3ac counting: past `ticks(40)` → scene 4, phase 8, 7 (after it 0x1b) | the last press | [`update`] |
 /// | | phase 8: `CameraScript((660.6, 481.4, 112.6), (0, −0.12, −2.76), 1, 0, 0)`, scene 5, phase 9 | | [`update`] |
-/// | | phase 9, game mode 0: `EnterSlideshowMode` (`0x299610`), 10; phase 10, game mode 0: `PlayMovieB(11)` (`0x299108`), 11 | the slideshow and the ending | [`update`] (`cinematic::enter_slideshow` / `play_movie_b`: the engine's ends are NOT ported, G-CUT-003) |
-/// | | phase 11, game mode 0: 0x162360 = 0x1623a0 = 0, `PauseAllSounds(0x21)`, the seat, the pilot and itself deleted | | [`update`] (`cinematic::pause_sounds`) |
+/// | | phase 9, game mode 0: `EnterSlideshowMode` (`0x299610`), 10; phase 10, game mode 0: `PlayMovieB(11)` (`0x299108`), 11 | the slideshow and the ending | [`update`] (`cinematic::enter_slideshow` / `play_movie_b`: the credits `crate::slideshow`, the movie `mpegs[51]`) |
+/// | | phase 11, game mode 0: 0x162360 = 0x1623a0 = 0, `EnterMenuMode(0x21)` (Lombyte `PauseAllSounds`), the seat, the pilot and itself deleted | the end-of-game page | [`update`] (`cinematic::enter_menu_mode`) |
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::GAME_SIZE { return; }
     if w.m(id).pvars.len() < pv::SIZE { w.mm(id).pvars.resize(pv::SIZE, 0); }
     death_watch(w, id);
     intake(w, id);
     let tgt = usize::try_from(c::pi32(w, id, pv::TARGET_MOBY) - 1).ok().filter(|&m| m < w.table.mobys.len());
-    // 0x2f2b18 / 0x266098: the big-head cheat (G-SAV-006): nothing without the cheat.
+    // 0x2f2b18: the actors' big-head cheat on the scene actors of class 0x4e1 at 2.5 (gp−0x485c); 0x266098(2.5, pilot, 0,
+    // +0x1c0): the enemies' big head on the pilot (+0x3a4) while its state is below 0x80.
+    crate::moby_update::manip::scene_big_head(w, &[0x4e1], 0, 2.5);
+    if let Some(p) = link(w, id, pv::PILOT).filter(|&p| w.m(p).state < 0x80) { crate::moby_update::manip::big_head(w, 2.5, p, 0, id, 0x1c0); }
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), w.camera.map(|x| f32::from_bits(x.0))) < 32.0 {
         crate::shadows::probe_down(w, id);
         w.mm(id).b7f = 0x1a;
@@ -1724,7 +1727,7 @@ fn finale(w: &mut World, id: MobyId) -> bool {
         11 if w.svc.game_mode == 0 => {
             w.svc.units.set_word(words::GIANT_DONE, 0);
             w.svc.units.set_word(words::CHECKPOINT, 0);
-            cinematic::pause_sounds(w, 0x21);
+            cinematic::enter_menu_mode(w, 0x21);
             if let Some(s) = link(w, id, pv::SEAT) { w.delete_moby(s); }
             if let Some(p) = link(w, id, pv::PILOT) { w.delete_moby(p); }
             w.delete_moby(id);

@@ -286,7 +286,8 @@ impl Plugin for WaterPlugin {
             app.insert_resource(Time::<Fixed>::from_hz(crate::determinism::TICK_HZ));
         }
         app.add_plugins(MaterialPlugin::<WaterMaterial>::default())
-            .add_systems(Startup, (setup, fire_field_setup))
+            .add_systems(crate::level_switch::LevelStartup, (setup, fire_field_setup))
+            .add_systems(crate::level_switch::LevelUnload, (crate::level_switch::remove::<WaterState>, crate::level_switch::remove::<FireFieldDraw>))
             .add_systems(FixedUpdate, tick)
             .add_systems(PostUpdate, (draw, draw_fire_fields).before(bevy::asset::AssetEventSystems));
     }

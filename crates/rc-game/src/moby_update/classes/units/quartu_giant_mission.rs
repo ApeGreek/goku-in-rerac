@@ -19,7 +19,7 @@
 //!
 //! | address | what | status |
 //! |---|---|---|
-//! | 0x2ec760 +0 | `0x2ec678`: in a cutscene with the big-head cheat 0x15edb0, the cheat's manipulator on this class's scene actors | NOT ported (G-SAV-006) |
+//! | 0x2ec760 +0 | `0x2ec678`: in a cutscene with the big-head cheat 0x15edb0, the cheat's manipulator (list 1, 2.75) on this class's scene actors | ported (`manip::scene_big_head`) |
 //! | +1 | +0x14c = −1 → return | ported ([`update`]) |
 //! | +2 | body ≠ 2: Giant Clank's moby: collision off (+0x94 = 0), hidden (+0x34 \|= 0x41) | ported |
 //! | +3 | state 9: +0x30 = 0, collision off, hidden; return | ported |
@@ -34,7 +34,7 @@
 //! | state 7 | game mode ≠ 2: `ShowPlanetBanner(16)`, `DialogStreamStart(2)`, → 8, then state 8's save at once; game mode 2: the save and → 9 at once (no banner, no scene) | ported |
 //! | state 8 | `memcard_Save(0, −1)` → 9 | ported (`cinematic::save`) |
 //! | tail | the head look-at (layout: pitch record +0x160 list 1, yaw record +0x1e0 list 0, glance +0x260, timers +0x274 / +0x278; no sequence gate) | ported (`talking_npc::look_at_layout`) |
-//! | tail | the big-head cheat: +0x1d0 = 2.75 | NOT ported (G-SAV-006) |
+//! | tail | the big-head cheat: +0x1d0 = 2.75 | ported (`talking_npc::look_springs`) |
 //! | | no particle, light, sound of its own (the scenes carry theirs) | n/a |
 
 use crate::moby_runtime::{mode, MobyId};
@@ -67,7 +67,7 @@ pub mod pv {
 }
 
 /// The head look-at layout of this class.
-const LOOK: LookLayout = LookLayout { pitch: (0x160, 1), yaw: (0x1e0, 0), glance: 0x260, seen: 0x274, glance_timer: 0x278, gate_seq_b: false };
+const LOOK: LookLayout = LookLayout { pitch: (0x160, 1), yaw: (0x1e0, 0), glance: 0x260, seen: 0x274, glance_timer: 0x278, gate_seq_b: false, eye: 1.0, pitch_k: 1.25, yaw_a: 0.5, yaw_b: 0.5, short_timers: false, gate_main: 0, gate_alt: 0xff, k_seen: 0.04 };
 
 fn link(w: &World, id: MobyId, o: usize) -> Option<MobyId> { usize::try_from(p::i32(&w.m(id).pvars, o)).ok().filter(|&m| m < w.table.mobys.len()) }
 
@@ -98,7 +98,9 @@ pub fn update(w: &mut World, id: MobyId) {
     use crate::hero::bodies::body;
     if w.m(id).pvars.len() < pv::SIZE { w.mm(id).pvars.resize(pv::SIZE, 0); }
     interact::poll_scene_end(w, id);
-    // (0x2ec678: the big-head cheat's scene manipulator, G-SAV-006.)
+    // 0x2ec678: the actors' big-head cheat on this class's scene actor (list 1) at 2.75.
+    let own = w.m(id).o_class;
+    crate::moby_update::manip::scene_big_head(w, &[own], 1, f32::from_bits(0x4030_0000));
     let Some(giant) = link(w, id, pv::GIANT) else { return };
     if w.hero.mode != body::GIANT { hide(w, giant); }
     if w.m(id).state == 9 {
@@ -223,6 +225,6 @@ pub fn update(w: &mut World, id: MobyId) {
         }
         _ => {}
     }
-    // (The big-head cheat's +0x1d0 = 2.75: G-SAV-006.)
+    // The big-head cheat's +0x1d0 = 2.75: in `look_at_layout` (`talking_npc::look_springs`).
     look_at_layout(w, id, &LOOK);
 }

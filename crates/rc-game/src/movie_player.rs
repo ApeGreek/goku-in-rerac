@@ -11,6 +11,13 @@
 //! | 4 + 1 | `MovieExitToGameplay`: VRAM restored, `FadeToBlack(4)` over the last movie picture and its closing vsync |
 //! | – | mode 0: `music_start_track(level track, 1, 0x400)`, the talker's dialogue refreshed (`FUN_0027b550(npc, rec, 1)`) |
 //!
+//! The other callers (docs/plan/progression.md `## media`): the page menu's post-actions 3 / 4 / 6 (0x28c990) fade
+//! `ticks(16)` first (over the menu image) and set the replay mode 0x15eed8 (3: 2, any button skips; 4 / 6: 1, Start
+//! alone; [`MoviePlayer::with_entry`]); `PlayMovieB(n)` 0x2ad050 = `mpegs[40 + n]` ([`MOVIE_B_BASE_NTSC`]), `PlayMovieC(n)` 0x2acfe8 =
+//! `mpegs[70 + n]` with language 0 ([`MOVIE_C_BASE_NTSC`]); the title's attract movie `fun_001e9488(i)` (boot) =
+//! `mpegs[80 + i]`, replay 2, entry fade `FadeToBlack(ticks(12))`, language 0, no music restart
+//! ([`MOVIE_ATTRACT_BASE_NTSC`], [`ATTRACT_FADE`]).
+//!
 //! The vsync accounting of the two blocking fades is read from the code (as the scene player's), not traced [M].
 
 use crate::pad::{button, PadState};
@@ -21,6 +28,20 @@ pub const FADE_FRAMES: u32 = 4;
 /// In-level movie `n` is `mpegs[MOVIE_BASE_NTSC + n]` (`DialogStreamUpdate`: TOC 0x139388 + 8n; PAL 0x139420 = 21 + n).
 pub const MOVIE_BASE_NTSC: i32 = 2;
 pub const MOVIE_BASE_PAL: i32 = 21;
+/// `PlayMovieB(n)` 0x2ad050: `mpegs[40 + n]` (TOC 0x1394b8 + 8n; PAL 0x139518 = 52 + n): the transitions table (the
+/// Cinematics page's replays, the ending `PlayMovieB(11)`).
+pub const MOVIE_B_BASE_NTSC: i32 = 40;
+pub const MOVIE_B_BASE_PAL: i32 = 52;
+/// `PlayMovieC(n)` 0x2acfe8: `mpegs[70 + n]` (TOC 0x1395a8; PAL 0x1395d0 = 75 + n), language 0: the extras.
+pub const MOVIE_C_BASE_NTSC: i32 = 70;
+pub const MOVIE_C_BASE_PAL: i32 = 75;
+/// Boot `fun_001e9488(i)`: `mpegs[80 + i]` (TOC 0x1395f8; PAL 0x139618 = 84 + i): the title's attract loop.
+pub const MOVIE_ATTRACT_BASE_NTSC: i32 = 80;
+pub const MOVIE_ATTRACT_BASE_PAL: i32 = 84;
+/// The attract movie's entry fade `FadeToBlack(ticks(12))`.
+pub const ATTRACT_FADE: u32 = 12;
+/// The page menu's fade before a replay (`FadeToBlack(ticks(16))`, post-actions 3 / 4 / 5 / 6 / 7).
+pub const MENU_FADE: u32 = 16;
 /// Audio samples (48 kHz) per 60 Hz vsync: the movie's clock advances by this much per frame.
 pub const SAMPLES_PER_VSYNC: u64 = 800;
 /// The output rate.
@@ -85,6 +106,11 @@ pub struct MovieFrame {
 pub struct MoviePlayer {
     pub ctx: MovieContext,
     phase: Phase,
+    /// The last image is already black (the page menu's `FadeToBlack(ticks(16))` of post-actions 3 / 4 / 6 ran before:
+    /// the entry fade draws black), and the entry fade's length (`StartPssMovie`'s `FadeToBlack(4)`; the title's attract
+    /// movies `fun_001e9488`: `FadeToBlack(ticks(12))`).
+    black_entry: bool,
+    fade_in: u32,
     /// Frames per second as a fraction (30/1 until [`MoviePlayer::set_rate`]).
     fps: (u32, u32),
     /// The last picture shown.
@@ -93,7 +119,15 @@ pub struct MoviePlayer {
 }
 
 impl MoviePlayer {
-    pub fn new(ctx: MovieContext) -> Self { MoviePlayer { ctx, phase: Phase::FadeIn(0), fps: (30, 1), last_picture: None, skipped: false } }
+    pub fn new(ctx: MovieContext) -> Self { MoviePlayer { ctx, phase: Phase::FadeIn(0), black_entry: false, fade_in: FADE_FRAMES, fps: (30, 1), last_picture: None, skipped: false } }
+
+    /// The entry fade over an image the caller already faded to black (`black_entry`), and its length (default
+    /// [`FADE_FRAMES`]).
+    pub fn with_entry(mut self, black_entry: bool, fade_in: u32) -> Self {
+        self.black_entry = black_entry;
+        self.fade_in = fade_in.max(1);
+        self
+    }
 
     /// The stream's frame rate (the sequence header's).
     pub fn set_rate(&mut self, num: u32, den: u32) { self.fps = (num.max(1), den.max(1)); }
@@ -119,8 +153,10 @@ impl MoviePlayer {
     /// One vsync. `pictures`: how many pictures the stream has (None while unknown: the decoder has not reached the
     /// end yet); `latency`: samples queued for the audio device. Returns the frame to show.
     pub fn tick(&mut self, pad: &PadState, pictures: Option<u32>, latency: u32) -> MovieFrame {
+        let fi = self.fade_in;
         let frame = match self.phase {
-            Phase::FadeIn(k) if k < FADE_FRAMES => MovieFrame { phase: self.phase, black: fade_to_black_coverage(FADE_FRAMES, k), picture: None },
+            Phase::FadeIn(_) if self.black_entry => MovieFrame { phase: self.phase, black: 1.0, picture: None },
+            Phase::FadeIn(k) if k < fi => MovieFrame { phase: self.phase, black: fade_to_black_coverage(fi, k), picture: None },
             Phase::FadeIn(_) => MovieFrame { phase: self.phase, black: 1.0, picture: None },
             Phase::Playing(k) => {
                 let pic = self.picture_at(k, latency);
@@ -140,7 +176,7 @@ impl MoviePlayer {
             Phase::Done => MovieFrame { phase: Phase::Done, black: 0.0, picture: None },
         };
         self.phase = match self.phase {
-            Phase::FadeIn(k) if k < FADE_FRAMES => Phase::FadeIn(k + 1),
+            Phase::FadeIn(k) if k < fi => Phase::FadeIn(k + 1),
             Phase::FadeIn(_) => Phase::Playing(0),
             Phase::Playing(k) => Phase::Playing(k + 1),
             Phase::FadeOut(k) if k < FADE_FRAMES => Phase::FadeOut(k + 1),

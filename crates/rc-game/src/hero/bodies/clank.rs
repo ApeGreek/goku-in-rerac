@@ -892,6 +892,8 @@ pub(crate) fn after_update(h: &mut Hero, table: &mut MobyTable, body: MobyId, hi
     let shown = table.mobys.get(body).is_some_and(|m| m.mode & crate::moby_runtime::mode::HIDDEN == 0);
     let hero = h.clone();
     let (glow, flash) = (h.bodies.glow, h.bodies.flash);
+    // 1.7, or 3.1 with the cheat 0x15edb3 (`crate::cheats`).
+    let big = h.cheats.on(crate::cheats::slot::CLANK);
     if shown {
         if let Some(g) = glow {
             hits.world(table, &hero, rng, counter, &mut |w| {
@@ -905,7 +907,7 @@ pub(crate) fn after_update(h: &mut Hero, table: &mut MobyTable, body: MobyId, hi
                     m.rows[..3].copy_from_slice(&mtx[..3]);
                 }
                 w.build_matrix(g);
-                let mut k = 1.7f32;
+                let mut k = if big { 3.1f32 } else { 1.7f32 };
                 if flash != 0 { k *= 1.4; }
                 let cls = w.classes.info(super::GLOW_CLASS).map_or(1.0, |i| i.scale);
                 let s = &mut w.mm(g).scale;

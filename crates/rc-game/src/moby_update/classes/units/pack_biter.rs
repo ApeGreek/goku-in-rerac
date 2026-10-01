@@ -28,7 +28,7 @@
 //! | no health: untargetable, 8·dt / 10·dt (×1.35 for a hit of class 0xb4), `0x271418(atan(pos − target), m, K, 5, 1, 0)`, keys 11 / 18, `SetDeathBits(m, 0x200 on Giant Clank (body 2) else 0, −1)`, +0x94 = 0, state 99, flash 0x78 | the death flight, the bolts and the save bit | [`pre`] (`knock::start`, `crate_::set_death_bits`); the direction reads a stale stack target in the game: the port's is Ratchet [L] |
 //! | else: (×1.35), `0x271418(…, 6, 1, 0)`, keys 5 / 10, state 6, flash 0xfa, +0x26 = `ticks(60)` | the knockback | [`pre`] |
 //! | `0x27cf10` flash start; +0xa4 = 0xff | | [`pre`] (`flash::start`) |
-//! | `0x282a90(2.1, m, 0, +0x230)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x282a90(2.1, m, 0, +0x230)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn and within 38 of the camera: `0x26f020`, +0x7f = 0x1e | the shadow probe | [`pre`] (`shadows::probe_down`) |
 //! | farther than 40 (xy) from Ratchet → nothing more this tick | | [`update`] |
 //! | +0x228: body ≠ 2 → hidden (+0x30 0xff, +0x94 0, mode \| 0x41, untargetable), done; body 2 → shown (+0x30 0x40, the class's collision, targetable) | the Giant Clank-sized pack (Quartu) | [`pre`] (reads `Hero::mode`: never 2 until G-HERO-005's body switch) |
@@ -224,7 +224,8 @@ fn pre(w: &mut World, id: MobyId) -> Option<target::Target> {
         }
     }
     w.mm(id).hit_slot = 0xff;
-    // 0x282a90(2.1, m, 0, +0x230): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x282a90(2.1, m, 0, +0x230): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.1, id, 0, id, 0x230);
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), cam) < 38.0 {
         crate::shadows::probe_down(w, id);

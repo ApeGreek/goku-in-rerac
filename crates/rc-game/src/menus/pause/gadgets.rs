@@ -154,6 +154,17 @@ pub struct PreviewView {
     pub rot: [f32; 3],
 }
 
+/// What the engine draws for the end page's Helpdesk girl (`media::girl_draw`, `MediaMenu::girl_view`): her moby (class `media::GIRL_CLASS`) at
+/// the menu camera + `media::GIRL_OFFSET`, turned by π, posed by `anim` (and the blend's snapshot key).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GirlView {
+    pub rect: [i32; 4],
+    pub anim: rc_formats::moby_anim::AnimState,
+    pub snapshot: Option<rc_formats::moby_anim::MobyFrame>,
+}
+
+impl Eq for GirlView {}
+
 /// The 3D widgets of the current page, for the engine (rebuilt by every draw).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GadgetsView {

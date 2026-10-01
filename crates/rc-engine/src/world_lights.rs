@@ -109,11 +109,14 @@ fn update(
     level: Res<crate::Level>,
     assets: Res<AssetServer>,
     mut state: Local<Option<WorldLights>>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     tfrags: Option<ResMut<crate::tfrag_lod::TfragLodState>>,
     ties: Option<ResMut<crate::tie_lod::TieLodState>>,
     shrubs: Option<ResMut<crate::shrub_render::ShrubSway>>,
 ) {
+    // A runtime level change (crate::level_switch): the new level's lights.
+    if generation.is_changed() { *state = None; }
     let w = state.get_or_insert_with(|| setup(&level, &assets));
     let empty = PointLights::default();
     let bank = match &play {

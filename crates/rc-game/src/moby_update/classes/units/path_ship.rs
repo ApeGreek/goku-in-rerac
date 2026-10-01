@@ -18,7 +18,7 @@
 //! | state 1 | `SoundIsAlive(m, slot)` (0x28cfa0) no → slot = `PlayClassSound(1, 4, m)` (loop); t += 20·dt / +0x70 (gp−0x4c9c); t > count → t −= count; `0x264718(t, path, level 9, &position, &rotation, 0)` (L01 0x277d40) | [`update`] (`path::pose`) |
 //! | | collision (+0x94) on (class +0x10) when x ≥ 8 and y ≥ 8, else off; drawn → 0x2eca30(m, old position); a hit with damage > 0 → 2 | [`update`] |
 //! | 0x2eca30 | for joints 0..2 (0x251e38 = L01 0x2645a8): one blob: k1 0.666, k2 0.333, jitter 1.5, w1 `randf(0.333, 0.75)`, w2 `randf(1, 2)`, colours 0x600080ff / 0x6020a0c0 and 0x20802040 / 0x20601020, phases 23 / 11 / 11 with spread 0.5, byte 9 = 8 + 0x60 (gp−0x4c7c .. −0x4c44) | [`exhaust`] (`engine_trail::blob`) |
-//! | state 2 | level 02: the kill counter 0x15edf4 + 1 > 2 and skill point 0x13d40a clear → set, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)`; level 09: Ratchet in state 0x32, counter 0x15edfc + 1 > 4, skill point 0x13d417 | NOT ported: G-SAV-007 (the skill points and their counters) |
+//! | state 2 | level 02: the kill counter 0x15edf4 + 1 > 2 and skill point 0x13d40a clear → set, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)`; level 09: Ratchet in state 0x32, counter 0x15edfc + 1 > 4, skill point 0x13d417 | [`update`] (`story::award_skill_point`; the counters in `Services::level_words` [L: core words, kept per level load]) |
 //! | | `PlayClassSound(0, 0, m)`; v = row 0·0.15 (gp−0x4c84 · [0x15ed60]), v.z += 0.08 (gp−0x4c80); `BreakFxB(12·dt², m, 0x5f2 / 0x5f5 / 0x790, position, rotation, ticks(90), 0, v, 0)` (0x2655b0 = L01 0x278ad8); `DeleteMoby` | [`update`] (`fx::break_piece_with`) |
 //! | drawn | glow (+0x90) = `FastTweenColor(clamp(sin(phase)·4 − 3, 0, 1), 0x80302020, 0x803030c0)` (gp−0x4c8c / −0x4c88); phase += 360°·dt (gp−0x4c90) | [`update`] |
 //! | 0x2ec3f0 | group ≠ −1: joints 3, 4, 5 → +0x80 / +0x90 / +0xa0; +0xb0 = 0x30 alpha with the glow's r, g, b (+0x90..+0x92); frame ≠ 0 and the word ≠ frame → word = frame, `RegisterDrawCallback(0x2ec308, m)` (0x20a2c8 = L01 0x21afe0) | [`glow_points`] (`Callback::UnitGlow`) |
@@ -37,6 +37,10 @@ use super::GlowQuad;
 pub const UPDATE_FN: u32 = 0x2e_c4b8;
 pub const REFERENCE_LEVEL: u32 = 2;
 pub const CLASSES: [i16; 1] = [1212];
+/// 0x15edf4: the path ships shot down on level 02 (gp−0x7e0c).
+pub const KILLS_02: u32 = 0x15_edf4;
+/// 0x15edfc: the path ships shot down from the turret on level 09 (gp−0x7e04).
+pub const KILLS_09: u32 = 0x15_edfc;
 pub const PIECES: [i16; 3] = [0x5f2, 0x5f5, 0x790];
 pub const SPEED_UPS: f32 = 20.0;
 pub const GLOW: (u32, u32) = (0x8030_2020, 0x8030_30c0);
@@ -122,6 +126,19 @@ pub fn update(w: &mut World, id: MobyId) {
             if hit.is_some_and(|h| 0.0 < h.damage.to_f32()) { w.mm(id).state = 2; }
         }
         2 => {
+            // The kill counters (session words 0x15edf4 / 0x15edfc) and their skill points: level 02, the third kill
+            // → 0x13d40a; level 09 from the turret (state 0x32), the fifth → 0x13d417.
+            use crate::moby_update::story::{award_skill_point, skill_index};
+            if w.svc.level == 2 {
+                let n = w.svc.level_words.get(&KILLS_02).copied().unwrap_or(0) as i32 + 1;
+                w.svc.level_words.insert(KILLS_02, n as u32);
+                if 2 < n { award_skill_point(w, skill_index(0x13_d40a)); }
+            }
+            if w.svc.level == 9 && w.hero.state == 0x32 {
+                let n = w.svc.level_words.get(&KILLS_09).copied().unwrap_or(0) as i32 + 1;
+                w.svc.level_words.insert(KILLS_09, n as u32);
+                if 4 < n { award_skill_point(w, skill_index(0x13_d417)); }
+            }
             w.play_sound(0, 0, id);
             let (pos, rot, r0) = (w.m(id).position, w.m(id).rotation, w.m(id).rows[0]);
             let mut v = c::scale(r0, 0.15 * SPEED);

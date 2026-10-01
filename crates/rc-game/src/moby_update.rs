@@ -10,6 +10,7 @@ pub mod interact;
 pub mod manip;
 pub mod scheduler;
 pub mod services;
+pub mod story;
 pub mod triggers;
 
 pub use scheduler::{Groups, Scheduler};

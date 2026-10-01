@@ -30,10 +30,11 @@
 //! | 0x2ff4dc..0x2ff57c | `FastDecTimer(P+0x168)` out: P+0x168 = (int)(`randf(180, 300)`·0x15ed68); a glance point 6 units away at yaw + `randf(−90, 90)`° and pitch `randf(0, 30)`° (`0x277b50`), + the NPC's position → P+0x150 (3 draws) | [`look_at`] |
 //! | 0x2ff580..0x2ff5c0 | P+0x164 ≠ 0: look at his body point, k 0.04; else at P+0x150, k 0.02 (d 0.3) | [`look_at`] |
 //! | 0x2ff5cc..0x2ff6d4 | from the eye (position + 1 z): yaw rel. to the NPC's (±π/2), pitch −atan2(z, xy) (±π/6); P+0x138 (list 1 z) = yaw/2, P+0xb4 (list 0 y) = pitch·1.25, P+0xb8 (list 0 z) = yaw/2 | [`look_at`] |
-//! | 0x2ff6d8..0x2ff6fc | the big-head cheat 0x15edb0: P+0xc0 (list 0's scale) = 2.75 | NOT ported (G-SAV-006, conditional; cheats off) |
+//! | 0x2ff6d8..0x2ff6fc | the big-head cheat 0x15edb0: P+0xc0 (list 0's scale) = 2.75 (k, d × 0x15ed64 = 1 either way) | [`look_springs`] |
 //! | 0x2ff700..0x2ff734 | `FUN_002777d8(k, d, npc, P+0x50, 0)`, `(k, d, npc, P+0xd0, 1)` (k, d × 0x15ed64 = 1) | [`crate::moby_update::manip::look`] |
 //!
-//! Not ported besides: `FUN_002ff028` at the top (the big-head cheat's manipulator on the scene actors: G-SAV-006).
+//! `FUN_002ff028` at the top: the big-head cheat's manipulator on the scene actors of this class or 0x32b at 2.1
+//! ([`crate::moby_update::manip::scene_big_head`]).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature as c;
@@ -49,6 +50,9 @@ const PLACE_DISTANCE: f32 = 2.2;
 /// `TalkingNpcUpdate` (0x2ff118).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x50 { return; }
+    // FUN_002ff028: the actors' big-head cheat on this class's (or 0x32b's) scene actors at 2.1 (gp−0x4ed0).
+    let own = w.m(id).o_class;
+    manip::scene_big_head(w, &[own, 0x32b], 0, f32::from_bits(0x4006_6666));
     interact::poll_scene_end(w, id);
     // Drawn last frame and within 32 units of the camera: the shadow probe, shadow range 0x1a.
     if w.m(id).visible != 0 {
@@ -120,21 +124,60 @@ pub struct LookLayout {
     pub glance_timer: usize,
     /// Only while sequence B (+0x53) is 0 (774's gate; 1446 has none).
     pub gate_seq_b: bool,
+    /// The eye's height over the NPC's position (774: 1; Aridia's surfer agent 788: 2).
+    pub eye: f32,
+    /// The pitch record's y = pitch · `pitch_k` (774: 1.25; the Aridia NPCs: 1).
+    pub pitch_k: f32,
+    /// The pitch record's z = yaw · `yaw_a`, the yaw record's z = yaw · `yaw_b` (774: 0.5 / 0.5; 786: 0.7 / 0.3;
+    /// 788: 0.6 / 0.4).
+    pub yaw_a: f32,
+    pub yaw_b: f32,
+    /// The "seen" and glance timers are s16 (`FastDecTimer__FRs`: 786) instead of s32.
+    pub short_timers: bool,
+    /// The sequence B under which the targets are written when gated (0; Batalia's deserter 1144: 1).
+    pub gate_main: u8,
+    /// A second sequence B under which the targets are still written (Rilgar's race girl 918: 2; 0xff: none).
+    pub gate_alt: u8,
+    /// The spring rate while Ratchet is seen (774: 0.04; 918: 0.03).
+    pub k_seen: f32,
+}
+
+impl LookLayout {
+    /// The layout of a class whose look-at matches 774's but for its records and timers (the defaults of the
+    /// optional fields: eye 1, pitch × 1.25, yaw 0.5 / 0.5, s32 timers, no second gate, k 0.04).
+    pub const fn talker(pitch: (usize, u8), yaw: (usize, u8), glance: usize, seen: usize, glance_timer: usize, gate_seq_b: bool) -> LookLayout {
+        LookLayout { pitch, yaw, glance, seen, glance_timer, gate_seq_b, eye: 1.0, pitch_k: 1.25, yaw_a: 0.5, yaw_b: 0.5, short_timers: false, gate_main: 0, gate_alt: 0xff, k_seen: f32::from_bits(0x3d23_d70a) }
+    }
 }
 
 /// P+0x50 / P+0xd0: the look records on joint lists 0 (head) and 1 (neck); P+0x150 the glance point, P+0x164 the
 /// "seen Ratchet" timer, P+0x168 the glance timer.
-pub const LAYOUT: LookLayout = LookLayout { pitch: (0x50, 0), yaw: (0xd0, 1), glance: 0x150, seen: 0x164, glance_timer: 0x168, gate_seq_b: true };
+pub const LAYOUT: LookLayout = LookLayout::talker((0x50, 0), (0xd0, 1), 0x150, 0x164, 0x168, true);
 
 /// The head look-at tail of `TalkingNpcUpdate` (module doc table).
 pub fn look_at(w: &mut World, id: MobyId) { look_at_layout(w, id, &LAYOUT) }
 
-/// The head look-at on the layout `l` (module doc table).
+/// The head look-at on the layout `l` (module doc table): the targets, then the two records' springs.
 pub fn look_at_layout(w: &mut World, id: MobyId, l: &LookLayout) {
+    let (k, d) = look_targets(w, id, l);
+    look_springs(w, id, l, k, d);
+}
+
+/// The two records' springs `FUN_002777d8(k, d, npc, rec, list)` (k, d × 0x15ed64 = 1).
+pub fn look_springs(w: &mut World, id: MobyId, l: &LookLayout, k: f32, d: f32) {
+    // 0x2ff6d8: the actors' big-head cheat 0x15edb0: the head record's scale request (+0x70) = 2.75.
+    if w.svc.cheats.on(crate::cheats::slot::ACTORS) { p::set_ff(&mut w.mm(id).pvars, l.pitch.0 + manip::rec::REC_SCALE, f32::from_bits(0x4030_0000)); }
+    manip::look(w, id, id, l.pitch.0, l.pitch.1, k, d);
+    manip::look(w, id, id, l.yaw.0, l.yaw.1, k, d);
+}
+
+/// The targets half of [`look_at_layout`]; returns the springs' (k, d).
+pub fn look_targets(w: &mut World, id: MobyId, l: &LookLayout) -> (f32, f32) {
     let need = [l.pitch.0 + manip::rec::SIZE, l.yaw.0 + manip::rec::SIZE, l.glance + 0x10, l.seen + 4, l.glance_timer + 4].into_iter().max().unwrap_or(0);
     if w.m(id).pvars.len() < need { w.mm(id).pvars.resize(need, 0); }
     let (mut k, d) = (f32::from_bits(0x3ca3_d70a), f32::from_bits(0x3e99_999a));
-    if !l.gate_seq_b || w.m(id).anim.seq_b == 0 {
+    let seq = w.m(id).anim.seq_b;
+    if !l.gate_seq_b || seq == l.gate_main || seq == l.gate_alt {
         let h = w.hero;
         let hp = h.pos.map(|x| x.to_f32());
         let body = h.body_point.map(|x| x.to_f32());
@@ -144,44 +187,47 @@ pub fn look_at_layout(w: &mut World, id: MobyId, l: &LookLayout) {
             let a = c::atan(body[0] - pos[0], body[1] - pos[1]);
             near = c::diff_rots(c::yaw(w, id), a) < std::f32::consts::FRAC_PI_2;
         }
+        // The timers' width (s32 `FastDecTimer__FRi`, or s16 `__FRs`).
+        let get = |w: &World, o: usize| if l.short_timers { c::pi16(w, id, o) as i32 } else { c::pi32(w, id, o) };
+        let set = |w: &mut World, o: usize, v: i32| if l.short_timers { c::set_pi16(w, id, o, v as i16) } else { c::set_pi32(w, id, o, v) };
+        let dec = |w: &mut World, o: usize| if l.short_timers { c::dec_timer_pvar_s16(w, id, o) } else { c::dec_timer_pvar_i32(w, id, o) };
         if near {
             if c::len3(h.disp.map(|x| x.to_f32())) > 0.01 {
                 let t = c::ticks(w, 120);
-                c::set_pi32(w, id, l.seen, t);
+                set(w, l.seen, t);
             } else {
-                c::dec_timer_pvar_i32(w, id, l.seen);
+                dec(w, l.seen);
             }
-        } else if c::pi32(w, id, l.seen) != 0 {
-            c::set_pi32(w, id, l.seen, 0);
+        } else if get(w, l.seen) != 0 {
+            set(w, l.seen, 0);
             c::set_pv4(w, id, l.glance, body);
         }
-        if c::dec_timer_pvar_i32(w, id, l.glance_timer) != 0 {
+        if dec(w, l.glance_timer) != 0 {
             let t = w.svc.timing.scale(crate::ps2v::Pf::f(w.rng.randf(180.0, 300.0))).to_f32() as i32;
-            c::set_pi32(w, id, l.glance_timer, t);
+            set(w, l.glance_timer, t);
             let deg = f32::from_bits(0x3c8e_fa35);
             let yaw = c::add_rot(c::yaw(w, id), w.rng.randf(-90.0, 90.0) * deg);
             let pitch = w.rng.randf(0.0, 30.0) * deg;
             let g = [6.0 * yaw.cos() * pitch.cos(), 6.0 * yaw.sin() * pitch.cos(), 6.0 * pitch.sin(), 0.0];
             c::set_pv4(w, id, l.glance, c::add(g, [pos[0], pos[1], pos[2], 0.0]));
         }
-        let target = if c::pi32(w, id, l.seen) != 0 {
-            k = f32::from_bits(0x3d23_d70a);
+        let target = if get(w, l.seen) != 0 {
+            k = l.k_seen;
             body
         } else {
             c::pv4(w, id, l.glance)
         };
-        let eye = [pos[0], pos[1], pos[2] + 1.0, pos[3]];
+        let eye = [pos[0], pos[1], pos[2] + l.eye, pos[3]];
         let v = c::sub(target, eye);
         let half_pi = std::f32::consts::FRAC_PI_2;
         let yaw = c::sub_rot(c::atan(v[0], v[1]), c::yaw(w, id)).clamp(-half_pi, half_pi);
         let lim = f32::from_bits(0x3f06_0a92);
         let pitch = (-c::atan(c::len2(v), v[2])).clamp(-lim, lim);
-        c::set_pf(w, id, l.yaw.0 + manip::rec::TARGET + 8, yaw * 0.5);
-        c::set_pf(w, id, l.pitch.0 + manip::rec::TARGET + 4, pitch * 1.25);
-        c::set_pf(w, id, l.pitch.0 + manip::rec::TARGET + 8, yaw * 0.5);
+        c::set_pf(w, id, l.yaw.0 + manip::rec::TARGET + 8, yaw * l.yaw_b);
+        c::set_pf(w, id, l.pitch.0 + manip::rec::TARGET + 4, pitch * l.pitch_k);
+        c::set_pf(w, id, l.pitch.0 + manip::rec::TARGET + 8, yaw * l.yaw_a);
     }
-    manip::look(w, id, id, l.pitch.0, l.pitch.1, k, d);
-    manip::look(w, id, id, l.yaw.0, l.yaw.1, k, d);
+    (k, d)
 }
 
 #[cfg(test)]

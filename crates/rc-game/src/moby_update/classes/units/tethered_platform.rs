@@ -165,6 +165,9 @@ fn make_piece(w: &mut World, core: MobyId, q: c::V, class: i16) -> Option<MobyId
 
 /// Level09 0x2c26c8 (module doc).
 pub fn update(w: &mut World, id: MobyId) {
+    // `gp−0x5838 += 1` (0x1613c8): the platforms updated this tick, read and reset by the help director 1000's skill
+    // point (`help_gaspar`).
+    *w.svc.level_words.entry(super::help_gaspar::PLATFORM_WORD).or_default() += 1;
     if w.m(id).pvars.len() < o::LEN { return; }
     let oc = w.m(id).o_class;
     match w.m(id).state {

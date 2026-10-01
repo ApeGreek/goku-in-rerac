@@ -249,6 +249,9 @@ type FxSlot = (Entity, Handle<Mesh>, Handle<FxPrimMaterial>, bool);
 pub struct FxSlots {
     slots: Vec<Option<FxSlot>>,
     fx: Vec<Option<Handle<Image>>>,
+    /// The render layer of the slots' entities (None: the default layer; the flight's draws are on the transition's
+    /// layer, crate::flight_render).
+    pub layer: Option<bevy::camera::visibility::RenderLayers>,
 }
 
 /// The assets the slots need.
@@ -307,6 +310,7 @@ impl FxSlots {
                                 Name::new(format!("{name} draw {k}")),
                             ))
                             .id();
+                        if let Some(l) = &self.layer { commands.entity(e).insert(l.clone()); }
                         self.slots[k] = Some((e, mesh, mat, true));
                         continue;
                     }
@@ -674,6 +678,8 @@ impl Plugin for FxDrawPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<FxPrimMaterial>::default())
             .init_resource::<FxDraw>()
+            // A runtime level change (crate::level_switch): the slots' entities are gone.
+            .add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<FxDraw>)
             .add_systems(PostUpdate, draw_list1.before(bevy::asset::AssetEventSystems));
     }
 }
@@ -754,8 +760,41 @@ fn draw_list1(
                         for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
                         out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
                     }
+                    // The ship's shadow (`0x2a2130`), flames (`0x2a2ab8`) and trail (`0x2a2d28`): rc_game::travel::ship's quads.
+                    Callback::ShipShadow | Callback::ShipFlames | Callback::ShipTrail => {
+                        let g = match cb {
+                            Callback::ShipShadow => cbs.ship.shadow.get(&id).cloned(),
+                            Callback::ShipFlames => cbs.ship.flames.get(&id).cloned(),
+                            _ => {
+                                let tr = &p.svc.travel;
+                                let flight = p.svc.game_mode == 6 && tr.sub == rc_game::travel::space::SUB_FLIGHT;
+                                Some(rc_game::travel::ship::trail_quads(&tr.trail, rc_game::travel::ship_index(tr.ship), flight))
+                            }
+                        };
+                        let Some(g) = g.filter(|g| !g.quads.is_empty()) else { continue };
+                        let mut b = PrimBuf::default();
+                        for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
+                        out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
+                    }
                     // Drawn by crate::water_render / crate::sea_render; the Walloper's arcs by crate::walloper_render; the
                     // range static by crate::visibomb_view.
+                    // The Metal Detector's scan (`0x2f1e28`): rc_game's buried_bolts::Scan squares, FX 8, additive.
+                    Callback::DetectorScan => {
+                        let s = &p.svc.buried.scan;
+                        if s.quads.is_empty() { continue; }
+                        let mut b = PrimBuf::default();
+                        for (q, rgba) in &s.quads { b.quad(*q, rc_game::moby_update::classes::buried_bolts::SCAN_ST, [*rgba; 4]); }
+                        out.push(FxGroup { fx: rc_game::moby_update::classes::buried_bolts::SCAN_FX, additive: true, prims: b });
+                    }
+                    // The disguise's glow quads (`0x229440` body 3: `0x2781d0(0.2, 0.08, point, 0x141634)`).
+                    Callback::DisguiseGlow => {
+                        let Some((pts, rgba)) = cbs.disguise else { continue };
+                        let mut b = PrimBuf::default();
+                        for pt in pts { glow_quad(&mut b, 0.2, 0.08, pt, rgba, cam); }
+                        out.push(FxGroup { fx: GLOW_FX, additive: true, prims: b });
+                    }
+                    // The Trespasser lock's minigame is 2-D: crate::scene_render draws it.
+                    Callback::TrespasserRings => {}
                     Callback::FireField760 | Callback::RipplePatches | Callback::Sea(_) | Callback::Walloper | Callback::RangeStatic | Callback::UnitFrame(_) => {}
                 }
             }

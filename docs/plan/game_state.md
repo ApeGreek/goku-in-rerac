@@ -287,3 +287,8 @@ vendor searches are bounded to the 12 slots (the game has no bound; unreachable 
 3002 packer / codec (0x207b08 / 0x1fa860; the chunk saves as held), landmark capture 0x208770, challenge mode
 0x226b08, the slot preview, the RAM-dump file `BASCUS-97199RATCHET`, PCSX2 `.ps2` card import/export, help
 sounds and new-planet messages. The Veldin-play-dependent numbers (bolts, extra ammo) still need a PCSX2 dump.
+
+**2026-10-01 (saves lane).** The card, the saves and the loads run natively: `rc_game::memcard` (`memcard_Update`, the
+card monitor, `memcard_Save`, the whole saves, the slot previews `memcard_RestoreInfo`) on a card folder, the landmark
+capture (`GameState::capture_landmarks`), challenge mode (`GameState::challenge_reset`), the front end and the card
+pages: docs/plan/progression.md `## saves`. Left: G-SAV-011 (native leftovers), G-SAV-012 (the title world).

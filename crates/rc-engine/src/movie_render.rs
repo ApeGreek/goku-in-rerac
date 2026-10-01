@@ -28,6 +28,12 @@
 //!   `game_camera::letterbox`), nearest-sampled, above the HUD; the black fade is a UI quad whose alpha makes the
 //!   linear-light blend give `C·(1 − coverage)` in display bytes, like the GS's black quad.
 //!
+//! * **Other callers** (docs/plan/progression.md `## media`): [`request`] with [`MovieRequest::movie_b`] (`PlayMovieB`:
+//!   the Cinematics page, the ending `PlayMovieB(11)`), [`MovieRequest::movie_c`] (`PlayMovieC`: the extras, language 0),
+//!   [`play_attract`] (the title's attract loop, boot `fun_001e9488`: back to the interrupted mode, no music restart),
+//!   and the page menu's replays ([`MovieRequest::after_menu_fade`]: its `FadeToBlack(ticks(16))` before, the replay mode
+//!   0x15eed8 in [`crate::menu_render::MenuMode::replay`]).
+//!
 //! Environment (dev checks, not game options):
 //! - `RC_PLAY_MOVIE=<n>`: in-level movie n after gameplay tick 1 (as `RC_SCENE`), e.g. 3 = the Novalis holofilm.
 //! - `RC_MOVIE_SKIP=<k>`: press Start with L1 L2 R1 R2 held on movie-mode frame k (the skip test).
@@ -43,7 +49,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::ui::UiTargetCamera;
 use rc_game::menus::mode::Mode;
 use rc_game::moby_runtime::MobyId;
-use rc_game::movie_player::{MovieContext, MovieFrame, MoviePlayer, Phase, MOVIE_BASE_NTSC, SAMPLES_PER_VSYNC};
+use rc_game::movie_player::{MovieContext, MovieFrame, MoviePlayer, Phase, MOVIE_ATTRACT_BASE_NTSC, MOVIE_BASE_NTSC, MOVIE_B_BASE_NTSC, MOVIE_C_BASE_NTSC, SAMPLES_PER_VSYNC};
 use rc_game::pad::{button, PadState};
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -59,6 +65,57 @@ pub struct MovieRequest {
     pub movie: i32,
     /// The talker whose dialogue continues after the movie (0x179588).
     pub talker: Option<MobyId>,
+    /// The audio language (`StartPssMovie`'s third argument: 0x15ed88, or 0 for `PlayMovieC` and the attract movies).
+    pub language: Option<u8>,
+    /// The caller faded the last image to black before (the page menu's `FadeToBlack(ticks(16))`), and the entry fade
+    /// (4; the attract movies 12).
+    pub black_entry: bool,
+    pub fade_in: u32,
+    /// The replay mode 0x15eed8 the caller sets for this movie and clears after it (the attract movies: 2); None: the
+    /// global as it is ([`crate::menu_render::MenuMode::replay`], the page menu's post-actions set it).
+    pub replay: Option<i32>,
+    /// Who the movie returns to.
+    pub exit: MovieExit,
+}
+
+/// What follows the movie.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MovieExit {
+    /// `MovieExitToGameplay` 0x2ad2b8: mode 0, `music_start_track(level track, 1, 0x400)`, the talker refreshed.
+    #[default]
+    Gameplay,
+    /// The title's attract movie (boot `fun_001e9488`): the mode it interrupted again, no music restart.
+    #[allow(dead_code)] // the saves lane's title plays the attract movies ([`play_attract`])
+    FrontEnd,
+}
+
+impl MovieRequest {
+    /// `DialogStreamUpdate(n)` 0x2acf50: in-level movie n = `mpegs[2 + n]`, the game language.
+    pub fn in_level(n: i32, talker: Option<MobyId>) -> MovieRequest {
+        MovieRequest { file: (MOVIE_BASE_NTSC + n) as u32, movie: n, talker, language: None, black_entry: false, fade_in: rc_game::movie_player::FADE_FRAMES, replay: None, exit: MovieExit::Gameplay }
+    }
+    /// `PlayMovieB(n)` 0x2ad050: `mpegs[40 + n]`, the game language.
+    pub fn movie_b(n: i32) -> MovieRequest { MovieRequest { file: (MOVIE_B_BASE_NTSC + n) as u32, ..MovieRequest::in_level(n, None) } }
+    /// `PlayMovieC(n)` 0x2acfe8: `mpegs[70 + n]`, language 0.
+    pub fn movie_c(n: i32) -> MovieRequest { MovieRequest { file: (MOVIE_C_BASE_NTSC + n) as u32, language: Some(0), ..MovieRequest::in_level(n, None) } }
+    /// Boot `fun_001e9488(i)`: the title's attract movie `mpegs[80 + i]` (replay 2: any button skips; language 0; entry
+    /// fade `ticks(12)`; back to the title).
+    #[allow(dead_code)] // the saves lane's title plays the attract movies ([`play_attract`])
+    pub fn attract(i: i32) -> MovieRequest {
+        MovieRequest {
+            file: (MOVIE_ATTRACT_BASE_NTSC + i) as u32,
+            language: Some(0),
+            fade_in: rc_game::movie_player::ATTRACT_FADE,
+            replay: Some(2),
+            exit: MovieExit::FrontEnd,
+            ..MovieRequest::in_level(i, None)
+        }
+    }
+    /// After the page menu's `FadeToBlack(ticks(16))` (drawn by crate::menu_render over the menu image).
+    pub fn after_menu_fade(mut self) -> MovieRequest {
+        self.black_entry = true;
+        self
+    }
 }
 
 static QUEUE: Mutex<VecDeque<MovieRequest>> = Mutex::new(VecDeque::new());
@@ -69,8 +126,20 @@ fn queue() -> std::sync::MutexGuard<'static, VecDeque<MovieRequest>> { QUEUE.loc
 /// negative n is ignored as in the game. The movie starts this frame (the rest of the tick that asked has run).
 pub fn request_in_level(n: i32, talker: Option<MobyId>) {
     if n < 0 { return; }
-    queue().push_back(MovieRequest { file: (MOVIE_BASE_NTSC + n) as u32, movie: n, talker });
+    request(MovieRequest::in_level(n, talker));
 }
+
+/// Any movie (`PlayMovieB` / `PlayMovieC` / the attract movies / the page menu's replays: [`MovieRequest`]'s
+/// constructors). A negative movie number is ignored as in the game (`if (-1 < n)`). It starts on the next movie frame.
+pub fn request(req: MovieRequest) {
+    if req.movie < 0 { return; }
+    queue().push_back(req);
+}
+
+/// The title's attract movie i (boot `fun_001e9488`, the `saves` lane's title calls it after its idle time): see
+/// [`MovieRequest::attract`]. [`MovieState::busy`] tells when it is over.
+#[allow(dead_code)] // its caller is the saves lane's title (docs/plan/progression.md `## media`)
+pub fn play_attract(i: i32) { request(MovieRequest::attract(i)); }
 
 /// A movie is queued or playing: the gameplay tick is suspended.
 fn blocking(state: &MovieState) -> bool { state.running.is_some() || !queue().is_empty() }
@@ -117,6 +186,13 @@ pub struct MovieState {
     trace: bool,
     /// Movies played to the end or skipped (reports).
     pub finished: Vec<(u32, bool)>,
+    /// The mode the running movie interrupted (restored by a [`MovieExit::FrontEnd`] exit).
+    interrupted: Option<Mode>,
+}
+
+impl MovieState {
+    /// A movie is queued or playing (the title waits for its attract movie with this).
+    pub fn busy(&self) -> bool { blocking(self) }
 }
 
 #[derive(Component)]
@@ -148,7 +224,7 @@ fn setup(mut commands: Commands, mut state: ResMut<MovieState>, mut images: ResM
     let picture = commands.spawn((full(), ImageNode::new(state.image.clone()), Visibility::Hidden, Name::new("movie picture"))).id();
     let fade = commands.spawn((full(), BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)), Name::new("movie fade"))).id();
     // Above the HUD composite (same global z, higher local z).
-    let root = commands.spawn((full(), GlobalZIndex(i32::MAX), ZIndex(1), Visibility::Hidden, MovieUi, Name::new("movie"))).add_children(&[picture, fade]).id();
+    let root = commands.spawn((full(), GlobalZIndex(i32::MAX), ZIndex(1), Visibility::Hidden, MovieUi, Name::new("movie"), crate::level_switch::KeepAcrossLevels)).add_children(&[picture, fade]).id();
     (state.root, state.picture, state.fade) = (Some(root), Some(picture), Some(fade));
 }
 
@@ -269,7 +345,7 @@ fn movie_frame(
     if st.running.is_none() {
         let Some(req) = queue().pop_front() else { return };
         let path = movie_path(req.file);
-        let language = crate::hud_render::language() as u8;
+        let language = req.language.unwrap_or(crate::hud_render::language() as u8);
         let (tx, rx) = sync_channel(4);
         let spawn = std::thread::Builder::new().name(format!("movie {:03}", req.file)).spawn({
             let path = path.clone();
@@ -277,16 +353,21 @@ fn movie_frame(
         });
         if let Err(e) = spawn { eprintln!("movie: cannot start the decoder thread: {e}"); }
         let gs = persistent.as_ref().map(|s| &s.0.global);
-        let ctx = MovieContext { replay: 0, game_beaten: gs.is_some_and(|g| g.game_beaten != 0), completes: gs.map_or(0, |g| g.completes), level: crate::level_load::level_index() as i32 };
+        // 0x15eed8: the caller's replay mode (fun_001e9488 sets 2), else the global as the page menu left it.
+        if let (Some(r), Some(m)) = (req.replay, menu.as_mut()) { m.replay = r; }
+        let replay = req.replay.unwrap_or_else(|| menu.as_ref().map_or(0, |m| m.replay));
+        let ctx = MovieContext { replay, game_beaten: gs.is_some_and(|g| g.game_beaten != 0), completes: gs.map_or(0, |g| g.completes), level: crate::level_load::level_index() as i32 };
         println!(
             "movie: app frame {}: DialogStreamUpdate({}) → StartPssMovie(mpegs[{}], language {language}) {}: mode 1, sounds and music stopped",
             frame_no.0, req.movie, req.file, path.display()
         );
         if let Some(a) = audio.as_mut() { a.system().movie_stop(); }
+        st.interrupted = menu.as_ref().map(|m| m.state.mode);
         if let Some(m) = menu.as_mut() { m.state.set(Mode::Movie); }
+        let player = MoviePlayer::new(ctx).with_entry(req.black_entry, req.fade_in);
         st.running = Some(Running {
             req,
-            player: MoviePlayer::new(ctx),
+            player,
             rx: Mutex::new(rx),
             opened: false,
             audio: None,
@@ -383,11 +464,30 @@ fn movie_exit(
     st.finished.push((rt.req.file, rt.player.skipped));
     set_visible(&mut vis, st.root, false);
     set_visible(&mut vis, st.picture, false);
-    if let Some(a) = audio.as_mut() { a.system().movie_exit(); }
-    if let Some(m) = menu.as_mut() { m.state.set(Mode::Gameplay); }
-    if let (Some(npc), Some(p)) = (rt.req.talker, play.as_mut()) {
-        p.svc.interact.talker = Some(npc);
-        p.svc.interact.scene_ended = true;
+    let interrupted = st.interrupted.take();
+    match rt.req.exit {
+        MovieExit::Gameplay => {
+            // MovieExitToGameplay: replay mode 2 (the menu's in-level replays) back to 0 (0x15eed8).
+            if let Some(m) = menu.as_mut() {
+                if m.replay == 2 { m.replay = 0; }
+            }
+            if let Some(a) = audio.as_mut() { a.system().movie_exit(); }
+            if let Some(m) = menu.as_mut() { m.state.set(Mode::Gameplay); }
+            if let Some(p) = play.as_mut() {
+                if p.svc.game_mode == 1 { p.svc.game_mode = 0; }
+            }
+            if let (Some(npc), Some(p)) = (rt.req.talker, play.as_mut()) {
+                p.svc.interact.talker = Some(npc);
+                p.svc.interact.scene_ended = true;
+            }
+        }
+        MovieExit::FrontEnd => {
+            // fun_001e9488's tail: 0x15eed8 = 0, FadeToBlack(4), the idle counter 0x15f604 = 0 (the title's); no music.
+            if let Some(m) = menu.as_mut() {
+                m.replay = 0;
+                m.state.set(interrupted.unwrap_or(Mode::Gameplay));
+            }
+        }
     }
 }
 
@@ -410,7 +510,8 @@ mod tests {
         queue().clear();
         request_in_level(3, None);
         request_in_level(-1, None);
-        assert_eq!(queue().pop_front(), Some(MovieRequest { file: 5, movie: 3, talker: None }));
+        assert_eq!(queue().pop_front(), Some(MovieRequest::in_level(3, None)));
+        assert_eq!(MovieRequest::in_level(3, None).file, 5);
         assert!(queue().is_empty());
     }
 }

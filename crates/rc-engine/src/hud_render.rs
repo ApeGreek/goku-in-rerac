@@ -236,8 +236,20 @@ pub struct LevelHud {
     pub lang: u32,
 }
 
-/// `RC_LANG`, default English.
-pub fn language() -> u32 { std::env::var("RC_LANG").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(rc_formats::strings::lang::ENGLISH) }
+/// 0x15ed88, the game's language: `RC_LANG` (default English) until the front end's Language list changes it
+/// ([`set_language`]); every later load (the level's text, the help voice bank, the movies' and scenes' language, the
+/// space plates) reads it.
+pub fn language() -> u32 {
+    let v = LANGUAGE.load(std::sync::atomic::Ordering::Relaxed);
+    if v != u32::MAX { return v; }
+    std::env::var("RC_LANG").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(rc_formats::strings::lang::ENGLISH)
+}
+
+/// The runtime language (u32::MAX: not set, `RC_LANG` applies).
+static LANGUAGE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// 0x15ed88 = `lang` (`MenuSetPostAction` action 9).
+pub fn set_language(lang: u32) { LANGUAGE.store(lang, std::sync::atomic::Ordering::Relaxed); }
 
 /// Reads `hud_header`, the banks, the overlay's glyph tables, the FX textures and the level text.
 pub fn load(root: &Path, index: u32, core: &rc_formats::level::LevelCore, core_index: &[u8], core_data: &[u8], gameplay: &[u8]) -> Result<LevelHud> {
@@ -507,9 +519,11 @@ pub struct HudBuild;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Hud2dHook>().init_resource::<SceneLayer>().init_resource::<HudFeed>();
+        // A runtime level change (crate::level_switch): the level's HUD is built again by `setup`.
+        app.add_systems(crate::level_switch::LevelUnload, (crate::level_switch::reset::<Hud2dHook>, crate::level_switch::reset::<SceneLayer>, crate::level_switch::reset::<HudFeed>, crate::level_switch::remove::<HudRuntime>, crate::level_switch::remove::<crate::hud_images::HudImages>));
         if std::env::var("RC_HUD").is_ok_and(|v| v.trim() == "0") { return; }
         app.add_plugins((Material2dPlugin::<HudMaterial>::default(), UiMaterialPlugin::<HudComposite>::default(), UiMaterialPlugin::<HudStaticComposite>::default()))
-            .add_systems(Startup, setup)
+            .add_systems(crate::level_switch::LevelStartup, setup)
             .add_systems(Update, (target_main_camera, tick_and_build).chain().in_set(HudBuild));
     }
 }

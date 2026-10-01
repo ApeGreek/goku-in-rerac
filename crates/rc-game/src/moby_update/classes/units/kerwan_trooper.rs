@@ -32,7 +32,7 @@
 //! | address | what it does | ported / not |
 //! |---|---|---|
 //! | `0x24e830(+0x270, m, &rec)` (= `0x274b78`); d = xy distance to the target | | [`update`] (`target::acquire`) |
-//! | `0x251d70(2.5, +0x150)`: the head record's scale = 2.5 under the big-head cheat (0x15edb7), else 1.0 | | the 1.0 written [`update`]; the cheat branch NOT ported (G-SAV-006) |
+//! | `0x251d70(2.5, +0x150)`: the head record's scale = 2.5 under the big-head cheat (0x15edb7), else 1.0 | | [`update`] (`manip::big_head_scale`) |
 //! | +0x262 = 1: mission (+0xb0) not done → return; done → no collision (+0x94 = 0), mode \|= 0x41, return | the one hidden until its mission | [`update`] |
 //! | game mode 0x15f5c4 = 2 → mode \|= 0x41; else (state ≠ 0xe) mode &= ~0x41 | hidden in cutscenes | [`update`] |
 //! | out of [2, 1021]³, or no path (+0x134 = −1) outside 0xd → `DeleteMoby` | | [`update`] |
@@ -960,8 +960,8 @@ pub fn update(w: &mut World, id: MobyId) {
     let range = c::pf(w, id, pv::SIGHT);
     let t = target::acquire(w, id, range);
     let d = c::dist2(c::pos(w, id), t.pos);
-    // `0x251d70(2.5, +0x150)`: the big-head cheat (0x15edb7, G-SAV-006) would write 2.5.
-    c::set_pf(w, id, pv::HEAD + crate::moby_update::manip::rec::REC_SCALE, 1.0);
+    // `0x251d70(2.5, +0x150)`: the head record's scale request, 2.5 with the big-head cheat (0x15edb7), else 1.0.
+    crate::moby_update::manip::big_head_scale(w, 2.5, id, pv::HEAD);
     if c::pu8(w, id, pv::HIDDEN) == 1 {
         if !mission_done(w, id) { return; }
         let m = w.mm(id);

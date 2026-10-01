@@ -19,6 +19,7 @@
 //! | 13 | 0x28a920 / 0x2954d0 | generic 0x295040(120, 8) | 2 |
 //! | 15 | 0x28aa98 / 0x279000 | generic 0x278b68(120, 8) | 1 |
 //! | 17 | 0x28ac88 / 0x283008 | inline: 240 kind 1 + 16 kind 0 | 1 |
+//! | the title world ([`TITLE_LEVEL`]) | boot `update_sky_effects` 0x22ae70 | inline, after `srand(12345)` (`set_global_state_slot(0x3039)`): 246 kind 1 (texture 1) in a band + 10 kind 0 (texture 1) | 2 |
 //!
 //! **Record** (0x20 bytes, the particle record's first half): byte 0 kind (0 moving, 1/3 twinkle, 2 fixed),
 //! byte 1 "drawn" flag (written by `SkySpriteProc`), byte 2 sky texture index (header +0x10 table; < 0 = not
@@ -79,6 +80,15 @@ const THIRTY_SIX: F = 0x4210_0000;
 const SIXTEEN: F = 0x4180_0000;
 /// 2⁻⁸ (0x3b800000).
 const INV256: F = 0x3b80_0000;
+/// The key of the title world's sky (boot `update_sky_effects`; not a level number).
+pub const TITLE_LEVEL: u32 = u32::MAX;
+/// The title's `srand(12345)` before it generates (`set_global_state_slot(0x3039)`: newlib's rand state).
+pub const TITLE_SEED: u32 = 0x3039;
+/// −3.0 (0xc0400000), 0.2, 0.09, 1.2: the title twinklers' band (azimuth −3 ± 0.2·π, polar 1.2 + 0.09·[−π, π)).
+const MINUS_THREE: F = 0xc040_0000;
+const POINT_TWO: F = 0x3e4c_cccd;
+const POINT_09: F = 0x3db8_51ec;
+const ONE_POINT_TWO: F = 0x3f99_999a;
 /// 0.16 (0x3e23d70a): moving-star size, generic dispatch and 02.
 const SIZE_MOVING: F = 0x3e23_d70a;
 /// 0.18 (0x3e3851ec): moving-star size on 06 and 17.
@@ -134,6 +144,8 @@ pub enum Variant {
     L06,
     /// Level 17 inline (full-sphere twinklers, table-coloured moving stars).
     L17,
+    /// The title world (boot 0x22ae70): twinklers in a band of the sky on texture 1, moving stars on texture 1.
+    Title,
 }
 
 /// A level's star step.
@@ -160,6 +172,7 @@ pub fn level_stars(level: u32) -> Option<LevelStars> {
         13 => s(Variant::Generic, 0x78, 0, 8, 2),
         6 => s(Variant::L06, 0xea, 6, 16, 1),
         17 => s(Variant::L17, 0xf0, 0, 16, 1),
+        TITLE_LEVEL => s(Variant::Title, 0xf6, 0, 10, 2),
         _ => return None,
     })
 }
@@ -237,6 +250,38 @@ fn gen_twinkle(r: &mut Star, rng: &mut Rng, kind: u8, tex_add: u8, sphere: bool,
     r.set_u32(0xc, base);
 }
 
+/// The title's twinkle generator (boot 0x22ae70): kind 1, `randi(256)` → +0xc, texture 1, ALPHA 0x48, rotation =
+/// `rand_angle`, size = (`randi(24)` + 32)·2⁻⁸, a = `fast_add_rotations(−3, rand_angle·0.2)`, b = `rand_angle·0.09 + 1.2`;
+/// x = cos a·sin b·50, y = sin a·sin b·50, z = cos b·50; g = `randi(24)`, A = `randi(32)`, `r16 & 1` picks the tint as
+/// [`gen_twinkle`] does.
+fn gen_title_twinkle(r: &mut Star, rng: &mut Rng) {
+    r.0[0] = KIND_TWINKLE;
+    let v = rng.randi(0x100);
+    r.0[2] = 1;
+    r.0[3] = ALPHA_ADDITIVE;
+    r.set_u16(0xc, v as u16);
+    let rot = rng.rand_angle_bits();
+    r.set_u32(8, rot);
+    let s = rng.randi(0x18);
+    r.set_u32(0x1c, ps2v::mul(ps2v::itof0(s + 0x20), INV256));
+    let ra = rng.rand_angle_bits();
+    let a = crate::moby_update::creature::add_rot(ps2v::to_f32(MINUS_THREE), ps2v::to_f32(ps2v::mul(ra, POINT_TWO))).to_bits();
+    let rb = rng.rand_angle_bits();
+    let b = ps2v::add(ps2v::mul(rb, POINT_09), ONE_POINT_TWO);
+    let x = ps2v::mul(ps2v::mul(cos(a), sin(b)), FIFTY);
+    let y = ps2v::mul(ps2v::mul(sin(a), sin(b)), FIFTY);
+    let z = ps2v::mul(cos(b), FIFTY);
+    r.set_position([x, y, z]);
+    let g = rng.randi(0x18) as u32;
+    let alpha = (rng.randi(0x20) as u32) << 24;
+    let base = if r16(rng) & 1 != 0 {
+        alpha.wrapping_add((g << 16).wrapping_add(BASE_RGBA))
+    } else {
+        alpha.wrapping_add((g << 8).wrapping_add(BASE_RGBA)) | g
+    };
+    r.set_u32(0xc, base);
+}
+
 /// Moving-star generator body: the two counters, then texture/size (and on 06/17 the table colour).
 fn gen_moving(r: &mut Star, rng: &mut Rng, tex: u8, tables: Option<&OverlayTables>) {
     r.0[0] = KIND_MOVING;
@@ -272,6 +317,9 @@ pub fn generate_over(level: u32, rng: &mut Rng, tables: &OverlayTables, initial:
             }
             Variant::L17 => {
                 if i < ls.twinkle { gen_twinkle(r, rng, KIND_TWINKLE, 0, true, 8) } else { gen_moving(r, rng, 1, Some(tables)) }
+            }
+            Variant::Title => {
+                if i < ls.twinkle { gen_title_twinkle(r, rng) } else { gen_moving(r, rng, 1, None) }
             }
             Variant::L06 => {
                 if i >= ls.twinkle + ls.fixed {
@@ -337,14 +385,14 @@ pub fn update(level: u32, stars: &mut [Star], rng: &mut Rng, tables: &OverlayTab
                 move_star(r);
                 let blink = r.u16(0xc) & 0x3f < 8;
                 let v = match ls.variant {
-                    Variant::Generic | Variant::L02 => if blink { 0x7020_20f0 } else { 0x2020_20f0 },
+                    Variant::Generic | Variant::L02 | Variant::Title => if blink { 0x7020_20f0 } else { 0x2020_20f0 },
                     Variant::L06 | Variant::L17 => (r.rgba() & 0x00ff_ffff) | if blink { 0x7000_0000 } else { 0x2400_0000 },
                 };
                 r.set_u32(4, v);
             }
             (Variant::Generic, KIND_TWINKLE) | (Variant::L02 | Variant::L06, KIND_TWINKLE_B) => twinkle(r, rng),
-            // 0x28ac88: every non-zero kind twinkles (only kind 1 exists there).
-            (Variant::L17, _) => twinkle(r, rng),
+            // 0x28ac88 / the title's 0x22ae70: every non-zero kind twinkles (only kind 1 exists there).
+            (Variant::L17 | Variant::Title, _) => twinkle(r, rng),
             (Variant::L06, KIND_FIXED) => {
                 let e = (r.0[0xe] as u32 + 1) % 0x30;
                 r.0[0xe] = e as u8;
@@ -390,7 +438,11 @@ impl SkyStars {
     /// One frame of the star step: generate if this is the first frame, then update.
     pub fn frame(&mut self, rng: &mut Rng) {
         if level_stars(self.level).is_none() { return; }
-        if self.stars.is_empty() { self.stars = generate_over(self.level, rng, &self.tables, &self.initial); }
+        if self.stars.is_empty() {
+            // The title's generator reseeds the one rand stream first (`set_global_state_slot(0x3039)`).
+            if self.level == TITLE_LEVEL { rng.srand(TITLE_SEED); }
+            self.stars = generate_over(self.level, rng, &self.tables, &self.initial);
+        }
         update(self.level, &mut self.stars, rng, &self.tables);
     }
 }

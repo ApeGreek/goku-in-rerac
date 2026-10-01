@@ -30,7 +30,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x2d0ec0` | the 0x15edb0 cheat in scenes: the scene actor of this class gets a manipulator at 2.75 | NOT ported (G-SAV-006) |
+//! | `0x2d0ec0` | the 0x15edb0 cheat in scenes: the scene actor of this class gets a manipulator at 2.75 | [`update`] (`manip::scene_big_head`) |
 //! | drawn and within 38 (3-D) of the camera (0x1677c0): `0x280000` (= `0x26f020`), +0x7f = 0x1e | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | `0x2d1030`, `0x2d1340`, `0x2d14b0`, `0x2d27b0` in that order | motion, move, the states, the look-at | [`motion`], [`moving`], [`brain`], [`look`] |
 //! | (port) the end of the talker's scene: `NpcTalkRefresh(m, +0x20, 1)` (the game's scene end calls it) | | [`update`] (`interact::poll_scene_end_at`) |
@@ -79,7 +79,7 @@
 //!
 //! **The look-at** `0x2d27b0`: in 0..5, 0xb, 0xc, 0xe, 0x10: from 1 above the feet to Ratchet: yaw (relative, ±70°) and
 //! pitch (−atan, clamped to [−30°, 15°]): head record pitch = it, yaw ·0.7, torso yaw ·0.3; the 0x15edb0 cheat's head
-//! scale 2.75 (NOT ported, G-SAV-006); `0x288320(0.02, 0.3, m, +0x160, 0)` / `(…, +0x1e0, 1)` (= `0x2777d8`). [`look`].
+//! scale 2.75 (P+0x1d0); `0x288320(0.02, 0.3, m, +0x160, 0)` / `(…, +0x1e0, 1)` (= `0x2777d8`). [`look`].
 //!
 //! **The gate 65** (U350, `0x2cb810`, pvars 0x10: +0x00 the turn velocity, +0x04 the closed yaw, +0x08 the twin): 0 → 1,
 //! +0x04 = yaw; not mirrored: `CreateMoby(65)` the twin (draw / update distance, mode \| 0x8000, position, rotation; its
@@ -87,7 +87,7 @@
 //! mirrored); a turn of 0 → 3. 1 / 3: nothing. `0x2cb990(gate)` (the commando's): a 65 in state 1 → flag 0x13d3e2 (90) = 1,
 //! state 2, its twin state 2. [`gate_update`], [`open_gate`].
 //!
-//! **Not ported:** the 0x15edb0 cheat's manipulators (G-SAV-006). **Depends on** 1157 (the level11 cutaway machine at
+//! **Depends on** 1157 (the level11 cutaway machine at
 //! 0x30d800, `units::pokitaru_cutaway`, ported 2026-10-01): phase 2 (state 0xb) ends when it reaches its state 5.
 //!
 //! **Not the game's, noted [L]:** the moby links (the gate's twin) are kept as index + 1; `0x285ab0` writes back the helm
@@ -634,7 +634,8 @@ fn look(w: &mut World, id: MobyId) {
         c::set_pf(w, id, pv::HEAD + t + 8, yaw * 0.7);
         c::set_pf(w, id, pv::TORSO + t + 8, yaw * 0.3);
     }
-    // The 0x15edb0 cheat's head scale 2.75 (G-SAV-006) is not written.
+    // The actors' big-head cheat 0x15edb0: the head record's scale request (+0x70 = P+0x1d0) = 2.75.
+    if w.svc.cheats.on(crate::cheats::slot::ACTORS) { c::set_pf(w, id, pv::HEAD + crate::moby_update::manip::rec::REC_SCALE, f32::from_bits(0x4030_0000)); }
     crate::moby_update::manip::look(w, id, id, pv::HEAD, 0, 0.02, 0.3);
     crate::moby_update::manip::look(w, id, id, pv::TORSO, 1, 0.02, 0.3);
 }
@@ -642,6 +643,9 @@ fn look(w: &mut World, id: MobyId) {
 /// `0x2d0fa8`.
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
+    // 0x2d0ec0: the actors' big-head cheat on this class's scene actor at 2.75.
+    let own = w.m(id).o_class;
+    crate::moby_update::manip::scene_big_head(w, &[own], 0, f32::from_bits(0x4030_0000));
     interact::poll_scene_end_at(w, id, pv::TALK);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));

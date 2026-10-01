@@ -27,7 +27,8 @@
 //!
 //! **Not ported** (counted with [`crate::moby_update::Services::unported`]): the glow sprites of draw callback
 //! 0x30de68, the jet particles (type 74, `0x30dda0`), the blob shadow `0x26eec8`, the Summoner moby's summon anim
-//! (class 0x1b1 state 1), the big-head cheat manipulator. The camera-mode check (`0x167280`+0x86 == 0x14) is taken as
+//! (class 0x1b1 state 1). The big-head cheat 0x15edb0 (states ≥ 3: P+0x90 on list 5 at 2.1) is
+//! `manip::actor_big_head`. The camera-mode check (`0x167280`+0x86 == 0x14) is taken as
 //! false (no camera mode 0x14 in the port).
 
 use crate::moby_runtime::{mode, MobyId};
@@ -443,7 +444,8 @@ pub fn mouse_update(w: &mut World, id: MobyId) {
         house_collision(w, house, false);
     }
     if w.m(id).state >= 3 {
-        // The big-head cheat's manipulator (cheat 0x15edb0) is not ported: off. 0x30ded0: joint points 3 / 4.
+        // The actors' big-head cheat 0x15edb0: the record P+0x90 on list 5 at 2.1. 0x30ded0: joint points 3 / 4.
+        crate::moby_update::manip::actor_big_head(w, 2.1, id, 5, id, 0x90);
         let (a, b) = (w.joint_point(id, 3), w.joint_point(id, 4));
         c::set_pv4(w, id, pvo::JOINTS, a);
         c::set_pv4(w, id, pvo::JOINTS + 0x10, b);

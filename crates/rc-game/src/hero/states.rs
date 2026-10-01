@@ -76,8 +76,16 @@ impl Hero {
             self.frozen = 0;
             self.items.f13f7 = 0;
             self.f13ff = 0;
+            // 0x141630 (the guards' alert on the disguise: super::hologuise) cleared.
+            self.gadgets.disguise.alert = 0;
             // 0x277740(0x1409c0): Ratchet's after-images end (crate::afterimage).
             self.fx.trails.hero.kill();
+        }
+        // The disguise (body 3) and a state outside its own, the walk-to states and 0 / 1: `0x22cd18` → leave the body
+        // (super::hologuise; `0x231450` ends with its own `SetState(0, 1)`, then this one goes on).
+        if self.mode == super::bodies::body::DISGUISE && !(0x53..=0x59).contains(&id) && !(0x65..=0x67).contains(&id) && id != 0 && id != 1 {
+            let mode = self.gadgets.game_mode;
+            super::bodies::leave_body(self, c, mode);
         }
         let ok = self.set_state_body(c, id, play, old_sub);
         if ok && f7 != 0 && self.items.f13f7 == 0 { self.items.restore_pending = 1; }

@@ -149,7 +149,7 @@ pub struct CanvasPlugin;
 
 impl Plugin for CanvasPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Canvases>().add_systems(PostUpdate, apply.before(TransformSystems::Propagate));
+        app.init_resource::<Canvases>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<Canvases>).add_systems(PostUpdate, apply.before(TransformSystems::Propagate));
     }
 }
 

@@ -52,8 +52,8 @@
 //! * **State 2**: back to 0 once a spline index is set. **State 3**: the delay, then state 1.
 //!
 //! **Not ported (counted in `FxStats::unported`):** of the kill on a hit 0x800000 (state 0x65, `SpawnBeamExplosion`
-//! [`KILL_BEAM`], the links and itself deleted: ported), the first kill's skill point 0x13d408 / level sound 1 / banner
-//! 0x53d6 and the wreck `FUN_0030be70` (class 1510); the group
+//! [`KILL_BEAM`], the links and itself deleted, the first kill's skill point 0x13d408 / level sound 1 / banner 0x53d6
+//! through `story::award_skill_point`: ported), the wreck `FUN_0030be70` (class 1510); the group
 //! synchronisation (group ≥ 0); the level-3/9 combat
 //! block (hit 0x210000, the 0x13a hide timer); the class-specific sounds; the debug lines. `0x161b00`
 //! (gp−0x5100, "flyers paused", 0 on Novalis) is taken as 0.
@@ -368,10 +368,11 @@ pub const KILL_BEAM: crate::moby_update::creature::fx::Beam = crate::moby_update
 };
 
 /// The hit branch: state 0x65, the blast ([`KILL_BEAM`]), the linked mobys (P+0x140..0x14c) and the flyer deleted.
-/// Not ported (module doc): the first kill's skill point 0x13d408 with the level sound 1 and banner 0x53d6 (G-SAV-007),
-/// the wreck 1510 of `0x30be70` (G-CLS-015).
+/// The first kill's skill point 0x13d408 with the level sound 1 and banner 0x53d6 (`story::award_skill_point`). Not
+/// ported (module doc): the wreck 1510 of `0x30be70` (G-CLS-015).
 fn kill(w: &mut World, id: MobyId) {
-    w.svc.unported("flyer: kill skill point / sound / banner, wreck 1510 0x30be70");
+    crate::moby_update::story::award_skill_point(w, 0);
+    w.svc.unported("flyer: wreck 1510 0x30be70");
     w.mm(id).state = DEAD;
     let pos = crate::moby_update::creature::pos(w, id);
     crate::moby_update::creature::fx::beam_explosion(w, &KILL_BEAM, Some(id), pos);

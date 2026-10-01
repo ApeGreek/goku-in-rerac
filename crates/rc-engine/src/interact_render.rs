@@ -133,19 +133,29 @@ pub struct VendorRt {
     lang: u32,
     /// Wall-clock time of the open (`RC_INTERACT_TRACE` timing).
     opened_at: Option<std::time::Instant>,
+    /// The PDA's remote vendor (`OpenVendorMenu(0)`): its own class-11 moby (deleted by `VendorExit`) and the view the
+    /// first render sets (the camera's position, rows identity: looking along +x; the Euler restored at the leave).
+    remote_moby: bool,
+    remote_cam: Option<CameraView>,
 }
 
 /// The class blob of `o_class` in the level core (joint lists).
 pub(crate) fn class_blob(o_class: i32) -> anyhow::Result<Vec<u8>> {
-    // The level core, decompressed once for every blob asked for.
-    static CORE: std::sync::OnceLock<Option<(Vec<u8>, rc_formats::level::LevelCore)>> = std::sync::OnceLock::new();
-    let core = CORE.get_or_init(|| {
-        let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
-        let data = rc_data::level_core_data(&root, index).ok()?.to_vec();
-        let core = rc_formats::level::parse_level_core(&crate::disc_source::level_file(&root, index, "core_index.bin").ok()?, data.len()).ok()?;
-        Some((data, core))
-    });
-    let (data, core) = core.as_ref().ok_or_else(|| anyhow::anyhow!("level core not read"))?;
+    // The level core, decompressed once per level for every blob asked for (the store's copy; a runtime level change,
+    // crate::level_switch, makes it the next level's).
+    type Core = (u32, Option<(std::sync::Arc<[u8]>, rc_formats::level::LevelCore)>);
+    static CORE: std::sync::Mutex<Option<Core>> = std::sync::Mutex::new(None);
+    let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+    let mut g = CORE.lock().unwrap_or_else(|e| e.into_inner());
+    if g.as_ref().map(|c| c.0) != Some(index) {
+        let load = || -> Option<(std::sync::Arc<[u8]>, rc_formats::level::LevelCore)> {
+            let data = rc_data::level_core_data(&root, index).ok()?;
+            let core = rc_formats::level::parse_level_core(&crate::disc_source::level_file(&root, index, "core_index.bin").ok()?, data.len()).ok()?;
+            Some((data, core))
+        };
+        *g = Some((index, load()));
+    }
+    let (data, core) = g.as_ref().and_then(|c| c.1.as_ref()).ok_or_else(|| anyhow::anyhow!("level core not read"))?;
     let name = format!("moby_class/{o_class:04}");
     let blk = core.blocks.iter().find(|b| b.name == name).ok_or_else(|| anyhow::anyhow!("no {name}"))?;
     Ok(data.get(blk.offset..blk.offset + blk.size).ok_or_else(|| anyhow::anyhow!("{name} out of range"))?.to_vec())
@@ -262,11 +272,27 @@ pub fn after_tick(
                 let Some(t) = vr.tables.clone() else { continue };
                 let mut out = VendorOut::default();
                 let mut v = Vendor::open(t, gs, vendor.is_none(), &mut out);
+                // OpenVendorMenu(0) (the PDA): `CreateMoby(0xb)` at the camera + (3.8, 0, −1.5) (gp−0x5ba0, 0x161068), +0x32
+                // = 0x40, rotation (0, 0, π), `MobyBuildMatrix`, state 3; the view: rows identity at the camera.
+                let vendor = match vendor {
+                    Some(id) => Some(id),
+                    None => {
+                        let id = remote_vendor(play);
+                        vr.remote_moby = id.is_some();
+                        let pos = play.game.camera.out.pos;
+                        let one = |k: usize| std::array::from_fn::<Pf, 4, _>(|i| if i == k { Pf::f(1.0) } else { Pf::ZERO });
+                        vr.remote_cam = Some(CameraView { pos, euler: [Pf::ZERO; 4], rows: [one(0), one(1), one(2)] });
+                        id
+                    }
+                };
                 v.lang = vr.lang as i32;
                 println!(
                     "interact: frame {frame}: OpenVendorMenu: mode 5, {} entries {:?}, selection {}",
                     v.items.len(), v.items.iter().map(|e| (e.item, e.ammo)).collect::<Vec<_>>(), v.sel
                 );
+                // The four arm manipulators 0x166300 on the vendor's joint lists 0x14..0x17 (the monitors laid out for
+                // fewer than 8 entries).
+                if let Some(id) = vendor { arms(play, id, Some(v.items.len())); }
                 vr.vendor = Some(v);
                 vr.moby = vendor;
                 // FUN_0024fb00: the HUD's slots emptied (the prompt goes at once); the bolt counter is pinned again.
@@ -328,10 +354,64 @@ fn rows_bits(r: &[[f32; 4]; 4]) -> [V4; 3] { [0, 1, 2].map(|i| r[i].map(f32::to_
 /// World points of a moby's joint lists (`MobyGetBoneMatrix`: the lists' last joints' pose translations × scale /
 /// 1024, turned by its rows, plus its position).
 fn joint_points(class: &MobyAnimClass, state: &moby_anim::AnimState, snap: Option<&moby_anim::MobyFrame>, lists: &[Vec<u8>], rows: &[[f32; 4]; 4], pos: [f32; 3], scale: f32) -> Vec<[f32; 3]> {
+    joint_points_posed(class, state, snap, lists, rows, pos, scale, &[])
+}
+
+/// [`joint_points`] with the moby's joint-modifier list (+0x64): the vendor's arm manipulators move its monitors.
+#[allow(clippy::too_many_arguments)]
+fn joint_points_posed(class: &MobyAnimClass, state: &moby_anim::AnimState, snap: Option<&moby_anim::MobyFrame>, lists: &[Vec<u8>], rows: &[[f32; 4]; 4], pos: [f32; 3], scale: f32, mods: &[moby_anim::JointModifier]) -> Vec<[f32; 3]> {
     let chains: Vec<&[u8]> = lists.iter().map(|l| l.as_slice()).collect();
     if chains.is_empty() || chains.iter().any(|c| c.is_empty()) { return Vec::new(); }
-    let p = moby_anim::joint_translations(class, state, snap, &chains);
+    let p: Vec<[u32; 4]> = moby_anim::evaluate_chains_posed(class, state, snap, &chains, &[], mods).iter().map(|r| r[3].map(f32::to_bits)).collect();
     moby_anim::bone_points(&p, &rows_bits(rows), pos, scale).iter().map(|v| [f32::from_bits(v[0]), f32::from_bits(v[1]), f32::from_bits(v[2])]).collect()
+}
+
+/// `OpenVendorMenu(0)`'s remote vendor moby (module docs of `rc_game::hero::pda`): class 11 at the camera + (3.8, 0, −1.5),
+/// +0x32 = 0x40, rotation (0, 0, π), its matrix built, state 3. None when the class is not on the level or the table is
+/// full (the game would crash on a null moby).
+fn remote_vendor(play: &mut Play) -> Option<MobyId> {
+    let classes = play.classes.clone();
+    let cam = play.game.camera.out.pos;
+    let mut w = rc_game::moby_update::services::World::new(&mut play.game.mobys, &play.game.hero, &mut play.game.rng, &*classes, &mut play.svc, play.game.counter);
+    classes.info(vendor::VENDOR_CLASS)?;
+    let id = w.create_moby(vendor::VENDOR_CLASS)?;
+    {
+        let m = w.mm(id);
+        m.draw_dist = 0x40;
+        let pw = m.position[3];
+        m.position = [cam[0].to_f32() + 3.8, cam[1].to_f32(), cam[2].to_f32() - 1.5, pw];
+        m.rotation = [0.0, 0.0, std::f32::consts::PI, m.rotation[3]];
+        m.state = 3;
+    }
+    w.build_matrix(id);
+    Some(id)
+}
+
+/// The owner key of the vendor's arm manipulators 0x166300 (`rc_game::moby_update::manip::key` with an owner no table
+/// moby has).
+const ARMS_OWNER: usize = 0xfffe;
+
+/// `OpenVendorMenu`'s `AttachManipulator(vendor, 0x14 + k, 0x166300 + 0x40·k)` (with `entries`:
+/// `rc_game::menus::vendor::arm_manipulators`), or `DetachManipulator` of the four (None).
+fn arms(play: &mut Play, vendor_id: rc_game::moby_runtime::MobyId, entries: Option<usize>) {
+    use rc_game::moby_update::manip;
+    let targets = play.svc.joint_targets.get(&vendor::VENDOR_CLASS).cloned().unwrap_or_default();
+    let Some(m) = play.game.mobys.mobys.get_mut(vendor_id) else { return };
+    if m.joint_mod_keys.len() != m.joint_mods.len() { m.joint_mod_keys.resize(m.joint_mods.len(), u32::MAX); }
+    for k in 0..4usize {
+        let key = manip::key(ARMS_OWNER, 0x40 * k);
+        if let Some(i) = m.joint_mod_keys.iter().position(|&x| x == key) {
+            m.joint_mod_keys.remove(i);
+            m.joint_mods.remove(i);
+        }
+    }
+    let Some(n) = entries else { return };
+    for (k, (list, trans)) in vendor::arm_manipulators(n).into_iter().enumerate() {
+        let Some(&joint) = targets.get(list as usize).filter(|&&j| j != 0xff) else { continue };
+        let node = moby_anim::JointModifier { joint, mode: 0, weight: 0.0, quat: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3], trans };
+        m.joint_mods.insert(0, node);
+        m.joint_mod_keys.insert(0, manip::key(ARMS_OWNER, 0x40 * k));
+    }
 }
 
 /// One EE audio frame of mode 5 (`sound_update` at the end of `VendorModeUpdate`) when no world tick ran it.
@@ -374,7 +454,40 @@ pub fn vendor_frame(
     let (sub0, pre0) = (v.sub, v.pre_fade);
     let ticked = std::mem::take(&mut mm.world_ticked);
     let bolts0 = gs.global.bolts;
-    let out = v.frame(&input, gs, items, sess, assets, &mut play.game.rng);
+    let mut out = v.frame(&input, gs, items, sess, assets, &mut play.game.rng);
+    // VendorStartWeaponDemo 0x2ae7f8: the demo scene plays in the vendor's frame (the space-scene player,
+    // crate::travel_render, `rc_game::travel::space::SUB_DEMO`), the hand request 0x141408 = the bought weapon (0 for the
+    // Drone Device 0x18); substate 3 ends with `VendorExit(1)` when the demo is over.
+    let mut demo_exit = false;
+    if let Some(d) = out.weapon_demo.take() {
+        println!("interact: frame {frame}: VendorStartWeaponDemo: item {} scene unknown_1530[{}], stream {}", d.item, d.scene, d.stream);
+        sess.temp_hand = if d.item == 0x18 { 0 } else { d.item as i32 };
+        match vr.moby {
+            Some(id) => {
+                // `CameraScript2(2)` first (the scene's camera then drives the view).
+                let level = play.svc.level;
+                play.svc.cinematic.calls.push(rc_game::cinematic::CinematicCall::CameraRelease { kind: 2, level });
+                crate::travel_render::request_weapon_demo(d.scene, id);
+            }
+            None => {
+                out.exit = true;
+                out.sounds.push(vendor::sound::CLOSED);
+            }
+        }
+    }
+    if v.sub == 3 && crate::travel_render::take_weapon_demo_done() {
+        out.exit = true;
+        out.stop_voice = true;
+        demo_exit = true;
+    }
+    // DetachManipulator(vendor, 0x166300 + 0x40·k): the arms back.
+    if out.detach_arms {
+        if let Some(id) = vr.moby { arms(play, id, None); }
+    }
+    // VendorExit: 0x15172a ∉ {6, 7} → 5: the salesman's line stops.
+    if out.stop_voice && out.exit {
+        if let Some(a) = audio.as_deref_mut() { a.system().scene_command(rc_game::audio::scene::SceneAudioCmd::StopSpeech); }
+    }
     apply_anim(play, vr.moby, &out.anim);
     let classes = play.classes.clone();
     // The menu's MobyAnimAdvance of the vendor (the moby loop does it while the world runs).
@@ -388,7 +501,7 @@ pub fn vendor_frame(
     let layout_cam = v.tables.layout.as_ref().map_or([3.8, 0.0, 1.5], |l| l.camera);
     let vm = vr.moby.and_then(|id| play.game.mobys.mobys.get(id).cloned());
     // The camera: cut to the vendor's front once the open's fade is black, held there (the script camera's targets).
-    let cam = vm.as_ref().map(|m| camera_view(m, layout_cam));
+    let cam = if vr.remote_moby { vr.remote_cam } else { vm.as_ref().map(|m| camera_view(m, layout_cam)) };
     if v.pre_fade == 0 {
         if let (Some(view), Some(c)) = (view, cam) { view.view = c; }
     }
@@ -403,7 +516,7 @@ pub fn vendor_frame(
         let view_g = View::game(c.pos_f32(), rows_f);
         d.view = Some(view_g);
         let snap = play.svc.snapshots.get(id).and_then(|s| s.as_ref());
-        let pts = classes.anim(vendor::VENDOR_CLASS).map(|cl| joint_points(cl, &m.anim, snap, &vr.vendor_lists, &m.rows, pos, m.scale)).unwrap_or_default();
+        let pts = classes.anim(vendor::VENDOR_CLASS).map(|cl| joint_points_posed(cl, &m.anim, snap, &vr.vendor_lists, &m.rows, pos, m.scale, &m.joint_mods)).unwrap_or_default();
         let joint = |j: usize| pts.get(j).copied().unwrap_or(pos);
         let layout = v.tables.layout.clone();
         if let Some(l) = layout.as_ref().filter(|_| pts.len() >= 23) {
@@ -440,10 +553,12 @@ pub fn vendor_frame(
                     let (w, h) = p.texel_size();
                     d.screens.push(ScreenDraw { s: screens::POPUP, placed: p, content: v.screen_content(screens::POPUP, (w, h), assets, gs, frame as u32), fx: fx[6].clone(), nearest: false });
                 }
-                // The cone's V scroll (+0.01 per draw).
-                vr.cone_scroll += 0.01;
-                if vr.cone_scroll > 1.0 { vr.cone_scroll -= 1.0; }
-                d.cone = Some(vr.cone_scroll);
+                // The cone's V scroll (+0.01 per draw); the remote vendor has no cone (`DrawWorld_Mode5`: 0x1ca980 = 0 only).
+                if !v.remote {
+                    vr.cone_scroll += 0.01;
+                    if vr.cone_scroll > 1.0 { vr.cone_scroll -= 1.0; }
+                    d.cone = Some(vr.cone_scroll);
+                }
             }
             if v.screens_shown() || v.glass_only() {
                 d.glass = (1..6).map(|s| screens::glass(l, s, &joint)).collect();
@@ -486,7 +601,19 @@ pub fn vendor_frame(
         // VendorExit 0x2ae660: mode 0, the HUD slots released, the vendor's state 1, Ratchet teleported in front of the
         // vendor facing it (state 0), CameraScript2(2) from the vendor view, music_Unpause.
         if let Some(id) = moby { rc_game::moby_update::classes::vendor::on_exit(&mut play.game.mobys, id); }
-        if let (Some(m), Some(c)) = (vm.as_ref(), cam) {
+        if vr.remote_moby {
+            // The remote vendor: `SetState(0, 1)` where he stands, no camera script, the moby deleted (0x1ca980 ≠ 0).
+            let mut f = rc_game::moby_update::services::HeroFields::of(&play.game.hero);
+            f.call(rc_game::moby_update::services::HeroCall::SetState { id: 0, play: true });
+            play.svc.hero_writes = Some((play.game.counter, f));
+            if let Some(id) = moby {
+                let c = play.game.counter;
+                play.game.mobys.delete(id, c);
+            }
+            vr.remote_moby = false;
+            vr.remote_cam = None;
+            vr.moby = None;
+        } else if let (Some(m), Some(c)) = (vm.as_ref(), cam) {
             let exit = v.tables.layout.as_ref().map_or([3.5, 0.0, 0.0], |l| l.exit);
             let pos = vendor::to_world(&m.rows, [m.position[0], m.position[1], m.position[2]], exit);
             let yaw = rc_game::moby_update::interact::add_rot(m.rotation[2], std::f32::consts::PI);
@@ -497,8 +624,13 @@ pub fn vendor_frame(
             play.svc.hero_writes = Some((play.game.counter, f));
             let level = play.svc.level;
             let calls = &mut play.svc.cinematic.calls;
-            calls.push(rc_game::cinematic::CinematicCall::CameraScript { pos: c.pos_f32(), euler: [0.0, 0.0, c.euler[2].to_f32()], mode: 1, ticks: 0, collide: false });
-            calls.push(rc_game::cinematic::CinematicCall::CameraRelease { kind: 2, level });
+            if demo_exit {
+                // VendorExit(1) after a weapon demo: `HeroTeleport(…, 0, 1)`: the follow camera reset behind Ratchet.
+                calls.push(rc_game::cinematic::CinematicCall::CameraResetBehindHero);
+            } else {
+                calls.push(rc_game::cinematic::CinematicCall::CameraScript { pos: c.pos_f32(), euler: [0.0, 0.0, c.euler[2].to_f32()], mode: 1, ticks: 0, collide: false });
+                calls.push(rc_game::cinematic::CinematicCall::CameraRelease { kind: 2, level });
+            }
             if let Some(a) = audio.as_deref_mut() { a.system().hero_teleported(pos); }
         }
         // `VendorExit`: `snd_ContinueAllSoundsInGroup(0x1d)` (0x2ae7c0), `music_Unpause`.

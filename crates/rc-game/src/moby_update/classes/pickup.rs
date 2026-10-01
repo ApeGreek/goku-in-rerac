@@ -52,7 +52,9 @@
 //!   each (life 5 or 40 ticks by camera distance 10), and registers its draw callback `0x301c00` (list 1: the glow
 //!   sphere, its halo and, on the crate, the glass sheen; drawn by `rc-engine`'s fx_draw from [`nanotech_glow`]).
 //!
-//! Not ported: the cheat 6 (0x15edb6) extensions (full-health pickups, 0x13f510), the platform ride of a free
+//! The cheat 6 (0x15edb6, `crate::cheats`): a cluster is also taken at full health while 0x13f510 is 0, the take sets
+//! 0x13f510 = `ticks(600)`, and at full health while invulnerable the flying orbs' life is held at `ticks(250)` and the
+//! ring's timers +1. Not ported: the platform ride of a free
 //! cluster on a moving moby (kept: the offset bookkeeping).
 
 use crate::hero::physics::{self as ph, V4};
@@ -847,7 +849,10 @@ fn nt_heal_check(w: &mut World, id: MobyId) {
     let hp = w.hero_fields().health;
     if hp == 0 { return; }
     let pending = p::i32(&w.m(master).pvars, nt::PENDING);
-    if !(hp + pending < max_health(w)) { return; }
+    // The cheat 6 (0x15edb6, "Health gives invincibility at max"): also taken at full health while 0x13f510 is 0.
+    let cheat = w.svc.cheats.on(crate::cheats::slot::HEALTH);
+    let f510 = w.hero_fields().invulnerable.unwrap_or(w.hero.f510);
+    if !(hp + pending < max_health(w) || (cheat && f510 == 0)) { return; }
     let pos = pos3(w, id);
     if len(sub(pos, f3(w.hero.pos))) >= 10.0 { return; }
     // FUN_00300d70: a clear line (flags 0x12) from 0.5 above the cluster to 0.5 above Ratchet.
@@ -856,6 +861,8 @@ fn nt_heal_check(w: &mut World, id: MobyId) {
     w.mm(id).state = 3;
     let n = p::i32(&w.m(master).pvars, nt::PENDING) + 1;
     p::set_i32(&mut w.mm(master).pvars, nt::PENDING, n);
+    // The cheat 6: 0x13f510 = ticks(600) (ten seconds of invulnerability).
+    if cheat { w.hero_fields_mut().invulnerable = Some(w.ticks(600)); }
     let t300 = w.ticks(300);
     p::set_i16(&mut w.mm(id).pvars, nt::TIMER, t300 as i16);
     let target = chest(w);
@@ -898,6 +905,20 @@ fn nt_heal(w: &mut World, id: MobyId) {
         let c = chest(w);
         set_pos3(w, id, c);
         if heal_ring(w, id) && w.rng.randi(5) == 0 { heal_glints(w, id); }
+    }
+    // The cheat 6 at full health and invulnerable: the orbs' life held at ticks(250) (gp−0x4e50) and the ring's four
+    // timers +1 (they stay young).
+    let f510 = w.hero_fields().invulnerable.unwrap_or(w.hero.f510);
+    if w.hero_fields().health == max_health(w) && f510 != 0 && w.svc.cheats.on(crate::cheats::slot::HEALTH) {
+        let hold = w.ticks(250) as i16;
+        if p::i16(&w.m(id).pvars, nt::TIMER) < hold {
+            let pv_ = &mut w.mm(id).pvars;
+            p::set_i16(pv_, nt::TIMER, hold);
+            for k in 0..4 {
+                let v = p::i16(pv_, nt::RING_T + 2 * k);
+                p::set_i16(pv_, nt::RING_T + 2 * k, v.wrapping_add(1));
+            }
+        }
     }
     let mut t = p::i16(&w.m(id).pvars, nt::TIMER);
     let running = sv::fast_dec_timer_s16(&mut t) == 0;

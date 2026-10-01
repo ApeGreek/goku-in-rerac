@@ -43,7 +43,7 @@
 //! | | `BoltBurst(m, 10, 20, 2, −1)` for hit flags 0x800000, else `(m, 3, 5, 2, −1)` (0x24f1b8 = L01 0x275988) | [`wreck`] (`crate_::bolt_burst`) |
 //! | | P+0x14a = `ticks(600)`; `SpawnBeamExplosion(0, 0, 4, 2, 100000, 3, 15, m, vel, point, 20, 3, 4, −1, 1, 1, −1, 0)` (0x24ce98 = L01 0x273310): the flashes, streaks, sparks, puffs, fireball, camera shake, light | [`wreck`] (`fx::beam_explosion`, [`WRECK_BEAM`]) |
 //! | | the pieces: 115 0x6a9–0x6ab, 116 0x6ac–0x6ae, 117 0x6af–0x6b1, 118 0x6b2–0x6b4, 119 0x6b5–0x6b7, 120 0x6b8–0x6ba, 132 0x6bc, 0x6be, 0x6bf: `BreakFxB(12·dt², m, class, pos, rot, ticks(90), 0, row 0·0.075 + (0, 0, 0.08), 0x15f580 (zero), 0x15f580)` (0x2520b0 = L01 0x278ad8); 75, 795 none | [`wreck`] (`fx::break_piece_with`) |
-//! | | 795: skill point 0x13d40c, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)` | NOT ported (G-SAV-007; counted `unported`) |
+//! | | 795: skill point 0x13d40c, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)` | ported (`story::award_skill_point`) |
 //! | | `0x27a618(0, 0, m)`: level def 2 at the moby | [`wreck`] (`World::play_level_def`) |
 //! | tail | 0x160770 = 0x29dba8 (debug) | n/a |
 //! | | +0xa4 = 0xff; P+0x14a ≠ 0: `FastDecTimer`; still running or seen → collision off, mode \|= 0x41, the loop released, P+0x150 = −1, untargetable; out and culled → mode &= ~0x41 \| 0x1000, collision back (class +0x10) | [`wreck`] |
@@ -541,7 +541,7 @@ pub fn wreck(w: &mut World, id: MobyId, culled: bool) {
             let t = w.ticks(0x5a);
             break_piece_with(w, id, c, pos, rot, t, 0, v, [0.0; 4], [0.0; 4]);
         }
-        if oc == 795 { w.svc.unported("air traffic 795: skill point 0x13d40c, level sound 1, banner 0x53d6 (G-SAV-007)"); }
+        if oc == 795 { crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d40c)); }
         w.play_level_def(0, 0, id);
     }
     w.mm(id).hit_slot = 0xff;

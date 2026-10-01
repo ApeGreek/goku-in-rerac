@@ -18,7 +18,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x26dae0(3.6, m, 2, +0x230)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x26dae0(3.6, m, 2, +0x230)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn and within 28 of the camera: `0x264650` (= `0x26f020`), +0x7f = 0x16 | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | `0x2d36e0`: `MobyGetHitMessage(m, 0x330000, 0)`, `0x2649a8` (= `0x26f378`, col 4); out5 ≠ 1 and not dying: health −= damage (≤ 0 → reaction 1); reaction 0..11 → `SetDeathBits(m, 0, −1)`, state 99; +0xa4 = 0xff | every weapon's hit record through the resolver kills it; the bolts and the save bit | [`tick`] (`World::get_hit`, `damage::resolve`, `crate_::set_death_bits`) |
 //! | states ∉ {0, 4}: `0x26a650(14, m, +0x170, …, area path +0x21c)` (= `0x274df8`); a target farther than 14 from home or 3 in height → kind 2; no moby → Ratchet's | the target search (decoys win) | [`tick`] (`target::acquire_in`) |
@@ -271,7 +271,8 @@ pub fn let_go(w: &mut World, id: MobyId) {
 /// Level08 `0x2d2af0` (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
-    // 0x26dae0(3.6, m, 2, +0x230): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x26dae0(3.6, m, 2, +0x230): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 3.6, id, 2, id, 0x230);
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), cam) < 28.0 {
         crate::shadows::probe_down(w, id);

@@ -28,7 +28,7 @@
 //! | lure +0x38 → the group wakes, +0x1ac = `trunc(scale(randf(180, 240)))`; `FastDecTimer(+0x1ac)` | the Taunter | [`tick`] |
 //! | `MobyGetHitMessage(m, 0xb30000, 0)`, `0x26f378(m, hit, +0x20, 0, &out5, &damage, 0, col 4)`, `FastDecTimer_s16(+0x26)` | every weapon's hit record through the resolver | [`tick`] (`World::get_hit`, `damage::resolve`) |
 //! | out5 < 2 or dying / falling → no reaction | | [`tick`] |
-//! | level 10 (gp−0x7e7c), attacker class 0x31a, alerted, skill point 0x13d419 not earned → the point, level sound 1, banner 0x53d6 | the skill point | NOT ported (G-SAV-007 [deferred]; counted: `unported("skill point 0x13d419")`) |
+//! | level 10 (gp−0x7e7c), attacker class 0x31a, alerted, skill point 0x13d419 not earned → the point, level sound 1, banner 0x53d6 | the skill point | ported (`story::award_skill_point`) |
 //! | the cooldown running and a type-0 hit: reaction 0xb, damage < 3 → 0 | | [`tick`] |
 //! | Ratchet in state 0x20 (or just out of it, `ticks(30)`): damage ≤ 2 | the Comet-Strike's cap | [`tick`] |
 //! | its own class's hit; mid-swing with Clank (body 1) the attacker → none | | [`tick`] (the body branch: G-HERO-005) |
@@ -47,7 +47,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | scale = class scale · 0.8; `0x256da0(2.5, m, 2, +0x2b0)` | the big-head cheat manipulator | scale: [`update`]; the cheat NOT ported (G-SAV-006, conditional) |
+//! | scale = class scale · 0.8; `0x256da0(2.5, m, 2, +0x2b0)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | reachable: pos + 1 → target + 1 within 15, in the world box, clear (`CollLine_Fix` flags 2), and within 1 in z unless Ratchet stands on a crate (0x13f64c, `0x273278`) | | [`reachable`] (`crate_::is_crate`) |
 //! | case 0: +0x1dc and Clank → deleted; D; +0x58 10, +0x5a 16; mode \| 0x5000; home + yaw; the walker (radius 819, J1 0.8, J2 2, J3 0.5, J9 speed·dt); the watched moby gone / killed and its mission done → −1; 1 (blend 0) | init | [`init`] (`walker::seed`) |
 //! | case 1: `SpringTurn2(home yaw)`; the watched moby gone / killed, a target, or +0x1b4 → 2, +0x1a8 `ticks(1)`, the group wakes | sleep | [`update`] |
@@ -256,8 +256,7 @@ fn tick(w: &mut World, id: MobyId) {
         let own = w.m(id).o_class;
         let attacker_class = h.attacker.map(|a| w.m(a).o_class);
         if w.svc.level == 10 && attacker_class == Some(k::SEE_THROUGH) && c::pi32(w, id, pv::ALERT) != 0 {
-            // Skill point 0x13d419 with `PlayLevelSoundAtMoby(1, 0, 0)` and `ShowBanner(0x53d6, −1)` (G-SAV-007).
-            w.svc.unported("skill point 0x13d419");
+            crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d419));
         }
         if c::pi16(w, id, pv::COOLDOWN) != 0 && h.b28 == 0 {
             reaction = 0xb;
@@ -683,7 +682,8 @@ pub fn update(w: &mut World, id: MobyId) {
     tick(w, id);
     let o = w.m(id).o_class;
     w.mm(id).scale = class_scale(w, o) * k::SCALE;
-    // 0x256da0(2.5, m, 2, +0x2b0): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x256da0(2.5, m, 2, +0x2b0): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 2, id, 0x2b0);
     let ok = reachable(w, id);
     let t = tgt_pos(w, id);
     match state(w, id) {

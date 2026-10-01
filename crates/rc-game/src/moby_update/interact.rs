@@ -174,6 +174,17 @@ pub enum GameWrite {
     /// `GiveItem(item, equip)` 0x275760 called by a class (Pokitaru's commando 114: the O2 Mask, item 6): applied by the
     /// engine with the item tables (`GameState::give_item`); the banner is the class side's ([`give_item`]).
     GiveItem { item: usize, equip: bool },
+    /// `0x13d408[k] = 1`: skill point k earned (`crate::moby_update::story::award_skill_point`).
+    SkillPoint(usize),
+    /// `0x13d4c0[item] = v`: a class's direct item store (`story::set_owned`; not `GiveItem`).
+    Owned(usize, u8),
+    /// `0x13d4e8[item] = v` (`story::set_acquired`).
+    Acquired(usize, u8),
+    /// `0x15eda0 = n`: max health (the nanotech upgrades, `story::set_max_hp`).
+    MaxHp(i32),
+    /// `0x2f21c0`: buried cache `cache` (1..) of `level` dug once more: its nibble of `0x14bf10 + level·16` + 1, at most
+    /// 15 (the Metal Detector, `crate::hero::metal_detector`).
+    MetalDetectorDig { level: usize, cache: u8 },
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -505,6 +516,8 @@ pub struct TalkGame {
     /// 0x14bf10 + level·16 (save chunk 3008): the Metal Detector's dug counts, two nibbles a byte, by level (the
     /// buried bolt caches 605 read their level's at init: `classes::buried_bolts`).
     pub metal_detector_bits: Vec<[u8; 16]>,
+    /// 0x13d408: the skill points (chunk 8), read and set by the classes (`crate::moby_update::story`).
+    pub skill_points: Vec<u8>,
 }
 
 impl TalkGame {
@@ -559,6 +572,7 @@ impl Interact {
         self.game.metal_detector_bits = gs.levels.iter().map(|l| l.metal_detector).collect();
         self.game.talked = g.landmarks.iter().map(|l| l.flags).collect();
         self.game.planet_unlocked = g.planet_unlocked.to_vec();
+        self.game.skill_points = g.skill_points.to_vec();
     }
 
     /// The saved-game writes of the tick into `gs` (and drains them).
@@ -577,6 +591,18 @@ impl Interact {
                 }
                 // Needs the item tables: the engine applies it from the returned list.
                 GameWrite::GiveItem { .. } => {}
+                GameWrite::SkillPoint(k) => { if let Some(b) = gs.global.skill_points.get_mut(k) { *b = 1; } }
+                GameWrite::Owned(i, v) => { if let Some(b) = gs.global.owned.get_mut(i) { *b = v; } }
+                GameWrite::Acquired(i, v) => { if let Some(b) = gs.global.acquired.get_mut(i) { *b = v; } }
+                GameWrite::MaxHp(n) => gs.global.max_hp = n,
+                GameWrite::MetalDetectorDig { level, cache } => {
+                    if let Some(l) = gs.levels.get_mut(level) {
+                        let k = cache.wrapping_sub(1);
+                        if let Some(b) = l.metal_detector.get_mut((k / 2) as usize) {
+                            *b = if k & 1 != 0 { (*b & 0xf0) | ((*b & 0xf) + 1).min(15) } else { (*b & 0x0f) | (((*b >> 4) + 1).min(15) << 4) };
+                        }
+                    }
+                }
             }
         }
         w

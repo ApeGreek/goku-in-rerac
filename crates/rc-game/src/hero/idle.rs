@@ -22,7 +22,8 @@
 //!
 //! The edge look-down branch of `0x22b928` reads the edge probe `Hero::edge_probe`. The other producers the hero update
 //! runs around these (the feet `0x22c5c0`, `HeroScanTargets` 0x22c080, the Magneboots lean `0x2352e0`) are
-//! `super::pose`. Not ported: the options 0x15edb1 / 0x15edb3 / 0x15edb5, Clank hidden (0x141628, 0 on Novalis), the
+//! `super::pose`. The cheats (`crate::cheats`, [`Hero::cheats`]): 0x15edb1 (record 17's scale 1.57), 0x15edb3 (0x15ee18 → 1.8,
+//! record 18 = 0x15ee18). Not ported: the cheat 0x15edb5's mirror (below), Clank hidden (0x141628, 0 on Novalis), the
 //! hit flash 0x13f53e in the glow, and the sound triggers of the advances (`PlayClassSound` pitch draws, the sound layer).
 //!
 //! **The joint modifiers** (Ratchet's moby +0x64, docs/plan/hero_gameplay.md §7): the records the springs update are
@@ -1003,10 +1004,12 @@ impl Hero {
     /// and the timer `rand_range(90, 200) + (int)(80·k)`); the fidgets clamp the look to ±20° / 0..15°. Record 3
     /// gets the look, record 1 55 % / 52 % of it.
     fn head_look(&mut self, seq_b: u8, rng: &mut Rng) {
+        // The Clank cheat 0x15edb3 with Clank on the back (0x1404d4): record 18's scale = 0x15ee18.
+        if self.cheats.on(crate::cheats::slot::CLANK) && self.back.is_some() { self.idle.joints[joint::CLANK0].scale = self.bodies.scale18; }
         let rec17 = &mut self.idle.joints[joint::REC17];
         rec17.scale = self.idle.rec17_scale;
-        // Approach(0.92, 0.05, &0x15ee14) (1.57 with option 0x15edb1).
-        let t = f(0x3f6b_851f);
+        // Approach(0.92, 0.05, &0x15ee14) (1.57 with the cheat 0x15edb1, "Ratchet has a big head").
+        let t = if self.cheats.on(crate::cheats::slot::RATCHET) { f(0x3fc8_f5c3) } else { f(0x3f6b_851f) };
         let step = f(0x3d4c_cccd);
         let mut d = t - self.idle.rec17_scale;
         if step < d { d = step; } else if d < -step { d = -step; }
@@ -1149,6 +1152,8 @@ impl Hero {
     /// 0x14034c re-armed to 50..200 when it has run out and Clank is on sequence 1; frames 1..21: the eyelid nodes
     /// 0x140240.., [`Hero::clank_modifiers`]).
     fn clank_glow_blink(&mut self, counter: i32, rng: &mut Rng) {
+        // Approach(1.0, 0.05, &0x15ee18) (1.8 with the cheat 0x15edb3, "Clank has a large noggin"), every tick.
+        super::bodies::approach_head_scale(self);
         if self.back_slot.clank_hidden != 0 { return; }
         let (health, flash) = (self.health, self.f53e);
         let Some(b) = self.back.as_mut() else { return };

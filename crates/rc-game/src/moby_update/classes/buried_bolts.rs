@@ -26,8 +26,10 @@
 //! **The alert frame** (`HudBoltAlertShow` 0x227d90, in the hero's frame after the moby pass: [`alert_frame`]):
 //! with the Metal Detector owned (`0x13d4db`, item 27) the flag is `nearest ≠ 0 && distance < 20` and element 7 is
 //! requested (`queue_animation_update(7, 0x753a, …)`: `Services::hud`, drawn by `crate::hud`'s bolt alert), then the
-//! nearest is cleared (distance 100000); without it, flag 0 and nothing is cleared. The detector's dig (bolts from the
-//! cache, the nibble write, `DeleteMoby`) belongs to the gadget port (G-WPN-006): [`Globals`] is what it reads.
+//! nearest is cleared (distance 100000; the values kept in [`Globals::seen`] for the detector, which the game runs
+//! before this frame part); without it, flag 0 and nothing is cleared. The detector's aim, beep, dig (bolts from the
+//! cache, the nibble write [`dig`], `DeleteMoby`) and scan draw ([`scan_frame`]) are `crate::hero::metal_detector`
+//! (2026-10-01, G-WPN-006).
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::services::{pvar as p, World};
@@ -68,6 +70,80 @@ pub struct Globals {
     pub counter: u8,
     /// Element-7 requests made by [`alert_frame`] (`queue_animation_update(7, 0x753a, …)`), for the HUD port.
     pub alert_requests: u64,
+    /// 0x141390 / 0x141394 as the moby pass left them, kept by [`alert_frame`] before it resets the search: what the
+    /// Metal Detector's update reads later in the frame (`HudBoltAlertShow` runs after `HeroItemsUpdate` in the game,
+    /// after the moby pass in the port; nothing between them reads or writes the two words).
+    pub seen: Option<(MobyId, f32)>,
+    /// The Metal Detector's scan draw `0x2f1e28` ([`Scan`]).
+    pub scan: Scan,
+}
+
+/// The Metal Detector's scan (its item pvars +0x10 / +0x24 / +0x28 / +0x30 and colour +0x90 as the draw callback
+/// `0x2f1e28` reads them, `crate::hero::metal_detector`): the state part runs in the frame's callbacks ([`scan_frame`]),
+/// the renderer draws [`Scan::quads`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Scan {
+    /// +0x24 / +0x28: the phase (0..1, `+= dt` per draw) and how far it has reached since ○ was pressed.
+    pub phase: f32,
+    pub reach: f32,
+    /// +0x10: the tip; +0x30: the head's axis.
+    pub origin: [f32; 3],
+    pub axis: [f32; 3],
+    /// +0x90: the item's colour.
+    pub glow: u32,
+    /// The squares of the last draw (corners, colour), FX texture [`SCAN_FX`], additive.
+    pub quads: Vec<([[f32; 3]; 4], u32)>,
+}
+
+/// The scan's FX texture (gp−0x5158 = 8).
+pub const SCAN_FX: usize = 8;
+/// The scan squares' ST.
+pub const SCAN_ST: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+
+/// `0x2f1e28` (registered on Ratchet's moby by the Metal Detector's update): the phase steps by dt (wrapping at 1), the
+/// reach follows it, and the squares are laid out back from the phase in steps of 0.1 for one turn (module doc of
+/// `crate::hero::metal_detector`).
+pub fn scan_frame(w: &mut World) {
+    let dt = crate::moby_update::services::DT.to_f32();
+    let s = &mut w.svc.buried.scan;
+    s.phase += dt;
+    if 1.0 < s.phase { s.phase -= 1.0; }
+    if s.reach < s.phase { s.reach = s.phase; }
+    s.quads.clear();
+    let unit = |a: [f32; 3]| {
+        let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        if l == 0.0 { [0.0; 3] } else { a.map(|x| x / l) }
+    };
+    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let ax = unit(s.axis);
+    let a = unit(cross(ax, [1.0, 0.0, 0.0]));
+    let b = unit(cross(ax, a));
+    let (mut d, mut k) = (s.phase, s.phase);
+    while s.phase - 1.0 < k {
+        if d <= s.reach {
+            let half = d * 0.5 + 0.23;
+            let c: [f32; 3] = std::array::from_fn(|i| s.origin[i] - ax[i] * d);
+            let corner = |sa: f32, sb: f32| -> [f32; 3] { std::array::from_fn(|i| c[i] + a[i] * half * sa + b[i] * half * sb) };
+            // v0 = c − b − a, v1 = c + b − a, v2 = c − b + a, v3 = c + b + a (the disassembly's order).
+            let quad = [corner(-1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(1.0, 1.0)];
+            let alpha = ((1.0 - d) * 255.0) as i32 as u32;
+            s.quads.push((quad, (s.glow & 0x00ff_ffff) | (alpha << 24)));
+        }
+        d -= 0.1;
+        if d < 0.0 { d += 1.0; }
+        k -= 0.1;
+    }
+}
+
+/// `0x2f21c0` (the dig, `crate::hero::metal_detector`): cache `n` (its +0xbc, 1..) of `level` dug once more: the save
+/// nibble + 1, at most 15 (the saved game through `GameWrite::MetalDetectorDig`, and the copy the caches' init reads).
+pub fn dig(w: &mut World, level: u32, n: u8) {
+    let k = n.wrapping_sub(1);
+    if let Some(bytes) = w.svc.interact.game.metal_detector_bits.get_mut(level as usize) {
+        let b = &mut bytes[(k / 2) as usize % 16];
+        *b = if k & 1 != 0 { (*b & 0xf0) | ((*b & 0xf) + 1).min(15) } else { (*b & 0x0f) | (((*b >> 4) + 1).min(15) << 4) };
+    }
+    w.svc.interact.writes.push(crate::moby_update::interact::GameWrite::MetalDetectorDig { level: level as usize, cache: n });
 }
 
 /// The dug-count nibble of cache `n` (0-based) in the level's 16 save bytes (`0x14bf10 + level·16`).
@@ -107,13 +183,10 @@ pub fn update(w: &mut World, id: MobyId) {
     } else {
         w.svc.buried.counter = 0;
     }
-    // The probe point: the Metal Detector's tip while it is the hand item, else Ratchet's feet.
+    // The probe point: the Metal Detector's tip (its pvar +0x10, `crate::hero::metal_detector`) while it is the hand
+    // item, else Ratchet's feet.
     let slot = &w.hero.items.slot;
-    if slot.item.is_some() && slot.id == METAL_DETECTOR as i32 {
-        // The detector moby's pvar+0x10 (its probe point) has no port yet: its feet stand in.
-        w.svc.unported("605 probe point of the Metal Detector (hand item moby pvar+0x10)");
-    }
-    let q = crate::hero::physics::to_f32x3(w.hero.pos);
+    let q = if slot.item.is_some() && slot.id == METAL_DETECTOR as i32 { w.hero.gadgets.detector.tip } else { crate::hero::physics::to_f32x3(w.hero.pos) };
     let (path, cuboid) = (p::i32(&w.m(id).pvars, pv::PATH), p::i32(&w.m(id).pvars, pv::CUBOID));
     let inside = (path != -1 && w.in_path(q, path)) || (cuboid != -1 && w.in_cuboid(q, cuboid)) || (path == -1 && cuboid == -1);
     if !inside { return; }
@@ -137,6 +210,7 @@ pub fn alert_frame(w: &mut World) {
         return;
     }
     g.alert = g.nearest.is_some() && g.distance < ALERT_RANGE;
+    g.seen = g.nearest.map(|n| (n, g.distance));
     g.distance = FAR;
     g.nearest = None;
     if g.alert {

@@ -35,6 +35,9 @@
 //! | U139 | 915, 916, 917 markers deleted at once (03, 10) | level03 0x2dc310 | [`marker`] |
 //! | U281 | 648 smoke emitters (08, 10) | level08 0x2f5830 | [`smoke_emitter`] |
 //! | U170 | 341 Hydrodisplacer pads (05, 07, 11, 12, 18) | level05 0x2f8080 | [`hydro_pad`] |
+//! | U96 | 615 Trespasser locks (02, 04, 06, 08, 11, 13, 18) | level02 0x2d8ad0 | [`trespasser_lock`] |
+//! | U107 / U108 | 743 / 744 the sliding doors of the Trespasser lock (02) | level02 0x2dffc8 / 0x2e0138 | [`lock_doors`] |
+//! | U365 | 1159 the split door of the Trespasser lock / floor switch (11) | level11 0x30e978 | [`lock_doors`] |
 //! | U204 | 367 sliders (06) | level06 0x2d9d10 | [`slider`] |
 //! | U82 | 1341 the Novalis help-hint director (01) | level01 0x30acb8 | [`help_director`] |
 //! | U36 | 1564 path gliders (00, 07, 10, 18) | level00 0x2e3a88 | [`path_glider`] |
@@ -130,6 +133,7 @@
 //! | U194 | 893 Rilgar's hinged hatches (05) | level05 0x316258 | [`rilgar_hatch`] |
 //! | U191 | 855 Rilgar's water spouts (05): type-50 droplets, type-46 rings, the group voice | level05 0x3150f0 | [`rilgar_spout`] |
 //! | U438 | 1805 Gemlik's breakable props (13) | level13 0x30cdb8 | [`gemlik_breakable`] |
+//! | U570 | 1750 the save before the last boss (18): `MakeWholeSave` into the ending buffer once | level18 0x2fad08 | [`ending_save`] |
 //! | U252 | 1041 Umbris' lobbing turrets (07) and their shot 882 | level07 0x30d4d8, 0x30bbc8 | [`umbris_lobber`] |
 //! | U118 | 1212 the path ships (02, 09): path, exhaust ([`engine_trail`], shared with [`batalia_fighter`]), glow quads | level02 0x2ec4b8, draw 0x2ec308 | [`path_ship`] |
 //! | U155 | 434 Eudora's crank lifts (04): posed by a bolt crank, sink back unwinding it | level04 0x2c6bb8 | [`eudora_crank_lift`] |
@@ -154,6 +158,31 @@
 //! | U554, U555 | 583 the boss's pads and 586 the button / countdown (18) | level18 0x2d6600, 0x2d7b20 (countdown draw 0x2d8098) | [`veldin_pads`] |
 //! | — | 564 / 624 / 628 / 983 / 1898 the boss's shots (18, created only by 1422 / 1906): shell, ring, aura, beam, flash | level18 0x2d5050, 0x2db460, 0x2dc260, 0x2e9e70, 0x2fb548 | [`veldin_shots`] |
 //! | U123, U124 | 822 Kerwan's train (03): the locomotive pulling the cars 1210 behind its lead 845 (the flyer driver), the ride, the arrival, the infobot's release | level03 0x292e98, 0x293c78 | [`kerwan_train`] |
+//! | U114, U115 | 786 Aridia's surfer (the Sonic Summoner) and 788 his agent (the Hoverboard; the shark-count race) (02) | level02 0x2e0dc0, 0x2e1950 | [`aridia_story`] |
+//! | U142, U145 | 890 Helga (the Swingshot) and 909 the Heli-Pack giver (03) | level03 0x2da870, 0x2db558 | [`kerwan_story`] |
+//! | U169, U170 | 1120 the Suck Cannon pickup and 1190 the Blarg informant (planet 6) (04) | level04 0x2e1a10, 0x2e3078 | [`eudora_story`] |
+//! | U200, U201, U203 | 918 the race girl (flag 0), 919 the bouncer (planet 7), 925 the R.Y.N.O. salesman (05) | level05 0x316ab8, 0x317470, 0x3180a0 | [`rilgar_story`] |
+//! | U233 | 1105 Blarg's scientist (the Grindboots) (06) | level06 0x301070 | [`blarg_story`] |
+//! | U297, U298, U299 | 1130 the commando (planet 10), 1144 the deserter (planet 9), 1283 the turret host (the Metal Detector) (08) | level08 0x302ce8, 0x305270, 0x3065d8 | [`batalia_story`] |
+//! | U321 | 1290 the Pilot's Helmet pickup (09; the code is in every overlay) | level01 0x30a6d0 | [`gaspar_story`] |
+//! | U329, U350 | 18 the Magneboots pickup and 1326 the Nanotech seller (G-SAV-005) (10) | level10 0x298668, 0x2e8358 | [`orxon_story`] |
+//! | U360, U363, U365 | 23 the O2 Mask prop, 90 the Thruster-Pack giver, 298 the Persuader giver (11) | level11 0x2cb668, 0x2d0710, 0x2f0e40 | [`pokitaru_story`] |
+//! | U394, U398, U411 | 282 (flag 1, flag 0x61), 328 the Hydro-Pack giver, 1404 the scene triggers (12) | level12 0x2e6c48, 0x2eb570 | [`hoven_story`] |
+//! | U440 | 1353 Gemlik's story director (the arrival, Qwark's ambush, planet 14) (13) | level13 0x30b628 | [`gemlik_story`] |
+//! | U464, U469, U474 | 851 Qwark (the PDA), 924 the scrap merchant (planet 15), 1354 the Morph-o-Ray (14) | level14 0x2fba20, 0x2fefe0, 0x305758 | [`oltanis_story`] |
+//! | U503, U506, U511 | 1388 the Bolt Grabber, 1419 the broadcast director (planet 17), 1469 the help director (15) | level15 0x2ea748, 0x2eb4c0 | [`quartu_story`] |
+//! | U529 | 1377 the Map-O-Matic giver (flags 0x70 / 0x71) (16) | level16 0x2e3190 | [`kalebo_story`] |
+//! | U561 | 1428 the fleet's item scene (flags 2 / 0x78) (17) | level17 0x2f1790 | [`fleet_story`] |
+//! | U31 | 834 Veldin's Clank (flag 8, the trip to Novalis) (00) | level00 0x2d9dc8 | [`veldin_story`] |
+//! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
+//! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
+//! | U405 | 1267 Hoven's turret mini-game (Gemlik's unlock, planet 13), its HUD 0x304218 and red screen 0x304d98 (12) | level12 0x303540 | [`hoven_turret`] |
+//! | — | 458 the ridden turrets' shell (08, 12; created by code: the spawner 0x2ef2e8) | level12 0x2ef648 | [`turret_shell`] |
+//! | U407 | 1274 Hoven's carrier (the turret game's target: 17 parts, five guns, the fall, scene 7) (12) | level12 0x3069d0 | [`hoven_carrier`] |
+//! | — | 184 the gun shot (04, 12; created by code: the spawner 0x2d4150) | level12 0x2d4378 | [`gun_shot`] |
+//! | U397 | 326 Hoven's gun drones (ordinary and the turret game's attackers) and their shot 409 (12) | level12 0x2e9f68, 0x2ece00 | [`hoven_drone`] |
+//! | — | 1371 the drones' rider (12, 15; created by code: 0x308670, knocked off by 0x308708) | level12 0x308918 | [`drone_rider`] |
+//! | U538 | 1455 Kalebo III's grind-race host (the Hologuise, skill point 0x13d422; the race itself: G-LVL-007) (16) | level16 0x2e6808 | [`kalebo_race`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::services::World;
@@ -185,6 +214,8 @@ pub mod bob_block;
 pub mod marker;
 pub mod smoke_emitter;
 pub mod hydro_pad;
+pub mod trespasser_lock;
+pub mod lock_doors;
 pub mod slider;
 pub mod help_director;
 pub mod path_glider;
@@ -273,6 +304,7 @@ pub mod pokitaru_gate;
 pub mod rilgar_hatch;
 pub mod rilgar_spout;
 pub mod gemlik_breakable;
+pub mod ending_save;
 pub mod umbris_lobber;
 pub mod engine_trail;
 pub mod path_ship;
@@ -303,6 +335,31 @@ pub mod veldin_hopper;
 pub mod veldin_pads;
 pub mod veldin_shots;
 pub mod kerwan_train;
+pub mod story_npc;
+pub mod aridia_story;
+pub mod kerwan_story;
+pub mod eudora_story;
+pub mod rilgar_story;
+pub mod blarg_story;
+pub mod batalia_story;
+pub mod gaspar_story;
+pub mod orxon_story;
+pub mod pokitaru_story;
+pub mod hoven_story;
+pub mod gemlik_story;
+pub mod oltanis_story;
+pub mod quartu_story;
+pub mod kalebo_story;
+pub mod fleet_story;
+pub mod veldin_story;
+pub mod umbris_story;
+pub mod hoven_turret;
+pub mod turret_shell;
+pub mod hoven_carrier;
+pub mod gun_shot;
+pub mod hoven_drone;
+pub mod drone_rider;
+pub mod kalebo_race;
 
 /// One unit's port.
 #[derive(Clone, Copy, Debug)]
@@ -351,6 +408,10 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U139", level: marker::REFERENCE_LEVEL, func: marker::UPDATE_FN, classes: &marker::CLASSES, update: marker::update, joints: &[] },
     UnitPort { unit: "U281", level: smoke_emitter::REFERENCE_LEVEL, func: smoke_emitter::UPDATE_FN, classes: &smoke_emitter::CLASSES, update: smoke_emitter::update, joints: &[] },
     UnitPort { unit: "U170", level: hydro_pad::REFERENCE_LEVEL, func: hydro_pad::UPDATE_FN, classes: &hydro_pad::CLASSES, update: hydro_pad::update, joints: &[] },
+    UnitPort { unit: "U96", level: trespasser_lock::REFERENCE_LEVEL, func: trespasser_lock::UPDATE_FN, classes: &trespasser_lock::CLASSES, update: trespasser_lock::update, joints: &trespasser_lock::CLASSES },
+    UnitPort { unit: "U107", level: lock_doors::REFERENCE_LEVEL, func: lock_doors::UPDATE_743, classes: &lock_doors::CLASSES_743, update: lock_doors::update_743, joints: &[] },
+    UnitPort { unit: "U108", level: lock_doors::REFERENCE_LEVEL, func: lock_doors::UPDATE_744, classes: &lock_doors::CLASSES_744, update: lock_doors::update_744, joints: &[] },
+    UnitPort { unit: "U365", level: lock_doors::LEVEL_1159, func: lock_doors::UPDATE_1159, classes: &lock_doors::CLASSES_1159, update: lock_doors::update_1159, joints: &[] },
     UnitPort { unit: "U204", level: slider::REFERENCE_LEVEL, func: slider::UPDATE_FN, classes: &slider::CLASSES, update: slider::update, joints: &[] },
     UnitPort { unit: "U82", level: help_director::REFERENCE_LEVEL, func: help_director::UPDATE_FN, classes: &help_director::CLASSES, update: help_director::update, joints: &[] },
     UnitPort { unit: "U36", level: path_glider::REFERENCE_LEVEL, func: path_glider::UPDATE_FN, classes: &path_glider::CLASSES, update: path_glider::update, joints: &[] },
@@ -464,6 +525,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U194 893", level: rilgar_hatch::REFERENCE_LEVEL, func: rilgar_hatch::UPDATE_FN, classes: &rilgar_hatch::CLASSES, update: rilgar_hatch::update, joints: &rilgar_hatch::CLASSES },
     UnitPort { unit: "U191 855", level: rilgar_spout::REFERENCE_LEVEL, func: rilgar_spout::UPDATE_FN, classes: &rilgar_spout::CLASSES, update: rilgar_spout::update, joints: &[] },
     UnitPort { unit: "U438 1805", level: gemlik_breakable::REFERENCE_LEVEL, func: gemlik_breakable::UPDATE_FN, classes: &gemlik_breakable::CLASSES, update: gemlik_breakable::update, joints: &[] },
+    UnitPort { unit: "U570 1750", level: ending_save::REFERENCE_LEVEL, func: ending_save::UPDATE_FN, classes: &ending_save::CLASSES, update: ending_save::update, joints: &[] },
     UnitPort { unit: "U252 1041", level: umbris_lobber::REFERENCE_LEVEL, func: umbris_lobber::UPDATE_FN, classes: &umbris_lobber::CLASSES, update: umbris_lobber::update, joints: &umbris_lobber::CLASSES },
     UnitPort { unit: "U252 882", level: umbris_lobber::REFERENCE_LEVEL, func: umbris_lobber::SHOT_FN, classes: &umbris_lobber::SHOT_CLASSES, update: umbris_lobber::shot_update, joints: &[] },
     UnitPort { unit: "U118 1212", level: path_ship::REFERENCE_LEVEL, func: path_ship::UPDATE_FN, classes: &path_ship::CLASSES, update: path_ship::update, joints: &path_ship::CLASSES },
@@ -523,6 +585,52 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U307 664", level: riding_floats::REFERENCE_LEVEL_664, func: riding_floats::UPDATE_FN_664, classes: &riding_floats::CLASSES_664, update: riding_floats::float_664, joints: &[] },
     UnitPort { unit: "U316 1293", level: riding_floats::REFERENCE_LEVEL_1293, func: riding_floats::UPDATE_FN_1293, classes: &riding_floats::CLASSES_1293, update: riding_floats::float_1293, joints: &[] },
     UnitPort { unit: "U255 1069", level: riding_floats::REFERENCE_LEVEL_1069, func: riding_floats::UPDATE_FN_1069, classes: &riding_floats::CLASSES_1069, update: riding_floats::float_1069, joints: &[] },
+    // Story drivers (batch 6, lane story: docs/plan/progression.md `## story`).
+    UnitPort { unit: "U114 786", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::SURFER_FN, classes: &aridia_story::SURFER_CLASSES, update: aridia_story::surfer_update, joints: &aridia_story::SURFER_CLASSES },
+    UnitPort { unit: "U115 788", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::AGENT_FN, classes: &aridia_story::AGENT_CLASSES, update: aridia_story::agent_update, joints: &[] },
+    UnitPort { unit: "U142 890", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::HELGA_FN, classes: &kerwan_story::HELGA_CLASSES, update: kerwan_story::helga_update, joints: &[] },
+    UnitPort { unit: "U145 909", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::AL_FN, classes: &kerwan_story::AL_CLASSES, update: kerwan_story::al_update, joints: &[] },
+    UnitPort { unit: "U169 1120", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::SUCK_FN, classes: &eudora_story::SUCK_CLASSES, update: eudora_story::suck_cannon_update, joints: &[] },
+    UnitPort { unit: "U170 1190", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::INFORMANT_FN, classes: &eudora_story::INFORMANT_CLASSES, update: eudora_story::informant_update, joints: &[] },
+    UnitPort { unit: "U200 918", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::GIRL_FN, classes: &rilgar_story::GIRL_CLASSES, update: rilgar_story::race_girl_update, joints: &[] },
+    UnitPort { unit: "U201 919", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::BOUNCER_FN, classes: &rilgar_story::BOUNCER_CLASSES, update: rilgar_story::bouncer_update, joints: &[] },
+    UnitPort { unit: "U203 925", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::SALESMAN_FN, classes: &rilgar_story::SALESMAN_CLASSES, update: rilgar_story::salesman_update, joints: &[] },
+    UnitPort { unit: "U233 1105", level: blarg_story::REFERENCE_LEVEL, func: blarg_story::SCIENTIST_FN, classes: &blarg_story::SCIENTIST_CLASSES, update: blarg_story::scientist_update, joints: &[] },
+    UnitPort { unit: "U297 1130", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::COMMANDO_FN, classes: &batalia_story::COMMANDO_CLASSES, update: batalia_story::commando_update, joints: &[] },
+    UnitPort { unit: "U298 1144", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::DESERTER_FN, classes: &batalia_story::DESERTER_CLASSES, update: batalia_story::deserter_update, joints: &[] },
+    UnitPort { unit: "U299 1283", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::WORKER_FN, classes: &batalia_story::WORKER_CLASSES, update: batalia_story::water_worker_update, joints: &[] },
+    UnitPort { unit: "U321 1290", level: gaspar_story::REFERENCE_LEVEL, func: gaspar_story::UPDATE_FN, classes: &gaspar_story::CLASSES, update: gaspar_story::update, joints: &[] },
+    UnitPort { unit: "U329 18", level: orxon_story::REFERENCE_LEVEL, func: orxon_story::MAGNEBOOTS_FN, classes: &orxon_story::MAGNEBOOTS_CLASSES, update: orxon_story::magneboots_update, joints: &[] },
+    UnitPort { unit: "U350 1326", level: orxon_story::REFERENCE_LEVEL, func: orxon_story::NANOTECH_FN, classes: &orxon_story::NANOTECH_CLASSES, update: orxon_story::nanotech_update, joints: &[] },
+    UnitPort { unit: "U360 23", level: pokitaru_story::REFERENCE_LEVEL, func: pokitaru_story::MASK_FN, classes: &pokitaru_story::MASK_CLASSES, update: pokitaru_story::mask_update, joints: &[] },
+    UnitPort { unit: "U363 90", level: pokitaru_story::REFERENCE_LEVEL, func: pokitaru_story::THRUSTER_FN, classes: &pokitaru_story::THRUSTER_CLASSES, update: pokitaru_story::thruster_update, joints: &[] },
+    UnitPort { unit: "U365 298", level: pokitaru_story::REFERENCE_LEVEL, func: pokitaru_story::PERSUADER_FN, classes: &pokitaru_story::PERSUADER_CLASSES, update: pokitaru_story::persuader_update, joints: &[] },
+    UnitPort { unit: "U394 282", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::MERCHANT_FN, classes: &hoven_story::MERCHANT_CLASSES, update: hoven_story::merchant_update, joints: &hoven_story::MERCHANT_CLASSES },
+    UnitPort { unit: "U411 1404", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::SCENE_FN, classes: &hoven_story::SCENE_CLASSES, update: hoven_story::scene_trigger_update, joints: &[] },
+    UnitPort { unit: "U398 328", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::HYDRO_FN, classes: &hoven_story::HYDRO_CLASSES, update: hoven_story::hydro_update, joints: &[] },
+    UnitPort { unit: "U440 1353", level: gemlik_story::REFERENCE_LEVEL, func: gemlik_story::UPDATE_FN, classes: &gemlik_story::CLASSES, update: gemlik_story::update, joints: &[] },
+    UnitPort { unit: "U464 851", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::QWARK_FN, classes: &oltanis_story::QWARK_CLASSES, update: oltanis_story::qwark_update, joints: &[] },
+    UnitPort { unit: "U469 924", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::MERCHANT_FN, classes: &oltanis_story::MERCHANT_CLASSES, update: oltanis_story::merchant_update, joints: &[] },
+    UnitPort { unit: "U474 1354", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::MORPH_FN, classes: &oltanis_story::MORPH_CLASSES, update: oltanis_story::morph_update, joints: &[] },
+    UnitPort { unit: "U503 1388", level: quartu_story::REFERENCE_LEVEL, func: quartu_story::GRABBER_FN, classes: &quartu_story::GRABBER_CLASSES, update: quartu_story::grabber_update, joints: &[] },
+    UnitPort { unit: "U511 1469", level: quartu_story::REFERENCE_LEVEL, func: quartu_story::HELP_FN, classes: &quartu_story::HELP_CLASSES, update: quartu_story::help_update, joints: &[] },
+    UnitPort { unit: "U506 1419", level: quartu_story::REFERENCE_LEVEL, func: quartu_story::BROADCAST_FN, classes: &quartu_story::BROADCAST_CLASSES, update: quartu_story::broadcast_update, joints: &[] },
+    UnitPort { unit: "U529 1377", level: kalebo_story::REFERENCE_LEVEL, func: kalebo_story::UPDATE_FN, classes: &kalebo_story::CLASSES, update: kalebo_story::update, joints: &[] },
+    UnitPort { unit: "U561 1428", level: fleet_story::REFERENCE_LEVEL, func: fleet_story::UPDATE_FN, classes: &fleet_story::CLASSES, update: fleet_story::update, joints: &[] },
+    UnitPort { unit: "U31 834", level: veldin_story::REFERENCE_LEVEL, func: veldin_story::UPDATE_FN, classes: &veldin_story::CLASSES, update: veldin_story::update, joints: &[] },
+    UnitPort { unit: "U248 436", level: umbris_story::REFERENCE_LEVEL, func: umbris_story::UPDATE_FN, classes: &umbris_story::CLASSES, update: umbris_story::update, joints: &[] },
+    UnitPort { unit: "U118 1005", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::ITEM_SCENE_FN, classes: &aridia_story::ITEM_SCENE_CLASSES, update: aridia_story::item_scene_update, joints: &[] },
+    UnitPort { unit: "U405 1267", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::UPDATE_FN, classes: &hoven_turret::CLASSES, update: hoven_turret::update, joints: &hoven_turret::CLASSES },
+    // Draw callbacks only (no class runs them): the HUD (`Callback::UnitFrame`) and the red screen (`Callback::UnitQuads`).
+    UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "458 shell", level: turret_shell::REFERENCE_LEVEL, func: turret_shell::UPDATE_FN, classes: &turret_shell::CLASSES, update: turret_shell::update, joints: &[] },
+    UnitPort { unit: "U407 1274", level: hoven_carrier::REFERENCE_LEVEL, func: hoven_carrier::UPDATE_FN, classes: &hoven_carrier::CLASSES, update: hoven_carrier::update, joints: &hoven_carrier::JOINTS },
+    UnitPort { unit: "184 shot", level: gun_shot::REFERENCE_LEVEL, func: gun_shot::UPDATE_FN, classes: &gun_shot::CLASSES, update: gun_shot::update, joints: &[] },
+    UnitPort { unit: "U397 326", level: hoven_drone::REFERENCE_LEVEL, func: hoven_drone::UPDATE_FN, classes: &hoven_drone::CLASSES, update: hoven_drone::update, joints: &hoven_drone::JOINTS },
+    UnitPort { unit: "U397 409", level: hoven_drone::REFERENCE_LEVEL, func: hoven_drone::SHOT_FN, classes: &hoven_drone::SHOT_CLASSES, update: hoven_drone::shot_update, joints: &[] },
+    UnitPort { unit: "1371 rider", level: drone_rider::REFERENCE_LEVEL, func: drone_rider::UPDATE_FN, classes: &drone_rider::CLASSES, update: drone_rider::update, joints: &[] },
+    UnitPort { unit: "U538 1455", level: kalebo_race::REFERENCE_LEVEL, func: kalebo_race::UPDATE_FN, classes: &kalebo_race::CLASSES, update: kalebo_race::update, joints: &kalebo_race::CLASSES },
 ];
 
 /// Port indices as the `ClassUpdate::Unit` payload.
@@ -668,7 +776,9 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
 /// The state part of the unit draw callback row `i` run for moby `id` by the frame's callbacks
 /// (`Callback::UnitFrame(i)`, `draw_callbacks::run_frame`): its `rand` draws and what it leaves for the renderer.
 pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
-    if let Some((veldin_pads::REFERENCE_LEVEL, veldin_pads::COUNTDOWN_FN)) = PORTS.get(i as usize).map(|u| (u.level, u.func)) {
-        veldin_pads::countdown_draw(w, id);
+    match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
+        Some((veldin_pads::REFERENCE_LEVEL, veldin_pads::COUNTDOWN_FN)) => veldin_pads::countdown_draw(w, id),
+        Some((hoven_turret::REFERENCE_LEVEL, hoven_turret::HUD_FN)) => hoven_turret::hud_frame(w, id),
+        _ => {}
     }
 }

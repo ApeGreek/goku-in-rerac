@@ -95,6 +95,9 @@ pub enum MobySpawn {
     Splash { size: f32, pos: [f32; 4], angle: f32 },
     /// `FUN_002c9da0(side)`: a Thruster-Pack flame, class 0xa7 (`HeroItemsCreate`; no draws).
     ThrusterFlame { side: i32 },
+    /// `HeroTickStateTimer`'s `CreateMoby(0x27a)`: the Hologuise disguise at the hero (`pos` = 0x13f3d0, `rot` =
+    /// 0x13f3e0), then `SwitchCharacter(3, 0x53, moby)` (`super::hologuise`).
+    Disguise { pos: [f32; 4], rot: [f32; 4] },
 }
 
 /// Ratchet's moby as the last write-back left it (`MobyBuildMatrix` of the previous tick): what `FUN_002645a8(Ratchet,
@@ -123,6 +126,10 @@ pub struct JointData {
     /// The other bodies' classes' joint lists (Clank 0x57, Giant Clank 0x1a3: `super::bodies::BodyJoints`): what
     /// `0x2645a8` reads while a body is the hero moby.
     pub bodies: std::sync::Arc<Vec<super::bodies::BodyJoints>>,
+    /// The hand item classes' joint lists' modifier targets `(o_class, target per list)` (the second byte list's first
+    /// entry, `rc_formats::moby_anim::list_target`; 0xff none): the joints the hand records and the Metal Detector's
+    /// node act on (`super::gadgets::hand_modifiers`).
+    pub items: std::sync::Arc<Vec<(i16, Vec<u8>)>>,
 }
 
 /// One back pack class's joint lists: `(o_class, class scale +0x24, first byte lists)`.
@@ -463,6 +470,22 @@ pub fn create_mobys(h: &mut Hero, table: &mut crate::moby_runtime::MobyTable, he
                 use crate::moby_update::classes::thruster_flame as tf;
                 let Some(id) = hits.create_moby(table, tf::CLASS, counter) else { continue };
                 tf::fill(&mut table.mobys[id], side);
+                out.push(id);
+            }
+            MobySpawn::Disguise { pos, rot } => {
+                let class = super::bodies::DISGUISE_CLASS;
+                let Some(id) = hits.create_moby(table, class, counter) else { continue };
+                let hero_light = table.mobys.get(h.hero_moby(hero_moby)).map(|m| (m.light, m.ambient));
+                let m = &mut table.mobys[id];
+                m.position = pos;
+                m.rotation = rot;
+                m.draw_dist = 0x40;
+                m.visible = 1;
+                m.glow = 0;
+                if let Some((l, a)) = hero_light { (m.light, m.ambient) = (l, a); }
+                h.bodies.disguise = Some(id);
+                // `SwitchCharacter(3, 0x53, moby)`: made by the next tick before the classes' calls (`Bodies::restore`).
+                h.bodies.restore = Some((super::bodies::body::DISGUISE, super::hologuise::IDLE, super::bodies::BodyMoby { id, o_class: class, anim: m.anim }));
                 out.push(id);
             }
         }

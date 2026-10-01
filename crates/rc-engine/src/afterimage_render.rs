@@ -79,6 +79,7 @@ fn state_of(p: &Pose) -> AnimState {
 #[allow(clippy::too_many_arguments)]
 fn draw(
     mut state: Local<Option<Ghosts>>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     play: Option<Res<Play>>,
     level: Res<crate::Level>,
     mut commands: Commands,
@@ -87,6 +88,8 @@ fn draw(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
 ) {
+    // A runtime level change (crate::level_switch): the ghosts' entities are gone.
+    if generation.is_changed() { *state = None; }
     let Some(p) = play else { return };
     let lv = &level.0;
     let g = state.get_or_insert_with(|| {

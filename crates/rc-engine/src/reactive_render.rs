@@ -13,7 +13,7 @@ pub struct ReactivePlugin;
 
 impl Plugin for ReactivePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ReactiveDraw>().add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
+        app.init_resource::<ReactiveDraw>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<ReactiveDraw>).add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
     }
 }
 

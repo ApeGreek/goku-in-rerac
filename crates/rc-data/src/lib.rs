@@ -186,6 +186,13 @@ impl Lumps {
     /// Drops the lumps this store holds for `root` (they stay alive where still referenced). For a future level
     /// change; the engine loads one level per process today.
     pub fn forget(&self, root: &Path) { self.lock().lumps.retain(|(r, _), _| r != root); }
+
+    /// Drops the lumps of level `index` (`levels/NN/…`) this store holds for `root` (still alive where referenced): the
+    /// engine's runtime level change frees the level it left, as the game reuses the level's memory.
+    pub fn forget_level(&self, root: &Path, index: u32) {
+        let prefix = format!("levels/{index:02}/");
+        self.lock().lumps.retain(|(r, rel), _| r != root || !rel.starts_with(&prefix));
+    }
 }
 
 static GLOBAL: OnceLock<Lumps> = OnceLock::new();

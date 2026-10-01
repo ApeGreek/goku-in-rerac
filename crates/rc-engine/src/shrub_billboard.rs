@@ -124,7 +124,7 @@ pub struct ShrubBillboardPlugin;
 
 impl Plugin for ShrubBillboardPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(MaterialPlugin::<BillboardMaterial>::default()).add_systems(Startup, spawn_system);
+        app.add_plugins(MaterialPlugin::<BillboardMaterial>::default()).add_systems(crate::level_switch::LevelStartup, spawn_system);
     }
 }
 
@@ -152,12 +152,26 @@ fn spawn_system(
     mut materials: ResMut<Assets<BillboardMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    spawn_billboards(&mut commands, &level.0, &mut meshes, &mut images, &mut materials, &mut buffers, None);
+}
+
+/// The billboard sprites of `level`'s shrubs, on render layer `layer` (None: the default layer; crate::title_world
+/// draws the title world on its own layer).
+pub(crate) fn spawn_billboards(
+    commands: &mut Commands,
+    level: &crate::level_load::LoadedLevel,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<BillboardMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+    layer: Option<&bevy::camera::visibility::RenderLayers>,
+) {
     if std::env::var("RC_NO_SHRUBS").is_ok_and(|v| v.trim() == "1") { return; }
     // `RC_NO_BILLBOARDS=1`: no billboard sprites (the meshes still fade out at F).
     if std::env::var("RC_NO_BILLBOARDS").is_ok_and(|v| v.trim() == "1") { return; }
     let t0 = Instant::now();
-    let shrubs: &LevelShrubs = &level.0.shrubs;
-    let fog = crate::game_camera::TfragFog::new(&level.0.fog);
+    let shrubs: &LevelShrubs = &level.shrubs;
+    let fog = crate::game_camera::TfragFog::new(&level.fog);
     let sampler = ImageSamplerDescriptor {
         // CLAMP_1 = 5 from the pass-1 setup packet.
         address_mode_u: ImageAddressMode::ClampToEdge,
@@ -223,7 +237,7 @@ fn spawn_system(
         for variant in 0..3u8 {
             let params = BillboardParams { misc: Vec4::new(variant as f32, d.mxl as f32, d.k, crate::game_camera::NEAR) };
             let mat = materials.add(BillboardMaterial { texture: d.image.clone(), fog, params, instances: instances.clone(), variant });
-            commands.spawn((
+            let mut e = commands.spawn((
                 Mesh3d(d.mesh.clone()),
                 MeshMaterial3d(mat),
                 // Only the Transparent3d sort reads it (the shader places every corner itself).
@@ -231,6 +245,7 @@ fn spawn_system(
                 NoFrustumCulling,
                 Name::new(format!("shrub billboard class {} pass {}", d.o_class, variant)),
             ));
+            if let Some(l) = layer { e.insert(l.clone()); }
         }
     }
     println!(

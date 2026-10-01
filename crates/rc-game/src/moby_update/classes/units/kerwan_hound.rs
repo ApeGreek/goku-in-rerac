@@ -27,7 +27,7 @@
 //! | address | what it does | ported / not |
 //! |---|---|---|
 //! | `0x24e830(+0x230, m, &t)` (= `0x274b78`) | the target (Ratchet or a decoy) | [`update`] (`target::acquire`) |
-//! | `0x251d00(2.1, m, 0, +0x280)` | the big-head cheat (0x15edb7): attach a manipulator at 2.1; off: detach it if attached (never attached without the cheat) | NOT ported (G-SAV-006) |
+//! | `0x251d00(2.1, m, 0, +0x280)` | the big-head cheat (0x15edb7): attach a manipulator at 2.1; off: detach it if attached (never attached without the cheat) | [`update`] (`manip::big_head`) |
 //! | `0x2c6a20` | the hits | [`hits`] |
 //! | `FastDecTimer(+0x244)` | | [`update`] |
 //! | 0: mode \|= 0x1000; home = pos; +0x7f = 0x18; 1; health 1.0, +0x29 0, alert 0, meter 1; `SeedJumpPattern(J)`; J+0x40 4π·dt², J+0x44 π·dt, J+8 2, J+0 radius 0x38d, J+0x24 speed·dt, J flags \|= 0x20, J+0x28 2.0954, J+0xc 2, J+0x3c 2π·dt², +0x264 1.0, +0x244 0, +0x26c 0, +0x260 0, J+0x2c = J+0x24·scale(6), +0x58 8, +0x5a 7; `rand() & 1` → mode \|= 0x8000 (mirrored) | init | [`init`] |
@@ -427,6 +427,8 @@ pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     let range = c::pf(w, id, pv::SIGHT);
     let t = target::acquire(w, id, range);
+    // 0x251d00(2.1, m, 0, +0x280): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.1, id, 0, id, 0x280);
     hits(w, id);
     c::dec_timer_pvar_i32(w, id, pv::HOLD);
     match state(w, id) {

@@ -235,6 +235,9 @@ pub struct Help {
     pub out: HelpOut,
     /// A camera option reversed (the low byte of 0x15eddc or 0x15ede0 is 0): the Aridia director 1324's camera hint.
     pub cam_reversed: bool,
+    /// 0x15eddc (camera up / down: 1 normal, 0 reversed) as the classes read it (Hoven's turret 1267 negates the
+    /// stick's y when it is 0).
+    pub cam_pitch_word: u32,
 }
 
 impl Default for Help {
@@ -257,6 +260,7 @@ impl Default for Help {
             play_time: 0,
             out: HelpOut::default(),
             cam_reversed: false,
+            cam_pitch_word: 1,
         }
     }
 }
@@ -294,6 +298,7 @@ impl Help {
         self.bx.text_on = gs.global.helpdesk_text != 0;
         self.bx.voice_on = gs.global.helpdesk_voice != 0;
         self.cam_reversed = gs.global.cam_pitch_normal & 0xff == 0 || gs.global.cam_yaw_normal & 0xff == 0;
+        self.cam_pitch_word = gs.global.cam_pitch_normal as u32;
     }
 
     /// The records and the log back into the saved game (after the tick).
@@ -301,6 +306,7 @@ impl Help {
         let g = &mut gs.global;
         if g.help != self.records.help { g.help = self.records.help; }
         if g.move_help != self.records.moves { g.move_help = self.records.moves; }
+        if g.gadget_help != self.records.gadget { g.gadget_help = self.records.gadget; }
         if g.help_log != self.log { g.help_log = self.log; }
         if g.help_log_pos != self.log_pos { g.help_log_pos = self.log_pos; }
     }

@@ -1064,6 +1064,12 @@ impl Hero {
         dec_s(&mut self.f536);
         dec_s(&mut self.f53e);
         dec_s(&mut self.f546);
+        // 0x13f52c / 0x13f52a: the swap timers `UpdateWrenchSelected` sets (`0x230720` / `0x2306c0`; G-HERO-025).
+        dec_s(&mut self.items.f52c);
+        dec_s(&mut self.items.f52a);
+        // The disguise's timer 0x14162e (super::hologuise): its end is made by the caller (enter / leave body 3).
+        let square = env.pad.pressed_within(crate::pad::button::SQUARE, ticks(0x12)).is_some();
+        super::hologuise::tick_timer(self, square);
         // 0x13f538 (the fidget cooldown) and the fidget records' +0x60 (0x179d70 + k·0x70).
         dec_s(&mut self.idle.cooldown);
         // Body 2: Giant Clank's beam lockout 0x140986 (super::bodies::giant).

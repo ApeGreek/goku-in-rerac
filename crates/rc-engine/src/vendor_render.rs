@@ -3,9 +3,12 @@
 //! * **The hologram's beam on approach** (class 11 states 1 / 2, level01 0x2bb128; the Gadgetron logo itself, class
 //!   1143, is the dynamic moby the vendor creates, drawn with its metal pass by the dynamic-moby path, its two joints
 //!   turned by the vendor's manipulators: `rc_game::moby_update::manip`): the class's draw callback 0x2ba9c0,
-//!   the projector beam, 4 FX quads over the 9 vertices of 0x1d77e0 (x / y scaled by the hologram's size), V scrolled
-//!   +0.01 per draw, turned to face the camera [M: the callback's rotation and texture are lost in the decompile; FX 0x18
-//!   as the menu's cone].
+//!   the projector beam, 4 FX 0x18 quads over the 9 vertices of 0x1d77e0 (x / y scaled by the hologram's size pvar
+//!   +0x90), V scrolled by gp−0x586c (+0x01 per drawn vendor, wrapping by −1), turned by the camera's yaw 0x167258
+//!   (`fun_001fa030` with the Euler (0, 0, yaw)), ALPHA 0x44; then the **scan plane** (G-UI-006): one FX 0x1b quad, its
+//!   phase t = gp−0x5868 (+0.01 per drawn vendor, back to 0 past 1), the square ±1.2·t·size about the vendor, its −x
+//!   edge at z 1.1 + 1.4·t and its +x edge 0.2 lower, turned by the camera's yaw, UV (0, 0)..(1, 1), RGBA
+//!   ((1 − t)·128) << 24 | 0x808080; then the four glow points (`FUN_002781d0`, crate::interact_render).
 //! * **Mode 5** (`DrawWorld_Mode5` 0x2b4020): the item hologram (+0x200 ammo / +0x300 weapon) in the world before
 //!   the vendor, the hologram cone (`VendorDrawHologramCone` 0x2b3cc8: FX 0x18, ALPHA 0x44, V scroll), the six screens
 //!   placed on the vendor's monitor joints, the popup while buying, the glass quads (FX 0x19) and then the HUD.
@@ -44,11 +47,14 @@ const SLOT_BACKDROP: u32 = 1;
 const SLOT_SALESMAN: u32 = 2;
 const SLOT_HOLO: u32 = 3;
 const SLOT_POPUP: u32 = 4;
-const SLOTS: u32 = SLOT_POPUP + 1;
+/// The popup's class-13 moby +0x500 (its quantity case).
+const SLOT_POPUP_PANEL: u32 = 5;
+const SLOTS: u32 = SLOT_POPUP_PANEL + 1;
 /// Palette entries per slot (the salesman has 92 joints).
 const JOINTS: u32 = 128;
-/// The FX textures.
+/// The FX textures (the cones and the beam; the beam's scan plane).
 const CONE_FX: usize = 0x18;
+const SCAN_FX: usize = 0x1b;
 /// Light set 14 and the screen mobys' light word.
 const LIGHT_SET: usize = 14;
 const LIGHT_WORD: u32 = 0x0e0e;
@@ -63,10 +69,14 @@ struct VendorGfx {
     gadgets: std::sync::Arc<Vec<(LevelMobyClass, MobyAnimClass)>>,
     item_canvas: CanvasId,
     salesman_canvas: CanvasId,
+    /// The popup's target while it shows the +0x500 moby.
+    popup_canvas: CanvasId,
     cone: crate::fx_draw::FxSlots,
     /// The beam's V scroll 0x161394 and the tick it last advanced.
     beam_scroll: f32,
     beam_tick: Option<u64>,
+    /// gp−0x5868: the scan plane's phase (+0.01 per drawn beam, 0 past 1).
+    scan: f32,
     /// FX 0x19's size (the glass quads' texels).
     glass_size: (i32, i32),
 }
@@ -76,6 +86,7 @@ pub struct VendorRenderPlugin;
 impl Plugin for VendorRenderPlugin {
     fn build(&self, app: &mut App) {
         if !crate::gameplay::enabled() { return; }
+        app.add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<VendorGfx>);
         app.add_systems(PreUpdate, setup).add_systems(Update, draw.after(crate::menu_render::MenuPrims).before(HudBuild));
     }
 }
@@ -83,12 +94,15 @@ impl Plugin for VendorRenderPlugin {
 #[allow(clippy::too_many_arguments)]
 fn setup(
     mut done: Local<bool>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     mut commands: Commands,
     level: Res<crate::Level>,
     mut canvases: ResMut<Canvases>,
     mut images: ResMut<Assets<Image>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    // Once per level (crate::level_switch: a runtime level change runs it again).
+    if generation.is_changed() { *done = false; }
     if *done { return; }
     *done = true;
     let lv = &level.0;
@@ -106,6 +120,7 @@ fn setup(
     let extra = ExtraMobys::new(lv, records, crate::moby_anim::identity_palette(SLOTS * JOINTS), &mut buffers);
     let item_canvas = canvases.create(&mut commands, &mut images, "vendor item panel");
     let salesman_canvas = canvases.create(&mut commands, &mut images, "vendor salesman");
+    let popup_canvas = canvases.create(&mut commands, &mut images, "vendor popup");
     let glass_size = lv.hud.as_ref().and_then(|h| h.fx.get(screens::GLASS_FX).cloned().flatten()).map_or((64, 64), |t| (t.width as i32, t.height as i32));
     println!("vendor render: {} gadget classes, glass FX {glass_size:?}", gadgets.len());
     commands.insert_resource(VendorGfx {
@@ -115,9 +130,11 @@ fn setup(
         gadgets: std::sync::Arc::new(gadgets),
         item_canvas,
         salesman_canvas,
+        popup_canvas,
         cone: Default::default(),
         beam_scroll: 0.0,
         beam_tick: None,
+        scan: 0.0,
         glass_size,
     });
 }
@@ -233,7 +250,6 @@ fn draw(
     level: Res<crate::Level>,
     mut hook: ResMut<Hud2dHook>,
     mut canvases: ResMut<Canvases>,
-    cams: Query<&Transform, With<crate::fly_cam::FlyCam>>,
     fog: Option<Res<crate::game_camera::GameFog>>,
     mut vis: Query<&mut Visibility>,
     mut transforms: Query<&mut Transform, Without<crate::fly_cam::FlyCam>>,
@@ -252,7 +268,9 @@ fn draw(
         let mut prims: Vec<Prim> = Vec::new();
         let mut statics: [Vec<Prim>; 3] = Default::default();
         for sd in &d.screens {
-            prims.extend(screen_prims(sd, &lh.glyphs, &sizes, sd.s == screens::ITEM || sd.s == screens::SALESMAN, &mut statics));
+            // The 3D targets clear on their canvas (the popup only while it shows its +0x500 moby).
+            let canvas = sd.s == screens::ITEM || sd.s == screens::SALESMAN || (sd.s == screens::POPUP && d.scene.popup_panel.is_some());
+            prims.extend(screen_prims(sd, &lh.glyphs, &sizes, canvas, &mut statics));
         }
         if let Some(view) = d.view {
             let (gw, gh) = gfx.glass_size;
@@ -284,6 +302,7 @@ fn draw(
     });
     canvases.show(gfx.item_canvas, canvas_of(screens::ITEM));
     canvases.show(gfx.salesman_canvas, canvas_of(screens::SALESMAN));
+    canvases.show(gfx.popup_canvas, if d.scene.popup_panel.is_some() { canvas_of(screens::POPUP) } else { None });
     // ---- The mobys.
     let mut want: Vec<(u32, SlotDraw)> = Vec::new();
     // Light set 14 for the vendor's screen mobys.
@@ -311,6 +330,7 @@ fn draw(
     if let Some(m) = &d.scene.salesman { screen_moby(SLOT_SALESMAN, m, 0); }
     if let Some(m) = &d.scene.hologram { screen_moby(SLOT_HOLO, m, 1); }
     if let Some(m) = &d.scene.popup { screen_moby(SLOT_POPUP, m, 0); }
+    if let Some(m) = &d.scene.popup_panel { screen_moby(SLOT_POPUP_PANEL, m, 0); }
     // The beams of the vendors whose hologram shows (the draw callback 0x2ba9c0 the vendor registers).
     let table = &play.game.mobys;
     let logos: Vec<([f32; 3], f32)> = table.mobys.iter().enumerate()
@@ -334,6 +354,7 @@ fn draw(
             let layer = match *slot {
                 SLOT_ITEM | SLOT_BACKDROP => Some(canvases.layer(gfx.item_canvas)),
                 SLOT_SALESMAN => Some(canvases.layer(gfx.salesman_canvas)),
+                SLOT_POPUP_PANEL => Some(canvases.layer(gfx.popup_canvas)),
                 _ => None,
             };
             for &e in &ents {
@@ -374,13 +395,11 @@ fn draw(
         if let Some(mut b) = buffers.get_mut(&gfx.extra.instances) { b.data = Some(records); }
     }
     // ---- The cone (menu) and the beams (approach).
-    let cam = cams.iter().next().map(|t| crate::game_camera::game_eye(t).to_array());
     let counter = play.game.counter;
-    if gfx.beam_tick != Some(counter) && !logos.is_empty() {
-        gfx.beam_tick = Some(counter);
-        gfx.beam_scroll += 0.01;
-        if gfx.beam_scroll > 1.0 { gfx.beam_scroll -= 1.0; }
-    }
+    // The camera's yaw 0x167258 the beams turn by.
+    let cam_yaw = play.game.camera.out.euler[2].to_f32();
+    let new_tick = gfx.beam_tick != Some(counter) && !logos.is_empty();
+    if new_tick { gfx.beam_tick = Some(counter); }
     let mut groups = Vec::new();
     let layout = vr.vendor.as_ref().and_then(|v| v.tables.layout.clone()).or_else(|| vr.layout());
     if let Some(l) = layout.as_ref() {
@@ -397,11 +416,30 @@ fn draw(
             groups.push(quads(&l.cone, &|v| vendor::to_world(&rows, pos, v), scroll));
         }
         for &(p, s) in &logos {
-            // Facing the camera about z; x / y scaled by the hologram's size.
-            let yaw = cam.map_or(0.0, |c| (c[1] - p[1]).atan2(c[0] - p[0]));
-            let (sn, cs) = yaw.sin_cos();
+            // Each drawn beam steps the two shared phases (the callback runs once per vendor per frame).
+            if new_tick {
+                gfx.beam_scroll += 0.01;
+                if gfx.beam_scroll > 1.0 { gfx.beam_scroll -= 1.0; }
+            }
+            // Turned by the camera's yaw (rows of the Euler (0, 0, yaw), the vertex as a row vector); x / y scaled by the
+            // hologram's size.
+            let (sn, cs) = cam_yaw.sin_cos();
             let place = move |v: [f32; 3]| [p[0] + (v[0] * cs - v[1] * sn) * s, p[1] + (v[0] * sn + v[1] * cs) * s, p[2] + v[2]];
             groups.push(quads(&l.beam, &place, gfx.beam_scroll));
+            // The scan plane (FX 0x1b).
+            if new_tick {
+                gfx.scan += 0.01;
+                if gfx.scan > 1.0 { gfx.scan = 0.0; }
+            }
+            let t = gfx.scan;
+            let (a, b) = (-t * 1.2 * s, t * 1.2 * s);
+            let z = t * 1.4 + 1.1;
+            let corners = [[a, a, z], [b, a, z - 0.2], [a, b, z], [b, b, z - 0.2]];
+            let turn = move |v: [f32; 3]| [p[0] + v[0] * cs - v[1] * sn, p[1] + v[0] * sn + v[1] * cs, p[2] + v[2]];
+            let rgba = (((1.0 - t) * 128.0) as i32 as u32) << 24 | 0x80_8080;
+            let mut pb = crate::fx_draw::PrimBuf::default();
+            pb.quad(corners.map(turn), [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], [rgba; 4]);
+            groups.push(crate::fx_draw::FxGroup { fx: SCAN_FX, additive: false, prims: pb });
         }
     }
     let fog = fog.map(|f| f.uniform).unwrap_or_else(|| crate::game_camera::TfragFog::new(&lv.fog));

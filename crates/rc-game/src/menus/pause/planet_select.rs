@@ -4,8 +4,8 @@
 //! confirm keys (0x295370) and the missions widget's planet stepping (0x28fec8). Spec: docs/plan/menus.md §3
 //! "Map", "Planet select", "Confirm".
 //!
-//! Stubs (counted): the streamed / composed destination map and picture (0x28f868's streaming half,
-//! 0x293398 / 0x293670), the 3D globe 0x294258, the gold-bolt panel 0x292980 and the missions list.
+//! The missions list, the streamed pictures 0x293398 / 0x293670, the globe 0x294258 and the confirm page's gold-bolt panel
+//! 0x292980 are [`super::map_page`]'s.
 
 use super::super::{sprite, text, text_plain, MenuAssets, MenuDraw, MenuInput, MenuSound};
 use super::{list_font, lf, Data, Item, List, MenuEnv, MenuOut, PageMenu, DISABLED, DISABLED_SELECTED, LIGHT_BLUE, YELLOW};
@@ -228,10 +228,15 @@ pub fn confirm_update(m: &mut PageMenu, inp: &MenuInput, gs: &mut GameState, out
     0
 }
 
-/// 0x28fec8 (the confirm page's missions widget): L1/R1 step to the previous / next known planet (stopping
-/// at the current level). The missions list itself is a stub.
+/// `FUN_0028fec8` (the missions widget of the missions page and the ship's confirm page; `map_page` has its list):
+/// unfocused, the destination's cursor = −1; focused: Start / Select / R3 close, R1 / L1 step to the next / previous
+/// known planet (stopping at the current level; sound 1 and the destination's mission status), Up / Down move the
+/// mission cursor ([`super::map_page::missions_keys`]), △ back (or close at a root).
 pub fn missions_update(m: &mut PageMenu, w: u32, inp: &MenuInput, gs: &mut GameState, out: &mut MenuOut) -> i32 {
-    if !m.is_focus(w) { return 0; }
+    if !m.is_focus(w) {
+        super::map_page::missions_unfocused(m, w);
+        return 0;
+    }
     if inp.pressed_u & 0xd00 != 0 && !m.no_close { return 1; }
     let (old, level) = (m.dest, gs.global.level);
     let known = |i: i32| usize::try_from(i).ok().and_then(|i| gs.global.planet_unlocked.get(i)).is_some_and(|&b| b != 0);
@@ -264,8 +269,12 @@ pub fn missions_update(m: &mut PageMenu, w: u32, inp: &MenuInput, gs: &mut GameS
         }
     }
     m.dest = d;
-    if m.dest != old { out.sounds.push(MenuSound::Cursor); }
-    *m.stub_calls.entry("missions list 0x28fec8").or_default() += 1;
+    let changed = m.dest != old;
+    if changed {
+        out.sounds.push(MenuSound::Cursor);
+        super::map_page::dest_changed(m, gs);
+    }
+    super::map_page::missions_keys(m, w, inp.pressed_u, changed, out);
     if inp.pressed_u & button::TRIANGLE != 0 {
         let parent = m.pages.get(&m.current).map_or(0, |p| p.parent);
         if parent != 0 {

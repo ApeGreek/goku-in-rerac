@@ -306,6 +306,12 @@ where
         a.play_footstep(level, class, foot, variant, 0, self.hero, pos, &self.listener, rng, self.counter)
     }
 
+    /// `SoundSetPitchBend(slot, pb)` 0x2a1988 on a slot the hand item took (no owner test, as the game).
+    fn set_pitch_bend(&mut self, slot: i32, pb: i32) {
+        let Some(mut a) = (self.audio)() else { return };
+        if let Some(s) = usize::try_from(slot).ok().and_then(|i| a.slots.slots.get_mut(i)) { s.pb = pb; }
+    }
+
     /// `SoundIsAlive(item, slot)` on a slot the hero took (owner: Ratchet's moby, the hand item's stand-in).
     fn alive(&mut self, slot: i32) -> bool {
         let Some(a) = (self.audio)() else { return false };

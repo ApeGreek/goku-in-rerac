@@ -40,7 +40,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x264dd0(2.5, m, 1, +0x1a0)` (= `0x278720`) | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x264dd0(2.5, m, 1, +0x1a0)` (= `0x278720`) | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn within 30 of the camera: `0x25c788` shadow probe, +0x7f = 0x18 | | [`update`] (`shadows::probe_down`) |
 //! | 0: `rand() & 1` → mirror; targetable; +0x58 15, +0x30 1, +0x5c 1, +0x5a 8, +0x29 0; Ratchet's light word and ambient (+0x38); `SeedJumpPattern(J)`; column 2; J turn 0.03 / 0.3 / 0.25, top 4·dt, probes 2 / 2; health 3; +0x40 zeroed; the flames cleared (`0x264e40`); mode 1 → 10 (blend 0), 2 → 8 (blend 2), 3 → 9 (blend 0xf), else 7 (blend 0) | init | [`init`] |
 //! | 2: wrapped → 3 (blend 4) | wake | [`update`] |
@@ -465,7 +465,8 @@ fn flame(w: &mut World, id: MobyId) {
 /// `0x2d7748`.
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
-    // 0x264dd0(2.5, m, 1, +0x1a0): the big-head manipulator (the cheat flag 0x15edb7; G-SAV-006): not modelled.
+    // 0x264dd0(2.5, m, 1, +0x1a0): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 1, id, 0x1a0);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 30.0 {

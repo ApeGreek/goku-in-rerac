@@ -2,7 +2,9 @@
 //
 // Transform (boot 0x22bf94): p = (x, y, z, 1)·SkyM·C with the raw s16 vertex integers, C = boot 0x187040 =
 // rotation-only view × the world projection, then XY = 2048 + (p.xy / p.w)·(256, 208). SkyM (the shell's
-// rotation) is the mesh transform; the view's translation is dropped by transforming directions (w = 0).
+// rotation; the space skies' scaled, turned and translated shells, crate::flight_render) is the mesh transform,
+// applied to (x, y, z, 1) as the game does (a level sky's entity has no translation and no scale, so that is its
+// rotation alone); the view's translation is dropped by transforming the result as a direction (w = 0).
 // GS Z is 0 for every sky vertex (the builders write the XYZ2 high word as 0): clip.z = 0 gives depth 0,
 // which is GS Z 0 under the port's depth = Z / 2^24 mapping (game_camera.rs), the far end.
 //
@@ -33,8 +35,8 @@ struct SkyVertexOutput {
 fn vertex(v: Vertex) -> SkyVertexOutput {
     var out: SkyVertexOutput;
     let world_from_local = mesh_functions::get_world_from_local(v.instance_index);
-    // v·SkyM: rotation only (the entity has no translation, and w = 0 ignores it anyway).
-    let dir = (world_from_local * vec4<f32>(v.position, 0.0)).xyz;
+    // (x, y, z, 1)·SkyM: the whole shell matrix (rotation, scale, translation row).
+    let dir = (world_from_local * vec4<f32>(v.position, 1.0)).xyz;
     // Rotation-only view (0x186f40 without the camera translation), then the world projection.
     let view_dir = (view.view_from_world * vec4<f32>(dir, 0.0)).xyz;
     var clip = view.clip_from_view * vec4<f32>(view_dir, 1.0);

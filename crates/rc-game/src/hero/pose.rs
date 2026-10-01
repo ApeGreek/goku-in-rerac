@@ -24,7 +24,7 @@
 //! | 0x235354..0x2353f0 | the limit 25° (0x3f: 17°, 0x70: 5°, 0x71 / 4: 11°; 9° at most standing on a moby 0x13f64c) | [`Hero::magnet_lean`] |
 //! | 0x2353f0..0x2354dc | record 1 y = clamp(40°·down.x, ±limit), x = clamp(−40°·down.y, ±limit); record 3 y = −½ record 1 y, x = −¼ record 1 x | [`Hero::magnet_lean`] |
 //! | 0x2354dc..0x23561c | p = clamp(−70°·down.x, −7°, 57°), at least 80° with down.z > 0.85 (upside down), 70° above 0.5; records 13 / 14 / 15 / 16 y = 0.57 / 0.5 / 0.5 / 0.35·p; q = clamp(70°·down.y, ±70°): record 16 x = q, records 13 / 14 / 15 x = 0.7·q | [`Hero::magnet_lean`] |
-//! | `0x235e60` (state 2's physics after `HeroLean`) | without Clank (0x1404d4 = 0): nothing; option 0x15edb3: record 18 scale = gp−0x7de8 (options: not ported) | [`Hero::clank_sway`] |
+//! | `0x235e60` (state 2's physics after `HeroLean`) | without Clank (0x1404d4 = 0): nothing; the cheat 0x15edb3: record 18 scale = gp−0x7de8 (0x15ee18) | [`Hero::clank_sway`] |
 //! | 0x235eb4..0x235fc4 | state 2: record 18 springs (0.02, 0.35); z = clamp(−1.2·clamp(residual 0x13f4d8, ±1.4), ±75°); translation z = min(0.1·\|r\| + 0.1, 0.07) (always 0.07: the game's numbers) × 1024 / Clank's scale +0x2c | [`Hero::clank_sway`] |
 //!
 //! Side effects: the joint records (Ratchet's list +0x64 and Clank's through the springs `0x2273d0`), the foot motes
@@ -275,6 +275,8 @@ impl Hero {
     /// `0x235e60` (the walk physics, after `HeroLean`): Clank's sway on the back, record 18 (module doc).
     pub fn clank_sway(&mut self) {
         if self.back.is_none() { return; }
+        // The cheat 0x15edb3: record 18's scale = 0x15ee18.
+        if self.cheats.on(crate::cheats::slot::CLANK) { self.idle.joints[joint::CLANK0].scale = self.bodies.scale18; }
         let s = 1024.0 / self.idle.clank_scale;
         if self.state != 2 { return; }
         let r = self.yaw_residual.to_f32().clamp(-1.4, 1.4);

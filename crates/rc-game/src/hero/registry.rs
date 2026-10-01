@@ -48,7 +48,8 @@ pub enum Module {
     /// `stance.rs` (P2): look stance, fidget state, scripted walk-to-point.
     Stance,
     /// `weapons.rs`: the weapon states (the glove throw 0x23; the weapon stances 0x17 / 0x27 / 0x2e / 0x30 have no
-    /// SetState caller in any level; the gadget poses 0x38..0x3a are set by one moby callback).
+    /// SetState caller in any level); the Hydrodisplacer's use poses 0x38..0x3a (`hydrodisplacer.rs`, set by its item
+    /// update on a pad 341).
     Weapons,
     /// `crank.rs`: the bolt crank 0x3b (set and driven by the crank class 280).
     Crank,
@@ -56,8 +57,8 @@ pub enum Module {
     /// the Visibomb's flight; 0x1f: the mouse's summon; 0x32: turrets and vehicles; 0x78: the Umbris boss; 99 / 100:
     /// the scene body).
     Scripted,
-    /// `bodies/clank.rs` (body 1: 0x43..0x52, 0x7d) and `bodies/giant.rs` (body 2: 0x5a..0x62); the Hologuise disguise
-    /// (body 3: 0x53..0x59) is not ported (G-WPN-006).
+    /// `bodies/clank.rs` (body 1: 0x43..0x52, 0x7d), `bodies/giant.rs` (body 2: 0x5a..0x62) and `bodies/disguise.rs` (the
+    /// Hologuise disguise, body 3: 0x53..0x59).
     Bodies,
     /// Later: the Hoverboard (levels 5 and 16).
     Hoverboard,
@@ -139,9 +140,9 @@ pub static STATES: [StateInfo; 0x83] = [
     s("Hydro-Pack thrust", 0x11, Swim, true),                     // 0x35
     s("surface swim", 0x12, Swim, true),                          // 0x36
     s("tread water", 0x12, Swim, true),                           // 0x37
-    s("gadget pose 1", 0x13, Weapons, false),                     // 0x38
-    s("gadget pose 2", 0x13, Weapons, false),                     // 0x39
-    s("gadget pose 3", 0x13, Weapons, false),                     // 0x3a
+    s("Hydrodisplacer use pose: in", 0x13, Weapons, true),                     // 0x38
+    s("Hydrodisplacer use pose: use", 0x13, Weapons, true),                     // 0x39
+    s("Hydrodisplacer use pose: out", 0x13, Weapons, true),                     // 0x3a
     s("bolt crank (turning a bolt with the wrench)", 9, Crank, true), // 0x3b
     s("burn bounce (surface 1)", 4, Damage, true),                // 0x3c
     s("death", 0x14, Damage, true),                               // 0x3d
@@ -166,13 +167,13 @@ pub static STATES: [StateInfo; 0x83] = [
     s("Clank walk variant (no entry)", -1, Bodies, true),        // 0x50
     s("Clank kick (□)", 6, Bodies, true),                         // 0x51
     s("Clank pit fall (surface 8 / 0xc)", 2, Bodies, true),                          // 0x52
-    s("Hologuise idle", 0, Bodies, false),                        // 0x53
-    s("Hologuise walk", 1, Bodies, false),                        // 0x54
-    s("Hologuise fall", 2, Bodies, false),                        // 0x55
-    s("Hologuise hurt", 7, Bodies, false),                        // 0x56
-    s("Hologuise death", 0x14, Bodies, false),                    // 0x57
-    s("Hologuise pit fall", 2, Bodies, false),                    // 0x58
-    s("Hologuise ○ action", 0, Bodies, false),                    // 0x59
+    s("Hologuise idle", 0, Bodies, true),                        // 0x53
+    s("Hologuise walk", 1, Bodies, true),                        // 0x54
+    s("Hologuise fall", 2, Bodies, true),                        // 0x55
+    s("Hologuise hurt", 7, Bodies, true),                        // 0x56
+    s("Hologuise death", 0x14, Bodies, true),                    // 0x57
+    s("Hologuise pit fall", 2, Bodies, true),                    // 0x58
+    s("Hologuise ○ action", 0, Bodies, true),                    // 0x59
     s("Giant Clank idle", 0, Bodies, true),                      // 0x5a
     s("Giant Clank walk", 1, Bodies, true),                      // 0x5b
     s("Giant Clank fall", 2, Bodies, true),                      // 0x5c
@@ -238,6 +239,7 @@ impl Hero {
                 self.melee_entry(c, id, play);
                 None
             }
+            Weapons if (0x38..=0x3a).contains(&id) => super::hydrodisplacer::entry(self, c, id, play, old_sub),
             Melee if id == 0x21 => {
                 self.rebound_entry(c, play);
                 None
@@ -256,7 +258,13 @@ impl Hero {
             Crank => super::crank::entry(self, c, id, play, old_sub),
             Scripted => super::scripted::entry(self, c, id, play, old_sub),
             Bodies if implemented(id) => {
-                if (0x5a..=0x62).contains(&id) { super::bodies::giant::entry(self, c, id, play, old_sub) } else { super::bodies::clank::entry(self, c, id, play, old_sub) }
+                if (0x5a..=0x62).contains(&id) {
+                    super::bodies::giant::entry(self, c, id, play, old_sub)
+                } else if (0x53..=0x59).contains(&id) {
+                    super::bodies::disguise::entry(self, c, id, play, old_sub)
+                } else {
+                    super::bodies::clank::entry(self, c, id, play, old_sub)
+                }
             }
             Jump | Melee | Weapons | Bodies | Hoverboard | Unused => None,
         }
@@ -290,6 +298,7 @@ impl Hero {
                 _ => return false,
             },
             Weapons if s == 0x23 => return super::weapons::physics(self, env),
+            Weapons if (0x38..=0x3a).contains(&s) => return super::hydrodisplacer::physics(self, env),
             Ledge => return super::ledge::physics(self, env, anim, rng),
             Packs => return super::packs::physics(self, env, anim, rng),
             Boots => return super::boots::physics(self, env, anim, rng),
@@ -300,7 +309,13 @@ impl Hero {
             Crank => return super::crank::physics(self),
             Scripted => return super::scripted::physics(self, env, anim, rng),
             Bodies if implemented(s) => {
-                return if (0x5a..=0x62).contains(&s) { super::bodies::giant::physics(self, env, anim, rng) } else { super::bodies::clank::physics(self, env, anim, rng) };
+                return if (0x5a..=0x62).contains(&s) {
+                    super::bodies::giant::physics(self, env, anim, rng)
+                } else if (0x53..=0x59).contains(&s) {
+                    super::bodies::disguise::physics(self, env, anim, rng)
+                } else {
+                    super::bodies::clank::physics(self, env, anim, rng)
+                };
             }
             Jump | Weapons | Bodies | Hoverboard | Unused => return false,
         }
@@ -330,6 +345,7 @@ impl Hero {
                 }
             }
             Weapons if s == 0x23 => super::weapons::transitions(self, c),
+            Weapons if (0x38..=0x3a).contains(&s) => super::hydrodisplacer::transitions(self, c),
             Swim => match s {
                 0x33 | 0x35 => self.tr_underwater(c),
                 0x34 => self.tr_underwater_idle(c),
@@ -347,7 +363,13 @@ impl Hero {
             Crank => super::crank::transitions(self, c),
             Scripted => super::scripted::transitions(self, c),
             Bodies if implemented(s) => {
-                if (0x5a..=0x62).contains(&s) { super::bodies::giant::transitions(self, c) } else { super::bodies::clank::transitions(self, c) }
+                if (0x5a..=0x62).contains(&s) {
+                    super::bodies::giant::transitions(self, c)
+                } else if (0x53..=0x59).contains(&s) {
+                    super::bodies::disguise::transitions(self, c)
+                } else {
+                    super::bodies::clank::transitions(self, c)
+                }
             }
             Jump | Weapons | Bodies | Hoverboard | Unused => {}
         }
@@ -379,6 +401,8 @@ mod tests {
         want.extend([0x15, 0x23]);
         // The gadget lunge (walloper.rs).
         want.push(0x20);
+        // The Hydrodisplacer's use poses (hydrodisplacer.rs, G-WPN-006).
+        want.extend([0x38, 0x39, 0x3a]);
         // The wrench rebound (melee.rs; the physics and transitions of 0x7a).
         want.push(0x21);
         // The bolt crank (crank.rs).
@@ -392,6 +416,8 @@ mod tests {
         // The other bodies (G-HERO-005): Clank (bodies/clank.rs) and Giant Clank (bodies/giant.rs).
         want.extend([0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50, 0x51, 0x52, 0x7d]);
         want.extend(0x5a..=0x62);
+        // The Hologuise disguise (bodies/disguise.rs, G-WPN-006).
+        want.extend(0x53..=0x59);
         want.sort_unstable();
         assert_eq!(got, want);
         assert!(!implemented(-1) && !implemented(0x83));

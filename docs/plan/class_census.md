@@ -787,7 +787,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U394 | 1269 | 12 | 20/20 | L12:304e00 | 1/428 | missing | missing: creature,shadow | anim coll creature death hit math moby |
 | U502 | 552 | 16 | 20/20 | L16:2cf4a8 | 6/330 | cheap | — | fxdraw math sound |
 | U552 | 568 | 18 | 20/20 | L18:2d5918 | 2/404 | cheap | — | anim creature hit math react |
-| U96 | 615 | 02 04 06 08 11 13 18 | 19/19 | L02:2d8ad0, L04:2d4ae0, L06:2e1940 +4 | 3/694 | missing | missing: camera; partly: herostate,light | anim cine creature fxdraw help herostate math sound |
+| U96 | 615 | 02 04 06 08 11 13 18 | 19/19 | L02:2d8ad0, L04:2d4ae0, L06:2e1940 +4 | 3/694 | missing | missing: camera; partly: herostate,light | anim cine creature fxdraw help herostate math sound | **ported: `units::trespasser_lock` (2026-10-01 gadgets)**
 | U392 | 1259 | 12 | 18/18 | L12:302f30 | 3/648 | cheap | — | coll fxdraw hit math moby trig |
 | U572 | 1906 | 18 | 18/18 | L18:2fbb98 | 4/834 | missing | missing: path | anim creature fxdraw hit math react |
 | U130 | 574 | 03 | 17/19 | L03:2c6fd0 | 7/3452 | missing | missing: cheat,creature; partly: anim,platform | anim camera coll creature death hit math moby particles path shadow sound trig |
@@ -947,7 +947,7 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U308 | 1201 | 09 | 3/3 | L09:304c80 | 4/1078 | missing | missing: camera; partly: herostate | anim cine light math moby particles sound target |
 | U310 | 1285, 1286, 1287, 1288 | 09 | 3/3 | L09:3082d8 | 2/380 | missing | missing: fxmoby | creature hit math moby sound |
 | U322 | 702 | 10 | 3/3 | L10:2c7a20 | 1/120 | missing | missing: ptype | math sound |
-| U365 | 1159 | 11 | 3/3 | L11:30e978 | 1/134 | cheap | — | math moby sound |
+| U365 | 1159 | 11 | 3/3 | L11:30e978 | 1/134 | cheap | — | math moby sound | **ported: `units::lock_doors` (2026-10-01 gadgets)**
 | U367 | 1179 | 11 15 | 3/3 | L11:30ee00, L15:2d9100 | 1/284 | cheap | — | help math sound |
 | U389 | 384 | 12 | 3/3 | L12:2ec720 | 1/232 | cheap | — | fxdraw math particles |
 | U397 | 1345 | 12 | 3/3 | L12:3081b0 | 2/304 | cheap | — | fxdraw math mission moby sound |
@@ -1005,8 +1005,8 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U101 | 675 | 02 | 1/1 | L02:2dd370 | 1/88 | cheap | — | anim math |
 | U103 | 713 | 02 | 1/1 | L02:2ddc88 | 7/1502 | missing | missing: camera,path; partly: herostate | cine help herostate math moby particles platform sound |
 | U105 | 733 | 02 | 1/1 | L02:2df3d8 | 4/378 | cheap | — | anim creature math moby sound |
-| U107 | 743 | 02 | 1/1 | L02:2dffc8 | 3/20 | cheap | — | — |
-| U108 | 744 | 02 | 1/1 | L02:2e0138 | 1/82 | cheap | — | math |
+| U107 | 743 | 02 | 1/1 | L02:2dffc8 | 3/20 | cheap | — | — | **ported: `units::lock_doors` (2026-10-01 gadgets)**
+| U108 | 744 | 02 | 1/1 | L02:2e0138 | 1/82 | cheap | — | math | **ported: `units::lock_doors` (2026-10-01 gadgets)**
 | U110 | 762 | 02 | 1/1 | L02:2e0720 | 2/370 | cheap | — | hit math moby particles sound |
 | U111 | 786 | 02 | 1/1 | L02:2e0dc0 | 3/778 | missing | missing: camera,save; partly: anim | anim cine creature help herostate lsound math mission moby trig |
 | U112 | 788 | 02 | 1/1 | L02:2e1950 | 4/870 | missing | missing: save; partly: anim | anim cine creature help hud lsound math mission moby trig |
@@ -1146,6 +1146,6 @@ tags are `tools/ghidra/names/census_systems.tsv`.
 | U557 | 644 | 18 | 1/1 | L18:2df608 | 1/294 | missing | missing: camera | cine help math |
 | U564 | 1422 | 18 | 1/1 | L18:2f2bf0 | 50/7136 | missing | missing: camera,cheat,cine,herostate,platform; partly: anim; untagged ×1 | anim camera cine creature dialog fxdraw herostate hit hud lsound math mission moby particles shadow sound target trig |
 | U568 | 1563 | 18 | 1/1 | L18:2f88e8 | 4/1314 | unknown | untagged ×1 | anim creature fxdraw math particles |
-| U570 | 1750 | 18 | 1/1 | L18:2fad08 | 2/248 | missing | missing: save | math |
+| U570 | 1750 | 18 | 1/1 | L18:2fad08 | 2/248 | ported (2026-10-01 b6 saves, `units::ending_save`) | — | math |
 | U571 | 1799 | 18 | 1/1 | L18:2fad28 | 1/72 | cheap | — | anim math particles |
 | U239 | 1474 | 07 | 0/1 | L07:2cdb28 | 2/416 | partly | partly: herostate | math platform sound |

@@ -15,7 +15,7 @@ pub struct TeslaPlugin;
 
 impl Plugin for TeslaPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TeslaDraw>().add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
+        app.init_resource::<TeslaDraw>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<TeslaDraw>).add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
     }
 }
 

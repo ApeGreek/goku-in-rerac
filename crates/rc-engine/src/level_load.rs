@@ -72,13 +72,43 @@ impl LoadTimings {
 /// The game data folder (`--data-dir`, `RC_DATA_DIR`, else the development `extracted/`; crate::disc_source).
 pub fn extracted_root() -> PathBuf { crate::disc_source::data_root() }
 
-/// `RC_LEVEL` (decimal level index), else Novalis.
-pub fn level_index() -> u32 {
+/// `RC_LEVEL` (decimal level index), else Novalis: the level the boot loads.
+pub fn boot_level_index() -> u32 {
     match std::env::var("RC_LEVEL") {
         Ok(s) => s.trim().parse().unwrap_or_else(|_| panic!("RC_LEVEL must be a level index, got {s:?}")),
         Err(_) => DEFAULT_LEVEL,
     }
 }
+
+/// The loaded level (0x15ed84 as the engine's loader has it): the boot's [`boot_level_index`] until a runtime level
+/// change ([`set_level_index`], crate::level_switch).
+pub fn level_index() -> u32 {
+    let v = CURRENT_LEVEL.load(std::sync::atomic::Ordering::Relaxed);
+    if v == u32::MAX { boot_level_index() } else { v }
+}
+
+/// The level loaded by a runtime level change (crate::level_switch).
+pub fn set_level_index(index: u32) { CURRENT_LEVEL.store(index, std::sync::atomic::Ordering::Relaxed); }
+
+static CURRENT_LEVEL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+/// 0x13e056, the ship index `DoSpaceTransition` sets before the load (`rc_game::travel::ship_for`); None at the boot
+/// (crate::moby_spawn then takes `RC_SHIP` or the level's first-visit ship).
+pub fn ship() -> Option<usize> {
+    let v = SHIP.load(std::sync::atomic::Ordering::Relaxed);
+    (v >= 0).then_some(v as usize)
+}
+
+/// Sets 0x13e056 for the next load (crate::travel_render).
+pub fn set_ship(ship: i16) { SHIP.store(ship.clamp(0, 2) as i32, std::sync::atomic::Ordering::Relaxed); }
+
+static SHIP: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// A per-level cache (one `OnceLock` per level index: the level-keyed tables built from the loaded level's overlay).
+pub type PerLevel<T> = [std::sync::OnceLock<T>; 20];
+
+/// The cell of the loaded level in a [`PerLevel`] cache.
+pub fn per_level<T>(cells: &'static PerLevel<T>) -> &'static std::sync::OnceLock<T> { &cells[(level_index() as usize).min(19)] }
 
 pub fn load_level(root: &Path, index: u32) -> Result<LoadedLevel> {
     // The game data folder (crate::disc_source).

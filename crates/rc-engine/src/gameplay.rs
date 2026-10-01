@@ -172,6 +172,13 @@ impl Plugin for GameplayPlugin {
                     gs.global.bolts = n;
                     println!("game state: RC_GIVE_BOLTS: {n} bolts");
                 }
+                // RC_UNLOCK_PLANETS=<p>,<p>,...: those planets unlocked (`UnlockPlanet` 0x2756d0: 0x13dd40 and the map order
+                // 0x13d510) from the start (debug): the ship's planet page lists them (rc_game::travel).
+                if let Ok(v) = std::env::var("RC_UNLOCK_PLANETS") {
+                    let ps: Vec<usize> = v.split(',').filter_map(|t| t.trim().parse().ok()).filter(|&p: &usize| p < 20).collect();
+                    for &p in &ps { gs.unlock_planet(p); }
+                    println!("game state: RC_UNLOCK_PLANETS: planets {ps:?} unlocked (map order {:?})", gs.global.map_order);
+                }
                 // RC_GAME_BEATEN=1: the game-beaten flag (save chunk 31) set (debug): the pause menu's Goodies entry (0x2917d8).
                 if std::env::var("RC_GAME_BEATEN").is_ok_and(|v| v.trim() == "1") {
                     gs.global.game_beaten = 1;
@@ -209,6 +216,17 @@ impl Plugin for GameplayPlugin {
         if let Some(s) = &script { println!("gameplay: RC_PLAY_SCRIPT drives the pad for ticks 0..={} (keyboard and gamepad ignored)", s.end()); }
         // RC_PLAY_FLY=1: the game ticks but the view starts on the fly camera (RC_CAM), for looking at mobys.
         let fly = std::env::var("RC_PLAY_FLY").is_ok_and(|v| v.trim() == "1");
+        // A runtime level change (crate::level_switch): the old level's play state dropped; `setup` builds the new one.
+        app.add_systems(
+            crate::level_switch::LevelUnload,
+            (
+                crate::level_switch::remove::<Play>,
+                crate::level_switch::remove::<AmmoTable>,
+                crate::level_switch::remove::<HeldWeapon>,
+                crate::level_switch::remove::<PlayView>,
+                crate::level_switch::reset::<TickBudget>,
+            ),
+        );
         app.insert_resource(if fly { CameraSource::Fly } else { CameraSource::Play })
             .insert_resource(PlayScript(script))
             .init_resource::<PadFrame>()
@@ -255,7 +273,7 @@ pub struct HeldWeapon(pub Option<(u16, i32, i32)>);
 struct AmmoTable(Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>);
 
 /// The hand-item data, the ammo table (uses ammo, max) and the weapon fields of the item definitions.
-type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, Vec<Vec<u8>>, Vec<Vec<u8>>);
+type ItemTablesOut = (ItemData, Vec<(bool, u16)>, Vec<rc_game::hero::items::WeaponDef>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<(i16, Vec<u8>)>);
 
 /// The level's hand-item data (item definitions from the overlay, the gadget classes, Ratchet's joint lists)
 /// for `rc_game::hero::items`: the definitions at the overlay's item table (L01 0x179f40, found through
@@ -286,14 +304,19 @@ fn item_data(lv: &crate::level_load::LoadedLevel) -> anyhow::Result<ItemTablesOu
     // bubbles at his hands, feet and mouth: rc_game::hero::fx::joint_point).
     let firsts: Vec<Vec<u8>> = (0..64).map(|l| gadget::joint_list(&ratchet_blob, &rc.class.header, l).map(|(a, _)| a).unwrap_or_default()).collect();
     let mut classes = Vec::new();
+    // The gadget classes' joint-list targets (the hand records and the Metal Detector's head node act on them:
+    // rc_game::hero::gadgets::hand_modifiers).
+    let mut item_targets = Vec::new();
     for g in &gadgets {
         let c = &g.moby.class;
         let seqs = rc_formats::moby_anim::parse_sequences(&g.blob, c).with_context(|| format!("gadget {} sequences", g.moby.o_class))?;
         let chains = (0..16).map_while(|l| gadget::joint_list(&g.blob, &c.header, l).ok().map(|(a, _)| a)).collect();
+        let targets = (0..16).map_while(|l| gadget::joint_list(&g.blob, &c.header, l).ok().map(|(_, b)| rc_formats::moby_anim::list_target(&b).unwrap_or(0xff))).collect();
+        item_targets.push((g.moby.o_class as i16, targets));
         classes.push(ItemClass { o_class: g.moby.o_class as i16, anim: rc_formats::moby_anim::MobyAnimClass::new(c, seqs), scale: c.header.scale, chains });
     }
     let ammo = tables.records.iter().map(|r| (r.has_ammo(), u16::from_le_bytes([r.0[0xe], r.0[0xf]]))).collect();
-    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, seconds, firsts))
+    Ok((ItemData { defs, hero_chains, classes }, ammo, weapon_defs, seconds, firsts, item_targets))
 }
 
 /// The level's water the hero's ground probe reads (`SetWaterLevel` 0x26ed38: the ripple module's active patches,
@@ -532,13 +555,14 @@ impl Play {
 
 /// The loaded level's ported class updates (`rc_game::moby_update::classes::LevelPorts`, docs/plan/level_generalisation.md
 /// C1): the level's class table `lvl.vtbl` matched against the ports' reference functions (the level-01 overlay, level
-/// 03's for the swing target), with the engine's external updates (emitter, ripple manager). Built once per process;
+/// 03's for the swing target), with the engine's external updates (emitter, ripple manager). Built once per level;
 /// without the overlays, every class by number.
 pub fn level_ports() -> &'static rc_game::moby_update::classes::LevelPorts {
     use rc_formats::level_overlay::LevelOverlay;
     use rc_game::moby_update::classes::LevelPorts;
-    static PORTS: std::sync::OnceLock<LevelPorts> = std::sync::OnceLock::new();
-    PORTS.get_or_init(|| {
+    // One table per level (crate::level_switch: the loaded level changes at run time).
+    static PORTS: crate::level_load::PerLevel<LevelPorts> = [const { std::sync::OnceLock::new() }; 20];
+    crate::level_load::per_level(&PORTS).get_or_init(|| {
         let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
         let overlay = |l: u32| -> Option<std::sync::Arc<LevelOverlay>> {
             let b = crate::disc_source::level_file(&root, l, "overlay.bin").ok()?;
@@ -613,6 +637,21 @@ fn help_frame(p: &mut Play, report: &rc_game::tick::TickReport, other_frame: boo
     if let Some(gs) = gs { p.svc.help.sync_out(gs); }
 }
 
+/// The cheat entry's move patterns 0x179b80 (`rc_game::cheats::CheatTables`) from the level's overlay (relocated against
+/// level 01's); twelve empty patterns when the overlay cannot be read (no cheat matches).
+fn cheat_patterns() -> Vec<Vec<u8>> {
+    let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+    let reference = crate::disc_source::level_file(&root, 1, "overlay.bin");
+    let ov = crate::disc_source::level_file(&root, index, "overlay.bin").ok().and_then(|b| match &reference {
+        Ok(r) => rc_game::menus::Overlay::relocated(&b, r).ok(),
+        Err(_) => rc_game::menus::Overlay::parse(&b).ok(),
+    });
+    match ov {
+        Some(ov) => rc_game::cheats::CheatTables::read(&ov).patterns,
+        None => vec![Vec::new(); rc_game::cheats::SLOTS],
+    }
+}
+
 /// The help system's level data (rc_game::help): the level text and the small font's glyphs (the box sizing), and the
 /// help log's id table 0x1798d0 from the level's overlay (relocated against level 01's).
 fn help_setup(svc: &mut Services, lv: &crate::level_load::LoadedLevel, index: u32) {
@@ -683,8 +722,8 @@ fn map_tick(p: &mut Play, report: &rc_game::tick::TickReport, gs: Option<&GameSt
 /// against the reference levels' code). Built once per process; the default (level 01's) without the overlays.
 pub fn camera_ports() -> &'static rc_game::follow_camera::level::CameraPorts {
     use rc_formats::level_overlay::LevelOverlay;
-    static P: std::sync::OnceLock<rc_game::follow_camera::level::CameraPorts> = std::sync::OnceLock::new();
-    P.get_or_init(|| {
+    static P: crate::level_load::PerLevel<rc_game::follow_camera::level::CameraPorts> = [const { std::sync::OnceLock::new() }; 20];
+    crate::level_load::per_level(&P).get_or_init(|| {
         let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
         let overlay = |l: u32| -> Option<LevelOverlay> { LevelOverlay::parse(&crate::disc_source::level_file(&root, l, "overlay.bin").ok()?).ok() };
         match (overlay(index), overlay(1)) {
@@ -699,8 +738,8 @@ pub fn camera_ports() -> &'static rc_game::follow_camera::level::CameraPorts {
 /// class-number fallback).
 pub fn level_reactions() -> &'static std::collections::HashMap<i16, rc_game::moby_update::creature::react::Table> {
     use rc_formats::level_overlay::LevelOverlay;
-    static T: std::sync::OnceLock<std::collections::HashMap<i16, rc_game::moby_update::creature::react::Table>> = std::sync::OnceLock::new();
-    T.get_or_init(|| {
+    static T: crate::level_load::PerLevel<std::collections::HashMap<i16, rc_game::moby_update::creature::react::Table>> = [const { std::sync::OnceLock::new() }; 20];
+    crate::level_load::per_level(&T).get_or_init(|| {
         let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
         let overlay = |l: u32| -> Option<LevelOverlay> { LevelOverlay::parse(&crate::disc_source::level_file(&root, l, "overlay.bin").ok()?).ok() };
         let reference = |l: u32| overlay(l).map(std::sync::Arc::new);
@@ -854,8 +893,13 @@ fn moby_table(lv: &crate::level_load::LoadedLevel, classes: &mut ClassTable, shi
             mo.position = [inst.position[0], inst.position[1], inst.position[2], 0.0];
             mo.rotation = [inst.rotation[0], inst.rotation[1], inst.rotation[2], 0.0];
             for (k, r) in crate::moby_light::instance_rows(inst).iter().enumerate() { mo.rows[k] = r.map(f32::from_bits); }
-            mo.draw_dist = inst.draw_distance as i16;
-            mo.update_dist = inst.update_distance as u8;
+            // InitLevelRenderGlobals 0x255958: +0x74 = ShipUpdate (the class port), +0x32 = 0xff, +0x30 = 0x10, mode &= ~2,
+            // `hard_cut(ship, 1, 0)`.
+            mo.draw_dist = 0xff;
+            mo.update_dist = 0x10;
+            mo.mode &= !2;
+            (mo.anim.seq_a, mo.anim.seq_b, mo.anim.frame_a, mo.anim.frame_b, mo.anim.t) = (1, 1, 0, 0, 0.0);
+            let _ = (inst.draw_distance, inst.update_distance);
             if ms::ship_hidden_on_arrival(insts, &tests, &save.missions) {
                 // MissionNpcUpdate state 1 → FUN_002a2450: mode |= 3, +0x94 = 0.
                 mo.mode |= 3;
@@ -914,6 +958,7 @@ type GameplayEntities<'w, 's> = Query<'w, 's, (Entity, &'static MeshTag), (With<
 #[allow(clippy::too_many_arguments)]
 fn setup(
     mut done: Local<bool>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     mut commands: Commands,
     level: Res<crate::Level>,
     spawn: Option<Res<MobySpawn>>,
@@ -928,6 +973,8 @@ fn setup(
     mut materials: ResMut<Assets<MobyMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    // Once per level (crate::level_switch: a runtime level change runs the set-up again).
+    if generation.is_changed() { *done = false; }
     if *done { return; }
     let Some(mut occl) = occl else { return };
     *done = true;
@@ -978,7 +1025,8 @@ fn setup(
     // The hand items (wrench, bomb glove, …): created by the hero update from the first tick on.
     let mut arm_joints: [Vec<u8>; 2] = Default::default();
     let item_data = match item_data(lv) {
-        Ok((d, ammo, weapon_defs, seconds, firsts)) => {
+        Ok((d, ammo, weapon_defs, seconds, firsts, item_targets)) => {
+            game.hero.set_item_joint_targets(item_targets);
             arm_joints = rc_game::hero::weapons::ARM_LISTS.map(|l| seconds.get(l as usize).cloned().unwrap_or_default());
             game.hero.set_joint_targets(&seconds);
             game.hero.set_joint_chains(firsts);
@@ -1021,11 +1069,27 @@ fn setup(
         ),
     }
     hero_level_setup(&mut game.hero, back_classes.as_ref(), level_index);
+    // HeroInit 0x226b70: unless the level-13 ship was adopted (0x160540), 0x13e090 / 0x13e0a0 = Ratchet's position and
+    // rotation after the init: where the landing scene's end puts him back (rc_game::travel).
+    let landing_spot = {
+        let h = &game.hero;
+        let p = [h.pos[0].to_f32(), h.pos[1].to_f32(), h.pos[2].to_f32(), h.pos[3].to_f32()];
+        (p, [h.rot[0].to_f32(), h.rot[1].to_f32(), h.rot[2].to_f32(), h.rot[3].to_f32()])
+    };
 
     // The moby loop's services and the load pass (counter 0) on the game's stream.
     let mut svc = Services::new();
     svc.level = level_index;
     svc.death_z = lv.death_z;
+    // The ship block (rc_game::travel): the loader's ship 0x13e030, its index 0x13e056, the fly-away's path and camera
+    // cuboids (level settings +0x3c..+0x44), Ratchet's landing spot; the ship's joint lists (the canopy glass).
+    svc.travel = rc_game::travel::ShipGlobals {
+        moby: ship_id,
+        ship: crate::moby_spawn::ship_index_for(level_index) as i16,
+        setup: rc_game::travel::FlyAwaySetup::parse(&lv.gameplay),
+        landing_spot: Some(landing_spot),
+        ..Default::default()
+    };
     // The help system (rc_game::help): the level text and small font it sizes with, the help log's id table.
     help_setup(&mut svc, lv, level_index);
     // The map system's level entry (rc_game::map, FUN_0025a4c0): tables, the level's map file, its fog mask.
@@ -1070,7 +1134,7 @@ fn setup(
     }
     // The other bodies' classes (Clank 0x57, Giant Clank 0x1a3, rc_game::hero::bodies): their joint lists for the hero's
     // joint points and joint modifiers, and for the moby world's joint matrices (Clank's antenna glow and rotor).
-    match class_joint_data_where(lv, |o| o == rc_game::hero::bodies::CLANK_CLASS || o == rc_game::hero::bodies::GIANT_CLASS) {
+    match class_joint_data_where(lv, |o| o == rc_game::hero::bodies::CLANK_CLASS || o == rc_game::hero::bodies::GIANT_CLASS || o == rc_game::hero::bodies::DISGUISE_CLASS) {
         Ok(m) => {
             let mut bodies = Vec::new();
             for (o, l) in m {
@@ -1083,6 +1147,17 @@ fn setup(
             game.hero.set_body_joints(bodies);
         }
         Err(e) => eprintln!("gameplay: no body joint lists ({e:#}): Clank / Giant Clank's joint points sit at the body's origin"),
+    }
+    if let Some(id) = ship_id {
+        let oc = game.mobys.mobys[id].o_class;
+        match crate::travel_render::ship_joint_lists(oc) {
+            Some(l) => { svc.joint_lists.insert(oc, l); }
+            None => eprintln!("gameplay: ship class {oc}: no joint lists (the canopy glass at the ship's origin)"),
+        }
+        // InitLevelRenderGlobals: the ship's +0x38 = the hero's light words (after the hero init).
+        let (light, ambient) = (game.mobys.mobys[hero_id].light, game.mobys.mobys[hero_id].ambient);
+        let mo = &mut game.mobys.mobys[id];
+        (mo.light, mo.ambient) = (light, ambient);
     }
     let n_static = game.mobys.first_dynamic;
     svc.groups = statics.groups(&lv.gameplay);
@@ -1168,6 +1243,16 @@ fn setup(
         })
         .map(|id| { let ii = statics.moby_to_instance[id]; (id, ii, occl.anim_index(ii)) })
         .collect();
+    // The ship (`ShipUpdate`, rc_game::travel::ship) is driven from the table like the ported statics: its update, the
+    // mode-6 scenes and the fly-away move, hide and animate it (its instance is the one crate::moby_spawn appended).
+    let mut driven = driven;
+    if let (Some(id), Some(ii)) = (ship_id, ship_ii) {
+        driven.push((id, ii, occl.anim_index(ii)));
+        for (e, tag) in &gameplay_entities {
+            if tag.0 as usize == ii { commands.entity(e).remove::<SpawnHidden>().insert(Visibility::Inherited); }
+        }
+        if let (Some(a), Some(k)) = (anim.as_mut(), occl.anim_index(ii)) { (a.hidden[k], a.pending[k]) = (false, None); }
+    }
     let dynamic = DynMobys::new(lv, game.mobys.mobys.len() - n_static, &mut buffers);
 
     let inst = &m.instances[hero_ii];
@@ -1539,6 +1624,16 @@ fn tick(
         p.game.hero.weapons.ammo = gs.0.global.ammo;
         p.game.hero.owned.0 = gs.0.global.owned;
         svc_cell.borrow_mut().interact.sync_game(&gs.0);
+        // The cheat bytes 0x15edb0 (rc_game::cheats) for the tick and the hero (GameOptions) and the moby loop
+        // (Services::cheats), and the options the game reads every tick (the mirror 0x15edb4, the camera's).
+        let g = &gs.0.global;
+        let mut o = gs.0.options().game_options();
+        o.cheats = rc_game::cheats::Cheats(g.cheats_active);
+        o.cheat_entry = g.game_beaten != 0 || g.completes != 0;
+        p.game.options = o;
+        p.game.camera.opts = o.camera;
+        svc_cell.borrow_mut().cheats = o.cheats;
+        if p.game.cheat_patterns.is_empty() { p.game.cheat_patterns = std::sync::Arc::new(cheat_patterns()); }
         // The help records, log, play time and options (rc_game::help), and the hero's copy of the records.
         svc_cell.borrow_mut().help.sync_in(&gs.0);
         p.game.hero.help.records = svc_cell.borrow().help.records.clone();
@@ -1602,6 +1697,9 @@ fn tick(
         let (f, h) = (p.game.hero.feet_slot.request, p.game.hero.head_slot.request);
         if s.0.temp_feet != f { s.0.temp_feet = f; }
         if s.0.temp_head != h { s.0.temp_head = h; }
+        // 0x141628 as a class stored it (Veldin's Clank 834: `HeroFields::clank_hidden`).
+        let ch = p.game.hero.back_slot.clank_hidden;
+        if s.0.clank_hidden != ch { s.0.clank_hidden = ch; }
     }
     if let Some(gs) = state.as_mut() {
         let (saved, last) = (p.game.hero.back_slot.slot.saved, p.game.hero.back_slot.thruster_last);
@@ -1629,7 +1727,22 @@ fn tick(
     if p.game.hero.melee.entered != [0; 3] {
         if let (Some(gs), Some(s)) = (state.as_mut(), session.as_ref()) {
             rc_game::hero::melee::apply_melee_stats(&mut p.game.hero.melee, &mut gs.0, &s.0);
+            // The help system's copy of the records (written back by `Help::sync_out` below) takes the bumped move /
+            // gadget records, so the write-back keeps them (G-SAV-009).
+            let r = &mut p.svc.help.records;
+            r.moves[0] = gs.0.global.move_help[0];
+            r.moves[1] = gs.0.global.move_help[1];
+            r.gadget[17] = gs.0.global.gadget_help[17];
         }
+    }
+    // The cheat entry's toggle (`0x2285a0`): 0x15edc0[i] = 1, 0x15edb0[i] flipped, `ShowBanner(0x4fbe / 0x4fbf, −1)`.
+    if let Some(t) = p.game.cheat_toggled.take() {
+        if let Some(gs) = state.as_mut() {
+            gs.0.global.cheats_ever[t.slot] = 1;
+            gs.0.global.cheats_active[t.slot] = t.on as u8;
+        }
+        rc_game::cinematic::banner_call(&mut p.svc.cinematic, t.banner(), rc_game::hud::scale_ticks(rc_game::cheats::BANNER_TICKS));
+        println!("cheats: tick {}: cheat {} {} (the move entry 0x2285a0)", p.game.counter, t.slot, if t.on { "enabled" } else { "disabled" });
     }
     // The help system (rc_game::help), then the play time 0x15eea4 (`FUN_002ab960` at the tick's end).
     help_frame(p, &report, scene_frame || world_frame, state.as_deref_mut().map(|s| &mut s.0), audio_cell.borrow_mut().as_deref_mut());

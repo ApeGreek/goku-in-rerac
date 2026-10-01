@@ -375,7 +375,7 @@ pub struct SeaRenderPlugin;
 impl Plugin for SeaRenderPlugin {
     fn build(&self, app: &mut App) {
         if !enabled() { return; }
-        app.init_resource::<SeaDraw>().add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
+        app.init_resource::<SeaDraw>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<SeaDraw>).add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
     }
 }
 

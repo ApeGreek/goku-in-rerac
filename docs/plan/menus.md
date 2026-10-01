@@ -715,7 +715,7 @@ first KB) is never sampled.
 | 0x262da0 markers | the destination's list when visited; centre the view on the hero (with 1); the points (fixed −1..−9, hook mobys 0x179638 on the current level, landmarks 0x13d5b0 elsewhere); shown by the mission's status; flag 0x1000 needs the landmark's flag 1; the label box sizing | `map_page::setup_markers` (the box sizing at the draw) |
 | 0x25b1c0 markers | rectangles (icon size × 1.5 / zoom / (2z + 5) / 13), pairwise push-apart, backing (0x40), icon or turned sprite (0x100; sizes gp−0x6de8.., landmark flag 2 → next frame), label box (UI frame + small font) | `map_page::draw_markers` |
 | 0x25e630 label text | `%b` → the price 0x1c4530, else "error" | `map_page::label_text` |
-| missions page 0x1b3bf8 | the mission list 0x293090 (`fun_0020bc00`), the mission picture 0x293398 / 0x293670 (`mission_ss`), the selection marks | NOT ported (G-UI-001) |
+| missions page 0x1b3bf8 | the mission list 0x293090 (`fun_0020bc00`), the mission picture 0x293398 / 0x293670 (`mission_ss`), the selection marks | ported 2026-10-01 (`map_page` coverage table) |
 | level 6's gp−0x6e08 | set by level 6's class code (0x302578) | the flag is `MapState::alt`; its writer NOT ported (G-UI-001) |
 | 0x184928 zone flags | written by level classes (L07 / L13 movers …) | `MapState::zone_flags`; the writers NOT ported (G-UI-001) |
 

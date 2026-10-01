@@ -47,6 +47,10 @@ pub struct GameOptions {
     /// 0x15edb4: mirrored controls.
     pub mirror: bool,
     pub camera: CameraOptions,
+    /// The cheat bytes 0x15edb0 (`crate::cheats`); the hero reads them as [`Hero::cheats`].
+    pub cheats: crate::cheats::Cheats,
+    /// 0x15eea0 ‖ 0x15ee20: the game beaten or completed (the cheat entry `0x2285a0` runs).
+    pub cheat_entry: bool,
 }
 
 /// The gameplay state one tick advances.
@@ -75,6 +79,11 @@ pub struct Game {
     pub camera_paused: bool,
     /// The level's grind paths (gameplay section 0x74) the hero rides (`hero::boots`; empty: no rails).
     pub grind_paths: std::sync::Arc<Vec<rc_formats::volumes::GrindPath>>,
+    /// The cheat entry's move patterns 0x179b80 (`crate::cheats::CheatTables::patterns`; empty: none match).
+    pub cheat_patterns: std::sync::Arc<Vec<Vec<u8>>>,
+    /// The cheat the entry `0x2285a0` toggled this tick (its byte already flipped in [`GameOptions::cheats`]); the engine
+    /// writes 0x15edb0 / 0x15edc0 and shows the banner.
+    pub cheat_toggled: Option<crate::cheats::Toggled>,
 }
 
 /// The moby hook: `(table, hero, rng, camera, collision, counter)`.
@@ -125,6 +134,9 @@ pub trait MobySystem {
     fn create_moby(&mut self, _table: &mut MobyTable, _o_class: i16, _counter: u64) -> Option<MobyId> { None }
     /// `DeleteMoby` 0x2636c0 outside the moby loop (the camera moby).
     fn delete_moby(&mut self, _table: &mut MobyTable, _id: MobyId, _counter: u64) {}
+    /// The game mode 0x15f5c4 as the moby loop left it (the hero code's tests of it: the disguise's timer in
+    /// `HeroTickStateTimer`, `FUN_00230770`; `crate::hero::hologuise`). 0: gameplay.
+    fn game_mode(&self) -> i32 { 0 }
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -166,7 +178,7 @@ impl Game {
         let hero = Hero::init_from_moby(&mut mobys.mobys[hero_moby], coll, &mut rng);
         let pad = PadState::default();
         let camera = Camera::new(&CamInput { hero: &hero, pad: &pad, coll, mobys: None, hero_moby: None }, options.camera);
-        Game { pad, mobys, hero_moby, hero, camera, rng, counter: 0, options, death_z: Pf::f(death_z), item_data: None, item_globals: ItemGlobals::default(), camera_paused: false, grind_paths: Default::default() }
+        Game { pad, mobys, hero_moby, hero, camera, rng, counter: 0, options, death_z: Pf::f(death_z), item_data: None, item_globals: ItemGlobals::default(), camera_paused: false, grind_paths: Default::default(), cheat_patterns: Default::default(), cheat_toggled: None }
     }
 
     /// The end of the level load (`LoadLevelCoreData` 0x258128): `0x15f5cc++` right after
@@ -215,6 +227,8 @@ impl Game {
         hero_sounds: &mut dyn HeroSounds,
     ) -> TickReport {
         self.pad.update(pad_data, self.options.mirror);
+        self.hero.cheats = self.options.cheats;
+        self.cheat_toggled = None;
         if !self.camera_paused { self.mobys.free_slot_pass(self.counter); }
         // The globals the moby loop reads outside the moby system: this tick's pad, the last camera update's Euler,
         // Ratchet's anim fields after his last update (moby_update::services::LoopGlobals).
@@ -230,8 +244,12 @@ impl Game {
         // update, as in the game (moby_update::services::HeroFields).
         let hero_writes = hooks.world.as_deref_mut().and_then(|w| w.take_hero_writes());
         if let Some(f) = &hero_writes { f.apply(&mut self.hero); }
+        // A class's store of the death height 0x15f638 (Kalebo's race host 1455).
+        if let Some(z) = hero_writes.as_ref().and_then(|f| f.death_z) { self.death_z = Pf::f(z); }
         // Their camera shakes (stores into 0x167260 / 0x167270; the camera update at the end of the tick applies them).
         for r in hooks.world.as_deref_mut().map(|w| w.take_camera_shakes()).unwrap_or_default() { self.camera.request_shake(r); }
+        // 0x15f5c4 for the hero code that tests it (the disguise's timer and gate: crate::hero::hologuise).
+        self.hero.gadgets.game_mode = hooks.world.as_deref().map_or(0, |w| w.game_mode());
         // `0x1413d0`: the hero moby (Ratchet's, or the body moby while a body is in: crate::hero::bodies).
         let hero_moby = Some(self.hero.hero_moby(self.hero_moby));
         // Their cinematic camera calls (CameraScript, CameraScript2, HeroTeleport's camera reset: crate::cinematic).
@@ -249,6 +267,8 @@ impl Game {
         // The target list 0x1abe80 for the melee aim search (hero::melee::aim_search) and the head's look target
         // (`HeroScanTargets`, hero::pose: every tick, with or without a hand item).
         carriers.melee = crate::hero::melee::melee_targets(&self.mobys, &self.target_list(hooks.world.as_deref()));
+        // The ground moby's class and pose (the Hydrodisplacer's poses 0x38..0x3a read the pad's: hero::hydrodisplacer).
+        carriers.ground = self.hero.ground_moby.and_then(|g| self.mobys.mobys.get(g).map(|m| (g, m.o_class, [m.position[0], m.position[1], m.position[2]], m.rotation[2])));
         // The weapon's target (0x13fda0) where the moby loop left it (SetState 0x23 aims at it).
         crate::hero::weapons::refresh_aim(&mut self.hero, &self.mobys);
         let hero_tick = {
@@ -296,12 +316,17 @@ impl Game {
                     self.hero.damage.hit = hooks.world.as_deref().and_then(|w| w.hit_message(&self.mobys, now)).map(|r| hero_hit(&self.mobys, &r));
                 }
             }
+            // 0x141660 / 0x141408 for the hero code outside the slot loop (the Hologuise's weapon check, the disguise's way
+            // out: crate::hero::hologuise); a change of the request is written back after the hero update.
+            (self.hero.gadgets.hand_saved, self.hero.gadgets.hand_request) = (self.item_globals.saved, self.item_globals.request);
             let moby = &mut self.mobys.mobys[self.hero.hero_moby(self.hero_moby)];
             hero_update_with_sounds(&mut self.hero, moby, &env, anim, &mut self.rng, hero_sounds)
         };
         let hm = self.hero.hero_moby(self.hero_moby);
         let hero_moby = Some(hm);
         drop(scene);
+        // The hand request as the hero update left it (the disguise's update clears 0x141408: crate::hero::hologuise).
+        if self.hero.gadgets.hand_request != self.item_globals.request { self.item_globals.request = self.hero.gadgets.hand_request; }
         // The mobys the hero update created (CreateMoby inside it: the water splash 775), before anything else can take a
         // slot, with their MobyBuildMatrix (hero::fx::create_mobys).
         if !self.hero.fx.mobys.is_empty() {
@@ -331,6 +356,14 @@ impl Game {
                 if let Some(w) = hooks.world.as_deref_mut() { w.build_matrix(&mut self.mobys, self.hero_moby); }
             }
         }
+        // The disguise's transitions' `UpdateWrenchSelected(0)` (□ in body 3: crate::hero::bodies::disguise), with the item
+        // environment, right after the body's update.
+        if std::mem::take(&mut self.hero.gadgets.wrench_select) {
+            if let Some(data) = self.item_data.as_ref() {
+                let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])), camera_up: Some(self.camera.out.rows_f32()[2]), targets: &[] };
+                crate::hero::items::update_hand_selected(&mut self.hero, &mut self.item_globals, &mut self.rng, &ienv);
+            }
+        }
         // Ratchet's class sounds a body state played on his moby (Clank's burn 0x7d: `PlayClassSound(9, 0, Ratchet)`).
         for (index, flags) in std::mem::take(&mut self.hero.bodies.ratchet_sounds) {
             hero_sounds.voice(&self.mobys.mobys[self.hero_moby], index, flags, &mut self.rng);
@@ -345,9 +378,12 @@ impl Game {
                 let targets = if self.hero.items.slot.item.is_some() { self.target_list(hooks.world.as_deref()) } else { Vec::new() };
                 let ienv = ItemEnv { data, pad: &self.pad, frame: self.counter as i32, hero_moby: self.hero_moby, coll: Some(coll), camera: Some((self.camera.out.pos_f32(), self.camera.out.rows_f32()[0])), camera_up: Some(self.camera.out.rows_f32()[2]), targets: &targets };
                 items_update(&mut self.hero, &mut self.item_globals, &mut self.mobys, &*anim, &mut self.rng, &ienv, hits);
+                // The item updates' writes into the pad's released mask 0x13cae8 (the Suck Cannon's put-away with L1 / L2
+                // held: hero::gadgets::Gadgets::released_or).
+                self.pad.released |= std::mem::take(&mut self.hero.gadgets.released_or);
                 // The slot loop's item update that needs the hero's context (the Swingshot's hook: SetState, the
                 // collision lines), at the same point of the frame (hero::gadgets).
-                if self.hero.gadgets.pending.is_some() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() || self.hero.weapons.pending_draw || self.hero.weapons.pending_idle || self.hero.weapons.pending_anim.is_some() {
+                if self.hero.gadgets.pending.is_some() || !self.hero.gadgets.calls.is_empty() || self.hero.swing.item.alive || self.hero.weapons.deferred.is_some() || self.hero.weapons.pending_draw || self.hero.weapons.pending_idle || self.hero.weapons.pending_anim.is_some() {
                     let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
                     let mobys = scene.as_ref().map(OwnedScene::scene);
                     let view = self.camera.out;
@@ -370,8 +406,20 @@ impl Game {
                 // update.
                 crate::hero::gadgets::flush_item_sounds(&mut self.hero, &self.mobys.mobys[self.hero_moby], hero_sounds, &mut self.rng);
             }
+            // `0x229158` (after HeroItemsUpdate): the Hologuise's squash on Ratchet's moby and the hand item.
+            crate::hero::hologuise::squash(&mut self.hero, &mut self.mobys.mobys[self.hero_moby]);
+            crate::hero::hologuise::squash_hand(&mut self.hero);
             // FUN_00227e90: the walk / run footsteps (after HeroItemsUpdate in 0x228870).
             crate::hero::fx::walk_footsteps(&mut self.hero, &self.mobys.mobys[self.hero_moby], &anim.view(), hero_sounds, &mut self.rng);
+            // FUN_002285a0: the cheat entry (the last moves against the patterns; crate::cheats).
+            let h = &self.hero;
+            let inp = crate::cheats::MoveInput { state_ticks: h.timer, group: h.group, state: h.state, flip_sector: h.jump.kind7a0, combo: h.melee.combo, mirror: self.options.cheats.on(crate::cheats::slot::MIRROR) };
+            let mut active = self.options.cheats.0;
+            if let Some(t) = self.hero.cheat_moves.step(self.options.cheat_entry, &inp, &self.cheat_patterns, &mut active) {
+                self.options.cheats.0 = active;
+                self.hero.cheats = self.options.cheats;
+                self.cheat_toggled = Some(t);
+            }
         }
         // The camera calls the hand items' updates made through the moby world (the Visibomb's launch switches the
         // type-6 camera in, `0x317d88`), applied before this tick's camera update as the game's direct calls are.

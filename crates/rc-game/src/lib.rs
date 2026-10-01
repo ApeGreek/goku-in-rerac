@@ -23,7 +23,12 @@
 //! * [`spline`]: the spline follower (paths and grind paths: step, advance, nearest point) the rail riders use.
 //! * [`shadows`]: the moby shadows' directions, slab probes and shadow volumes (`docs/plan/shadows.md`).
 //! * [`game_state`]: the saved game state, new game, level-start rules, transitions, saves and options (`docs/plan/game_state.md`).
+//! * [`memcard`]: the memory card natively (a folder): the card driver, the card monitor, previews, the saves and loads (`docs/plan/progression.md`).
+//! * [`frontend`]: the boot flow: the card check, the logos, the title, the attract loop, the main menu's hand-over (`docs/plan/progression.md`).
 //! * [`inventory`]: owned items, the equipped item per slot and the equip rules (`docs/plan/gadgets.md`).
+//! * [`slideshow`]: game mode 7, the credits slideshow (`docs/plan/progression.md`).
+//! * [`cheats`]: the cheat bytes, the move-sequence cheat entry, the Cheats list and the debug code entry (`docs/plan/progression.md`).
+//! * [`travel`]: the ship, game mode 6 (take-off, landing, fly-away, the flight) and `DoSpaceTransition` (`docs/plan/progression.md` `## travel`).
 
 pub mod collision_query;
 pub mod ps2v;
@@ -44,11 +49,16 @@ pub mod help;
 pub mod map;
 pub mod audio;
 pub mod game_state;
+pub mod memcard;
+pub mod frontend;
 pub mod inventory;
 pub mod menus;
 pub mod scene_player;
 pub mod movie_player;
+pub mod cheats;
+pub mod slideshow;
 pub mod cinematic;
+pub mod travel;
 pub mod spline;
 pub mod path;
 pub mod shadows;

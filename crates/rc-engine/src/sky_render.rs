@@ -235,8 +235,9 @@ pub struct SkyRenderPlugin;
 impl Plugin for SkyRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<SkyMaterial>::default())
-            .add_systems(Startup, spawn_sky)
-            .add_systems(PostStartup, main_camera_loads)
+            .add_systems(crate::level_switch::LevelStartup, spawn_sky)
+            .add_systems(crate::level_switch::LevelPostStartup, main_camera_loads)
+            .add_systems(crate::level_switch::LevelUnload, (crate::level_switch::remove::<SkyAnim>, crate::level_switch::remove::<SkyStarOrder>))
             .add_systems(Update, (animate_shells, stop_clearing))
             .add_systems(PostUpdate, follow_main_camera.before(TransformSystems::Propagate));
     }
@@ -261,71 +262,17 @@ fn spawn_sky(
         println!("sky: none in this level; the frame is cleared to the level background");
         return;
     };
-    let white = images.add(Image::new_fill(
-        Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
-        TextureDimension::D2,
-        &[255, 255, 255, 0x80],
-        TextureFormat::Rgba8Unorm,
-        RenderAssetUsages::RENDER_WORLD,
-    ));
-    let tex_images: Vec<Handle<Image>> = ls.textures.iter().map(|t| images.add(sky_image(t))).collect();
     let rotations = level_rotations(ls.level);
     let speed = match std::env::var("RC_SKY_ROT") { Ok(v) => v.trim().parse().unwrap_or(1.0), Err(_) => 1.0 };
     let counter = tick_counter(0, speed);
-
-    let (mut order, mut n_tris) = (0u32, 0usize);
     // The star step runs after shells 0..before_shell (SkyDrawShell skips shells ≥ the header count, so a
     // step "before" a missing shell still runs after the last one).
     let star_before = rc_game::sky_stars::level_stars(ls.level).map(|s| s.before_shell);
-    let mut star_order = None;
-    for (si, shell) in ls.sky.shells.iter().enumerate() {
-        if star_before == Some(si) {
-            star_order = Some(order);
-            order += 1;
-        }
-        // Runs of consecutive faces with the same texture, in cluster and face order: one draw each.
-        let mut runs: Vec<(u8, Vec<sky::SkyGsVertex>)> = Vec::new();
-        for c in &shell.clusters {
-            let verts = sky::sky_gs_vertices(shell, c);
-            for tri in verts.as_chunks::<3>().0 {
-                match runs.last_mut() {
-                    Some((t, v)) if *t == tri[0].texture => v.extend_from_slice(tri),
-                    _ => runs.push((tri[0].texture, tri.to_vec())),
-                }
-            }
-        }
+    let s = spawn_shells(&mut commands, ls, star_before, RenderLayers::layer(SKY_LAYER), &mut meshes, &mut images, &mut materials, |e, si| {
         let rot = rotations.iter().find(|r| r.shell == si).map_or(Quat::IDENTITY, |r| r.rotation(counter));
-        for (tex, verts) in runs {
-            n_tris += verts.len() / 3;
-            let textured = shell.textured();
-            let image = if textured {
-                match ls.textures.iter().position(|t| t.index == tex as usize) {
-                    Some(i) => tex_images[i].clone(),
-                    None => { warn!("sky shell {si}: texture {tex} not decoded; drawing white"); white.clone() }
-                }
-            } else { white.clone() };
-            let positions: Vec<[f32; 3]> =
-                verts.iter().map(|v| game_to_bevy(v.position.map(|x| x as f32)).to_array()).collect();
-            let uvs: Vec<[f32; 2]> = verts.iter().map(|v| v.st).collect();
-            // Raw GS RGBA bytes; the shader applies the GS rules per shell kind.
-            let colors: Vec<[f32; 4]> = verts.iter().map(|v| v.rgba.map(|c| c as f32)).collect();
-            let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
-                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-                .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-            commands.spawn((
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(materials.add(SkyMaterial { texture: image, textured, order })),
-                Transform::from_rotation(rot),
-                RenderLayers::layer(SKY_LAYER),
-                NoFrustumCulling,
-                SkyShellEntity { shell: si },
-                Name::new(format!("sky shell {si} tex {tex}")),
-            ));
-            order += 1;
-        }
-    }
-
+        e.insert((Transform::from_rotation(rot), SkyShellEntity { shell: si }));
+    });
+    let (order, n_tris, star_order) = (s.order, s.triangles, s.star_order);
     let has_dome = ls.sky.shells.iter().any(|s| !s.textured());
     let clear_first_frame_only = level_zeroes_clear_flag(ls.level);
     commands.spawn((
@@ -352,10 +299,107 @@ fn spawn_sky(
             (false, _) => "every frame",
         }
     );
-    // Past the last shell: the slot after every shell draw.
-    if star_before.is_some() && star_order.is_none() { star_order = Some(order); }
     if let Some(o) = star_order { commands.insert_resource(SkyStarOrder(o)); }
     commands.insert_resource(SkyAnim { rotations, speed, clear_first_frame_only });
+}
+
+/// What [`spawn_shells`] made.
+pub(crate) struct SpawnedShells {
+    /// The next draw-order slot after the shells (and the star slot).
+    pub order: u32,
+    pub triangles: usize,
+    /// The star step's slot (`star_before`'s), if the shells reached it.
+    pub star_order: Option<u32>,
+    /// Every shell draw entity with its shell index.
+    pub entities: Vec<(Entity, usize)>,
+}
+
+/// The shells of a sky block as draws (one per run of consecutive faces with the same texture, in shell, cluster and
+/// face order) on render layer `layer`, each given its components by `extra(entity, shell)` (the shell's SkyM
+/// `Transform`, a marker). `star_before`: the shell the star step's draw slot comes before. Used by the level sky
+/// ([`spawn_sky`]) and the space skies the camera of [`SKY_LAYER`] is switched to (the flight between planets,
+/// crate::flight_render; the title world, crate::title_world).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_shells(
+    commands: &mut Commands,
+    ls: &LevelSky,
+    star_before: Option<usize>,
+    layer: RenderLayers,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<SkyMaterial>,
+    mut extra: impl FnMut(&mut bevy::ecs::system::EntityCommands, usize),
+) -> SpawnedShells {
+    let white = images.add(Image::new_fill(
+        Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+        TextureDimension::D2,
+        &[255, 255, 255, 0x80],
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    ));
+    let tex_images: Vec<Handle<Image>> = ls.textures.iter().map(|t| images.add(sky_image(t))).collect();
+    let (mut order, mut n_tris) = (0u32, 0usize);
+    let mut star_order = None;
+    let mut entities = Vec::new();
+    for (si, shell) in ls.sky.shells.iter().enumerate() {
+        if star_before == Some(si) {
+            star_order = Some(order);
+            order += 1;
+        }
+        // Runs of consecutive faces with the same texture, in cluster and face order: one draw each.
+        let mut runs: Vec<(u8, Vec<sky::SkyGsVertex>)> = Vec::new();
+        for c in &shell.clusters {
+            let verts = sky::sky_gs_vertices(shell, c);
+            for tri in verts.as_chunks::<3>().0 {
+                match runs.last_mut() {
+                    Some((t, v)) if *t == tri[0].texture => v.extend_from_slice(tri),
+                    _ => runs.push((tri[0].texture, tri.to_vec())),
+                }
+            }
+        }
+        for (tex, verts) in runs {
+            n_tris += verts.len() / 3;
+            let textured = shell.textured();
+            let image = if textured {
+                match ls.textures.iter().position(|t| t.index == tex as usize) {
+                    Some(i) => tex_images[i].clone(),
+                    None => { warn!("sky shell {si}: texture {tex} not decoded; drawing white"); white.clone() }
+                }
+            } else { white.clone() };
+            let positions: Vec<[f32; 3]> =
+                verts.iter().map(|v| game_to_bevy(v.position.map(|x| x as f32)).to_array()).collect();
+            let uvs: Vec<[f32; 2]> = verts.iter().map(|v| v.st).collect();
+            // Raw GS RGBA bytes; the shader applies the GS rules per shell kind.
+            let colors: Vec<[f32; 4]> = verts.iter().map(|v| v.rgba.map(|c| c as f32)).collect();
+            let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::RENDER_WORLD)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+            let mut e = commands.spawn((
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(materials.add(SkyMaterial { texture: image, textured, order })),
+                layer.clone(),
+                NoFrustumCulling,
+                Name::new(format!("sky shell {si} tex {tex}")),
+            ));
+            extra(&mut e, si);
+            entities.push((e.id(), si));
+            order += 1;
+        }
+    }
+    if star_before.is_some() && star_order.is_none() { star_order = Some(order); }
+    SpawnedShells { order, triangles: n_tris, star_order, entities }
+}
+
+/// A space sky shell's SkyM (`DrawSkyShells` 0x29f260): the Euler rotation (x, y, z) (the builder 0x1fa070:
+/// `v·Rz·Ry·Rx`), the rows scaled by `scale`, the translation row `t` (sky units, game axes). The shader applies the
+/// whole matrix to `(x, y, z, 1)` as the game's 0x22bf94 does.
+pub(crate) fn shell_transform(euler: [f32; 3], scale: f32, t: [f32; 3]) -> Transform {
+    let axis = |a: [f32; 3]| game_to_bevy(a);
+    let rot = Quat::from_axis_angle(axis([1.0, 0.0, 0.0]), euler[0])
+        * Quat::from_axis_angle(axis([0.0, 1.0, 0.0]), euler[1])
+        * Quat::from_axis_angle(axis([0.0, 0.0, 1.0]), euler[2]);
+    Transform { translation: game_to_bevy(t), rotation: rot, scale: Vec3::splat(scale) }
 }
 
 /// Decoded sky texture as the GS sees it: display-encoded RGB, raw texel alpha 0..0x80.
@@ -399,7 +443,9 @@ fn main_camera_loads(
 }
 
 /// After the first frame, levels whose dispatch zeroes the clear flag stop clearing.
-fn stop_clearing(anim: Option<Res<SkyAnim>>, mut cams: Query<&mut Camera, With<SkyCamera>>, mut frames: Local<u32>) {
+fn stop_clearing(anim: Option<Res<SkyAnim>>, mut cams: Query<&mut Camera, With<SkyCamera>>, mut frames: Local<u32>, generation: Res<crate::level_switch::LevelGeneration>) {
+    // A runtime level change (crate::level_switch): the new level's first frame clears again.
+    if generation.is_changed() { *frames = 0; }
     let Some(anim) = anim else { return };
     *frames += 1;
     if *frames != 2 || !anim.clear_first_frame_only { return; }
@@ -427,7 +473,7 @@ type SkyView<'w, 's> = Query<'w, 's, (&'static mut Transform, &'static mut Proje
 /// camera's own projection, 0x187040 = the rotation-only view times the world projection; the shader removes the
 /// translation). The projection follows every change of tan(hfov/2) 0x16cf70: a scene camera record's (0.414 or 0.554
 /// on Novalis, gameplay 0.63), so the sky turns exactly with the world instead of sliding against it.
-fn follow_main_camera(main: MainView, mut sky: SkyView) {
+pub(crate) fn follow_main_camera(main: MainView, mut sky: SkyView) {
     let Some((src, proj)) = main.iter().next() else { return };
     let tan = |p: &Projection| match p {
         Projection::Custom(c) => c.get::<game_camera::GameProjection>().map(|g| (g.tan_x, g.tan_y)),

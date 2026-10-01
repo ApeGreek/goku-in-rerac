@@ -38,7 +38,7 @@
 //!
 //! A trooper with a camera cuboid +0x1c4 (none on Novalis) shows its arrival: Ratchet's state 0x1f and the camera
 //! script on that cuboid for 360 ticks, queued in `creature::Globals::scripts` like the gunship's, and released from
-//! state 1 when the timer +0x1c8 is out. Not modelled: the big-head manipulator `0x278720` (a cheat flag). The shadow slab
+//! state 1 when the timer +0x1c8 is out. The big-head cheat `0x278720(2.5, m, 2, +0x200)` (0x15edb7): `manip::big_head`. The shadow slab
 //! `0x26eff8` (moby +0x84/+0x88) is set from the ground height of the gravity step (crate::shadows).
 
 use crate::moby_runtime::{mode, MobyId};
@@ -141,6 +141,8 @@ pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x1f0 { return; }
     let key = ground::key_time(w, id);
     let alert = alerted(w, id);
+    // 0x278720(2.5, m, 2, +0x200): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 2, id, 0x200);
     let old = c::pos(w, id);
     let cam_t = c::pi32(w, id, CAMERA_T);
     if 0 < cam_t { c::set_pi32(w, id, CAMERA_T, cam_t - 1); }

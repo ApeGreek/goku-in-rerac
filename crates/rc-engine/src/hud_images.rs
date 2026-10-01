@@ -93,7 +93,11 @@ impl HudImages {
 
 /// Entry `index` of the global TOC field at offset `field`: `global/<name>/NNN.bin`, WAD-compressed, a PIF.
 pub fn read_lump_picture(field: u32, index: u32) -> Option<Texture> {
-    let f = rc_formats::disc::RAC1_GLOBAL_FIELDS.iter().find(|f| f.offset as u32 == field)?;
+    // The TOC entry at `field + 8·index`: past the field's own count it is an entry of a field that follows (the
+    // Epilogue's languages, `rc_game::menus::pause::pages::field_entries`).
+    let at = field + 8 * index;
+    let f = rc_formats::disc::RAC1_GLOBAL_FIELDS.iter().find(|f| (f.offset as u32..f.offset as u32 + 8 * f.count as u32).contains(&at))?;
+    let index = (at - f.offset as u32) / 8;
     let root = crate::level_load::extracted_root();
     let raw = crate::disc_source::read(&root, &format!("global/{}/{index:03}.bin", f.name)).map_err(|e| eprintln!("hud images: {} {index}: {e:#}", f.name)).ok()?;
     let bytes = if rc_formats::wad::is_wad(&raw) { rc_formats::wad::decompress(&raw).ok()? } else { raw.to_vec() };

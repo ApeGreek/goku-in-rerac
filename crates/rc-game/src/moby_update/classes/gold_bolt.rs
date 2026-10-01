@@ -45,7 +45,7 @@
 //! Ratchet in the Hologuise disguise (body 3, 0x1413f4 = 3) leaves it before the teleport (`FUN_00231450`, the level's
 //! leave copy: `crate::hero::bodies::queue_leave`, run before the teleport's calls).
 //!
-//! Not ported: the cheat byte 0x15edb5 (mirrors the bolt: mode |= 0x8000; no cheats in the port).
+//! The cheat byte 0x15edb5 (only a save can set it: `crate::cheats`) mirrors the bolt: mode |= 0x8000 at the pickup.
 //!
 //! [`GameWrite::GoldBolt`]: crate::moby_update::interact::GameWrite::GoldBolt
 //! [`TalkGame::gold_bolt_bits`]: crate::moby_update::interact::TalkGame::gold_bolt_bits
@@ -342,6 +342,8 @@ fn start_cutaway(w: &mut World, id: MobyId) {
     }
     if w.m(id).anim.seq_b != 1 { w.anim_blend(id, 1, 0, 0); }
     w.hero_fields_mut().call(HeroCall::SetAnim { blend: 0.0, seq: HERO_ANIM, frame: 0 });
+    // The mirrored-animation cheat 0x15edb5 (`crate::cheats`): the bolt mirrored too (mode |= 0x8000).
+    if w.svc.cheats.on(crate::cheats::slot::MIRROR_ANIM) { w.mm(id).mode |= 0x8000; }
     w.hero_fields_mut().hide_hand = true;
     cinematic::letterbox(w, true);
     w.mm(id).state = 2;

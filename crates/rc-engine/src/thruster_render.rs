@@ -80,8 +80,8 @@ type Loaded = (FlameTables, Mutex<Vec<[f32; 2]>>);
 
 /// The loaded level's tables (once per process).
 fn tables() -> Option<&'static Loaded> {
-    static T: OnceLock<Option<Loaded>> = OnceLock::new();
-    T.get_or_init(|| {
+    static T: crate::level_load::PerLevel<Option<Loaded>> = [const { OnceLock::new() }; 20];
+    crate::level_load::per_level(&T).get_or_init(|| {
         let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
         let ov = |l: u32| crate::disc_source::level_file(&root, l, "overlay.bin").ok().and_then(|b| LevelOverlay::parse(&b).ok());
         let (Some(target), Some(reference)) = (ov(index), ov(1)) else {

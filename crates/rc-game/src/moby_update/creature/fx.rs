@@ -132,6 +132,11 @@ pub fn part21(w: &mut World, size: f32, p: V, vel: V, c1: u32, c2: u32, life: i3
     spawn_part(w, 21, |r| { r.rand(); }, |s, r| crate::particles::type21::spawn_rng(s, r, size, p, vel, c1, c2, life, split))
 }
 
+/// `PartType27Spawn` 0x282d80 (the gun spark; `crate::particles::type27`): one raw `rand()` (its rotation) with a record.
+pub fn part27(w: &mut World, size: f32, p: V, vel: V, rgba: u32, life: i32) -> bool {
+    spawn_part(w, 27, |r| { r.rand(); }, |s, r| crate::particles::type27::spawn_rng(s, r, size, p, vel, rgba, life))
+}
+
 /// `PartType44Spawn` 0x286450 (the drifting smoke puff; `crate::particles::type44`): one `randi(0xff)` (its rotation)
 /// with a record.
 pub fn part44(w: &mut World, a: &crate::particles::type44::Spawn) -> bool {

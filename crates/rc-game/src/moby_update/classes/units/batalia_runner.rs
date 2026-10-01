@@ -26,7 +26,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x26dae0(2.5, m, 1, +0x260)` (= `0x278720`) | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x26dae0(2.5, m, 1, +0x260)` (= `0x278720`) | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn and within 29 of the camera (0x1675c0): `0x264650` (= `0x26f020`), +0x7f = 0x17 | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | `MobyGetHitMessage(m, 0x210000, 0)` (0x264950) outside 8: held members (3) → 1; K gravity 0.008, flags 1, up 10·dt, drag 0.0005, speed 8·dt, +0x3d 0; the flight away from Ratchet (`0x266a48` = `0x271418`, seq 4, 1 tick); flash value 0x78; `SetDeathBits(m, 0, −1)` (0x261970); 8 | the hit | [`update`] (`knock::start`, `crate_::set_death_bits`) |
 //! | +0xa4 = 0xff | | [`update`] |
@@ -157,7 +157,8 @@ fn to_run(w: &mut World, id: MobyId) {
 /// `0x2e2df0`.
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
-    // `0x26dae0(2.5, m, 1, +0x260)`: the big-head manipulator (the cheat flag 0x15edb7; G-SAV-006): not modelled.
+    // `0x26dae0(2.5, m, 1, +0x260)`: the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 1, id, 0x260);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 29.0 {

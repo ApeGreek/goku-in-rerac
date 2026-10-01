@@ -211,7 +211,8 @@ impl Plugin for ShrubRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<ShrubMaterial>::default())
             .add_plugins(crate::shrub_billboard::ShrubBillboardPlugin)
-            .add_systems(Startup, spawn_system)
+            .add_systems(crate::level_switch::LevelStartup, spawn_system)
+            .add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<ShrubSway>)
             .add_systems(Update, cull_system)
             .add_systems(PostUpdate, update_sway);
     }
@@ -497,6 +498,34 @@ fn spawn_shrubs(
     materials: &mut Assets<ShrubMaterial>,
     buffers: &mut Assets<ShaderBuffer>,
 ) -> (Stats, ShrubSway) {
+    spawn_shrubs_on(commands, level, meshes, images, materials, buffers, None)
+}
+
+/// The shrubs of `level` on render layer `layer` (crate::title_world draws the title world on its own layer); their
+/// wind sway state is inserted as the resource the per-frame sway system drives. Returns the entity count.
+pub(crate) fn spawn_shrubs_layered(
+    commands: &mut Commands,
+    level: &LoadedLevel,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<ShrubMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+    layer: &bevy::camera::visibility::RenderLayers,
+) -> usize {
+    let (s, sway) = spawn_shrubs_on(commands, level, meshes, images, materials, buffers, Some(layer));
+    commands.insert_resource(sway);
+    s.entities
+}
+
+fn spawn_shrubs_on(
+    commands: &mut Commands,
+    level: &LoadedLevel,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<ShrubMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+    layer: Option<&bevy::camera::visibility::RenderLayers>,
+) -> (Stats, ShrubSway) {
     let t0 = Instant::now();
     let shrubs = &level.shrubs;
     let mut st = Stats::default();
@@ -626,6 +655,7 @@ fn spawn_shrubs(
                         Name::new(format!("shrub {ii} class {} tex {} list {list} {pass:?}", inst.o_class, part.texture)),
                     ));
                     if !exact || swayed { e.insert(NoFrustumCulling); }
+                    if let Some(l) = layer { e.insert(l.clone()); }
                     st.entities += 1;
                     if list == 2 { st.fade_twins += 1; }
                 }

@@ -190,6 +190,8 @@ pub enum ClassUpdate {
     Drone,
     DoomCanister,
     DoomBot,
+    /// The player's ship 531 / 532 / 533 (`ShipUpdate` 0x2a1c40: the loader installs it; `crate::travel::ship`).
+    Ship,
     /// A copy of the break template: `breakables::RECIPES[i]`.
     Breakable(u8),
     /// A water class: `crate::water::managers::PORTS[i]` (the ripple managers, the water plane).
@@ -201,7 +203,7 @@ pub enum ClassUpdate {
 }
 
 impl ClassUpdate {
-    pub const ALL: [ClassUpdate; 74] = [
+    pub const ALL: [ClassUpdate; 75] = [
         ClassUpdate::Bolt,
         ClassUpdate::Crate,
         ClassUpdate::Grass,
@@ -276,6 +278,7 @@ impl ClassUpdate {
         ClassUpdate::Drone,
         ClassUpdate::DoomCanister,
         ClassUpdate::DoomBot,
+        ClassUpdate::Ship,
     ];
 
     /// The level01 class-table address of this update.
@@ -355,6 +358,7 @@ impl ClassUpdate {
             ClassUpdate::Drone => drone::UPDATE_FN,
             ClassUpdate::DoomCanister => doom_canister::UPDATE_FN,
             ClassUpdate::DoomBot => doom_bot::UPDATE_FN,
+            ClassUpdate::Ship => crate::travel::ship::UPDATE_FN,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].func,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].func,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].func,
@@ -444,6 +448,7 @@ impl ClassUpdate {
             ClassUpdate::Drone => &drone::CLASSES,
             ClassUpdate::DoomCanister => &doom_canister::CLASSES,
             ClassUpdate::DoomBot => &doom_bot::CLASSES,
+            ClassUpdate::Ship => &crate::travel::ship::CLASSES,
             ClassUpdate::Breakable(i) => breakables::RECIPES[i as usize].classes,
             ClassUpdate::Water(i) => crate::water::managers::PORTS[i as usize].classes,
             ClassUpdate::Sea(i) => crate::water::sea::PORTS[i as usize].classes,
@@ -641,6 +646,7 @@ pub fn dispatch(u: ClassUpdate, w: &mut World, id: MobyId) {
         ClassUpdate::Drone => drone::update(w, id),
         ClassUpdate::DoomCanister => doom_canister::update(w, id),
         ClassUpdate::DoomBot => doom_bot::update(w, id),
+        ClassUpdate::Ship => crate::travel::ship::update(w, id),
         ClassUpdate::Breakable(i) => breakables::update(w, id, i),
         ClassUpdate::Water(i) => crate::water::managers::update(w, id, i),
         ClassUpdate::Sea(i) => crate::water::sea::update(w, id, i),

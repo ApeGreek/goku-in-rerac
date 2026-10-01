@@ -23,7 +23,7 @@
 //! | address | what it does | ported / not |
 //! |---|---|---|
 //! | `0x2b48d8`: `0x26bd00(20, or 22 in state 3, m, +0x00)` (= `0x274b78`); no moby → Ratchet's; +0xbc > 3 → state = +0xbc | the target search; an external state | [`tick`] (`target::acquire`) |
-//! | the rider (class 0x24, not deleted): `0x26f7a8(2.7, rider, 1, +0x70)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | the rider (class 0x24, state < 0x80): `0x26f7a8(2.7, rider, 1, +0x70)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | case 0: scale = class scale · 1.5; the rider (`0x2b4958`); home yaw; blend 0 (10 ticks); → 1 | init | [`update`], [`spawn_rider`] |
 //! | case 1: the target within 90° of home, 20 (xy), cuboid +0x50 (−1: none) holding Ratchet's body point (0x13f420) → reach 8, blend 1 (frame `rand_range(0, 3)`, `rand_range(7, 13)` ticks), 3; turn to home (12.57·dt², 12.57·dt², 12.57·dt, +0x60); the rider gone → 5 (blend 0), +0x64 = 1 | idle | [`update`] |
 //! | case 3: in range (22): `Approach(20, 6·dt, reach)`; the yaw toward the target clamped to ±+0x6c° of home; `0x2b47a0`; the rider gone → 5; out of range → 1 (blend 0) | track and fire | [`update`], [`fire`] |
@@ -271,7 +271,8 @@ pub fn spawn_shot(w: &mut World, reach: f32, pos: c::V, v: c::V, shooter: MobyId
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     tick(w, id);
-    // 0x26f7a8(2.7, rider, 1, +0x70) on a live rider: the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x26f7a8(2.7, rider, 1, +0x70) on a rider of class 0x24 whose state is below 0x80: the big-head cheat (0x15edb7).
+    if let Some(r) = rider(w, id).filter(|&r| w.m(r).state < 0x80) { crate::moby_update::manip::big_head(w, 2.7, r, 1, id, 0x70); }
     let t = tgt_pos(w, id);
     let s = state(w, id);
     let mut next = None;

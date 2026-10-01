@@ -167,6 +167,9 @@ pub struct Image {
     /// +0x38 / +0x3c: the picture's texels.
     pub tw: i32,
     pub th: i32,
+    /// +0x40: flag 0x1000's index pointer (the Epilogue pager's +0x54); +0x58: flag 1's explicit index.
+    pub ptr: u32,
+    pub explicit: i32,
     /// +0x44 state, +0x50 / +0x54 buffer A's / B's index, +0x5c ticks.
     pub state: i32,
     pub a: i32,
@@ -176,13 +179,22 @@ pub struct Image {
 
 impl Image {
     pub fn read(raw: &[u32; 8]) -> Image {
-        Image { field: raw[0].wrapping_sub(TOC_BASE), flags: raw[1], tw: raw[2] as i32, th: raw[3] as i32, state: -1, a: -1, b: -1, t: 0 }
+        Image { field: raw[0].wrapping_sub(TOC_BASE), flags: raw[1], tw: raw[2] as i32, th: raw[3] as i32, ptr: raw[4], explicit: -1, state: -1, a: -1, b: -1, t: 0 }
     }
 }
 
 /// The number of entries of the TOC field at `field` (`rc_formats::disc::RAC1_GLOBAL_FIELDS`); 0 unknown.
+/// The widget reads entry `index` at TOC `field + 8·index` whatever the field's own count, so the fields right after it
+/// count too (the Epilogue's languages: `epilogue_english` 0xbc8 then `_french`, `_italian`, `_german`, `_spanish`).
 pub fn field_entries(field: u32) -> u32 {
-    rc_formats::disc::RAC1_GLOBAL_FIELDS.iter().find(|f| f.offset as u32 == field).map_or(0, |f| f.count as u32)
+    let fields = rc_formats::disc::RAC1_GLOBAL_FIELDS;
+    let Some(mut i) = fields.iter().position(|f| f.offset as u32 == field) else { return 0 };
+    let mut n = fields[i].count as u32;
+    while let Some(next) = fields.get(i + 1).filter(|g| g.offset as u32 == fields[i].offset as u32 + 8 * fields[i].count as u32) {
+        n += next.count as u32;
+        i += 1;
+    }
+    n
 }
 
 /// `fun_0021fce0` (0x2936e8): state (+0x44) 0, both indices −1 (the buffers are the engine's). The Controls widget
@@ -222,13 +234,36 @@ pub fn image_update(m: &mut PageMenu, w: u32, gs: &GameState) -> i32 {
     // Flags 1, 2, 0x400 and 0x1000 (an explicit index, the planet, a slideshow, a language table) are the front
     // end's; no in-level page uses them.
     let mut idx: i32;
-    if f & 4 != 0 {
+    if f & 1 != 0 {
+        // An explicit index (+0x58; −1: no picture, nothing done).
+        idx = img.explicit;
+        if idx == -1 {
+            store(m, w, img);
+            return 0;
+        }
+    } else if f & 2 != 0 {
+        // The planet 0x184894.
+        idx = m.dest;
+    } else if f & 4 != 0 {
         idx = focused_cells(m).map_or(0, |c| c.0);
     } else if f & 0x100 != 0 {
-        // The memory-card slot previews (the Save / Load pages): not ported (G-SAV-002).
-        img.state = -1;
-        store(m, w, img);
-        return 0;
+        // The memory-card slot pages: the focused slot list's cursor (+0x40, 0..4) → its preview's level, the planet
+        // picture of that level; nothing while the card works, for an empty slot or without a PS2 card.
+        let slot = m.widgets.get(&focus(m)).map_or(0, |x| x.raw[4] as i32).clamp(0, 4);
+        let c = &m.saves.card;
+        if !c.idle() {
+            img.state = -1;
+            store(m, w, img);
+            return 0;
+        }
+        if img.state == -1 { img.state = 0; }
+        idx = c.card.previews[slot as usize].level;
+        if idx == -1 { img.state = -1; }
+        if c.card.ty != crate::memcard::TYPE_PS2 {
+            img.state = -1;
+            store(m, w, img);
+            return 0;
+        }
     } else if f & 8 != 0 {
         let Some((cursor, count, cells)) = focused_cells(m) else { return 0 };
         idx = cells.get(cursor.max(0) as usize).map_or(0, |c| c.image as i32);
@@ -237,6 +272,13 @@ pub fn image_update(m: &mut PageMenu, w: u32, gs: &GameState) -> i32 {
             store(m, w, img);
             return 0;
         }
+    } else if f & 0x400 != 0 {
+        // A slideshow: picture (ticks / ticks(300)) % 19 (+0x5c, counted above).
+        idx = (img.t / crate::menus::scale_ticks(300).max(1)) % 0x13;
+    } else if f & 0x1000 != 0 {
+        // A language table (the Epilogue): *(+0x40) (the pager's page, `media::epilogue_pager`) + the language's first
+        // entry (0x20a2d0[0x15ed88]: English 0, French 12, German 36, Spanish 48, Italian 24) in the fields that follow.
+        idx = super::media::pager_page(m, img.ptr) + m.media.lang_offsets.get(m.lang as usize).copied().unwrap_or(0);
     } else {
         let l = focused_list(m);
         idx = l.map_or(0, |l| l.cursor).max(0);

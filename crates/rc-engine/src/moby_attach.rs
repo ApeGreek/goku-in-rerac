@@ -169,7 +169,8 @@ impl Plugin for MobyAttachPlugin {
     fn build(&self, app: &mut App) {
         // Setup in the first PreUpdate: after moby_render's Startup spawn (MobyOcclusion) and moby_spawn's
         // PostStartup pass (which tags gameplay entities by MeshTag and must not see these).
-        app.add_systems(PreUpdate, setup)
+        app.add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<MobyAttach>)
+            .add_systems(PreUpdate, setup)
             // After moby_anim's FixedUpdate tick (Ratchet's advance) within the same fixed step.
             .add_systems(FixedPostUpdate, update)
             .add_systems(PostUpdate, (upload, rope_draw))
@@ -218,6 +219,7 @@ pub(crate) fn load_blobs() -> Result<(Vec<u8>, Vec<gadget::GadgetClass>)> {
 #[allow(clippy::too_many_arguments)]
 fn setup(
     mut done: Local<bool>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     mut commands: Commands,
     level: Res<crate::Level>,
     occl: Option<Res<MobyOcclusion>>,
@@ -227,6 +229,8 @@ fn setup(
     mut materials: ResMut<Assets<MobyMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    // Once per level (crate::level_switch: a runtime level change runs it again).
+    if generation.is_changed() { *done = false; }
     if *done { return; }
     let (Some(occl), Some(anim)) = (occl, anim) else { return };
     *done = true;
@@ -537,6 +541,13 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
         }
     }
     if let Some(h) = hand {
+        // The hand moby's joint-modifier list (the hand records 0x140c40, the Metal Detector's head node) and the Metal
+        // Detector's colour word +0x90 (rc_game::hero::gadgets / metal_detector).
+        let (mods, detector) = play.as_ref().map_or((Vec::new(), None), |p| {
+            let g = &p.game.hero.gadgets;
+            let det = (p.game.hero.items.slot.id == rc_game::hero::metal_detector::METAL_DETECTOR).then_some(g.detector.glow);
+            (g.hand_mods.clone(), det)
+        });
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
             item.visible = hand_shows(item.o_class, h.as_ref(), fp, hand_off);
             if let Some(m) = h.as_ref().filter(|m| m.o_class == item.o_class) {
@@ -544,6 +555,8 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
                 item.snapshot = m.snapshot.clone();
                 item.rows = m.rows;
                 item.position = m.position;
+                item.mods = mods.clone();
+                if detector.is_some() { item.glow = detector; }
             }
         }
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hook) {
@@ -685,8 +698,10 @@ fn rope_mesh(quads: &[[[f32; 3]; 4]]) -> Mesh {
 
 /// Draws the rope of this tick (none: hidden). Effect texture 0xf (`GetEffectTex(0xf)`, bilinear, repeat), vertex
 /// colour 0x80808080 (the texture as it is), GS alpha 0x80 = 1.0 (the texture's alpha doubled), alpha blended.
+#[allow(clippy::too_many_arguments)]
 fn rope_draw(
     mut st: Local<RopeGfx>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     play: Option<Res<crate::gameplay::Play>>,
     level: Res<crate::Level>,
     mut commands: Commands,
@@ -694,6 +709,8 @@ fn rope_draw(
     mut images: ResMut<Assets<Image>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
+    // A runtime level change (crate::level_switch): the rope's entity is gone.
+    if generation.is_changed() { *st = RopeGfx::default(); }
     let Some(play) = play else { return };
     let item = &play.game.hero.swing.item;
     let rope = item.rope.filter(|_| item.alive);

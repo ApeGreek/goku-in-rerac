@@ -49,7 +49,7 @@
 //! | address | what it does | ported / not |
 //! |---|---|---|
 //! | state ≠ 0x14: record state 0, the tick | | [`update`] |
-//! | `0x288f40(2.5, m, 0, +0x280)` (= `0x278720`) | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x288f40(2.5, m, 0, +0x280)` (= `0x278720`) | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn and within 28 of the camera: `0x280000` shadow probe, +0x7f = 0x16 | | [`update`] (`shadows::probe_down`) |
 //! | 0: health 2, meter 2, column 1, +0x29 1, +0x30 0.25, +0x58 8, +0x5a 2, +0xd0 the sequence table, `SeedJumpPattern(J)`, J radius 0x200, 0.5 / 0.5 / 0.5, flag 0x10; `rand() & 1` → mirror; mode 2 → 0x13 (blend 4, `ticks(10)`), at the path's first point, node 1; mode 1 → 1 at the first point 1 lower, home its second; no boat → `GroundHeight(0.5, pos, 0x20)`, 2 (blend 0, 5), home; a boat → 0xc, `randf(−3, 3)`, hidden without collision | init | [`init`] |
 //! | 1: turn to the path's second point (8.73·dt² / 12.57·dt); a target and `randi(9) == 0` → 7 (blend 0, 5), the jump: 4·dt in xy, `0x280ad0` lob (gravity −20·dt²) | the hop ashore | [`update`] (`knock::lob_up`) |
@@ -561,7 +561,8 @@ pub fn update(w: &mut World, id: MobyId) {
         if !pre(w, id) { return; }
     }
     let tm = target_moby(w, id);
-    // 0x288f40(2.5, m, 0, +0x280): the big-head manipulator (the cheat flag 0x15edb7; G-SAV-006): not modelled.
+    // 0x288f40(2.5, m, 0, +0x280): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 0, id, 0x280);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 28.0 {

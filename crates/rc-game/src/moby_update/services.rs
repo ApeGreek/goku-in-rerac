@@ -781,6 +781,12 @@ pub struct Services {
     pub level: u32,
     /// `0x15f5c4`: game mode (2 = cutscene; bolts hide).
     pub game_mode: i32,
+    /// 0x15edb0: the cheat bytes as the class updates read them (`crate::cheats`; the engine copies the saved game's
+    /// chunk 7 in before each tick).
+    pub cheats: crate::cheats::Cheats,
+    /// The scene big-head record 0x17c8c0 (`manip::scene_big_head`): the actor it was attached to, None while clear
+    /// (every `DialogStreamStart` clears it).
+    pub scene_head: Option<crate::moby_runtime::MobyId>,
     /// `0x15f638`: the level's death height (gameplay header +0x28; set by the engine at the load): Veldin's floating
     /// platforms 587 kill Ratchet riding one below it.
     pub death_z: f32,
@@ -903,6 +909,9 @@ pub struct Services {
     /// The HUD slot calls of the classes (`queue_animation_update` and the handle calls: [`crate::hud::calls`]); the HUD
     /// replays the new ones before its next update loop.
     pub hud: crate::hud::Calls,
+    /// The ship block 0x13e030.. (the ship moby, its index, the take-off flag 0x15f630, mode 6's substate and tick, the
+    /// trail): [`crate::travel::ShipGlobals`].
+    pub travel: crate::travel::ShipGlobals,
 }
 
 impl Default for Services {
@@ -915,6 +924,8 @@ impl Services {
             timing: Timing::NTSC,
             level: 1,
             game_mode: 0,
+            cheats: Default::default(),
+            scene_head: None,
             death_z: 0.0,
             camera_classes: Vec::new(),
             camera_focus: Vec::new(),
@@ -963,6 +974,7 @@ impl Services {
             help: Default::default(), map: Default::default(),
             visibomb: Default::default(),
             hud: Default::default(),
+            travel: Default::default(),
             pvar_shared: Vec::new(),
             vehicle: None,
         }
@@ -1100,12 +1112,25 @@ pub struct HeroFields {
     /// A class's copy of the hero's position / Euler into 0x141050 / 0x141060 (Giant Clank's pads 1451 / 1899: where he
     /// got in; `crate::hero::bodies::Bodies::entry_pose`).
     pub save_entry_pose: bool,
+    /// A class's store of a fixed pose into 0x141050 / 0x141060 (Rilgar's race girl 918: the race's finish point).
+    pub set_entry_pose: Option<([f32; 3], [f32; 3])>,
     /// A class's store of 0x13f510 (Ratchet's hit invulnerability, ticks): Veldin's cutaway director 644 (`0x2dfaa0`)
     /// holds him invulnerable for the length of its camera move.
     pub invulnerable: Option<i32>,
     /// A class's store of 0x141414 (the back slot's item request, `SessionState::temp_back`): the boss 1422's state 5
     /// asks for the Thruster-Pack (3).
     pub back_request: Option<i32>,
+    /// A class's store of 0x141410 (the head slot's item request, `SessionState::temp_head`): the Pilot's Helmet pickup
+    /// 1290 (level01 `0x30a6d0`) asks for item 7.
+    pub head_request: Option<i32>,
+    /// A class's store of 0x141628 (Clank hidden on Ratchet's back, `SessionState::clank_hidden`): Veldin's Clank 834.
+    pub clank_hidden: Option<i16>,
+    /// A class's store of 0x13f51c (`Hero::no_vel_clamp`): Hoven's turret 1267 holds it at `ticks(120)` while Ratchet
+    /// rides it.
+    pub no_vel_clamp: Option<i32>,
+    /// A class's store of the level's death height 0x15f638 (`Services::death_z` is the moby loop's copy): Kalebo's race
+    /// host 1455 (100 / 115, 74 during the race). The tick takes it into `Game::death_z`.
+    pub death_z: Option<f32>,
 }
 
 /// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
@@ -1186,8 +1211,13 @@ impl HeroFields {
             current_dist: 9999.0,
             airless: None,
             save_entry_pose: false,
+            set_entry_pose: None,
             invulnerable: None,
             back_request: None,
+            head_request: None,
+            clank_hidden: None,
+            no_vel_clamp: None,
+            death_z: None,
         }
     }
 
@@ -1238,8 +1268,12 @@ impl HeroFields {
         for (t, n) in h.weapons.picked.iter_mut().zip(self.ammo_picked.iter()) { *t += n; }
         if let Some(v) = self.airless { h.worn.airless = v; }
         if self.save_entry_pose { h.bodies.entry_pose = Some((ph::to_f32x3(h.pos), ph::to_f32x3(h.rot))); }
+        if let Some(pose) = self.set_entry_pose { h.bodies.entry_pose = Some(pose); }
         if let Some(t) = self.invulnerable { h.f510 = t; }
         if let Some(v) = self.back_request { h.back_slot.slot.request = v; }
+        if let Some(v) = self.head_request { h.head_slot.request = v; }
+        if let Some(v) = self.clank_hidden { h.back_slot.clank_hidden = v; }
+        if let Some(v) = self.no_vel_clamp { h.no_vel_clamp = v; }
         if let Some(p) = self.pose {
             h.pos = [pf(p.pos[0]), pf(p.pos[1]), pf(p.pos[2]), h.pos[3]];
             h.rot[2] = pf(p.yaw);
@@ -2057,6 +2091,7 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     fn take_hero_writes(&mut self) -> Option<HeroFields> { self.svc.borrow_mut().take_hero_writes() }
     fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { std::mem::take(&mut self.svc.borrow_mut().camera_shakes) }
     fn take_cinematic(&mut self) -> Vec<crate::cinematic::CinematicCall> { crate::cinematic::take_calls(&mut self.svc.borrow_mut()) }
+    fn game_mode(&self) -> i32 { self.svc.borrow().game_mode }
     fn run_list(&self, table: &MobyTable, camera: V4) -> Option<Vec<MobyId>> {
         Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
     }

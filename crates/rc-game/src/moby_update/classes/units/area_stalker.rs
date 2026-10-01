@@ -18,7 +18,7 @@
 //! | `0x2e6208` (state ≠ 0): `MobyGetHitMessage(m, 0x330000, 0)` (0x255d58) → K: +0x15d 0, zoff 0.5, speeds 15·dt / 8·dt (gp−0x4da0 / −0x4da4), gravity 20·dt², drag 20·dt², air speed 2·dt, flags 0x29, radius 0x200; untargetable; `0x256480` (= `0x26fa48`) aim; `0x257e50(…, K, 5, 1, 0)` (= `0x271418`); keys 8 / 16; state 8; +0x94 0; flash 0x78, `0x258d50` | every weapon's hit record kills it (the death flight) | [`tick`] (`World::get_hit`, `knock::*`, `flash::start`) |
 //! | +0xa4 = 0xff; `0x258e30` flash update | | [`tick`] |
 //! | `0x25b830(16, m, rec, …, area +0x1f0)` (= `0x274df8`); beyond 16 of home or 3 in height → kind 2; no moby → Ratchet's, the record at his position | the target search (decoys win) | [`tick`] (`target::acquire_in`) |
-//! | `0x25e9f0(2.1, m, 1, +0x220)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x25e9f0(2.1, m, 1, +0x220)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn, within 29 of the camera: `0x255a58` (= `0x26f020`), +0x7f = 0x17 | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | case 0: no area → deleted; meter 1, column 0, health 1, +0xd0 gp−0x4db8, `rand() & 1` mirror, home, 1, blend 2 (`ticks(20)`), +0x58 8, +0x5a 3 | init | [`update`] (+0xd0: `react::SEQS_1445`) |
 //! | case 1: a target → 4 (blend 0) | wait | [`update`] |
@@ -166,7 +166,8 @@ fn walk(w: &mut World, id: MobyId, to: c::V) -> f32 {
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     tick(w, id);
-    // 0x25e9f0(2.1, m, 1, +0x220): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x25e9f0(2.1, m, 1, +0x220): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.1, id, 1, id, 0x220);
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), cam) < 29.0 {
         crate::shadows::probe_down(w, id);

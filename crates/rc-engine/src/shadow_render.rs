@@ -124,8 +124,9 @@ impl Plugin for ShadowPlugin {
         println!("shadows: {} ({source}){}", if settings.enabled { "on" } else { "off" }, if settings.debug { ", RC_SHADOW_DEBUG: count target shown" } else { "" });
         app.insert_resource(settings)
             .init_resource::<ShadowVolumes>()
+            .add_systems(crate::level_switch::LevelUnload, (crate::level_switch::reset::<ShadowVolumes>, crate::level_switch::remove::<ShadowGame>))
             .add_plugins((ExtractResourcePlugin::<ShadowVolumes>::default(), ExtractComponentPlugin::<ShadowCamera>::default()))
-            .add_systems(Startup, setup)
+            .add_systems(crate::level_switch::LevelStartup, setup)
             .add_systems(Update, tag_camera)
             .add_systems(Last, collect);
         if crate::gameplay::enabled() { app.add_systems(FixedUpdate, shadow_tick.after(crate::gameplay::GameTick).after(crate::scene_render::actor_mobys)); }
@@ -176,7 +177,9 @@ pub fn shadow_tick(play: Option<ResMut<Play>>, level: Res<crate::Level>, game: O
     let counter = play.game.counter;
     let ticked = sg.counter != Some(counter);
     let actors = active.as_ref().filter(|s| s.running).map_or(&[][..], |s| &s.actors[..]);
-    if !ticked && actors.is_empty() { return; }
+    // Game mode 6's take-off / landing actors (crate::travel_render): the same probe in `GameStateUpdate`.
+    let space = active.as_ref().map_or(&[][..], |s| &s.space_actors[..]);
+    if !ticked && actors.is_empty() && space.is_empty() { return; }
     sg.counter = Some(counter);
     let Some(coll) = level.0.collision.as_ref() else { return };
     let sg = &mut *sg;
@@ -203,7 +206,7 @@ pub fn shadow_tick(play: Option<ResMut<Play>>, level: Res<crate::Level>, game: O
     }
     // The scene actors (`CutsceneModeUpdate`, right after each actor's `MobyBuildMatrix`: +0x7f ≠ 0 →
     // ShadowProbeAlongDir 0x26f0e0 with direction 0), before the direction update at the end of the frame.
-    for (id, _) in actors {
+    for (id, _) in actors.iter().chain(space) {
         if let Some(m) = p.game.mobys.mobys.get_mut(*id).filter(|m| m.b7f != 0) { shadows::probe_along_dir(m, sg.dirs.of(0), line); }
     }
     if ticked { shadows::update_shadow_dir(&mut sg.dirs, light); }
@@ -241,11 +244,11 @@ pub fn collect(
     let table = &play.game.mobys;
     // Ratchet's moby is hidden by his drawn entities, not by mode bits, while a scene runs (`FUN_002486c0`'s mode |= 1)
     // and in the vendor (crate::interact_render::hide_hero): MobyProc then skips him, shadow included.
-    let hero_hidden = scene.as_ref().is_some_and(|s| s.running) || !vendor_hidden.is_empty();
+    let hero_hidden = scene.as_ref().is_some_and(|s| s.running || s.space_hero_hidden) || !vendor_hidden.is_empty();
     // MobyProc's deferral: the shadow sphere, its cull and size, in the moby array's order.
     // The scene actors: drawn by crate::scene_render (their table mobys carry the port-only hidden bit), posed on the
     // streamed sequence.
-    let actor = |id: usize| scene.as_ref().and_then(|s| s.actors.iter().find(|a| a.0 == id).map(|a| a.1.clone()));
+    let actor = |id: usize| scene.as_ref().and_then(|s| s.actors.iter().chain(&s.space_actors).find(|a| a.0 == id).map(|a| a.1.clone()));
     let mut list = Vec::new();
     for (id, m) in table.mobys.iter().enumerate() {
         let is_actor = actor(id).is_some();

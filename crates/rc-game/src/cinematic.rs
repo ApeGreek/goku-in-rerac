@@ -16,7 +16,9 @@
 //! | `FadeToBlack(n)` 0x21b438 | [`fade_to_black`] | n blocking black-quad frames over the last image |
 //! | `ShowBanner(msg, t)` 0x2789e0 / `ShowPlanetBanner(p)` 0x277c38 | [`show_banner`] / [`show_planet_banner`] | the HUD banner ([`Cinematic::banner`]) |
 //! | `UnlockPlanet(p)` 0x2756d0 | [`unlock_planet`] | the saved game's planet bits and map order (+ banner) |
-//! | `memcard_Save(0, −1)` | [`save`] | logged: the in-memory game state is the save |
+//! | `memcard_Save(0, −1)` | [`save`] | the engine's `memcard_Save` on the native card (`rc-engine` `saves`) |
+//! | `EnterSlideshowMode` 0x2ad558 / `PlayMovieB(n)` 0x2ad050 / `EnterMenuMode(kind)` 0x28bf50 | [`enter_slideshow`] / [`play_movie_b`] / [`enter_menu_mode`] | the credits (mode 7), a transitions-table movie (mode 1), the page menu (mode 3) |
+//! | `0x2a29a0(dest)` | [`leave_level`] | leave the level for `dest` (`DoSpaceTransition`, `crate::travel`) |
 //! | `SetMissionDone(m)` 0x265080 | [`set_mission_done`] | the level's mission byte done (the live bytes and the saved game) |
 //! | `0x317d88` / `0x317aa0` / `0x317e70` | [`camera_type6`] | the type-6 camera's switch / tracking / hand-back (the Visibomb) |
 //! | `0x313628` / `0x313690` | [`follow_distance`] / [`follow_pivot_height`] | the follow camera's distance / pivot-height targets set by a class (the Pokitaru boats) |
@@ -70,11 +72,16 @@ pub enum CinematicCall {
     /// A class's store into 0x16735c, the follow camera's scripted focus moby
     /// ([`crate::follow_camera::Camera::set_focus_moby`]).
     FocusMoby(Option<MobyId>),
+    /// A class's store `0x167360 = t` (the ticks since the right stick moved, which ease the focus turn in; Hoven's
+    /// drones 326 write 0 with their focus store): [`crate::follow_camera::Camera::focus_ticks`].
+    FocusTicks(i32),
     /// A class's stores into a class-18 camera record's pvar block (`0x15ef50 + i·0x20` +0x1c): +0x34 the distance,
     /// +0x38 the pivot height ([`focus_record`]).
     FocusRecord { record: usize, distance: f32, pivot: f32 },
     /// `0x306338(slot)` (level18): a class-18 slot's record +0x50 = 1 (the region leaves this tick) ([`focus_suppress`]).
     FocusSuppress(usize),
+    /// [`CinematicCall::CameraScript`] unless the script camera is already up ([`camera_script_unless_script`]).
+    CameraScriptUnlessScript { pos: [f32; 3], euler: [f32; 3], mode: u8, ticks: i32, collide: bool },
 }
 
 /// What the engine has to do for the moby loop (outside the gameplay tick).
@@ -93,16 +100,32 @@ pub enum EngineRequest {
     FadeToBlack { frames: i32 },
     /// `FUN_002a2450` / `FUN_002a2480`: the ship moby 0x13e030 hidden (mode |= 3, no collision) / shown.
     ShipHidden(bool),
-    /// `memcard_Save(0, −1)`.
+    /// `memcard_Save(0, −1)` (`rc-engine` `saves::memcard_save`).
     Save,
-    /// `EnterSlideshowMode` 0x2ad558 (game mode 7) called from a class (the boss 1422's ending): the engine has no
-    /// slideshow yet (G-CUT-003), it logs the request and the game mode stays 0.
+    /// Class 1750's `FUN_00281fa8(0x1dfc10)` (level18 0x2fad08): `MakeWholeSave` into the ending buffer 0x1ba250 once
+    /// (the time warp's `memcard_RestoreGame` reads it; `rc-engine` `saves::store_ending`).
+    EndingSave,
+    /// `EnterSlideshowMode` 0x2ad558 (game mode 7: the credits, `crate::slideshow`) called from a class (the boss 1422's
+    /// ending): the engine runs the mode from the next frame (`FadeToBlack(8)` first).
     Slideshow,
-    /// `PlayMovieB(n)` 0x2ad050 (`StartPssMovie` of the table 0x1394b8, NTSC) from a class (the boss 1422: 11, the ending
-    /// movie): not played by the engine yet (G-CUT-003), logged.
+    /// `PlayMovieB(n)` 0x2ad050 (`StartPssMovie(mpegs[40 + n])`, the transitions table 0x1394b8, NTSC) from a class (the
+    /// boss 1422: 11, the ending movie).
     MovieB { movie: i32 },
-    /// `PauseAllSounds(mask)` (level18 0x278118) from a class: logged (G-AUD-012).
-    PauseSounds { mask: u32 },
+    /// `EnterMenuMode(kind)` 0x28bf50 (Lombyte `PauseAllSounds`; level18 0x278118) from a class: the page menu opened with
+    /// `kind` (the boss 1422: 0x21, the end-of-game page 0x1b7670 with no close keys). Was filed as a sound call
+    /// (G-AUD-012): the function pauses SFX group 0x1d and the music because it enters the menu.
+    EnterMenu { kind: i32 },
+    /// The item-movie player of levels 02 / 08 / 16 (level02 `0x298c68`, level08 `0x2a1880`, level16 `0x2923d0`):
+    /// `StartPssMovie(mpegs[64 + n])` (NTSC; PAL `[67 + n]`) in the language 0x15ed88 (Aridia's surfer 786: 2)
+    /// ([`item_movie`]).
+    ItemMovie { movie: i32 },
+    /// `0x2a29a0(dest)` (`0x15f5c0 = dest`, `0x15f5d8 = 1`, `0x15f570 = 1`): the level's main loop ends and
+    /// `DoSpaceTransition` takes the game to `dest` (Veldin's Clank 834, class 436; `crate::travel`). The engine's one
+    /// level change (`rc-engine` `travel_render`).
+    LeaveLevel { dest: i32 },
+    /// `memcard_Save(0, pretend)` from a class (Umbris' director 436: `memcard_Save(0, 8)`, the save made as if on
+    /// Batalia) ([`save_as`]).
+    SaveAs { pretend: i32 },
 }
 
 /// The cinematic layer's state in the moby services.
@@ -164,6 +187,26 @@ pub fn camera_targets(w: &mut World, pos: Option<[f32; 3]>, euler: Option<[f32; 
 /// `0x316e88(a, b)`.
 pub fn camera_curve(w: &mut World, a: f32, b: f32) { w.svc.cinematic.calls.push(CinematicCall::CameraCurve { a, b }); }
 
+/// `if (0x167400 && 0x167400->type ≠ 5) CameraScript(pos, euler, mode, ticks, collide)`: the script camera switched in
+/// unless it is already the current camera (the item scene 1005's glide, level02 `0x2ea578`): decided when the tick
+/// applies the camera calls ([`CinematicCall::CameraScriptUnlessScript`]) [L: the game tests it in the class update;
+/// no camera switch happens between the two].
+pub fn camera_script_unless_script(w: &mut World, pos: [f32; 3], euler: [f32; 3], mode: u8, ticks: i32, collide: bool) {
+    w.svc.cinematic.calls.push(CinematicCall::CameraScriptUnlessScript { pos, euler, mode, ticks, collide });
+}
+
+/// The level item-movie player `0x298c68(n)` ([`EngineRequest::ItemMovie`]): with Ratchet's health at 0 the death
+/// sequence instead; the help box closed (`StartPssMovie`).
+pub fn item_movie(w: &mut World, movie: i32) {
+    if movie < 0 { return; }
+    if w.hero.health == 0 {
+        w.hero_fields_mut().call(HeroCall::Death);
+        return;
+    }
+    w.svc.help.kill();
+    w.svc.cinematic.requests.push(EngineRequest::ItemMovie { movie });
+}
+
 /// `CameraScript2(kind)`.
 pub fn camera_script2(w: &mut World, kind: u8) {
     let level = w.svc.level;
@@ -212,6 +255,9 @@ pub fn follow_look_height(w: &mut World, h: f32, rate: f32, add: bool) { w.svc.c
 /// The store `0x16735c = moby` (0: `None`) from a class: the follow camera's scripted focus moby.
 pub fn focus_moby(w: &mut World, moby: Option<MobyId>) { w.svc.cinematic.calls.push(CinematicCall::FocusMoby(moby)); }
 
+/// The store `0x167360 = t` from a class ([`CinematicCall::FocusTicks`]).
+pub fn focus_ticks(w: &mut World, t: i32) { w.svc.cinematic.calls.push(CinematicCall::FocusTicks(t)); }
+
 /// The stores `+0x34 = distance`, `+0x38 = pivot` into class-18 camera record `record`'s block (the boss 1422's camera
 /// tweak `0x2f7288`); the moby loop's mirror ([`crate::moby_update::Services::camera_focus`]) is updated at once.
 pub fn focus_record(w: &mut World, record: usize, distance: f32, pivot: f32) {
@@ -237,6 +283,9 @@ pub fn start_scene(w: &mut World, scene: usize, arrival: bool) {
     // DialogStreamStart 0x2ac330 closes the help box at once (`FUN_002258b0`).
     w.svc.help.kill();
     w.svc.cinematic.requests.push(EngineRequest::StartScene { scene, arrival });
+    // DialogStreamStart stores game mode 2 (0x15f5c4) at once: the rest of this moby loop reads it (Umbris' director
+    // 436 falls from state 10 into 0xb in the same tick and waits there on it).
+    w.svc.game_mode = 2;
 }
 
 /// `DialogStreamUpdate(n)`.
@@ -252,21 +301,39 @@ pub fn set_fade(w: &mut World, f: f32) { w.svc.cinematic.fade = f; }
 /// `FadeToBlack(n)` from a class (see [`EngineRequest::FadeToBlack`]).
 pub fn fade_to_black(w: &mut World, frames: i32) { w.svc.cinematic.requests.push(EngineRequest::FadeToBlack { frames }); }
 
-/// `EnterSlideshowMode` 0x2ad558 from a class ([`EngineRequest::Slideshow`]).
-pub fn enter_slideshow(w: &mut World) { w.svc.cinematic.requests.push(EngineRequest::Slideshow); }
+/// `EnterSlideshowMode` 0x2ad558 from a class ([`EngineRequest::Slideshow`]): the game mode is 7 at once.
+pub fn enter_slideshow(w: &mut World) {
+    w.svc.game_mode = 7;
+    w.svc.cinematic.requests.push(EngineRequest::Slideshow);
+}
 
-/// `PlayMovieB(n)` 0x2ad050 from a class ([`EngineRequest::MovieB`]).
+/// `PlayMovieB(n)` 0x2ad050 from a class ([`EngineRequest::MovieB`]): `n < 0` does nothing; else `StartPssMovie` (the
+/// help box closed, `FUN_002258b0`; the game mode 1 at once).
 pub fn play_movie_b(w: &mut World, movie: i32) {
+    if movie < 0 { return; }
     w.svc.help.kill();
+    w.svc.game_mode = 1;
     w.svc.cinematic.requests.push(EngineRequest::MovieB { movie });
 }
 
-/// `PauseAllSounds(mask)` from a class ([`EngineRequest::PauseSounds`]).
-pub fn pause_sounds(w: &mut World, mask: u32) { w.svc.cinematic.requests.push(EngineRequest::PauseSounds { mask }); }
+/// `EnterMenuMode(kind)` 0x28bf50 from a class ([`EngineRequest::EnterMenu`]): the game mode is 3 at once (a later class
+/// of this moby loop reads 3).
+pub fn enter_menu_mode(w: &mut World, kind: i32) {
+    w.svc.game_mode = 3;
+    w.svc.cinematic.requests.push(EngineRequest::EnterMenu { kind });
+}
 
-/// `memcard_Save(0, −1)`: the in-memory game state already holds every write; the engine logs the request (no
-/// memory-card writer yet).
+/// `0x2a29a0(dest)` from a class ([`EngineRequest::LeaveLevel`]): the main loop leaves after this frame.
+pub fn leave_level(w: &mut World, dest: i32) { w.svc.cinematic.requests.push(EngineRequest::LeaveLevel { dest }); }
+
+/// `memcard_Save(0, −1)`: the engine saves to the native card (`rc-engine` `saves::memcard_save`).
 pub fn save(w: &mut World) { w.svc.cinematic.requests.push(EngineRequest::Save); }
+
+/// `memcard_Save(0, pretend)` ([`EngineRequest::SaveAs`]).
+pub fn save_as(w: &mut World, pretend: i32) { w.svc.cinematic.requests.push(EngineRequest::SaveAs { pretend }); }
+
+/// Class 1750's ending save (`FUN_00281fa8(0x1dfc10)`, level18 0x2fad08).
+pub fn ending_save(w: &mut World) { w.svc.cinematic.requests.push(EngineRequest::EndingSave); }
 
 /// `SetMissionDone(m)` 0x265080: `*(0x14c050 + level·16 + m) = 0xff` unless `m` is 0xff (no other effect). The one
 /// writer of the mission bytes for every class (checkpoint 805, talker 774, mission NPC 730 / 790, infobot 750, bolt
@@ -279,8 +346,12 @@ pub fn set_mission_done(w: &mut World, mission: u8) {
 }
 
 /// `ShowBanner(msg, ticks)` 0x2789e0 (`ticks` already scaled; the caller passes `ticks(180)` for −1).
-pub fn show_banner(w: &mut World, msg: i32, ticks: i32) {
-    let b = &mut w.svc.cinematic.banner;
+pub fn show_banner(w: &mut World, msg: i32, ticks: i32) { banner_call(&mut w.svc.cinematic, msg, ticks); }
+
+/// `ShowBanner(msg, ticks)` from outside the moby loop (the page menu's code entry `MenuInput` 0x298f80, the hero
+/// update's cheat entry `0x2285a0`): the same banner buffer.
+pub fn banner_call(c: &mut Cinematic, msg: i32, ticks: i32) {
+    let b = &mut c.banner;
     *b = BannerCall { seq: b.seq.wrapping_add(1), msg, ticks };
 }
 
@@ -338,6 +409,9 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             CinematicCall::CameraScript { pos, euler, mode, ticks, collide } => {
                 cam.camera_script(pos, euler, mode, ticks, collide, crate::hero::physics::to_f32x3(inp.hero.pos))
             }
+            CinematicCall::CameraScriptUnlessScript { pos, euler, mode, ticks, collide } => {
+                if !cam.script_active() { cam.camera_script(pos, euler, mode, ticks, collide, crate::hero::physics::to_f32x3(inp.hero.pos)) }
+            }
             CinematicCall::CameraCurve { a, b } => cam.camera_script_curve(a, b),
             CinematicCall::CameraTargets { pos, euler } => cam.camera_script_targets(pos, euler),
             CinematicCall::CameraRelease { kind, level } => cam.camera_script2(kind, level),
@@ -352,6 +426,7 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             CinematicCall::FollowTurnToward { rate, tolerance, dir } => cam.turn_toward(rate, tolerance, dir),
             CinematicCall::FollowLookHeight { h, rate, add } => cam.set_look_height(h, rate, add),
             CinematicCall::FocusMoby(m) => cam.set_focus_moby(m),
+            CinematicCall::FocusTicks(t) => cam.focus_ticks = t,
             CinematicCall::FocusRecord { record, distance, pivot } => {
                 if let Some(f) = cam.level_cams.slots.get_mut(record).and_then(|s| s.focus.as_mut()) {
                     f.distance = distance;

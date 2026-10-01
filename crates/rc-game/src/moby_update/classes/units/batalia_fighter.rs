@@ -17,7 +17,7 @@
 //! | state 2 | vel.z −= 15·dt²; rot.x = rot.x + `fast_add_rotations(rot.x, 7.330383·dt)` (the game's own sum, not a wrap); rot.y = −`FastArcTan(len2(vel), vel.z)`; pos += vel; z < 10 → delete; `coll_sphere(1.25, pos, 0, self)` (0x212960) hit → the blast, delete | [`fall`] |
 //! | the blast | `SpawnBeamExplosion(0, 0, 10, 5, 9, 1, 15, m, vel, pos, 20, 40, 16, −1, 1, 1, −1, 0)` (0x273310): no damage sphere, 20 streaks, 40 spark pairs, 16 puffs, debris 1, shake, no sound | [`BLAST`] (`fx::beam_explosion`) |
 //! | tail | +0x94 (collision) = 0 when x, y or z < 4, else the class's collision (class +0x10) | [`update`] |
-//! | tail, hit | `MobyGetHitMessage(m, 0x10000, 0)` (0x26f320) and state ≠ 2: **Ratchet mounted (0x1413d4 = 0x32) and skill point 0x13d414 not earned → earned, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)`**; vel = pos − old; vel.z += 2·dt; the blast; → 2 | [`update`]; the skill point: NOT ported (G-SAV-007 [deferred], the user's; it reads the real state 0x32 once ported) |
+//! | tail, hit | `MobyGetHitMessage(m, 0x10000, 0)` (0x26f320) and state ≠ 2: **Ratchet mounted (0x1413d4 = 0x32) and skill point 0x13d414 not earned → earned, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)`**; vel = pos − old; vel.z += 2·dt; the blast; → 2 | [`update`]; the skill point through `story::award_skill_point` |
 //! | tail | +0xa4 = 0xff (the hit record dropped) | [`update`] |
 //! | 0x2dec90 (drawn, +0x31 ≠ 0) | d = pos − old; point = rows·(−2.3, 0, 0.3) + pos; v1 = 0.75·d, w `randf(0.333, 0.8)`; v2 = 0.5·d + `rand_vec(0, 1.5·dt)`, w `randf(1, 1.7)`; c1 = `FastTweenColor(randf(0, 1), 0x600080ff, 0x6020a0c0)`, c2 = `FastTweenColor(randf(0, 1), 0x20802040, 0x20601020)`; phases `trunc(scale(23·randf(0, 1) + 1))`, `trunc(scale(10·(randf(−.5, .5) + 1)))`, `trunc(scale(7·(randf(−.5, .5) + 1)))`; `PartType02Spawn(…, −1)` (0x27dc98); the record's byte 9 = 8 − 0x70 | [`trail`] |
 //! | | no class sound, light, save flag besides the skill point; the blasts' own effects (`fx::beam_explosion`) | n/a |
@@ -121,7 +121,8 @@ pub fn update(w: &mut World, id: MobyId) {
     let coll = !(p[0] < EDGE || p[1] < EDGE || p[2] < EDGE) && super::class_collision(w, w.m(id).o_class);
     w.mm(id).has_collision = coll;
     if w.get_hit(id, SHOT_FLAG, false).is_some() && w.m(id).state != 2 {
-        // (The skill point of a hero in state 0x32: G-SAV-007, deferred.)
+        // Shot down from the turret (Ratchet in state 0x32): skill point 0x13d414.
+        if w.hero.state == 0x32 { crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d414)); }
         let mut v = sub(p, old);
         v[2] += DT + DT;
         set_pv4(w, id, pvo::VEL, v);

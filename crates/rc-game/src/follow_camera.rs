@@ -2549,6 +2549,7 @@ impl Camera {
 fn eye_height(h: &Hero) -> f32 {
     match h.mode {
         2 => f32::from_bits(0x4118_0000),
+        1 if h.cheats.on(crate::cheats::slot::CLANK) => f32::from_bits(0x3f99_999a),
         1 => f32::from_bits(0x3f66_6666),
         _ => f32::from_bits(0x3fcc_cccd),
     }

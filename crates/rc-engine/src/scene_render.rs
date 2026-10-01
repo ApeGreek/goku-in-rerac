@@ -59,7 +59,8 @@
 //!   meanwhile.
 //!
 //! Not modelled: the hero's state 100 body (frozen instead), the draw callbacks the FX driver registers (the ship's
-//! glow 0x2a70a8), the actors' moby-grid collision, the mirror / FOV cheats, mode-6 space scenes.
+//! glow 0x2a70a8), the actors' moby-grid collision, the mirror / FOV cheats. The mode-6 space scenes (the ship's take-off
+//! and landing) are crate::travel_render's.
 
 use crate::fly_cam::FlyCam;
 use crate::game_camera::{CameraSource, GameProjection, NTSC_Y_RATIO};
@@ -126,6 +127,10 @@ impl FullscreenMaterial for SceneFade {
     }
 }
 
+/// The scene frame (the classes' scene / movie / level-exit requests taken: crate::travel_render runs after it).
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SceneFrameSet;
+
 /// Marks entities hidden while a scene runs (the hero and his items).
 #[derive(Component)]
 struct SceneHidden;
@@ -166,6 +171,15 @@ pub struct ActiveScene {
     /// The actors' table mobys (0x16ce58) and their class animation with the streamed sequence: the scene renderer
     /// draws them (their table mobys carry the port-only hidden bit), crate::shadow_render casts their shadows.
     pub actors: Vec<(MobyId, Arc<MobyAnimClass>)>,
+    /// The white quad 0x15f400 (`DrawWorld` draws it after the black one, white at `0x15f400·128`): mode 6's take-off
+    /// flash (crate::travel_render).
+    pub white: f32,
+    /// Game mode 6's take-off / landing actors (crate::travel_render): their table mobys and class animation with the
+    /// streamed sequence. crate::shadow_render casts their shadows (`GameStateUpdate`: +0x7f ≠ 0 → `FUN_0026f0e0`, then
+    /// `MobyProc`'s shadow pass) as it does a mode-2 scene's actors.
+    pub space_actors: Vec<(MobyId, Arc<MobyAnimClass>)>,
+    /// Mode 6 hides Ratchet and his items (`FUN_002486c0`, crate::travel_render): `MobyProc` skips his shadow too.
+    pub space_hero_hidden: bool,
 }
 
 #[derive(Resource)]
@@ -205,6 +219,8 @@ impl Plugin for SceneRenderPlugin {
         let subtitles = !std::env::var("RC_SUBTITLES").is_ok_and(|v| v.trim() == "0");
         app.add_plugins(FullscreenMaterialPlugin::<SceneFade>::default())
             .init_resource::<ActiveScene>()
+            // A runtime level change (crate::level_switch): the scene state of the old level dropped.
+            .add_systems(crate::level_switch::LevelUnload, (crate::level_switch::reset::<ActiveScene>, crate::level_switch::reset::<FadeHold>, level_reset))
             .insert_resource(SceneRuntime {
                 mode,
                 player: None,
@@ -235,7 +251,7 @@ impl Plugin for SceneRenderPlugin {
             .configure_sets(FixedUpdate, GameTick.run_if(|h: Res<FadeHold>| h.frames == 0))
             .add_systems(FixedUpdate, (fade_step.before(GameTick), fade_take.after(GameTick)))
             .add_systems(RunFixedMainLoop, hold_camera.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop).after(crate::play_camera::apply))
-            .add_systems(FixedUpdate, (scene_frame.before(GameTick), actor_mobys.after(GameTick)))
+            .add_systems(FixedUpdate, (scene_frame.before(GameTick).in_set(SceneFrameSet), actor_mobys.after(GameTick)))
             .add_systems(RunFixedMainLoop, apply_camera.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop).after(crate::play_camera::apply))
             .add_systems(Update, subtitle_layer.before(crate::hud_render::HudBuild))
             .add_systems(PostUpdate, (upload, fade_pass))
@@ -246,6 +262,24 @@ impl Plugin for SceneRenderPlugin {
             None => {}
         }
     }
+}
+
+/// The per-level part of [`SceneRuntime`] dropped at a runtime level change (its actors' entities are gone).
+fn level_reset(mut rt: ResMut<SceneRuntime>) {
+    let rt = &mut *rt;
+    rt.player = None;
+    rt.actors.clear();
+    rt.extra = None;
+    rt.palette_len = 0;
+    rt.glyphs = None;
+    rt.frames = 0;
+    rt.uploaded = None;
+    rt.records.clear();
+    rt.palette.clear();
+    rt.pending.clear();
+    rt.talker = None;
+    rt.letterbox = 0;
+    rt.hid.clear();
 }
 
 /// The scene k of the current level, from `level_header.bin` and `scene/KK_ntsc.bin`.
@@ -315,16 +349,27 @@ fn take_requests(rt: &mut SceneRuntime, play: &mut Play, state: Option<&mut Pers
             // Taken right after its tick by fade_take (a request left here was already applied).
             R::FadeToBlack { .. } => {}
             R::Save => {
-                // memcard_Save 0x261448 packs the level's map mask into chunk 3002 first (rc_game::map, 0x25deb8).
-                let packed = play.svc.map.pack();
-                if let Some(l) = state.as_deref_mut().and_then(|s| s.0.levels.get_mut(level)) { l.map_mask = packed; }
-                println!("scene: memcard_Save (map mask packed; the in-memory game state holds every write; no card writer yet)");
+                // memcard_Save(0, −1) 0x261448: the capture (clock, landmarks, the map mask 0x25deb8) and the card's
+                // incremental save (crate::saves).
+                if let Some(st) = state.as_deref_mut() { crate::saves::memcard_save(play, &mut st.0, false, -1); }
             }
-            // The slideshow mode 7, PlayMovieB and PauseAllSounds from a class (the boss 1422's ending): not run by the
-            // engine yet (G-CUT-003, G-AUD-012); the game mode stays 0, so the class goes on.
-            R::Slideshow => println!("scene: EnterSlideshowMode requested (not ported: G-CUT-003)"),
-            R::MovieB { movie } => println!("scene: PlayMovieB({movie}) requested (not ported: G-CUT-003)"),
-            R::PauseSounds { mask } => println!("scene: PauseAllSounds({mask:#x}) requested (not ported: G-AUD-012)"),
+            // memcard_Save(0, pretend) from a class (Umbris' director 436: 8).
+            R::SaveAs { pretend } => {
+                if let Some(st) = state.as_deref_mut() { crate::saves::memcard_save(play, &mut st.0, false, pretend); }
+            }
+            // Class 1750 (level 18): the ending buffer (crate::saves).
+            R::EndingSave => {
+                if let Some(st) = state.as_deref() { crate::saves::store_ending(&st.0); }
+            }
+            // The slideshow mode 7, PlayMovieB and EnterMenuMode from a class (the boss 1422's ending): taken right after
+            // their tick by crate::menu_render (crate::media_render::take_class_requests); one left here goes the same way.
+            R::Slideshow => crate::media_render::request_slideshow(false),
+            R::MovieB { movie } => crate::movie_render::request(crate::movie_render::MovieRequest::movie_b(movie)),
+            R::EnterMenu { kind } => crate::media_render::request_menu(kind),
+            // The level item-movie player (level02 0x298c68): mpegs[64 + n] in the game language, back to gameplay.
+            R::ItemMovie { movie } => crate::movie_render::request(crate::movie_render::MovieRequest { file: (64 + movie) as u32, ..crate::movie_render::MovieRequest::in_level(movie, None) }),
+            // 0x2a29a0(dest) / the menus' level exits: DoSpaceTransition (crate::travel_render).
+            R::LeaveLevel { dest } => crate::travel_render::request_leave(dest),
             R::ShipHidden(h) => {
                 if let Some(id) = play.ship_moby() {
                     let m = &mut play.game.mobys.mobys[id];
@@ -429,6 +474,9 @@ fn scene_frame(
         } else if let Some(r) = rt.pending.pop_front() {
             r
         } else {
+            // `cinematic::start_scene` stores game mode 2 in the tick (DialogStreamStart's 0x15f5c4 = 2); a request
+            // the engine dropped (RC_SCENE's arrival) leaves no scene behind it: back to mode 0.
+            if let Some(p) = play.as_mut() { if p.svc.game_mode == 2 { p.svc.game_mode = 0; } }
             return;
         };
         rt.triggered = true;
@@ -442,6 +490,7 @@ fn scene_frame(
             Ok(s) => Arc::new(s),
             Err(e) => {
                 warn!("scene: scene {k} not loaded: {e:#}");
+                if let Some(p) = play.as_mut() { if p.svc.game_mode == 2 && rt.pending.is_empty() { p.svc.game_mode = 0; } }
                 // Reported as ended (a skipped scene) so a talker's dialogue goes on.
                 if let (Some(npc), Some(p)) = (rt.talker.take(), play.as_mut()) {
                     p.svc.interact.talker = Some(npc);
@@ -454,7 +503,8 @@ fn scene_frame(
         let ctx = SceneContext {
             game_beaten: gs.is_some_and(|g| g.game_beaten != 0),
             completes: gs.map_or(0, |g| g.completes),
-            replay: false,
+            // 0x15eed8 (a scene replayed from the page menu's post-action 5 runs with 1).
+            replay: menu.as_ref().is_some_and(|m| m.replay != 0),
             level: crate::level_load::level_index() as i32,
             language: rt.language,
             subtitles: rt.subtitles,
@@ -497,7 +547,11 @@ fn scene_frame(
     if let Some(e) = out.end {
         println!("scene: ended after {} frames ({}); tan(hfov/2) {} , music resumes in {} ticks", rt.frames, if e.skipped { "skipped" } else { "played through" }, e.tan_half_fov, e.music_resume_after);
     }
-    if !out.actors.is_empty() { pose_actors(rt, &player, &out, &level.0); }
+    if !out.actors.is_empty() {
+        // The actors' joint-modifier lists (the scene big-head cheat's node, rc_game::moby_update::manip::scene_big_head).
+        let table = play.as_ref().map(|p| &p.game.mobys);
+        pose_actors(rt, &player, &out, &level.0, table);
+    }
     active.camera = out.camera;
     active.black = out.black;
     active.world_runs = out.world_runs;
@@ -629,6 +683,8 @@ fn enter_mode2(rt: &mut SceneRuntime, p: &mut Play) {
     use rc_game::moby_update::services::{HeroCall, HeroFields};
     use rc_game::scene_player::{SCENE_HIDDEN_BIT, SCENE_HIDDEN_CLASSES};
     p.svc.game_mode = 2;
+    // DialogStreamStart 0x2ac330: the scene head record 0x17c8c0 (and 0x17c7c0 / 0x17c800) cleared.
+    p.svc.scene_head = None;
     p.game.camera_paused = true;
     let counter = p.game.counter;
     let call = HeroCall::SetState { id: rc_game::scene_player::HERO_SCENE_STATE, play: true };
@@ -744,7 +800,7 @@ pub(crate) fn actor_mobys(rt: Res<SceneRuntime>, play: Option<ResMut<Play>>) {
 }
 
 /// The actors' records and palettes for this frame's poses.
-fn pose_actors(rt: &mut SceneRuntime, player: &ScenePlayer, out: &SceneTick, level: &crate::level_load::LoadedLevel) {
+fn pose_actors(rt: &mut SceneRuntime, player: &ScenePlayer, out: &SceneTick, level: &crate::level_load::LoadedLevel, table: Option<&rc_game::moby_runtime::MobyTable>) {
     let scene = player.scene();
     let mut palette = crate::moby_anim::identity_palette(rt.palette_len);
     let mut records = Vec::with_capacity(rt.actors.len() * moby_render::EXTRA_RECORD_SIZE);
@@ -760,7 +816,8 @@ fn pose_actors(rt: &mut SceneRuntime, player: &ScenePlayer, out: &SceneTick, lev
         }
         let s = AnimState { seq_a: a.slot, frame_a: pose.frame_a, seq_b: a.slot, frame_b: pose.frame_b, t: pose.t, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
         a.pose = Some((s, pose.position));
-        let f = moby_anim::evaluate(&a.anim, &s);
+        let mods = a.moby.and_then(|id| table.and_then(|t| t.mobys.get(id))).map(|m| m.joint_mods.as_slice()).unwrap_or(&[]);
+        let f = moby_anim::evaluate_posed(&a.anim, &s, None, &[], mods);
         let at = a.base as usize * 64;
         for (k, b) in f.iter().take(a.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() { palette[at + k] = b; }
         let lights = lighting.map(|l| light::moby_lights(&rows, &l.bank, rt.light_word, rt.ambient, 0x80));
@@ -886,7 +943,11 @@ fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, hold: Res<FadeHol
     let gameplay = play.as_ref().map_or(0.0, |p| p.svc.cinematic.fade);
     let black = if active.running { active.black } else if hold.frames > 0 { hold.coverage() } else { gameplay };
     let alpha = (black.clamp(0.0, 1.0) * 128.0) as u32;
-    let want = ((active.running || hold.frames > 0 || gameplay > 0.0) && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
+    let mut want = ((active.running || hold.frames > 0 || gameplay > 0.0) && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
+    // The white quad 0x15f400 (mode 6, crate::travel_render) when no black one is drawn [L: the game draws both, black
+    // first; they never overlap in the take-off].
+    let white = (active.white.clamp(0.0, 1.0) * 128.0) as u32;
+    if want.is_none() && white > 0 { want = Some(SceneFade { rgba: UVec4::new(255, 255, 255, white) }); }
     for (e, have) in &cams {
         match (want, have) {
             (Some(w), Some(h)) if *h == w => {}
@@ -933,9 +994,28 @@ fn subtitle_layer(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, hold: 
             }
         }
     }
+    // The Trespasser locks' minigame (`0x2d93e8`, the frame's draw callback: rc_game's units::trespasser_lock::frame).
+    if !active.running {
+        if let Some(p) = play.as_ref() { layer.prims.extend(p.svc.draw_callbacks.rings.iter().map(ring_prim)); }
+    }
     let (Some(glyphs), Some(line)) = (rt.glyphs.as_ref(), active.last.as_ref().and_then(|t| t.subtitle.as_ref())) else { return };
     if !active.running { return; }
     layer.prims = subtitle_prims(glyphs, &line.text);
+}
+
+/// One primitive of the Trespasser minigame as a HUD primitive (pixels and texels rounded; the FX texture).
+fn ring_prim(r: &rc_game::moby_update::classes::units::trespasser_lock::RingPrim) -> Prim {
+    const W: i32 = crate::hud_render::W;
+    const H: i32 = crate::hud_render::H;
+    Prim {
+        tex: crate::hud_render::Tex::Fx(r.fx),
+        pos: r.pos.map(|p| [p[0].round() as i32, p[1].round() as i32]),
+        uv: r.uv.map(|u| [u[0] as i32, u[1] as i32]),
+        rgba: r.rgba,
+        scissor: [0, W - 1, 0, H - 1],
+        repeat: r.repeat,
+        nearest: false,
+    }
 }
 
 /// `DrawScreenFade`'s largest bar height (0x15f408 < 0x18).

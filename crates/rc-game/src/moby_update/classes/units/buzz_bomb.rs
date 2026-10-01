@@ -23,7 +23,7 @@
 //! | +0xa4 = 0xff; `0x27cff0` flash update | | [`tick`] |
 //! | lure +0x38 or +0xbc = 1 → alert `trunc(randf(180, 240))`; both cleared; `FastDecTimer(+0x190)` | the Taunter, the group's call | [`tick`] |
 //! | `randi(4)` = 0: not alerted → range 12, `0x27f9f0(12, m, rec, area)` (= `0x274df8`), beyond 12 or 3 in height → kind 2; alerted → 24, `0x27f770(24)` (= `0x274b78`); else the record follows its moby (gone → none, kind 2); none → Ratchet | the target search (decoys win) | [`tick`] (`target::acquire_in` / `acquire`) |
-//! | `0x282a90(2.7, m, 0, +0x280)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x282a90(2.7, m, 0, +0x280)` | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn and within 29 of the camera: `0x279c18` (= `0x26f020`), +0x7f = 0x17; game mode 2 → nothing | the shadow probe | [`update`] (`shadows::probe_down`) |
 //! | case 0: health 3, meter 3, column 2, +0x5a 6, +0x58 8; no area path → printf, deleted; walker (probes 0.5 / 0.5, radius 512, top speed 7.75·dt), state 1, blend 1 (10), slot −1 | init | [`update`] |
 //! | case 1: z += (ground + 0.5 − z)·0.1; `0x27b8b8(atan(target − pos), 8.73·dt², 8.73·dt², 4π·dt, yaw, +0x18c)` (= `0x270cc0`); wrapped → 1 in 19 blend 2 (`rand_range(7, 12)`), else blend 1 (`rand_range(7, 14)`), anim speed `randf(0.95, 1.05)`; a target → group call, the buzz (sound 1, loop 4) unless playing, moving, 2 | idle | [`update`] (`turn::turn_toward_pvar`) |
@@ -259,7 +259,8 @@ fn chase(w: &mut World, id: MobyId, t: c::V) {
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     tick(w, id);
-    // 0x282a90(2.7, m, 0, +0x280): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x282a90(2.7, m, 0, +0x280): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.7, id, 0, id, 0x280);
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), cam) < 29.0 {
         crate::shadows::probe_down(w, id);

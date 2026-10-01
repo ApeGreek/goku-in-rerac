@@ -47,7 +47,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x288f40(2.5, m, 0, +0x1e0)` (= `0x278720`) | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x288f40(2.5, m, 0, +0x1e0)` (= `0x278720`) | the big-head cheat manipulator | [`update`] (`manip::big_head`) |
 //! | drawn within 28 of the camera: `0x280000` shadow probe, +0x7f = 0x16 | | [`update`] |
 //! | 0: meter 3, health 3, column 2, +0x2a 6, +0x58 8, +0x5a 8, 3 (blend 0); a start path (+0x130) → 1 at its first point (no instance) | init | [`update`] |
 //! | 1 / 2 | no case (a start-path thrower stays) | n/a |
@@ -382,7 +382,8 @@ pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     pre(w, id);
     let tm = moby_ref(w, id, pv::TGT_MOBY);
-    // 0x288f40(2.5, m, 0, +0x1e0): the big-head manipulator (the cheat flag 0x15edb7; G-SAV-006): not modelled.
+    // 0x288f40(2.5, m, 0, +0x1e0): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 0, id, 0x1e0);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 28.0 {

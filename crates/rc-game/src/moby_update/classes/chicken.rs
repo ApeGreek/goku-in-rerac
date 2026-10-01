@@ -40,7 +40,7 @@
 //! 288))`: fading out (alpha +0x23 → 0) in its last 30 ticks, deleted when it ends or is not drawn.
 //!
 //! **Pvars** (0x80 in the game; the port appends the slot's two global records): +0x00 header, +0x20 the big-head
-//! manipulator record (the cheat 0x15edb7: not modelled), +0x64 s16 cluck timer, +0x66 s16 state timer, +0x68 turn
+//! manipulator record (the big-head cheat 0x15edb7: `manip::big_head`, 5.0 gold / 7.7), +0x64 s16 cluck timer, +0x66 s16 state timer, +0x68 turn
 //! velocity, +0x6c fall speed, +0x70 displaced timer (−1: not displaced), +0x74 gold, +0x78 health, +0x7c hit
 //! cooldown; +0x80 the knockback record ([`KNOCK`]), +0xe0 the suck record ([`SUCK`] = `react::CHICKEN.record`).
 //!
@@ -364,7 +364,10 @@ pub fn update(w: &mut World, id: MobyId) {
         c::set_pf(w, id, HEALTH, 1.0);
     }
     if w.m(id).state == 6 { return; }
-    // 0x278720: the big-head manipulator (cheat 0x15edb7) is not modelled.
+    // 0x2df510: `0x278720(gold Morph-o-Ray 0x13e535 ? 5.0 : 7.7, m, *gp−0x5380 = 0, P+0x20)`, the big-head cheat (0x15edb7);
+    // the gold byte is the one the morph copied into +0x74 [L: the game reads 0x13e535 each tick].
+    let s = if c::pi32(w, id, GOLD) != 0 { 5.0 } else { f32::from_bits(0x40f6_6666) };
+    crate::moby_update::manip::big_head(w, s, id, 0, id, 0x20);
     let mut here = pos0;
     // The displaced chicken (module doc).
     if 0 <= c::pi32(w, id, DISPLACED) {

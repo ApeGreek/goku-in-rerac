@@ -100,6 +100,83 @@ impl ModeState {
     }
 }
 
+/// What `InLevelFrameUpdate` 0x2aba68's pause tests read (mode 0's frame, before the tick).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TriggerIn {
+    /// 0x15f5c4 (raw) and 0x15f5c8.
+    pub mode: i32,
+    pub frames_in_mode: i32,
+    /// 0x15ed84.
+    pub level: i32,
+    /// 0x13cae4 (pressed, after the lock) and 0x13cadc ≠ 0 (the pad is connected).
+    pub pressed: u32,
+    pub connected: bool,
+    /// 0x1413d4 hero state, 0x1413dc movement group, 0x1413f4 body (2 Giant Clank), 0x1403fc the hand-swap state,
+    /// 0x141401 fell out, 0x1415f8 HP.
+    pub state: i32,
+    pub group: i32,
+    pub body: u8,
+    pub swap_state: u8,
+    pub fell: bool,
+    pub hp: i32,
+    /// 0x140940's class (+0xa6): the moby the hero rides (None: none).
+    pub riding_class: Option<i16>,
+    /// 0x167280 +0x86: the current camera's script lock (0x13: the triggers wait).
+    pub camera_lock: i16,
+    /// 0x16c4e0 & 0x10 (the debug step mode) and 0x16c5c4 (its countdown).
+    pub debug_step: bool,
+    pub c5c4: i32,
+}
+
+/// What the tests start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trigger {
+    /// `mode_freezeInit(kind, 0)`: 0 the riders' "Quit?" (levels 8 / 12), 1 the vehicles', 4 Giant Clank's (level 15).
+    Freeze(i32),
+    /// `EnterMenuMode(kind)`: 0 the pause menu (Start or the pad lost), 10 the map (Select / R3).
+    Menu(i32),
+}
+
+/// The vehicles whose rider (group 9, state 0x32) gets kind 1 (0x140940 +0xa6).
+pub const VEHICLE_CLASSES: [i16; 3] = [0x45, 0x563, 0x4da];
+
+/// `InLevelFrameUpdate` 0x2aba68's Start / Select tests, in its order (the card dialog, the return page and the save
+/// notice are the caller's): `go` = Start pressed or the pad lost.
+/// * level 15, ≥ 8 frames, Giant Clank (0x1413f4 = 2), go, state ≠ 0x72 → kind 4 (nothing while the camera lock is 0x13);
+/// * group 9, state 0x32 riding a vehicle ([`VEHICLE_CLASSES`]), ≥ 8 frames, go, state ≠ 0x72, camera lock ≠ 0x13 → kind 1;
+/// * mode 0, level 8 or 12, go, state 0x32 → kind 0;
+/// * go, ≥ 8 frames, state ≠ 0x72 and either group 22 or (swap state ≠ 2, state ∉ {0x32, 0x1d}, not fallen, HP ≠ 0,
+///   mode 0) → the pause menu (kind 0);
+/// * not the debug step, ≥ 8 frames, Select / R3 (0x500), group ≠ 22, state ∉ {0x72, 0x32, 0x1d}, not fallen, HP ≠ 0,
+///   mode 0, not riding a vehicle, 0x16c5c4 = 0 → the map (kind 10).
+pub fn in_level_trigger(t: &TriggerIn) -> Option<Trigger> {
+    use crate::pad::button;
+    let go = t.pressed & button::START != 0 || !t.connected;
+    let settled = t.frames_in_mode >= 8;
+    if t.level == 0xf && settled && t.body == 2 && go && t.state != 0x72 {
+        return if t.camera_lock == 0x13 { None } else { Some(Trigger::Freeze(4)) };
+    }
+    let riding = t.group == 9 && t.state == 0x32 && t.riding_class.is_some_and(|c| VEHICLE_CLASSES.contains(&c));
+    if riding && settled && go && t.state != 0x72 && t.camera_lock != 0x13 { return Some(Trigger::Freeze(1)); }
+    if t.mode == 0 && (t.level == 8 || t.level == 0xc) && go && t.state == 0x32 { return Some(Trigger::Freeze(0)); }
+    if go && settled && t.state != 0x72 {
+        if t.group == 0x16 { return Some(Trigger::Menu(0)); }
+        let blocked = t.swap_state == 2 || t.state == 0x32 || t.state == 0x1d || t.fell || t.hp == 0 || t.mode != 0;
+        if !blocked { return Some(Trigger::Menu(0)); }
+    }
+    let map = !t.debug_step
+        && settled
+        && t.pressed & (button::SELECT | button::R3) != 0
+        && t.group != 0x16
+        && ![0x72, 0x32, 0x1d].contains(&t.state)
+        && !t.fell
+        && t.hp != 0
+        && t.mode == 0
+        && !riding
+        && t.c5c4 == 0;
+    map.then_some(Trigger::Menu(10))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,8 +23,8 @@
 //! +0x244 waypoint graph, +0x248 alternate-target group (class 623 members; −1 on Novalis), +0x24c target polygon, +0x250
 //! size, +0x254 glow phase, +0x258 fall-out ripple patch (0 on Novalis), +0x25c trigger cuboid, +0x260 gate moby.
 //! The fall-out rule (`0x2eec68`): with +0x258 ≠ 0 (a ripple patch index; Rilgar / level 11) an amoeboid below that
-//! patch's height (`water::world::WaterWorld::patch_level`) bursts into goo and is deleted without bolts. Not ported (counted):
-//! the big-head manipulator, the shadow probe.
+//! patch's height (`water::world::WaterWorld::patch_level`) bursts into goo and is deleted without bolts. The big-head cheat
+//! `0x278720(2.9, m, 0, +0x270)` is `manip::big_head`. Not ported (counted): the shadow probe.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
@@ -122,7 +122,9 @@ pub fn update(w: &mut World, id: MobyId) {
         w.mm(id).mode |= 1;
         return;
     }
-    // (0x278720: the big-head manipulator.) Drawn and within 28 units of the camera: the shadow probe 0x26f020, +0x7f = 0x16.
+    // 0x278720(2.9, m, 0, +0x270): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, f32::from_bits(0x4039_999a), id, 0, id, 0x270);
+    // Drawn and within 28 units of the camera: the shadow probe 0x26f020, +0x7f = 0x16.
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 28.0 {

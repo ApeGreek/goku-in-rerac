@@ -226,11 +226,15 @@ pub fn apply_load_pass(root: &Path, index: u32, level: &mut LoadedLevel) -> Resu
     Ok(MobySpawn { enabled: true, states, ship })
 }
 
-/// `RC_SHIP` (0, 1 or 2), else the level's first-visit ship index (`moby_spawn::first_visit_ship`).
+/// `RC_SHIP` (0, 1 or 2), else 0x13e056 of the runtime level change, else the level's first-visit ship index
+/// (`moby_spawn::first_visit_ship`).
+pub(crate) fn ship_index_for(level: u32) -> usize { ship_index(level) }
+
 fn ship_index(level: u32) -> usize {
     match std::env::var("RC_SHIP").ok().and_then(|v| v.trim().parse::<usize>().ok()) {
         Some(i) if i < moby_spawn::SHIP_CLASSES.len() => i,
-        _ => moby_spawn::first_visit_ship(level),
+        // 0x13e056 as `DoSpaceTransition` set it for this load (crate::level_load::set_ship), else the level's first-visit ship.
+        _ => crate::level_load::ship().unwrap_or_else(|| moby_spawn::first_visit_ship(level)),
     }
 }
 
@@ -299,7 +303,7 @@ pub struct MobySpawnPlugin;
 
 impl Plugin for MobySpawnPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, init).add_systems(
+        app.add_systems(crate::level_switch::LevelPostStartup, init).add_systems(
             PostUpdate,
             force_hidden.after(crate::moby_render::update_moby_occlusion).before(VisibilitySystems::VisibilityPropagate),
         );

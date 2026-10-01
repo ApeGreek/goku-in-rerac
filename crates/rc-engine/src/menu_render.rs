@@ -8,8 +8,12 @@
 //!   it requests (PAD+0x1cc = 2 for the next `ProcessPadInput`), and the pause triggers of 0x2aba68 (Start
 //!   or pad lost → kind 0, Select|R3 → kind 10, after ≥ 8 frames in mode 0). Draws: the ring.
 //! * mode 3: `UpdatePad` on the game's pad (the main loop runs it in every mode), the menu frame
-//!   (`SceneController`), its draws (`PageMenuDraw`). The close's post-action returns to mode 0 (ship
-//!   travel, movies, scenes and the slideshow are not ported: logged, then resumed).
+//!   (`SceneController`), its draws (`PageMenuDraw`). The close's post-action: resume; the ship travel (logged:
+//!   the travel lane's); a movie / scene / the slideshow after the 16-frame fade over the menu image
+//!   ([`post_fade_step`], crate::media_render), the return page reopening the menu before the tick
+//!   ([`return_page_reopen`]).
+//! * mode 7: the credits slideshow (crate::media_render::Slides). A class's `EnterMenuMode` / `EnterSlideshowMode` /
+//!   `PlayMovieB` are taken after its tick (crate::media_render::take_class_requests).
 //! * [`MenuMode::loop_frame`] counts main-loop frames: the scripted pad (`RC_PLAY_SCRIPT`) is indexed by it,
 //!   so a script keeps its timeline across a pause (the gameplay tick counter stops in mode 3).
 //!
@@ -51,8 +55,11 @@
 //! main camera's view space exactly where the menu camera sees it (same view-space depth, so fog and the
 //! projection are unchanged).
 //!
-//! **Not ported**: the sounds (listed in the log), streamed pictures / maps, the globe, the ring's draw
-//! position between HUD slots 2 and 4 (it is drawn after the whole HUD); the frame mobys are fogged with
+//! **Also here** (batch 6): the pause tests through `rc_game::menus::mode::in_level_trigger` (the freeze kinds 0 / 1 / 4
+//! and their effects, `freeze_effects`), the dialogue player's step in every menu frame (`menu_voice_frame`: the end
+//! page's Helpdesk girl, `post_credits_audio`), the language switch (`apply_language`, the front end's `all_text`).
+//!
+//! **Not ported**: the ring's draw position between HUD slots 2 and 4 (it is drawn after the whole HUD); the frame mobys are fogged with
 //! the level's fog (`fog_state` pushes it into every `MobyMaterial`), not the menu's view-context fog
 //! (0..524288, F 255..0): at the frames' depth (≈ 5 units) the two differ by at most one step of F.
 //!
@@ -110,6 +117,10 @@ use rc_game::menus::screen_static::{StaticDraw, StaticTex};
 use rc_game::menus::{MenuAssets, MenuDraw, MenuInput, MenuSound, Overlay};
 use rc_game::pad::button;
 
+/// The main-loop frame of the menus (crate::travel_render's mode-6 frame runs before it).
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MenuFrameSet;
+
 /// The system set that builds the menus' 2D primitives into `Hud2dHook` (crate::vendor_render adds to them after).
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MenuPrims;
@@ -124,6 +135,10 @@ pub struct MenuMode {
     /// `gameplay::tick` runs once although the mode does not advance the tick; `world_ticked` = it did this frame.
     pub world_tick: bool,
     pub world_ticked: bool,
+    /// 0x15eed8, the replay mode the movie and scene players' skip rules read: 0 play, 1 a replay from the page menu
+    /// (Start alone skips), 2 the menu's in-level movie replays and the title's attract movies (any button skips), −1
+    /// never skippable. The page menu's post-actions set it (keeping the old value in its 0x1ba2a0 for the reopen).
+    pub replay: i32,
 }
 
 #[derive(Resource)]
@@ -145,6 +160,19 @@ struct MenuRt {
     trace: bool,
     /// The menu layer (module docs).
     layer: MenuLayer,
+    /// The close's movie / scene / slideshow post-action and its `FadeToBlack(ticks(16))` step (crate::media_render).
+    post_fade: Option<(PostAction, u32)>,
+    /// 0x1ba2a0: the replay mode before the post-action (restored when the return page reopens the menu).
+    replay_saved: i32,
+    /// Mode 7 (crate::media_render) and its tables.
+    slides: Option<crate::media_render::Slides>,
+    slide_tables: rc_game::slideshow::Tables,
+    /// Mode 4, the card dialog / the save notice (`rc_game::menus::freeze`; crate::saves).
+    freeze: Option<rc_game::menus::freeze::Freeze>,
+    /// The dialogue line the menu frames loaded (the end page's Helpdesk girl: `post_credits_audio`).
+    voice_vag: Option<std::sync::Arc<[u8]>>,
+    /// The language whose `all_text` block is the front end's message table (`queue_dma_transfer(0x15ed88)`).
+    front_text: Option<u32>,
 }
 
 #[derive(Component)]
@@ -189,11 +217,17 @@ pub struct MenuPlugin;
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MenuMode>().init_resource::<crate::interact_render::VendorRt>();
+        // A runtime level change (crate::level_switch): the level's menus are loaded again by `setup`.
+        app.add_systems(crate::level_switch::LevelUnload, (crate::level_switch::remove::<MenuRt>, crate::level_switch::reset::<crate::interact_render::VendorRt>));
         if !crate::gameplay::enabled() { return; }
         app.init_resource::<SnapshotRequest>()
             .add_systems(First, |mut r: ResMut<SnapshotRequest>| r.0 = None)
             .add_systems(PreUpdate, setup)
-            .add_systems(FixedUpdate, menu_frame.after(crate::gameplay::GameTick))
+            .add_systems(FixedUpdate, menu_frame.after(crate::gameplay::GameTick).in_set(MenuFrameSet))
+            // memcard_Update + the card monitor after the mode's update, every frame (crate::saves).
+            .init_resource::<crate::saves::FrontEndRt>()
+            .add_systems(FixedUpdate, crate::saves::card_frame.after(menu_frame))
+            .add_systems(FixedUpdate, return_page_reopen.before(crate::gameplay::GameTick))
             .add_systems(Update, (target_main_camera, build_prims).chain().in_set(MenuPrims).before(HudBuild))
             .add_systems(PostUpdate, menu_layer.before(TransformSystems::Propagate))
             .add_systems(PostUpdate, crate::interact_render::hide_hero.after(crate::moby_render::update_moby_occlusion).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate));
@@ -214,6 +248,7 @@ impl Plugin for MenuPlugin {
 #[allow(clippy::too_many_arguments)]
 fn setup(
     mut done: Local<bool>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     mut commands: Commands,
     level: Res<crate::Level>,
     window: Option<Single<&Window, With<PrimaryWindow>>>,
@@ -221,7 +256,10 @@ fn setup(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    (mut mm, mut fer): (ResMut<MenuMode>, ResMut<crate::saves::FrontEndRt>),
 ) {
+    // Once per level (crate::level_switch: a runtime level change runs it again).
+    if generation.is_changed() { *done = false; }
     if *done { return; }
     *done = true;
     let Some(lh) = level.0.hud.as_ref() else {
@@ -266,6 +304,15 @@ fn setup(
         m.ammo_records = t.records.iter().map(|r| (u(r, 8), u(r, 0xe))).collect();
     }
     if let Some(m) = menu.as_mut() { m.lang = lh.lang; }
+    // The end page's Helpdesk girl: class 0x7a5 (when the level has it: `SpawnHandGadgetMoby`) with her streamed
+    // sequences (rc_game::menus::pause::media, crate::menu_models::girl_anim_class).
+    if let Some(m) = menu.as_mut() {
+        let mobys = &level.0.mobys;
+        let girl = rc_game::menus::pause::media::GIRL_CLASS as i32;
+        if let Some(ci) = mobys.classes.iter().position(|c| c.o_class == girl) {
+            m.media.girl_class = crate::menu_models::girl_anim_class(&mobys.anim[ci]).map(|a| rc_game::menus::pause::media::GirlClass(std::sync::Arc::new(a)));
+        }
+    }
     // The frame mobys: class 0x472 from the level core.
     let frame_class = match load_frame_class(&level.0, &overlay) {
         Ok(f) => Some(f),
@@ -332,6 +379,7 @@ fn setup(
             .map(|l| lh.hud.frame_image(lh.hud.icon_frame(rc_game::menus::pause::map_page::GRID_ICON, l)).ok().map(|im| im.clut.to_vec()))
             .collect();
     }
+    let slide_tables = rc_game::slideshow::Tables::read(&overlay);
     let mut assets = MenuAssets::new(HudAssets::new(&lh.hud, lh.glyphs, lh.messages.clone()), overlay);
     // The global `all_text` in the game's language (the Help Log page's message table, `MenuTextLoad`).
     assets.all_text = load_all_text(&root, lh.lang);
@@ -348,7 +396,27 @@ fn setup(
         snapshot: snapshot.clone(),
         trace: std::env::var("RC_MENU_TRACE").is_ok_and(|v| v.trim() == "1"),
         layer,
+        post_fade: None,
+        replay_saved: 0,
+        slides: None,
+        slide_tables,
+        freeze: None,
+        voice_vag: None,
+        front_text: None,
     });
+    // The memory card (crate::saves) and, with RC_FRONTEND=1, the boot flow (the first rand() of the boot: newlib's
+    // initial state [L]).
+    // Once per process: the boot's (crate::level_switch runs this set-up again for every level; a Quit Game's level change
+    // to the front end sets the flag itself, crate::travel_render).
+    if generation.0 == 0 {
+        if crate::saves::front_end_requested() { crate::saves::set_front_end_active(true); }
+        crate::saves::setup_card();
+    }
+    if crate::saves::front_end_active() {
+        fer.fe = Some(crate::saves::front_end(lh.lang, rc_game::rng::Rng::new().rand()));
+        mm.state.set(Mode::Menu);
+        println!("menus: front end (RC_FRONTEND=1): the boot flow runs over the loaded level, the world hidden");
+    }
     // The snapshot is the menu layer's background: a UI node of its 2D camera.
     commands.spawn((
         Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
@@ -472,10 +540,20 @@ fn menu_frame(
     (mut vr, mut feed, mut view, mut audio): InteractParams,
     mut shadows: Option<ResMut<crate::shadow_render::ShadowSettings>>,
     mut widgets3d: ResMut<crate::menu_models::GadgetsPreview>,
+    (mut fer, movies): (ResMut<crate::saves::FrontEndRt>, Option<Res<crate::movie_render::MovieState>>),
 ) {
     let (Some(mut rt), Some(mut play), Some(mut gs), Some(mut sess)) = (rt, play, gs, sess) else { return };
     let rt = &mut *rt;
     let (gs, sess) = (&mut gs.0, &mut sess.0);
+    // The front end (crate::saves, RC_FRONTEND=1): the boot flow instead of the level's modes.
+    if fer.fe.is_some() {
+        let busy = movies.as_deref().is_some_and(|m| m.busy());
+        let fer = &mut *fer;
+        front_end_frame(rt, &mut mm, &mut play, gs, fer, &pad, &source, busy, audio.as_deref_mut());
+        mm.state.end_frame();
+        mm.loop_frame += 1;
+        return;
+    }
     let mode = mm.state.mode;
     let counter = play.game.counter;
     if mode == Mode::Gameplay && rt.last_counter == Some(counter) { return; }
@@ -513,38 +591,52 @@ fn menu_frame(
                 let (level, t) = (gs.global.level, gs.global.play_time);
                 rc_game::help::bump(&mut gs.global.move_help[9], level, t);
             }
-            // 0x2aba68: Start / pad lost → pause menu, Select|R3 → map (≥ 8 frames in mode 0, hero state and HP).
-            let hs = play.game.hero.state;
-            let allowed = mm.state.frames_in_mode >= 8 && ![0x72, 0x32, 0x1d].contains(&hs) && sess.hp != 0;
-            // Select / R3 also need movement group ≠ 22 (0x2abdec).
-            let map_allowed = allowed && play.game.hero.group != 22;
-            if let (true, Some(menu)) = (allowed, rt.menu.as_mut()) {
-                let kind = if inp.pressed & button::START != 0 || !inp.connected {
-                    Some(0)
-                } else if map_allowed && inp.pressed & (button::SELECT | button::R3) != 0 {
-                    Some(10)
-                } else {
-                    None
-                };
-                if let Some(k) = kind {
-                    menu.enter(k, gs);
-                    // The map system joins the page menu while it is open (rc_game::menus::pause::map_page).
-                    menu.map.state = std::mem::take(&mut play.svc.map);
-                    menu.map.loader = rc_game::menus::pause::map_page::Loader(Some(std::sync::Arc::new(crate::gameplay::map_file)));
-                    let h = &play.game.hero;
-                    menu.map.hero = rc_game::menus::pause::map_page::HeroMark { pos: [h.pos[0].to_f32(), h.pos[1].to_f32(), h.pos[2].to_f32()], yaw: h.rot[2].to_f32(), group: h.group };
-                    menu.map.mirror = gs.global.cheats_active[4] != 0;
-                    // The hook table 0x179638 (the map markers' mobys on this level): slot → position and angle.
-                    menu.map.hooks = play.svc.interact.talk_slots.iter().filter_map(|(&id, &k)| {
-                        let m = play.game.mobys.mobys.get(id)?;
-                        Some((k, (m.position[0], m.position[1], m.rotation[2])))
-                    }).collect();
-                    // EnterMenuMode 0x28bf50: snd_PauseAllSoundsInGroup(0x1d), music_Pause(0).
-                    if let Some(a) = audio.as_deref_mut() { a.system().menu_open(); }
-                    mm.state.set(Mode::Menu);
-                    rt.snapshot_request = true;
-                    rt.snapshot_ready = false;
-                    println!("menus: frame {frame}: enter mode 3, kind {k} (game tick frozen at {counter})");
+            // 0x2aba68: the pause tests (rc_game::menus::mode::in_level_trigger): Giant Clank's / the vehicles' / the
+            // riders' "Quit?" dialogs (mode_freezeInit 4 / 1 / 0), Start / pad lost → the pause menu, Select | R3 → the map.
+            let h = &play.game.hero;
+            let t = rc_game::menus::mode::TriggerIn {
+                mode: mm.state.mode.raw(),
+                frames_in_mode: mm.state.frames_in_mode,
+                level: gs.global.level,
+                pressed: inp.pressed,
+                connected: inp.connected,
+                state: h.state,
+                group: h.group,
+                body: h.mode,
+                // 0x1403fc (the hand swap), the ridden moby 0x140940 and the camera's script lock +0x86: not kept by the
+                // port's hero / camera (no vehicle class is ported: G-UI-019).
+                swap_state: 0,
+                fell: h.fell_out != 0,
+                hp: sess.hp,
+                riding_class: None,
+                camera_lock: 0,
+                debug_step: false,
+                c5c4: 0,
+            };
+            match rc_game::menus::mode::in_level_trigger(&t) {
+                Some(rc_game::menus::mode::Trigger::Menu(k)) if rt.menu.is_some() => open_menu(rt, &mut mm, &mut play, gs, audio.as_deref_mut(), k, frame),
+                Some(rc_game::menus::mode::Trigger::Freeze(k)) => open_freeze(rt, &mut mm, &mut play, audio.as_deref_mut(), k, 0, frame),
+                _ => {}
+            }
+            // The classes' front-end requests of this tick (crate::media_render): the credits (mode 7), the ending movie,
+            // `EnterMenuMode(kind)`.
+            if mm.state.mode == Mode::Gameplay {
+                crate::media_render::take_class_requests(&mut play);
+                while let Some(r) = crate::media_render::take() {
+                    match r {
+                        crate::media_render::MediaRequest::Menu { kind } => {
+                            if mm.state.mode == Mode::Gameplay { open_menu(rt, &mut mm, &mut play, gs, audio.as_deref_mut(), kind, frame); }
+                        }
+                        crate::media_render::MediaRequest::Slideshow { black_entry } => start_slideshow(rt, &mut mm, &mut play, black_entry, frame),
+                    }
+                }
+            }
+            // L00 0x297f78: the save notice, once auto-save is on (crate::saves).
+            if mm.state.mode == Mode::Gameplay {
+                let gate = rc_game::menus::freeze::NoticeGate { frames_in_mode: mm.state.frames_in_mode, dying: play.game.hero.fell_out != 0, hp: sess.hp, tick: play.game.counter };
+                if crate::saves::with_card(|c| rc_game::menus::freeze::save_notice_due(c, gs, &gate)).unwrap_or(false) {
+                    gs.global.flags[0x10] = 1;
+                    open_freeze(rt, &mut mm, &mut play, audio.as_deref_mut(), rc_game::menus::freeze::KIND_SAVE_NOTICE, 0, frame);
                 }
             }
         }
@@ -558,10 +650,19 @@ fn menu_frame(
             play.game.pad.update(Some(&input.bytes()), mirror);
             let inp = MenuInput::from_pad(&play.game.pad, true);
             let env = MenuEnv { vsync, b13f4: 0, pal: false };
-            if let Some(menu) = rt.menu.as_mut() {
+            let mut start_fade = None;
+            let mut freeze_req: Option<u32> = None;
+            if rt.post_fade.is_some() {
+                // The close's post-action 3 / 4 / 5 / 6 / 7: `FadeToBlack(ticks(16))` over the menu image, then the action.
+                post_fade_step(rt, &mut mm, &mut play, gs, sess.hp, audio.as_deref_mut(), frame, true);
+            } else if let Some(menu) = rt.menu.as_mut() {
                 menu.set_port_choices(Setting::Msaa, supported.as_deref().map_or_else(|| aa_choices(&SupportedMsaa::default()), aa_choices));
                 if let Some(r) = render.as_deref() { menu.set_port_value(Setting::Msaa, aa_index(r.msaa)); }
                 if let Some(s) = shadows.as_deref() { menu.set_port_value(Setting::Shadows, !s.enabled as u8); }
+                // The card and the save inputs moved into the menu for its tick (crate::saves).
+                saves_in(menu, &play);
+                // 0x15172a as the widgets read it (the Helpdesk girl).
+                menu.media.voice_state = play.svc.help.voice.state;
                 let out = menu.tick(&inp, gs, &env);
                 if let (Some(v), Some(s)) = (menu.port_value(Setting::Shadows), shadows.as_mut()) {
                     if s.enabled != (v == 0) {
@@ -582,13 +683,44 @@ fn menu_frame(
                 // The class-0x472 sounds (`PlayClassSound(n, 0x11, frame moby)`), the close's audio, then the frame's sound_update.
                 if let Some(a) = audio.as_deref_mut() {
                     play_menu_sounds(&mut play, a, &out.sounds);
-                    if let Some(x) = out.exit { a.system().menu_close(!matches!(x, PostAction::ShipTravel(_))); }
+                    // The movie / scene / slideshow post-actions unpause after their fade and action (post_fade_step).
+                    if let Some(x) = out.exit.filter(|x| !is_media_action(x)) { a.system().menu_close(!matches!(x, PostAction::ShipTravel(_))); }
                     menu_sound_frame(&mut play, a);
                 }
+                // The dialogue player's part of `sound_update` (music_Update 0x27a688): the widgets' requests, starts and
+                // stops (the Helpdesk girl's lines), then its step.
+                let mut voice_vag = rt.voice_vag.take();
+                menu_voice_frame(&mut play, audio.as_deref_mut(), &mut voice_vag, out.voice, out.voice_continue, out.voice_stop, frame);
+                rt.voice_vag = voice_vag;
                 if let Some((a, b)) = out.transition { println!("menus: frame {frame}: transition {a:#x} → {b:#x} (kind 1, 12 ticks)"); }
                 if let Some(p) = out.entered { println!("menus: frame {frame}: page {p:#x} entered (kind {:#x})", menu.kind); }
-                if out.quit { println!("menus: frame {frame}: Quit Game ○ (0x15f570 = 1: leaving the level is not ported)"); }
-                if let Some(p) = out.freeze { println!("menus: frame {frame}: mode_freezeInit(3, {p:#x}) (save / load dialog not ported)"); }
+                if out.quit { println!("menus: frame {frame}: Quit Game ○ (0x13d384 = 0, 0x15f5c0 = −1, 0x15f570 = 1)"); }
+                // 0x15f5c0 = dest, 0x15f570 = 1: the level loop ends (crate::media_render, the travel lane's level change).
+                if let Some(d) = out.level_exit { crate::media_render::request_level_exit(&mut play, d); }
+                if let Some(c) = out.end_choice { crate::media_render::request_end_choice(c); }
+                // MenuInput 0x298f80: a recognised code (the game state already written): the banner and the jingle.
+                if let Some((e, o)) = out.code {
+                    println!("menus: frame {frame}: code entry: {e:?}");
+                    if let Some((msg, ticks)) = o.banner { rc_game::cinematic::banner_call(&mut play.svc.cinematic, msg, ticks); }
+                    if o.jingle {
+                        if let Some(a) = audio.as_deref_mut() {
+                            let g = &mut play.game;
+                            let listener = rc_game::audio::class_sounds::listener_of(&g.camera.out);
+                            a.system().play_level_sound_at_moby(rc_game::audio::class_sounds::level_sound::SKILL_POINT, 0, None, None, &listener, &mut g.rng, g.counter);
+                        }
+                    }
+                }
+                // mode_freezeInit(3, page): the card dialog (crate::saves), opened after the menu's borrow.
+                if let Some(p) = out.freeze { freeze_req = Some(p); }
+                // 0x13e05a with a level exit (New Game 1, a load 0): the ship block's reset trip (rc_game::travel).
+                if let Some(st) = out.story { play.svc.travel.reset_trip = st; }
+                if let Some(l) = out.language {
+                    // (Only the front end's Options carry the Language list; the level's own text keeps its language
+                    // until the next level load, as on the PS2, where the level text is loaded once per level.)
+                    apply_language(&mut play, l);
+                    rt.assets.all_text = load_all_text(&crate::level_load::extracted_root(), l);
+                    println!("menus: frame {frame}: language 0x15ed88 = {l}");
+                }
                 // PageMenuClose 0x28c6c8 (its equip requests are always set): health and bolts kept up ScaleTicks(180).
                 if out.equip.is_some() { feed.calls.push(rc_game::hud::Call::ShowHealthBolts(rc_game::hud::scale_ticks(180))); }
                 // PageMenuClose: the Gadgets / Weapons pages' changed slots are requested (rc_game::inventory).
@@ -599,15 +731,75 @@ fn menu_frame(
                 if let Some(x) = out.exit {
                     // The map system back to the level (its view, zooms and a Map-o-Matic switch kept).
                     play.svc.map = std::mem::take(&mut menu.map.state);
-                    if x != PostAction::Resume { println!("menus: frame {frame}: post-action {x:?} not ported; resuming"); }
-                    mm.state.set(Mode::Gameplay);
-                    println!("menus: frame {frame}: menu closed, mode 0 (stub calls {:?})", menu.stub_calls);
+                    // A class's EnterMenuMode set the moby loop's mode word 3 (rc_game::cinematic::enter_menu_mode).
+                    if play.svc.game_mode == 3 { play.svc.game_mode = 0; }
+                    if is_media_action(&x) {
+                        println!("menus: frame {frame}: menu closed, post-action {x:?}: FadeToBlack(16) over the menu image first");
+                        start_fade = Some(x);
+                    } else {
+                        if let PostAction::ShipTravel(d) = x {
+                            println!("menus: frame {frame}: post-action ShipTravelTo({d})");
+                            crate::travel_render::request_ship_travel(d);
+                        }
+                        mm.state.set(Mode::Gameplay);
+                        println!("menus: frame {frame}: menu closed, mode 0 (stub calls {:?})", menu.stub_calls);
+                    }
                 } else {
                     menu.draw(&rt.assets, gs, &env, &mut play.game.rng, &mut rt.draws);
                 }
                 // The page's 3D widgets (crate::menu_models).
                 widgets3d.view = menu.view;
+                widgets3d.girl = menu.media.girl_view.clone();
                 widgets3d.frame += 1;
+                // The card back to crate::saves after the menu's tick and draw (the slot pages draw from it).
+                saves_out(menu);
+            }
+            if let Some(x) = start_fade {
+                rt.post_fade = Some((x, 0));
+                // The close frame already ran its sound_update.
+                post_fade_step(rt, &mut mm, &mut play, gs, sess.hp, audio.as_deref_mut(), frame, false);
+            }
+            // The end page's choice (crate::media_render): the time warp and challenge mode's state (crate::saves).
+            if let Some(c) = crate::media_render::take_end_choice() { end_choice(rt, &mut play, gs, c); }
+            if let Some(p) = freeze_req.filter(|_| mm.state.mode == Mode::Menu) {
+                open_freeze(rt, &mut mm, &mut play, audio.as_deref_mut(), rc_game::menus::freeze::KIND_CARD, p, frame);
+            }
+        }
+        Mode::Freeze => {
+            // UpdateModeFreeze (the card dialog / the save notice; crate::saves).
+            let input = match &rt.script {
+                Some(s) => s.at(frame),
+                None if *source == crate::game_camera::CameraSource::Play => pad.0,
+                None => rc_game::pad::PadInput::neutral(),
+            };
+            let mirror = gs.options().mirror;
+            play.game.pad.update(Some(&input.bytes()), mirror);
+            freeze_frame(rt, &mut mm, &mut play, gs, audio.as_deref_mut(), vsync, frame);
+        }
+        Mode::Slideshow => {
+            // UpdatePad (every mode but the movie's), then SlideshowModeUpdate / Render (crate::media_render).
+            let input = match &rt.script {
+                Some(s) => s.at(frame),
+                None if *source == crate::game_camera::CameraSource::Play => pad.0,
+                None => rc_game::pad::PadInput::neutral(),
+            };
+            let mirror = gs.options().mirror;
+            play.game.pad.update(Some(&input.bytes()), mirror);
+            let start = play.game.pad.pressed & button::START != 0;
+            let done = match rt.slides.as_mut() {
+                Some(sl) => {
+                    sl.frame(&rt.slide_tables, start, &rt.assets, &mut rt.draws);
+                    sl.done()
+                }
+                None => true,
+            };
+            // `sound_update` (SlideshowModeUpdate's tail) and the frame's samples.
+            if let Some(a) = audio.as_deref_mut() { menu_sound_frame(&mut play, a); }
+            if done {
+                let n = rt.slides.take().map_or(0, |s| s.frames);
+                mm.state.set(Mode::Gameplay);
+                if play.svc.game_mode == 7 { play.svc.game_mode = 0; }
+                println!("menus: frame {frame}: slideshow over after {n} frames: mode 0");
             }
         }
         Mode::Vendor => {
@@ -630,8 +822,133 @@ fn menu_frame(
         crate::interact_render::feed_idle(&mut feed);
         crate::interact_render::after_tick(&mut vr, &mut play, gs, &mut mm.state, frame, Some(&mut feed), audio.as_deref_mut(), Some(&rt.assets));
     }
+    // The card monitor's failed auto-save (status 22: `mode_freezeInit(3, 0)`; crate::saves).
+    if mm.state.mode != Mode::Freeze && crate::saves::with_card(|c| c.take_freeze_request()).unwrap_or(false) {
+        open_freeze(rt, &mut mm, &mut play, audio.as_deref_mut(), rc_game::menus::freeze::KIND_CARD, 0, frame);
+    }
     mm.state.end_frame();
     mm.loop_frame += 1;
+}
+
+/// `EnterMenuMode(kind)` 0x28bf50 (the pause triggers, a class's request, the return page): the page menu's entry, the
+/// map system joined, `snd_PauseAllSoundsInGroup(0x1d)` and `music_Pause(0)`, mode 3, the snapshot of this frame.
+fn open_menu(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, gs: &rc_game::game_state::GameState, audio: Option<&mut crate::audio_out::AudioOut>, k: i32, frame: u64) {
+    let counter = play.game.counter;
+    let Some(menu) = rt.menu.as_mut() else { return };
+    menu.enter(k, gs);
+    // The map system joins the page menu while it is open (rc_game::menus::pause::map_page).
+    menu.map.state = std::mem::take(&mut play.svc.map);
+    menu.map.loader = rc_game::menus::pause::map_page::Loader(Some(std::sync::Arc::new(crate::gameplay::map_file)));
+    let h = &play.game.hero;
+    menu.map.hero = rc_game::menus::pause::map_page::HeroMark { pos: [h.pos[0].to_f32(), h.pos[1].to_f32(), h.pos[2].to_f32()], yaw: h.rot[2].to_f32(), group: h.group };
+    menu.map.mirror = gs.global.cheats_active[rc_game::cheats::slot::MIRROR] != 0;
+    // The hook table 0x179638 (the map markers' mobys on this level): slot → position and angle.
+    menu.map.hooks = play.svc.interact.talk_slots.iter().filter_map(|(&id, &k)| {
+        let m = play.game.mobys.mobys.get(id)?;
+        Some((k, (m.position[0], m.position[1], m.rotation[2])))
+    }).collect();
+    // EnterMenuMode 0x28bf50: snd_PauseAllSoundsInGroup(0x1d), music_Pause(0).
+    if let Some(a) = audio { a.system().menu_open(); }
+    mm.state.set(Mode::Menu);
+    rt.snapshot_request = true;
+    rt.snapshot_ready = false;
+    println!("menus: frame {frame}: enter mode 3, kind {k} (game tick frozen at {counter})");
+}
+
+/// `InLevelFrameUpdate` 0x2aba68's first test: a return page (0x1ba260, set by a movie / scene / slideshow post-action)
+/// in mode 0 → `EnterMenuMode(0)` before the tick (no tick that frame); the first tick reopens that page and restores the
+/// replay mode 0x15eed8 from 0x1ba2a0.
+#[allow(clippy::too_many_arguments)]
+fn return_page_reopen(
+    rt: Option<ResMut<MenuRt>>,
+    mut mm: ResMut<MenuMode>,
+    play: Option<ResMut<Play>>,
+    gs: Option<Res<Persistent>>,
+    mut audio: Option<ResMut<crate::audio_out::AudioOut>>,
+    movies: Option<Res<crate::movie_render::MovieState>>,
+) {
+    let (Some(mut rt), Some(mut play), Some(gs)) = (rt, play, gs) else { return };
+    if mm.state.mode != Mode::Gameplay || rt.post_fade.is_some() || movies.is_some_and(|m| m.busy()) { return; }
+    if !rt.menu.as_ref().is_some_and(|m| m.return_page != 0) { return; }
+    // A scene the post-action asked for is still to start (crate::scene_render takes it this frame).
+    if play.svc.cinematic.requests.iter().any(|r| matches!(r, rc_game::cinematic::EngineRequest::StartScene { .. })) { return; }
+    mm.replay = rt.replay_saved;
+    let frame = mm.loop_frame;
+    open_menu(&mut rt, &mut mm, &mut play, &gs.0, audio.as_deref_mut(), 0, frame);
+}
+
+/// The post-actions that fade and leave for a movie, a scene or the slideshow (0x28c990: 3, 4, 5, 6, 7).
+fn is_media_action(x: &PostAction) -> bool { matches!(x, PostAction::Movie { .. } | PostAction::Scene(_) | PostAction::Slideshow) }
+
+/// Mode 7 from a request (`EnterSlideshowMode` 0x2ad558): the mode word 7, the runtime (crate::media_render).
+fn start_slideshow(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, black_entry: bool, frame: u64) {
+    rt.slides = Some(crate::media_render::Slides::start(black_entry));
+    mm.state.set(Mode::Slideshow);
+    play.svc.game_mode = 7;
+    println!("menus: frame {frame}: EnterSlideshowMode: mode 7 (FadeToBlack(8){})", if black_entry { " over black" } else { "" });
+}
+
+/// One step of the close's `FadeToBlack(ticks(16))` over the menu image (0x28c990); after the last step, the action:
+/// the mode word 0 (0x15f5c4 = 0), the replay mode (3: 2; 4 / 5 / 6: 1; the old value into 0x1ba2a0), the movie
+/// (`DialogStreamUpdate` / `PlayMovieB` / `PlayMovieC`), the scene (`DialogStreamStart`) or the slideshow, then
+/// `snd_ContinueAllSoundsInGroup(0x1d)` and `music_Unpause`.
+#[allow(clippy::too_many_arguments)]
+fn post_fade_step(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, _gs: &mut rc_game::game_state::GameState, hp: i32, audio: Option<&mut crate::audio_out::AudioOut>, frame: u64, sound: bool) {
+    let Some((x, k)) = rt.post_fade else { return };
+    crate::media_render::menu_fade_draws(k, &mut rt.draws);
+    let mut audio = audio;
+    if k + 1 < rc_game::movie_player::MENU_FADE {
+        rt.post_fade = Some((x, k + 1));
+        if let Some(a) = audio.as_deref_mut().filter(|_| sound) { menu_sound_frame(play, a); }
+        return;
+    }
+    rt.post_fade = None;
+    play.svc.game_mode = 0;
+    rt.replay_saved = mm.replay;
+    use crate::movie_render::{request, MovieRequest};
+    match x {
+        PostAction::Movie { kind: 3, arg } => {
+            mm.replay = 2;
+            // DialogStreamUpdate: with no health the death fade instead (the menu does not open at 0 health).
+            if hp != 0 { request(MovieRequest::in_level(arg as i32, None).after_menu_fade()); }
+        }
+        PostAction::Movie { kind: 4, arg } => {
+            mm.replay = 1;
+            request(MovieRequest::movie_b(arg as i32).after_menu_fade());
+        }
+        PostAction::Movie { arg, .. } => {
+            mm.replay = 1;
+            request(MovieRequest::movie_c(arg as i32).after_menu_fade());
+        }
+        PostAction::Scene(arg) => {
+            mm.replay = 1;
+            // DialogStreamStart: the help box closed, 0x15f3fc = 1 (the scene ramps its own copy).
+            play.svc.help.kill();
+            play.svc.cinematic.fade = 0.0;
+            play.svc.cinematic.requests.push(rc_game::cinematic::EngineRequest::StartScene { scene: arg as usize, arrival: false });
+        }
+        _ => {}
+    }
+    let movie = matches!(x, PostAction::Movie { .. });
+    if let Some(a) = audio {
+        // StartPssMovie's sound_StopAllSounds / music_Stop come before the close's unpause.
+        if movie { a.system().movie_stop(); }
+        a.system().menu_close(true);
+        if sound { menu_sound_frame(play, a); }
+    }
+    if x == PostAction::Slideshow {
+        start_slideshow(rt, mm, play, true, frame);
+    } else {
+        mm.state.set(Mode::Gameplay);
+    }
+    println!("menus: frame {frame}: post-action {x:?} after FadeToBlack(16) (replay mode 0x15eed8 = {})", mm.replay);
+}
+
+/// 0x15ed88 = `lang`: the runtime language every later load reads (crate::hud_render::language), the page menu's
+/// language (the Controls / Items / Epilogue pictures), the help voice bank (`help_audio[lang·150 + n]`).
+fn apply_language(play: &mut Play, lang: u32) {
+    crate::hud_render::set_language(lang);
+    play.svc.help.text.lang = lang;
 }
 
 /// The global `all_text` lump's block of language `lang` (`+4·lang` offsets; docs/plan/hud_text.md §5), empty when absent.
@@ -657,6 +974,59 @@ fn menu_sound_frame(play: &mut Play, audio: &mut crate::audio_out::AudioOut) {
     audio.push_frame();
 }
 
+/// The stream a dialogue id plays (`play_dialogue` 0x215970): ≥ 60000 `post_credits_audio[id − 60000]`
+/// (`fun_00215440`), 30000.. `help_audio[language·150 + id − 30000]` (`fun_002156d8`); the other ranges (scenes, the
+/// vendor, space, the Qwark boss) have their own players.
+fn dialogue_stream(id: i32, lang: u32) -> Option<String> {
+    match id {
+        60000.. => Some(format!("global/post_credits_audio/{:03}.bin", id - 60000)),
+        30000..=39999 => Some(format!("global/help_audio/{:03}.bin", lang as i32 * rc_game::help::VOICE_PER_LANGUAGE + id - rc_game::help::VOICE_BASE)),
+        _ => None,
+    }
+}
+
+/// One menu frame of the dialogue player 0x151720 (`rc_game::help::Voice`): a widget's request (0x1516ec), its
+/// `continue_audio_stream_if_ready` (the line starts at full volume: `fun_00215440` ignores the HelpDesk voice option)
+/// and its stop (0x15172a ∉ {6, 7} → 5), then `Help::voice_frame` (music_Update's dialogue part runs in every
+/// `sound_update`, the page menu's included) with its load / play / stop carried out.
+#[allow(clippy::too_many_arguments)]
+fn menu_voice_frame(play: &mut Play, mut audio: Option<&mut crate::audio_out::AudioOut>, vag: &mut Option<std::sync::Arc<[u8]>>, request: Option<i32>, cont: bool, stop: bool, frame: u64) {
+    use rc_game::help::VoiceCmd;
+    let help = &mut play.svc.help;
+    if let Some(id) = request { help.voice.request = id; }
+    let mut cmds = Vec::new();
+    if cont && help.voice.busy && help.voice.state == 3 {
+        help.voice.state = 4;
+        cmds.push(VoiceCmd::Play { audible: true });
+    }
+    if stop && help.voice.state.wrapping_sub(6) > 1 { help.voice.state = 5; }
+    help.voice_frame();
+    let lang = help.text.lang;
+    cmds.extend(std::mem::take(&mut help.out.voice));
+    for cmd in cmds {
+        match cmd {
+            VoiceCmd::Load { id } => {
+                let root = crate::level_load::extracted_root();
+                let b = dialogue_stream(id, lang).and_then(|f| crate::disc_source::read(&root, &f).ok());
+                let len = b.as_deref().and_then(rc_game::help::vag_ticks);
+                println!("menus: frame {frame}: dialogue line {id}: {}", len.map_or("missing".to_string(), |t| format!("{t} ticks")));
+                *vag = b.filter(|_| len.is_some()).map(std::sync::Arc::from);
+                play.svc.help.voice_loaded(len);
+            }
+            VoiceCmd::Play { audible } => {
+                if let (Some(v), Some(a), true) = (vag.clone(), audio.as_deref_mut(), audible) {
+                    a.system().scene_command(rc_game::audio::scene::SceneAudioCmd::Speech { vag: v });
+                }
+            }
+            VoiceCmd::Stop => {
+                if vag.take().is_some() {
+                    if let Some(a) = audio.as_deref_mut() { a.system().scene_command(rc_game::audio::scene::SceneAudioCmd::StopSpeech); }
+                }
+            }
+        }
+    }
+}
+
 /// The frame's page-menu sounds (`rc_game::menus::MenuSound::event`: class 0x472's sound n, flags 0x11).
 pub fn play_menu_sounds(play: &mut Play, audio: &mut crate::audio_out::AudioOut, sounds: &[MenuSound]) {
     if sounds.is_empty() { return; }
@@ -665,6 +1035,289 @@ pub fn play_menu_sounds(play: &mut Play, audio: &mut crate::audio_out::AudioOut,
         audio.system().play_class_sound(&s.event(play.game.counter), None, &listener, &mut play.game.rng);
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The memory-card pages, the card dialog (mode 4) and the front end (crate::saves).
+
+/// The card dialog was opened from the page menu (its render draws the menu under it).
+fn menu_under_freeze(rt: &MenuRt) -> bool { rt.render_mode == Mode::Freeze && rt.freeze.is_some_and(|f| f.prev == 3) }
+
+/// Before a page-menu tick: the card and the save inputs moved into the menu (the clock, the landmark ranges, the new
+/// game's template, the ending buffer).
+fn saves_in(menu: &mut PageMenu, play: &Play) {
+    if let Some(c) = crate::saves::take_card() { menu.saves.card = c; }
+    menu.saves.clock = crate::saves::clock_now();
+    menu.saves.landmark_base = play.svc.interact.tables.base.clone();
+    if menu.saves.template.is_none() { menu.saves.template = menu.saves.card.lump.as_ref().map(|l| l.template.clone()); }
+    menu.saves.ending = crate::saves::take_ending();
+}
+
+/// After the tick: the card back to crate::saves.
+fn saves_out(menu: &mut PageMenu) { crate::saves::put_card(std::mem::replace(&mut menu.saves.card, rc_game::memcard::MemCard::absent())); }
+
+/// `mode_freezeInit(kind, arg)` from the current mode.
+fn open_freeze(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, audio: Option<&mut crate::audio_out::AudioOut>, kind: i32, arg: u32, frame: u64) {
+    let (f, o) = rc_game::menus::freeze::Freeze::init(kind, arg, mm.state.mode.raw());
+    if o.pause_sounds {
+        if let Some(a) = audio { a.system().menu_open(); }
+    }
+    if let Some(m) = o.log { play.svc.help.log_append(m); }
+    println!("menus: frame {frame}: mode_freezeInit({kind}, {arg:#x}) from mode {}", f.prev);
+    rt.freeze = Some(f);
+    mm.state.set(Mode::Freeze);
+}
+
+/// The new game without a card (`load_and_initialize_level_chunk`, `FUN_002a29a0(0)`, 0x13e05a = 1).
+fn new_game_no_card(play: &mut Play, gs: &mut rc_game::game_state::GameState) {
+    let t = crate::saves::with_card(|c| c.lump.as_ref().map(|l| l.template.clone())).flatten();
+    rc_game::menus::pause::saves::reset_game(gs, t.as_deref());
+    play.svc.travel.reset_trip = true;
+    crate::media_render::request_level_exit(play, 0);
+}
+
+/// One frame of mode 4 (`UpdateModeFreeze` + its render: the page menu under a kind-3 dialog opened from it, the black
+/// 0x40, `DrawDialogText`).
+fn freeze_frame(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, gs: &mut rc_game::game_state::GameState, audio: Option<&mut crate::audio_out::AudioOut>, vsync: u32, frame: u64) {
+    let Some(mut f) = rt.freeze.take() else {
+        mm.state.set(Mode::Gameplay);
+        return;
+    };
+    let (pressed, level) = (play.game.pad.pressed, gs.global.level);
+    // Kind 0's inputs (rc_game::menus::freeze::FreezeCtx): the level and the hero's state ticks 0x13f4ec; the race's own
+    // values (stage, place, time, score, sound, records) come from the race classes (not ported: G-UI-019).
+    f.ctx.level = level;
+    f.ctx.hero_state_ticks = play.game.hero.f4ec;
+    // The kinds without the card (0, 1, 2, 4, 6) run without one set up too.
+    let out = crate::saves::with_card(|c| f.update(pressed, c, level)).unwrap_or_else(|| f.update(pressed, &mut rc_game::memcard::MemCard::absent(), level));
+    if let Some(t) = out.target {
+        if let Some(m) = rt.menu.as_mut() { m.target = t; }
+    }
+    freeze_effects(play, &out, frame);
+    if out.new_game { new_game_no_card(play, gs); }
+    if out.save { crate::saves::memcard_save(play, gs, false, -1); }
+    if out.resume_sounds {
+        if let Some(a) = audio { a.system().menu_close(true); }
+    }
+    if f.prev == 3 {
+        if let Some(m) = rt.menu.as_mut() {
+            saves_in(m, play);
+            m.draw(&rt.assets, gs, &MenuEnv { vsync, b13f4: 0, pal: false }, &mut play.game.rng, &mut rt.draws);
+            saves_out(m);
+        }
+    }
+    rt.draws.push(MenuDraw::Darken { alpha: rc_game::menus::pause::DARKEN_FREEZE });
+    if crate::saves::with_card(|c| f.draw(&rt.assets, c, vsync, &mut rt.draws)).is_none() {
+        f.draw(&rt.assets, &rc_game::memcard::MemCard::absent(), vsync, &mut rt.draws);
+    }
+    match out.mode {
+        Some(m) => {
+            mm.state.set(Mode::from_raw(m).unwrap_or(Mode::Gameplay));
+            println!("menus: frame {frame}: the dialog closed: mode {m}");
+        }
+        None => rt.freeze = Some(f),
+    }
+}
+
+/// The kinds 0 / 1 / 2 / 4 / 6 effects of an `UpdateModeFreeze` frame (rc_game::menus::freeze::FreezeOut).
+fn freeze_effects(play: &mut Play, out: &rc_game::menus::freeze::FreezeOut, frame: u64) {
+    use rc_game::moby_update::services::{HeroCall, HeroFields, HeroPose};
+    // 0x15f608 = 2: the occlusion shows everything this frame (the fallback crate::visibomb_view::all_visible reads).
+    if out.all_visible { play.svc.visibomb.all_visible_at = Some(play.game.counter.wrapping_sub(1)); }
+    let teleport_entry = |play: &mut Play, f: &mut HeroFields| {
+        // HeroTeleport(0x141050, 0x141060, 0, 1): the pose saved where he got in (crate::hero::bodies::Bodies::entry_pose).
+        if let Some((pos, euler)) = play.game.hero.bodies.entry_pose {
+            f.clear_motion();
+            f.pose = Some(HeroPose { pos, yaw: euler[2], target_yaw: euler[2] });
+            f.call(HeroCall::SetState { id: 0, play: true });
+            play.svc.cinematic.calls.push(rc_game::cinematic::CinematicCall::CameraResetBehindHero);
+        }
+    };
+    if let Some(q) = out.race_quit {
+        let mut f = HeroFields::of(&play.game.hero);
+        teleport_entry(play, &mut f);
+        play.svc.hero_writes = Some((play.game.counter, f));
+        println!("menus: frame {frame}: Quit Race: race sound {:?} stopped, quits counter {:?} (0x15ee38 / 0x15ee3c), update_resource_counter, HeroTeleport(entry pose)", q.stop_sound, q.count);
+    }
+    if out.race_rewind { println!("menus: frame {frame}: Quit Race? no: the race stage − 1, the race moby +0xbc = 3 (the race classes: G-UI-019)"); }
+    if out.vehicle_quit { println!("menus: frame {frame}: Quit? yes: 0x14095f |= 1 (the vehicle classes: G-UI-019)"); }
+    if out.leave_body {
+        // The body moby 0x1413d0 hidden, collision off, mode |= 1; the body left (FUN_00231450) and the entry pose.
+        if let Some(id) = play.game.hero.bodies.moby {
+            if let Some(m) = play.game.mobys.mobys.get_mut(id) {
+                m.visible = 0;
+                m.has_collision = false;
+                m.mode |= 1;
+            }
+        }
+        let mut f = HeroFields::of(&play.game.hero);
+        f.call(HeroCall::LeaveBody { game_mode: rc_game::menus::mode::Mode::Freeze.raw() });
+        teleport_entry(play, &mut f);
+        play.svc.hero_writes = Some((play.game.counter, f));
+        println!("menus: frame {frame}: Giant Clank's Quit? yes: the body left, HeroTeleport(entry pose)");
+    }
+    if out.fade_to_black.is_some() || out.video_mode.is_some() {
+        println!("menus: frame {frame}: the 60 Hz test: FadeToBlack {:?}, 0x16040c = {:?} (PAL only: no video mode switch on NTSC)", out.fade_to_black, out.video_mode);
+    }
+}
+
+/// The end page's choice (`media::EndChoice`): the time warp, or challenge mode without a card.
+fn end_choice(rt: &mut MenuRt, play: &mut Play, gs: &mut rc_game::game_state::GameState, c: rc_game::menus::pause::media::EndChoice) {
+    use rc_game::menus::pause::media::EndChoice;
+    match c {
+        EndChoice::Timewarp => crate::saves::time_warp(play, gs),
+        EndChoice::Challenge => {
+            let keep = rt.menu.as_ref().map(|m| m.saves.challenge_items.clone()).unwrap_or_default();
+            let t = crate::saves::with_card(|c| c.lump.as_ref().map(|l| l.template.clone())).flatten();
+            let clock = crate::saves::clock_now();
+            crate::saves::with_card(|card| card.challenge_save(gs, -1, clock, &keep, |g| rc_game::menus::pause::saves::reset_game(g, t.as_deref())));
+            play.svc.travel.reset_trip = true;
+            println!("saves: challenge mode without a card: times completed {}", gs.global.completes);
+        }
+    }
+}
+
+/// One main-loop frame of the front end (crate::saves; `rc_game::frontend`).
+#[allow(clippy::too_many_arguments)]
+fn front_end_frame(
+    rt: &mut MenuRt,
+    mm: &mut MenuMode,
+    play: &mut Play,
+    gs: &mut rc_game::game_state::GameState,
+    fer: &mut crate::saves::FrontEndRt,
+    pad: &PadFrame,
+    source: &crate::game_camera::CameraSource,
+    movie_busy: bool,
+    mut audio: Option<&mut crate::audio_out::AudioOut>,
+) {
+    let frame = mm.loop_frame;
+    let vsync = frame as u32;
+    rt.render_mode = Mode::Menu;
+    rt.draws.clear();
+    if movie_busy { return; }
+    if mm.state.mode != Mode::Menu { mm.state.set(Mode::Menu); }
+    let input = match &rt.script {
+        Some(s) => s.at(frame),
+        None if *source == crate::game_camera::CameraSource::Play => pad.0,
+        None => rc_game::pad::PadInput::neutral(),
+    };
+    let mirror = gs.options().mirror;
+    play.game.pad.update(Some(&input.bytes()), mirror);
+    let pressed = play.game.pad.pressed;
+    let inp = MenuInput::from_pad(&play.game.pad, true);
+    let env = MenuEnv { vsync, b13f4: 0, pal: false };
+    // The level under the front end stays silent (`snd_PauseAllSoundsInGroup(0x1d)`, `music_Pause`) [L: the boot has its
+    // own sound bank and title music, G-SAV-012].
+    if !fer.paused {
+        if let Some(a) = audio.as_deref_mut() { a.system().menu_open(); }
+        fer.paused = true;
+    }
+    let Some(fe) = fer.fe.as_mut() else { return };
+    // `transition_do_transition` 0x1eb798, every vsync: `queue_dma_transfer(0x15ed88)` makes `all_text`'s block of the
+    // language the message table (the front end's text; `transition_load_wad` loaded all eight blocks).
+    if rt.front_text != Some(fe.lang) {
+        let t = load_all_text(&crate::level_load::extracted_root(), fe.lang);
+        if !t.is_empty() { rt.assets.hud.messages = t.clone(); }
+        rt.assets.all_text = t;
+        rt.front_text = Some(fe.lang);
+    }
+    let out = match fe.phase {
+        rc_game::frontend::Phase::CardCheck { .. } => {
+            let check = crate::saves::with_card(|c| {
+                let d = c.dir.clone();
+                c.fs.boot_check(&d)
+            })
+            .unwrap_or(0);
+            fe.card_frame(check, pressed)
+        }
+        _ => fe.frame(pressed, movie_busy),
+    };
+    if out.logos {
+        // startlevel: the logos PSS `mpegs[0]` (NTSC), language 0, never skipped, back to the front end.
+        use crate::movie_render::{MovieExit, MovieRequest};
+        crate::movie_render::request(MovieRequest { file: 0, movie: 0, language: Some(0), replay: Some(-1), exit: MovieExit::FrontEnd, ..MovieRequest::in_level(0, None) });
+        println!("menus: frame {frame}: front end: the logos (mpegs[0])");
+    }
+    if let Some(i) = out.attract {
+        crate::movie_render::play_attract(i);
+        println!("menus: frame {frame}: front end: attract movie {i} (mpegs[{}])", 80 + i);
+    }
+    if out.open_menu {
+        if let Some(m) = rt.menu.as_mut() { m.enter(0x2d, gs); }
+        println!("menus: frame {frame}: front end: the main menu (kind 0x2d)");
+    }
+    let mut exit = None;
+    match fe.mode {
+        3 => {
+            if let Some(menu) = rt.menu.as_mut() {
+                saves_in(menu, play);
+                menu.saves.card.front_end = true;
+                let o = menu.tick(&inp, gs, &env);
+                if let Some(a) = audio.as_deref_mut() {
+                    play_menu_sounds(play, a, &o.sounds);
+                    menu_sound_frame(play, a);
+                }
+                if let Some(st) = o.story { play.svc.travel.reset_trip = st; }
+                if let Some(l) = o.language {
+                    fe.set_language(l);
+                    apply_language(play, l);
+                    println!("menus: frame {frame}: front end: language 0x15ed88 = {l} (the text, PRESS START and every later load follow)");
+                }
+                if let Some(p) = o.freeze {
+                    let (f, _) = rc_game::menus::freeze::Freeze::init(rc_game::menus::freeze::KIND_CARD, p, 3);
+                    fer.freeze = Some(f);
+                    fe.mode = 4;
+                }
+                if let Some(l) = o.level_exit { exit = Some(l); }
+                if o.exit.is_some() {
+                    fe.menu_closed();
+                    println!("menus: frame {frame}: front end: the menu closed, the title");
+                } else {
+                    menu.draw(&rt.assets, gs, &env, &mut play.game.rng, &mut rt.draws);
+                }
+                saves_out(menu);
+            }
+        }
+        4 => {
+            if let Some(f) = fer.freeze.as_mut() {
+                let level = gs.global.level;
+                let o = crate::saves::with_card(|c| f.update(pressed, c, level)).unwrap_or_default();
+                if let Some(t) = o.target {
+                    if let Some(m) = rt.menu.as_mut() { m.target = t; }
+                }
+                if o.new_game {
+                    let t = crate::saves::with_card(|c| c.lump.as_ref().map(|l| l.template.clone())).flatten();
+                    rc_game::menus::pause::saves::reset_game(gs, t.as_deref());
+                    play.svc.travel.reset_trip = true;
+                    exit = Some(0);
+                }
+                if let Some(m) = rt.menu.as_mut() {
+                    saves_in(m, play);
+                    m.draw(&rt.assets, gs, &env, &mut play.game.rng, &mut rt.draws);
+                    saves_out(m);
+                }
+                if let Some(m) = o.mode { fe.mode = m; }
+            }
+        }
+        _ => {}
+    }
+    fe.draw(&mut rt.draws);
+    fe.draw_fade(&mut rt.draws);
+    if fe.mode == 4 {
+        if let Some(f) = fer.freeze.as_ref() { crate::saves::with_card(|c| f.draw(&rt.assets, c, vsync, &mut rt.draws)); }
+    }
+    if let Some(l) = exit {
+        fe.exit(l);
+        crate::media_render::request_level_exit(play, l);
+        fer.fe = None;
+        fer.freeze = None;
+        crate::saves::set_front_end_active(false);
+        crate::saves::with_card(|c| c.front_end = false);
+        if let Some(a) = audio { a.system().menu_close(true); }
+        mm.state.set(Mode::Gameplay);
+        println!("menus: frame {frame}: front end over: level {l} (the travel lane's level change loads it)");
+    }
+}
+
 
 /// The frame's draws → HUD primitives; the snapshot node and its capture.
 #[allow(clippy::too_many_arguments)]
@@ -689,7 +1342,7 @@ fn build_prims(
     let snapshot = convert(&rt.draws, &mut h, &mut statics, &mut st, &lh.glyphs, &mut resolve);
     hook.prims = h.prims;
     hook.statics = statics;
-    hook.replace_hud = rt.render_mode == Mode::Menu;
+    hook.replace_hud = matches!(rt.render_mode, Mode::Menu | Mode::Slideshow) || menu_under_freeze(&rt);
     // The vendor (mode 5) runs `HudUpdate(1)` every frame: the HUD ticks and draws over its screens.
     hook.freeze = !matches!(rt.render_mode, Mode::Gameplay | Mode::Vendor);
     let show = snapshot && rt.snapshot_ready;
@@ -725,7 +1378,8 @@ fn menu_layer(
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
-    let active = rt.render_mode == Mode::Menu;
+    // Mode 3, or the card dialog opened from it (its render keeps the page menu: crate::saves).
+    let active = rt.render_mode == Mode::Menu || menu_under_freeze(rt);
     let Some(main_t) = main.iter().next().copied() else { return };
     let layer = &mut rt.layer;
     // The layer image and the snapshot follow the main target (the window, or the capture image kept at its size).
@@ -739,6 +1393,16 @@ fn menu_layer(
     }
     if let Ok(mut c) = cams.get_mut(layer.cam2d) {
         if c.is_active != active { c.is_active = active; }
+        // The front end (crate::saves): the layer is opaque black (the level's world stays hidden behind it), or clear
+        // over the title world when it is drawn (crate::title_world).
+        let clear = if crate::saves::title_world_shown() && crate::saves::front_end_active() {
+            Color::NONE
+        } else if crate::saves::front_end_active() {
+            Color::BLACK
+        } else {
+            Color::srgba(0.0, 0.0, 0.0, DARKEN as f32 / 128.0)
+        };
+        if !matches!(c.clear_color, ClearColorConfig::Custom(k) if k == clear) { c.clear_color = ClearColorConfig::Custom(clear); }
     }
     if let Ok(mut v) = vis.get_mut(layer.node) {
         let want = if active { Visibility::Visible } else { Visibility::Hidden };

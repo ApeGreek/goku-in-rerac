@@ -28,7 +28,7 @@
 //! | lure +0x38 → +0x184 = `trunc(scale(randf(180, 240)))`, +0x38 = 0; `FastDecTimer(+0x184)` | the Taunter: 6 more range | [`lure`] |
 //! | state ≠ death: `MobyGetHitMessage(m, 0x330000, 0)`, `0x26f378(m, hit, +0x20, 5, …, col 4)` | every weapon's hit record through the resolver | [`hit_1196`], [`hit_1199`] (`World::get_hit`, `damage::resolve`) |
 //! | 1199: the attacker's class (record +0x20) = its own → ignored | its own dives do not hurt it | [`hit_1199`] |
-//! | health ≤ damage: 1196 only: the level word gp−0x4cc8 (Ratchet in the help director's cuboid, `help_orxon::AIR_WORD`) and skill point 0x13d418 not earned → the point, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)` | the skill point | NOT ported (G-SAV-007 [deferred]; the branch is taken as the game's and counted: `unported("skill point 0x13d418")`) |
+//! | health ≤ damage: 1196 only: the level word gp−0x4cc8 (Ratchet in the help director's cuboid, `help_orxon::AIR_WORD`) and skill point 0x13d418 not earned → the point, `PlayLevelSoundAtMoby(1, 0, 0)`, `ShowBanner(0x53d6, −1)` | the skill point | ported (`story::award_skill_point`) |
 //! | health 0, untargetable, blend 5 (1196) / 4 (1199), state 0xb / 0xd; K +0x3d 3, gravity 26·dt², drag 0.0005, flags 9, speeds 7·dt / 10·dt; 1199: class sound 2 | the death flight | [`hit_1196`], [`hit_1199`] |
 //! | heading: record +0x30 & 1 → atan(record dir) else atan(pos − record pos); 1199: then `0x24d658` (= `0x26fa48`) on the dir (the heading and the exact push's speeds) | | `knock::aim` (1199) |
 //! | `0x271418(a, m, K, 5 / 4, 1, 0)`; flash 0x78, `0x272318`; `BoltBurst(m, 1, 3, 0, −1)` | | `knock::start`, `flash::start`, `crate_::bolt_burst` (flags 0: the game's returns at once) |
@@ -43,7 +43,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x256da0(2.5, m, 0, +0x270)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x256da0(2.5, m, 0, +0x270)` | the big-head cheat manipulator | (`manip::big_head`) |
 //! | drawn, within 29 of the camera: `0x24cc30` (= `0x26f020`), +0x7f = 0x17 | the shadow probe | `shadows::probe_down` |
 //! | +0x58 = 1 | anim speed | [`update_1196`] |
 //! | case 0: D (health 1, +0x24 1, col 0, +0x29 1, D+0x10 0.5), targetable, home +0x130 / +0x140; mode ≠ 1 → deleted; → 1 | init | [`update_1196`] |
@@ -64,7 +64,7 @@
 //!
 //! | address | what it does | ported / not |
 //! |---|---|---|
-//! | `0x256da0(2.5, m, 1, +0x270)` | the big-head cheat manipulator | NOT ported (G-SAV-006, conditional) |
+//! | `0x256da0(2.5, m, 1, +0x270)` | the big-head cheat manipulator | (`manip::big_head`) |
 //! | shadow probe within 29 (0x17); +0x58 = 1 | | [`update_1199`] |
 //! | states ∉ {0, 0xd}: z −= 0.125·cos(+0x19c) first, the tail adds the next one (+0x19c += 360° / `trunc(scale(1.21·60))`) | the bob | [`update_1199`] |
 //! | case 0: D+0x10 0.25, health 1, …, targetable, home, `rand_angle` phase, +0x58 8, +0x5a 20; mode 0 → 3, z + 2; 1 → deleted; 2 → 9: z = the cuboid's centre z, pos += (10·cos a, 10·sin b) (two `rand_angle`), +0x1a0 / +0x1a4; blend 3 | init | [`update_1199`], [`cuboid_redraw`] |
@@ -267,8 +267,7 @@ fn hit_1196(w: &mut World, id: MobyId) {
     let dmg = h.damage.to_f32();
     if c::pf(w, id, pv::D) <= dmg {
         if w.svc.units.word(super::help_orxon::AIR_WORD) != 0 {
-            // Skill point 0x13d418 with `PlayLevelSoundAtMoby(1, 0, 0)` and `ShowBanner(0x53d6, −1)` (G-SAV-007).
-            w.svc.unported("skill point 0x13d418");
+            crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d418));
         }
         c::set_pf(w, id, pv::D, 0.0);
         w.mm(id).mode &= !mode::TARGETABLE;
@@ -485,7 +484,8 @@ pub fn update_1196(w: &mut World, id: MobyId) {
     if state(w, id) != scout::DYING { hit_1196(w, id); }
     flash::update(w, id, pv::FLASH);
     targeting(w, id, 0.0);
-    // 0x256da0(2.5, m, 0, +0x270): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x256da0(2.5, m, 0, +0x270): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 0, id, 0x270);
     shadow(w, id);
     w.mm(id).anim.speed = 1.0;
     match state(w, id) {
@@ -663,7 +663,8 @@ pub fn update_1199(w: &mut World, id: MobyId) {
     if state(w, id) != swoop::DYING { hit_1199(w, id); }
     flash::update(w, id, pv::FLASH);
     targeting(w, id, 1.0);
-    // 0x256da0(2.5, m, 1, +0x270): the big-head cheat manipulator (G-SAV-006): not modelled.
+    // 0x256da0(2.5, m, 1, +0x270): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 1, id, 0x270);
     shadow(w, id);
     w.mm(id).anim.speed = 1.0;
     let s = state(w, id);

@@ -19,10 +19,15 @@
 //!   game streams per-item animations, `fun_002265d8` with the table 0x1b9870, not ported]; Clank and the pending
 //!   pack on the back list (the Heli-Pack's class 607 on its rotor sequence 6, `LoadHandGadget`); the pending
 //!   hand item on its attach list (sequence 1); the pending head item and boots posed from his joints
-//!   (`rc_game::hero::worn::pose_from_host`). Not drawn: the Persuader / Map-o-matic / Bolt Grabber mobys and the
-//!   drones (their callbacks are not ported).
+//!   (`rc_game::hero::worn::pose_from_host`); the Persuader (0x197, on his joint list 0x1e), the Map-o-Matic (0x266)
+//!   and the Bolt Grabber (0x26a, list 0x1d) when owned (`fun_002250f0`: on sequence 0, advanced, at the list's
+//!   matrix with its rows normalised). Not drawn: the drones (class 0x1df, `spawn_extra479`'s orbit; the hero's drone
+//!   counts 0x141346 / 0x141347 are not kept by the port: G-UI-002).
 //! * Item preview: the focused cell's item at camera + the table 0x1c4988 offset, rotated, cut to its sequence then
 //!   advanced every menu frame; Clank with it for a back item.
+//! * The end page's Helpdesk girl (`rc_game::menus::pause::media`, G-CUT-008): class 0x7a5 at camera + (2.2, 0, −1.6),
+//!   turned by π, posed by the widget's own animation state (`GirlView`); her sequences 1..3 come from the global lump
+//!   `post_credits_helpdesk_girl_seq` ([`girl_anim_class`], also given to the page menu for her state machine).
 
 use crate::moby_render::{self, ExtraMobys, MobyMaterial};
 use crate::screen_canvas::{CanvasId, CanvasView, Canvases};
@@ -41,6 +46,8 @@ use rc_game::menus::pause::gadgets::GadgetsView;
 #[derive(Resource, Default, Debug)]
 pub struct GadgetsPreview {
     pub view: GadgetsView,
+    /// The end page's Helpdesk girl (`rc_game::menus::pause::media::MediaMenu::girl_view`).
+    pub girl: Option<rc_game::menus::pause::gadgets::GirlView>,
     pub frame: u64,
 }
 
@@ -50,6 +57,10 @@ const BACK_ATTACH: usize = 5;
 const CLANK_O_CLASS: i32 = 601;
 const HELI_O_CLASS: i16 = 607;
 const SONIC_O_CLASS: i16 = 0x1b1;
+/// The 3D Ratchet's extras by `ModelView::extras` order (the Persuader, the Map-o-Matic, the Bolt Grabber) and the
+/// index of the joint list each sits on in [`HERO_LISTS`] (0x1e → 8, 0x1d → 7).
+const EXTRA_CLASSES: [i16; 3] = [0x197, 0x266, 0x26a];
+const EXTRA_LISTS: [usize; 3] = [8, 7, 7];
 /// The 3D Ratchet's offset from the menu camera (`FUN_00297ad0`: x + 4, z − 0.6) and yaw π.
 const MODEL_OFFSET: [f32; 3] = [4.0, 0.0, -0.6];
 
@@ -69,6 +80,11 @@ enum Role {
     /// (`pages::gold_draw`).
     Ammo,
     GoldBolt,
+    /// The end page's Helpdesk girl.
+    Girl,
+    /// The 3D Ratchet's Persuader (0x197), Map-o-Matic (0x266) and Bolt Grabber (0x26a) (`LoadHandGadget` with their
+    /// items owned; update `fun_002250f0`: at his joint list 0x1e (the Persuader) or 0x1d).
+    Extra,
 }
 
 struct Part {
@@ -92,8 +108,8 @@ struct PreviewRt {
     chains: Vec<(usize, Vec<u8>)>,
     bank: Option<rc_formats::tfrag_light::LightBank>,
     menu_cam: Mat4,
-    /// The canvases of the 3D Ratchet, the item preview, the ammo model and the gold bolt.
-    canvases: [CanvasId; 4],
+    /// The canvases of the 3D Ratchet, the item preview, the ammo model, the gold bolt and the Helpdesk girl.
+    canvases: [CanvasId; 5],
     last_frame: u64,
 }
 
@@ -101,7 +117,7 @@ pub struct MenuModelsPlugin;
 
 impl Plugin for MenuModelsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<GadgetsPreview>();
+        app.init_resource::<GadgetsPreview>().add_systems(crate::level_switch::LevelUnload, (crate::level_switch::reset::<GadgetsPreview>, crate::level_switch::remove::<PreviewRt>));
         if !crate::gameplay::enabled() { return; }
         app.add_systems(PreUpdate, setup).add_systems(PostUpdate, update.before(crate::screen_canvas::apply).before(TransformSystems::Propagate));
     }
@@ -110,6 +126,7 @@ impl Plugin for MenuModelsPlugin {
 #[allow(clippy::too_many_arguments)]
 fn setup(
     mut done: Local<bool>,
+    generation: Res<crate::level_switch::LevelGeneration>,
     mut commands: Commands,
     level: Res<crate::Level>,
     canvases: Option<ResMut<Canvases>>,
@@ -118,6 +135,8 @@ fn setup(
     mut materials: ResMut<Assets<MobyMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    // Once per level (crate::level_switch: a runtime level change runs it again).
+    if generation.is_changed() { *done = false; }
     if *done { return; }
     let Some(mut canvases) = canvases else { return };
     *done = true;
@@ -126,6 +145,7 @@ fn setup(
         canvases.create_over_hud(&mut commands, &mut images, "menu item preview"),
         canvases.create_over_hud(&mut commands, &mut images, "menu ammo model"),
         canvases.create_over_hud(&mut commands, &mut images, "menu gold bolt"),
+        canvases.create_over_hud(&mut commands, &mut images, "menu helpdesk girl"),
     ];
     let lv = &level.0;
     let m = &lv.mobys;
@@ -166,12 +186,21 @@ fn setup(
             specs.push((r, c.clone(), a.clone(), layer));
         }
     }
+    // The 3D Ratchet's extras (crate docs: `fun_002250f0`).
+    for o in EXTRA_CLASSES {
+        if let Some((c, a)) = level_class(o as i32) { specs.push((Role::Extra, c, a, 0)); }
+    }
     // The ammo pickups' classes (item definitions +0x3a; `SpawnHandGadgetMoby` makes one only when the level has the
     // class) and the gold bolt 0x46e.
     for o in [226, 204, 222, 1006, 214, 225, 213, 223, 1438, 1447, 1449] {
         if let Some((c, a)) = level_class(o) { specs.push((Role::Ammo, c, a, 2)); }
     }
     if let Some((c, a)) = level_class(rc_game::menus::pause::pages::GOLD_BOLT_CLASS) { specs.push((Role::GoldBolt, c, a, 3)); }
+    // The Helpdesk girl (class 0x7a5 with her streamed sequences) when the level has her class.
+    if let Some((c, a)) = level_class(rc_game::menus::pause::media::GIRL_CLASS as i32) {
+        let a = girl_anim_class(&a).unwrap_or(a);
+        specs.push((Role::Girl, c, a, 4));
+    }
     let mut parts = Vec::new();
     let mut palette_len = 0u32;
     for (role, class, anim, _) in &specs {
@@ -211,6 +240,22 @@ fn setup(
     commands.insert_resource(PreviewRt { parts, extra, chains, bank, menu_cam, canvases: ids, last_frame: 0 });
 }
 
+/// The Helpdesk girl's class with the three sequences of `post_credits_helpdesk_girl_seq` (TOC 0x1610) in its slots
+/// 1..3 (`fun_002256e8` state 1: WAD-decompressed; a table of three 8-byte entries, each's first word the offset of a
+/// sequence whose pointers are relative to itself, `relocate_asset_entry_pointers`). None when the lump is not read.
+pub fn girl_anim_class(level_anim: &MobyAnimClass) -> Option<MobyAnimClass> {
+    let root = crate::level_load::extracted_root();
+    let raw = crate::disc_source::read(&root, "global/post_credits_helpdesk_girl_seq.bin").map_err(|e| eprintln!("menu models: no Helpdesk girl sequences ({e:#})")).ok()?;
+    let d = if rc_formats::wad::is_wad(&raw) { rc_formats::wad::decompress(&raw).ok()? } else { raw };
+    let mut a = level_anim.clone();
+    if a.sequences.len() < 4 { a.sequences.resize(4, None); }
+    for k in 0..3usize {
+        let o = u32::from_le_bytes(d.get(8 * k..8 * k + 4)?.try_into().ok()?) as usize;
+        a.sequences[k + 1] = Some(moby_anim::parse_sequence(d.get(o..)?, 0).map_err(|e| eprintln!("menu models: Helpdesk girl sequence {}: {e:#}", k + 1)).ok()?);
+    }
+    Some(a)
+}
+
 fn rows_f32(r: &[V4; 3]) -> [[f32; 3]; 3] { r.map(|v| [0, 1, 2].map(|k| f32::from_bits(v[k]))) }
 
 /// A part's placement this frame: rows (game), position, its pose, whether its state advances.
@@ -240,7 +285,8 @@ fn update(
     let Some(main_t) = main.iter().next().copied() else { return };
     let in_menu = mode.is_some_and(|m| m.state.mode == rc_game::menus::mode::Mode::Menu);
     let view = if in_menu { gp.view } else { GadgetsView::default() };
-    let rects = [view.model.map(|m| m.rect), view.preview.map(|p| p.rect), view.ammo.map(|p| p.rect), view.gold_bolt.map(|p| p.rect)];
+    let girl = if in_menu { gp.girl.clone() } else { None };
+    let rects = [view.model.map(|m| m.rect), view.preview.map(|p| p.rect), view.ammo.map(|p| p.rect), view.gold_bolt.map(|p| p.rect), girl.as_ref().map(|g| g.rect)];
     // Each widget's canvas: the panel, the game projection's focal lengths, the view axis on the panel's centre, the
     // navy 0x80100808 clear.
     let proj = crate::game_camera::GameProjection::default();
@@ -299,7 +345,7 @@ fn update(
         placed[ri] = Some(Placed { rows, pos, pose: moby_anim::evaluate_with_snapshot(&ranim, &rstate, None) });
         let hand_attach = class_of(mv.equip[0]).map_or(0, |c| c.1.max(0) as usize);
         for (k, p) in rt.parts.iter_mut().enumerate() {
-            if matches!(p.role, Role::Ratchet | Role::Item | Role::ItemClank) || want(p.role) != Some(p.o_class) { continue; }
+            if matches!(p.role, Role::Ratchet | Role::Item | Role::ItemClank) || (p.role != Role::Extra && want(p.role) != Some(p.o_class)) { continue; }
             match p.role {
                 Role::Clank | Role::Back | Role::Hand => {
                     let seq = if p.o_class == HELI_O_CLASS { 6 } else { 1 };
@@ -313,6 +359,18 @@ fn update(
                     for _ in 0..steps { moby_anim::advance(&mut p.state, &p.anim); }
                     let (list, norm) = if p.role == Role::Hand { (hand_attach, hand_attach != 6) } else { (BACK_ATTACH, true) };
                     let Some((r, at)) = w_of(list, norm) else { continue };
+                    placed[k] = Some(Placed { rows: r, pos: at, pose: moby_anim::evaluate_with_snapshot(&p.anim, &p.state, None) });
+                }
+                Role::Extra => {
+                    let Some(e) = EXTRA_CLASSES.iter().position(|&c| c == p.o_class) else { continue };
+                    if !mv.extras[e] { continue; }
+                    if p.cut_for != p.o_class as i32 {
+                        p.state = AnimState::spawn(&p.anim);
+                        p.cut_for = p.o_class as i32;
+                    }
+                    // fun_002250f0: MobyAnimAdvance, then the joint matrix (rows normalised).
+                    for _ in 0..steps { moby_anim::advance(&mut p.state, &p.anim); }
+                    let Some((r, at)) = w_of(EXTRA_LISTS[e], true) else { continue };
                     placed[k] = Some(Placed { rows: r, pos: at, pose: moby_anim::evaluate_with_snapshot(&p.anim, &p.state, None) });
                 }
                 Role::Head | Role::BootL | Role::BootR => {
@@ -366,6 +424,17 @@ fn update(
             }
             for _ in 0..steps { moby_anim::advance(&mut p.state, &p.anim); }
             placed[k] = Some(Placed { rows, pos, pose: moby_anim::evaluate_with_snapshot(&p.anim, &p.state, None) });
+        }
+    }
+    // The Helpdesk girl: posed by the widget's animation state (rc_game::menus::pause::media::girl_update / girl_tick).
+    if let Some(gv) = girl.as_ref() {
+        let rows = moby_light::rotation_rows([0.0, 0.0, std::f32::consts::PI]);
+        let off = rc_game::menus::pause::media::GIRL_OFFSET;
+        let pos = [0, 1, 2].map(|k| frame::CAMERA_POS[k] + off[k]);
+        for (k, p) in rt.parts.iter_mut().enumerate() {
+            if p.role != Role::Girl { continue; }
+            p.state = gv.anim;
+            placed[k] = Some(Placed { rows, pos, pose: moby_anim::evaluate_with_snapshot(&p.anim, &gv.anim, gv.snapshot.as_ref()) });
         }
     }
     // Records, palettes, visibility.

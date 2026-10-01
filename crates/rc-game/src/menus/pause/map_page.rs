@@ -6,10 +6,25 @@
 //!
 //! Coordinates: the game draws the map in 1/16 pixels of the widget's panel (0x800 = 128 px down, 0x1000 = 256 px
 //! across the view point); the port converts to panel pixels when it emits the draws.
+//!
+//! **The missions page** (0x1b3bf8, ✕ on the map; its missions widget also sits on the ship's confirm page 0x1b6878)
+//! and **the streamed pictures** of the missions page and the ship's planet select (G-UI-002):
+//!
+//! | address | what | port |
+//! |---|---|---|
+//! | 0x20bc00 `fun_0020bc00(names, mask, pictures, descs)` | the destination's mission list (0x1a2c20): every record without flag 2 and with status ≠ 0 (flag 1: not when done) is listed: its name, or with `descs` "Completed" 0x523e when done else its description by the callback's value (+0x14 + 2·value); bit k of the mask when done; its picture +0x12 + value; bit 31 when every record without flag 2 is done; returns the count | [`mission_list`] |
+//! | 0x28fe28 missions enter | `FUN_00262760` (the destination's status); +0x7c = the count; the destination's cursor (+0x30 + 4·dest) ≠ −1: the description label 0x1b3dc0's id (0x1b3df4) and the picture widget 0x1b3c80's index (0x1b3cd8) | [`missions_enter`] |
+//! | 0x28fec8 missions update | unfocused: the destination's cursor = −1; focused: the close keys, R1 / L1 the next / previous known planet (sound 1, `FUN_00262760`), Up / Down the cursor mod the count (sound 1 on a change), on Up / Down or a new planet the count, the label and the picture again; △ back | `planet_select::missions_update` |
+//! | 0x293090 `DrawMissionsMenu2` | "Missions" 0x4f59 (large, (4, 4)); per listed mission from y 0x18: its name wrapped in the small font at x 0x10 within w − 0x11 (`fun_001f6fd0`; the cursor's line yellow 0x8020ffff with the colour codes off, else 0x80ffa888), its check box (`draw_menu_selection_marker`) at (9, y + 10) or (9, y + 0x10) for two lines, ticked when done; y += 16 per line; all done: 0x523d in the small font, window y 0..h, x 0..w, anchor h / 2, from y + 8, centred lines, 0x8020ffff; return 2 | [`missions_draw`] (the wrap: [`wrap_small`]) |
+//! | 0x293398 picture update | the index by flags: 1 the explicit +0x58 (−1: nothing), 2 the destination, 4 the focused widget's +0x3c, 0x100 the card slots', else the focused widget's +0x40 (≥ 0); +0x44 0 / 2 (shown): a new index whose TOC entry is not empty → the read (0x1516d8 free, the buffer, +0x50 = the index, +0x44 + 1; refused: −1); 1 / 3: the read done → WAD-decompressed with flag 0x20, the PIF converted (`fun_00204e30`) → 2 | [`picture_update`] (the read is the engine's and never pends: done the next frame [L]; flag 0x100: no widget of this callback has it, n/a) |
+//! | 0x293670 picture draw | +0x44 ≥ 2: `DrawTexturedQuad(0, 0, panel w, panel h, 0, 0, +0x38, +0x3c)` of the converted picture, return 0x10; else 0 | [`picture_draw`] |
+//! | 0x2936e8 / 0x293780 | the image widgets' enter / leave (+0x44 = 0 / −1, the indices −1) | [`picture_enter`] / [`picture_leave`] |
+//! | 0x292980 `DrawGBsShipMenu` | the confirm page's gold bolt (the Items page's moby, enter 0x292450 / leave 0x2924f8) placed at the menu camera + (8, *gp−0x689c = 1.3, −0.1) and drawn; "%s %d %s %d" of 0x4f4f, the destination's gold bolts found (0x14bec0 + 4·dest, 4 bytes), 0x4f53 and its total (0x1c4e08 + 4·dest) right-aligned at (w − 0x10, H / 2 − 8) in black and (w − 0x11, H / 2 − 9) in 0x80ffa888; return 8 | [`gold_panel_draw`] |
 
 use super::super::{MenuAssets, MenuDraw, MenuInput, QuadTex};
-use super::PageMenu;
+use super::{Data, MenuOut, PageMenu, LIGHT_BLUE, YELLOW};
 use crate::game_state::GameState;
+use crate::hud::{text as wtext, Draw};
 use crate::map::{self, MapFile, Mask};
 use rc_formats::font::Font;
 use std::collections::BTreeMap;
@@ -336,6 +351,8 @@ pub const MISSION_LISTS: u32 = 0x1870f0;
 pub const MARKER_LISTS: u32 = 0x187140;
 pub const MARKER_SIZES: u32 = 0x15fe18;
 pub const PRICES: u32 = 0x1c4530;
+/// 0x1c4e08: the gold bolts per level (`DrawGBsShipMenu` 0x292980).
+pub const GOLD_TOTALS: u32 = 0x1c4e08;
 
 /// One mission record (0x1870f0 lists).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -353,6 +370,10 @@ pub struct Mission {
     /// +0x24: 0 unavailable, 1 open, 2 done; +0x26: the callback's value.
     pub status: i16,
     pub cb_value: i16,
+    /// +0x12: the first of its pictures (`mission_ss`, + the callback's value); +0x14..+0x1a: its descriptions by the
+    /// callback's value (`desc` = the first).
+    pub picture: i16,
+    pub descs: [i16; 4],
 }
 
 /// One map marker record (0x187140 lists).
@@ -390,6 +411,8 @@ pub struct MapTables {
     pub markers: Vec<Vec<Marker>>,
     pub sizes: [f32; 6],
     pub prices: Vec<i32>,
+    /// 0x1c4e08: the gold bolts of each level (20 words; the confirm page's gold-bolt panel 0x292980).
+    pub gold_totals: Vec<i32>,
 }
 
 impl MapTables {
@@ -401,7 +424,10 @@ impl MapTables {
             if let Some(mut a) = ov.u32(ml + 4 * l).filter(|&p| p != 0) {
                 while ov.i16(a).is_some_and(|n| n != 0) {
                     let (s, u) = (|o: u32| ov.i16(a + o).unwrap_or(0), |o: u32| ov.u32(a + o).unwrap_or(0));
-                    ms.push(Mission { name: s(0), desc: s(0x14), req: [(s(2), u(4)), (s(8), u(0xc))], flags: u(0x10) as u16, cb: u(0x1c), arg: u(0x20), status: 0, cb_value: 0 });
+                    ms.push(Mission {
+                        name: s(0), desc: s(0x14), req: [(s(2), u(4)), (s(8), u(0xc))], flags: u(0x10) as u16, cb: u(0x1c), arg: u(0x20), status: 0, cb_value: 0,
+                        picture: s(0x12), descs: [s(0x14), s(0x16), s(0x18), s(0x1a)],
+                    });
                     a += 0x28;
                 }
             }
@@ -426,6 +452,8 @@ impl MapTables {
         t.sizes = std::array::from_fn(|k| ov.u32(sz + 4 * k as u32).map_or(0.0, f32::from_bits));
         let pr = ov.at(PRICES);
         t.prices = (0..64u32).map(|k| ov.i32(pr + 0x18 * k).unwrap_or(0)).collect();
+        let gt = ov.at(GOLD_TOTALS);
+        t.gold_totals = (0..20u32).map(|l| ov.i32(gt + 4 * l).unwrap_or(0)).collect();
         t
     }
 }
@@ -776,4 +804,284 @@ mod tests {
         assert!(mission_status(&mut ms, &g, 3));
         assert_eq!(ms.iter().map(|m| (m.status, m.cb_value)).collect::<Vec<_>>(), vec![(2, 0), (2, 0), (2, 1)]);
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The missions page and the streamed pictures (G-UI-002)
+
+/// One listed mission of `fun_0020bc00`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Listed {
+    /// The name (`descs` false) or the description / "Completed" 0x523e (`descs` true).
+    pub text: i32,
+    /// Its picture (`mission_ss`).
+    pub picture: i32,
+    pub done: bool,
+}
+
+/// `fun_0020bc00` over the destination's missions (their status already computed, [`mission_status`]): the listed
+/// missions and the "all done" bit (31 of the mask).
+pub fn mission_list(missions: &[Mission], descs: bool) -> (Vec<Listed>, bool) {
+    let mut all = true;
+    let mut out = Vec::new();
+    for m in missions {
+        if m.status != 2 && m.flags & 2 == 0 { all = false; }
+        if m.flags & 2 != 0 || m.status == 0 || (m.flags & 1 != 0 && m.status == 2) { continue; }
+        let text = if !descs {
+            m.name as i32
+        } else if m.status == 2 {
+            0x523e
+        } else {
+            m.descs.get(m.cb_value.max(0) as usize).copied().unwrap_or(0) as i32
+        };
+        out.push(Listed { text, picture: (m.picture as i32) + (m.cb_value as i32), done: m.status == 2 });
+    }
+    (out, all)
+}
+
+/// The missions widget's state (+0x30: a cursor per destination, −1 none; +0x7c: the count).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Missions {
+    pub cursors: [i32; 20],
+    pub count: i32,
+}
+
+/// The label 0x1b3df4 and the picture index 0x1b3cd8 for the destination's cursor (0x28fe28 / 0x28fec8): the label
+/// widget 0x1b3dc0 shows the description, the picture widget 0x1b3c80 the mission's picture.
+fn missions_show(m: &mut PageMenu, cursor: i32) {
+    let (list, _) = mission_list(&m.map.missions, true);
+    let Some(it) = usize::try_from(cursor).ok().and_then(|c| list.get(c)).copied() else { return };
+    let (label, image) = (m.addrs.missions_label, m.addrs.missions_image);
+    if let Some(Data::Label(l)) = m.widgets.get_mut(&label).map(|x| &mut x.data) { l.id = it.text as u32; }
+    if let Some(Data::Picture(p)) = m.widgets.get_mut(&image).map(|x| &mut x.data) { p.explicit = it.picture; }
+}
+
+/// `fun_0021c420` 0x28fe28, the missions widget's enter.
+pub fn missions_enter(m: &mut PageMenu, w: u32, gs: &GameState) {
+    let dest = m.dest;
+    enter(m, gs);
+    let count = mission_list(&m.map.missions, true).0.len() as i32;
+    let cursor = match m.widgets.get_mut(&w).map(|x| &mut x.data) {
+        Some(Data::Missions(ms)) => {
+            ms.count = count;
+            ms.cursors.get(dest.max(0) as usize).copied().unwrap_or(-1)
+        }
+        _ => return,
+    };
+    if cursor != -1 { missions_show(m, cursor); }
+}
+
+/// The Up / Down half of 0x28fec8 (after the planet keys; `changed` = the destination changed): the cursor of the
+/// destination moves mod the count, sound 1 on a change, the count, label and picture again on Up / Down or a new
+/// destination.
+pub fn missions_keys(m: &mut PageMenu, w: u32, keys: u32, changed: bool, out: &mut MenuOut) {
+    use crate::pad::button;
+    let dest = m.dest.clamp(0, 19) as usize;
+    let Some(Data::Missions(ms)) = m.widgets.get(&w).map(|x| &x.data) else { return };
+    let mut ms = *ms;
+    if ms.count == 0 { return; }
+    let before = ms.cursors[dest];
+    if keys & button::UP != 0 { ms.cursors[dest] = (before + ms.count - 1) % ms.count; }
+    if keys & button::DOWN != 0 { ms.cursors[dest] = (ms.cursors[dest] + 1) % ms.count; }
+    if ms.cursors[dest] != before { out.sounds.push(super::super::MenuSound::Cursor); }
+    if keys & (button::UP | button::DOWN) != 0 || changed {
+        ms.count = mission_list(&m.map.missions, true).0.len() as i32;
+        let c = ms.cursors[dest];
+        if let Some(Data::Missions(x)) = m.widgets.get_mut(&w).map(|x| &mut x.data) { *x = ms; }
+        missions_show(m, c);
+        return;
+    }
+    if let Some(Data::Missions(x)) = m.widgets.get_mut(&w).map(|x| &mut x.data) { *x = ms; }
+}
+
+/// The unfocused half of 0x28fec8: the destination's cursor = −1 (dest < 0x14).
+pub fn missions_unfocused(m: &mut PageMenu, w: u32) {
+    let dest = m.dest;
+    if let Some(Data::Missions(ms)) = m.widgets.get_mut(&w).map(|x| &mut x.data) {
+        if (0..0x14).contains(&dest) { ms.cursors[dest as usize] = -1; }
+    }
+}
+
+/// `fun_001f6fd0(x, y, w, max_h, rgba, text, −1)` → `fun_001f6cb8` with the small font: the greedy word wrap (a word
+/// that does not fit starts a new line, a space at the break is dropped). Returns the lines (y, bytes) and the height
+/// (`last y − y + 16`).
+pub fn wrap_small(a: &MenuAssets, x: i32, y: i32, w: i32, max_h: i32, t: &[u8]) -> (Vec<(i32, Vec<u8>)>, i32) {
+    let adv = |c: u8| a.width(Font::Small, &[c]);
+    let mut lines: Vec<(i32, Vec<u8>)> = vec![(y, Vec::new())];
+    let (mut i, mut ly, mut lx) = (0usize, y, x);
+    if t.first().is_some_and(|&c| c != 0) {
+        while ly + 0x10 <= y + max_h {
+            let c = t[i];
+            let mut wx = lx as f32;
+            if c != b' ' && c > 0xf {
+                let mut j = i;
+                let mut sum = 0.0f32;
+                while j < t.len() {
+                    sum += adv(t[j]) as f32;
+                    j += 1;
+                    if j >= t.len() || t[j] == b' ' || t[j] < 0x10 { break; }
+                }
+                wx += sum;
+            }
+            if ((x + w) as f32) < wx {
+                if c != b' ' && c > 0xf { i = i.wrapping_sub(1); }
+                ly += 0x10;
+                lx = x;
+                lines.push((ly, Vec::new()));
+            } else if !(8..=15).contains(&c) && adv(c) != 0 {
+                if let Some(l) = lines.last_mut() { l.1.push(c); }
+                lx += adv(c);
+            }
+            i = i.wrapping_add(1);
+            if i >= t.len() || t[i] == 0 { break; }
+        }
+    }
+    (lines, ly - y + 0x10)
+}
+
+/// `DrawMissionsMenu2` 0x293090 (panel-local; return 2).
+pub fn missions_draw(m: &PageMenu, w: u32, a: &MenuAssets, out: &mut Vec<MenuDraw>) -> u32 {
+    let Some(wd) = m.widgets.get(&w) else { return 2 };
+    let [_, _, ww, wh] = wd.rect;
+    let cursor = match &wd.data {
+        Data::Missions(ms) => ms.cursors.get(m.dest.max(0) as usize).copied().unwrap_or(-1),
+        _ => -1,
+    };
+    let (list, all) = mission_list(&m.map.missions, false);
+    out.push(MenuDraw::Hud(Draw::Text { font: Font::Large, x: 4, y: 4, rgba: LIGHT_BLUE, text: a.msg(0x4f59).to_vec() }));
+    let mut y = 0x18;
+    for (k, it) in list.iter().enumerate() {
+        let sel = cursor == k as i32;
+        let col = if sel { YELLOW } else { LIGHT_BLUE };
+        let (lines, h) = wrap_small(a, 0x10, y, ww - 0x11, 1000, a.msg(it.text));
+        for (ly, t) in lines {
+            if sel { super::super::text_plain(out, Font::Small, 0x10, ly, col, &t) } else { super::super::text(out, Font::Small, 0x10, ly, col, &t) }
+        }
+        let n = if h > 0x10 { 2 } else { 1 };
+        super::media::check_box(a, m.consts.navy, 9, if n == 2 { y + 0x10 } else { y + 10 }, it.done, out);
+        y += n * 0x10;
+    }
+    if all {
+        let win = wtext::Window::new(0, wh as i16, 0, ww as i16, (wh >> 1) as i16, (y + 8) as i16, 0x10, wtext::CENTRE_LINES);
+        out.push(MenuDraw::Hud(Draw::TextWindow { font: Font::Small, window: win, rgba: YELLOW, text: a.msg(0x523d).to_vec() }));
+    }
+    2
+}
+
+/// The picture widget 0x293398 / 0x293670's state (+0x30 TOC field, +0x34 flags, +0x38 / +0x3c texels, +0x44 state,
+/// +0x50 the index read, +0x58 the explicit index; `shown`: the index whose picture was converted last).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Picture {
+    pub field: u32,
+    pub flags: u32,
+    pub tw: i32,
+    pub th: i32,
+    pub state: i32,
+    pub index: i32,
+    pub explicit: i32,
+    pub shown: i32,
+}
+
+impl Picture {
+    pub fn read(raw: &[u32; 8]) -> Picture {
+        Picture { field: raw[0].wrapping_sub(super::pages::TOC_BASE), flags: raw[1], tw: raw[2] as i32, th: raw[3] as i32, state: -1, index: -1, explicit: -1, shown: -1 }
+    }
+}
+
+/// 0x2936e8 (shared with the image widgets): +0x44 = 0, the indices −1.
+pub fn picture_enter(m: &mut PageMenu, w: u32) {
+    if let Some(Data::Picture(p)) = m.widgets.get_mut(&w).map(|x| &mut x.data) {
+        p.state = 0;
+        p.index = -1;
+        p.shown = -1;
+    }
+}
+
+/// 0x293780: +0x44 = −1, the indices −1.
+pub fn picture_leave(m: &mut PageMenu, w: u32) {
+    if let Some(Data::Picture(p)) = m.widgets.get_mut(&w).map(|x| &mut x.data) {
+        p.state = -1;
+        p.index = -1;
+    }
+}
+
+/// `fun_0021f990` 0x293398.
+pub fn picture_update(m: &mut PageMenu, w: u32) -> i32 {
+    let focus = m.pages.get(&m.current).map_or(0, |p| p.focus);
+    let Some(Data::Picture(p)) = m.widgets.get(&w).map(|x| &x.data) else { return 0 };
+    let mut p = *p;
+    let idx = if p.flags & 1 != 0 {
+        if p.explicit == -1 { return 0; }
+        p.explicit
+    } else if p.flags & 2 != 0 {
+        m.dest
+    } else if p.flags & 4 != 0 {
+        // The focused widget's +0x3c (a grid's cursor).
+        match m.widgets.get(&focus).map(|x| &x.data) {
+            Some(Data::Grid(g)) => g.cursor,
+            _ => 0,
+        }
+    } else {
+        // The focused widget's +0x40 (a list's cursor), ≥ 0.
+        match m.widgets.get(&focus).map(|x| &x.data) {
+            Some(Data::List(l)) => l.cursor.max(0),
+            _ => 0,
+        }
+    };
+    match p.state {
+        1 | 3 => {
+            // The read is done: decompressed (flag 0x20) and converted (`fun_00204e30`).
+            p.shown = p.index;
+            p.state = 2;
+        }
+        0 | 2 => {
+            if idx == p.index { return 0; }
+            // An entry past the TOC field (its sector count 0): nothing.
+            let n = super::pages::field_entries(p.field);
+            if n != 0 && idx as u32 >= n { return 0; }
+            if idx < 0 { return 0; }
+            p.index = idx;
+            p.state += 1;
+        }
+        _ => {}
+    }
+    if let Some(Data::Picture(x)) = m.widgets.get_mut(&w).map(|x| &mut x.data) { *x = p; }
+    0
+}
+
+/// `draw_transition_overlay` 0x293670 (panel-local): the converted picture over the panel; return 0x10 (or 0).
+pub fn picture_draw(m: &PageMenu, w: u32, out: &mut Vec<MenuDraw>) -> u32 {
+    let Some(wd) = m.widgets.get(&w) else { return 0 };
+    let Data::Picture(p) = wd.data else { return 0 };
+    if p.state < 2 || p.shown < 0 { return 0; }
+    let [_, _, ww, wh] = wd.rect;
+    out.push(MenuDraw::Image { src: super::super::ImageSrc::Lump { field: p.field, index: p.shown as u32 }, x: 0, y: 0, w: ww, h: wh, u: 0, v: 0, tw: p.tw, th: p.th, rgba: 0x8080_8080 });
+    0x10
+}
+
+/// The confirm page's gold bolt: `*gp−0x689c` (y offset 1.3).
+pub const SHIP_GOLD_BOLT_OFFSET: [f32; 3] = [8.0, 1.3, -0.1];
+
+/// `DrawGBsShipMenu` 0x292980 (panel-local; return 8, centre crop).
+pub fn gold_panel_draw(m: &mut PageMenu, w: u32, a: &MenuAssets, gs: &GameState, out: &mut Vec<MenuDraw>) -> u32 {
+    let Some(wd) = m.widgets.get(&w) else { return 8 };
+    let rect = wd.rect;
+    let [_, _, ww, wh] = rect;
+    if let Some(spin) = m.gold_spin {
+        let class = super::pages::GOLD_BOLT_CLASS;
+        m.view.gold_bolt = Some(super::gadgets::PreviewView { rect, item: 0, o_class: class, clank: false, seq: 0, offset: SHIP_GOLD_BOLT_OFFSET, rot: [spin, super::pages::GOLD_BOLT_PITCH, 0.0] });
+    }
+    let dest = m.dest.clamp(0, 19) as usize;
+    let found = gs.levels.get(dest).map_or(0, |l| l.gold_bolts.iter().filter(|&&b| b != 0).count());
+    let total = m.map.tables.gold_totals.get(dest).copied().unwrap_or(0);
+    let mut t = a.msg(0x4f4f).to_vec();
+    t.extend_from_slice(format!(" {found} ").as_bytes());
+    t.extend_from_slice(a.msg(0x4f53));
+    t.extend_from_slice(format!(" {total}").as_bytes());
+    let (dx, dy) = super::pages::crop(ww, wh);
+    let tw = a.width(Font::Regular, &t);
+    let y = (crate::hud::SCREEN_H >> 1) - 8;
+    super::super::text(out, Font::Regular, ww - 0x10 - tw + dx, y + dy, super::SHADOW, &t);
+    super::super::text(out, Font::Regular, ww - 0x11 - tw + dx, y - 1 + dy, LIGHT_BLUE, &t);
+    8
 }

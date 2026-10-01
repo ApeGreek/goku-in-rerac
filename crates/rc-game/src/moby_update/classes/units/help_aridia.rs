@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | entry | update distance 0xff | [`update`] |
 //! | 0x2ee8c0 | in cuboid +0x5c, group < 2, `H[0x4f]` and `M[20]` 0, two or more owned hand items (slot type 0, not 8 / 0x18; `0x17a0c8` = the item definitions' +8 here) → `(20005, 0x4f)` | [`update`] |
-//! | 0x2ee990 | +0x54 = 0: in cuboid +0x48 in state 0x2c → 1; = 1: airborne (0x13f650 = 0) in cuboid +0x4c with skill point 0x13d409 not earned → skill point, level sound 1, banner 0x53d6; grounded → 0 | state: [`update`]; the award: NOT ported (G-SAV-007 [deferred]) |
+//! | 0x2ee990 | +0x54 = 0: in cuboid +0x48 in state 0x2c → 1; = 1: airborne (0x13f650 = 0) in cuboid +0x4c with skill point 0x13d409 not earned → skill point, level sound 1, banner 0x53d6; grounded → 0 | [`update`]; the award: `story::award_skill_point` |
 //! | 0x2eea40 | `H[0xc]` 0, in cuboid +0x10, the mission open, item 16 owned, its deaths ≥ 6 and more than `ScaleTicks(18000)` since `G[16]`'s time → `(2002, 0xc)` | [`update`] |
 //! | 0x2eeae8 | in cuboid +0x40 → the latch +0x58 := 1; latched: `M[8]` < 3 and `H[0x4c]` without this level's bit → `(20002, 0x4c)`; a camera option reversed (0x15eddc / 0x15ede0) → `H[0x76]` count := 0xffff, else `H[0x76]` without this level's bit → `(20012, 0x76)` | [`update`] (`Help::cam_reversed`) |
 //! | 0x2eeba0 | `H[0xd]` 0, in cuboid +0x10, the mission open, item 16 not owned, its deaths ≥ 3 → `(2003, 0xd)` | [`update`] |
@@ -41,6 +41,8 @@ pub fn update(w: &mut World, id: MobyId) {
     match pvi(w, id, 0x54) {
         0 if in_cuboid(w, id, 0x48) && w.hero.state == 0x2c => set_pvi(w, id, 0x54, 1),
         1 if w.hero.grounded_ticks != 0 => set_pvi(w, id, 0x54, 0),
+        // Airborne (0x13f650 = 0) in cuboid +0x4c: skill point 0x13d409 (`crate::moby_update::story`).
+        1 if in_cuboid(w, id, 0x4c) => { crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d409)); }
         _ => {}
     }
     let mission = pvi(w, id, 0);

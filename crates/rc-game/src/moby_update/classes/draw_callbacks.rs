@@ -60,6 +60,26 @@ pub enum Callback {
     /// runs in [`run_frame`] ([`super::units::frame_callback`]: Veldin's countdown 586's `0x2d8098`, its `randi(10)` and
     /// its text into [`DrawCallbacks::texts`]).
     UnitFrame(u16),
+    /// The ship's ground shadow (level01 `0x2a2130`, list 1; draw only): its quad computed at the registration
+    /// ([`crate::travel::ship::register_shadow`], [`DrawCallbacks::ship`]); `rc-engine`'s fx_draw draws it.
+    ShipShadow,
+    /// The ship's engine flames (level01 `0x2a2ab8`, list 1): the state part is each flame's `randi(+0xb2)`
+    /// ([`crate::travel::ship::flames_frame`] in [`run_frame`]); `rc-engine`'s fx_draw draws [`DrawCallbacks::ship`]'s quads.
+    ShipFlames,
+    /// The fly-away / flight trail (level01 `0x2a2d28`, list 1; draw only): `rc-engine`'s fx_draw draws
+    /// [`crate::travel::ship::trail_quads`] of `Services::travel`'s ring.
+    ShipTrail,
+    /// The Metal Detector's scan `0x2f1e28` (list 1), registered by the hand item's update on Ratchet's moby (the item
+    /// is not a table moby): the state part is the phase step and the squares (`super::buried_bolts::scan_frame`);
+    /// `rc-engine`'s fx_draw draws them.
+    DetectorScan,
+    /// The Trespasser lock 615's minigame (level02 `0x2d93e8`, list 1): the state part solves the rings and lays out the
+    /// 2-D primitives (`super::units::trespasser_lock::frame`); `rc-engine`'s scene_render draws them.
+    TrespasserRings,
+    /// The hero's draw callback `0x229440` in body 3 (the Hologuise disguise, registered by `crate::hero::bodies` on the
+    /// body moby): three glow quads `0x2781d0(0.2, 0.08, point, 0x141634)` at the disguise's joint lists 0..2
+    /// ([`DrawCallbacks::disguise`]); `rc-engine`'s fx_draw draws them. Draw only.
+    DisguiseGlow,
 }
 
 /// The lists (registration order).
@@ -81,6 +101,14 @@ pub struct DrawCallbacks {
     /// The 2-D countdowns the last [`run_frame`] drew (`DrawUIFrame` + `font_print_center_large`: Veldin's countdown
     /// 586, [`super::units::veldin_pads::countdown_draw`]); `rc-engine`'s scene_render draws them over the world.
     pub texts: Vec<super::units::veldin_pads::CountdownDraw>,
+    /// The ship's callbacks' quads (`crate::travel::ship`: the shadow at its registration, the flames from the frame's
+    /// [`run_frame`]).
+    pub ship: crate::travel::ship::ShipDraws,
+    /// The 2-D primitives the last [`run_frame`] laid out for the Trespasser locks' minigame (`0x2d93e8`,
+    /// [`super::units::trespasser_lock::frame`]); `rc-engine`'s scene_render draws them over the world.
+    pub rings: Vec<super::units::trespasser_lock::RingPrim>,
+    /// The disguise's glow points (0x1410a0..0x1410c0) and colour 0x141634 of this tick ([`Callback::DisguiseGlow`]).
+    pub disguise: Option<([[f32; 3]; 3], u32)>,
 }
 
 impl DrawCallbacks {
@@ -122,12 +150,15 @@ pub fn run_frame(w: &mut World) {
             Callback::ThrusterFlame => super::thruster_flame::draw_callback(w, id),
             Callback::RangeStatic => super::rc_range::draw_callback(w, id),
             Callback::UnitFrame(i) => super::units::frame_callback(w, i, id),
+            Callback::ShipFlames => crate::travel::ship::flames_frame(w, id),
+            Callback::DetectorScan => super::buried_bolts::scan_frame(w),
+            Callback::TrespasserRings => super::units::trespasser_lock::frame(w, id),
             Callback::Walloper => {
                 let dim = w.rng.randi(4) != 0;
                 w.svc.draw_callbacks.walloper_dim = Some(dim);
             }
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
-            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) | Callback::UnitQuads(_) => {}
+            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) | Callback::UnitQuads(_) | Callback::ShipShadow | Callback::ShipTrail | Callback::DisguiseGlow => {}
         }
     }
 }

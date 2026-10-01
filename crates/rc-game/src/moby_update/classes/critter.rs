@@ -24,7 +24,7 @@
 //! +0x214 s16 timers, +0x20a kind, +0x20c hover pick timer, +0x210 offset flip timer, +0x216 s16 leash, +0x218 leash
 //! moby, +0x21c path (−1 on Novalis), +0x228 hover wait, +0x60 the suck record (`creature::react`; state 7 is the Suck
 //! Cannon's: `0x305260`). Not ported (counted in `Services::unported`): the path clamp `0x28b5e0` (no Novalis critter has a path), the
-//! big-head manipulator `0x278720` (the cheat flag 0x15edb7), the shadow probe `0x26f020` (moby +0x84/+0x88).
+//! shadow probe `0x26f020` (moby +0x84/+0x88). The big-head cheat `0x278720(1.5, m, 0, +0x230)` (0x15edb7): `manip::big_head`.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
@@ -136,6 +136,8 @@ fn die(w: &mut World, id: MobyId, explode: bool) {
 /// `GroundCritterUpdate` 0x2efc60.
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x238 { return; }
+    // 0x278720(1.5, m, 0, +0x230): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 1.5, id, 0, id, 0x230);
     if w.svc.game_mode == 2 {
         let m = w.mm(id);
         m.has_collision = false;

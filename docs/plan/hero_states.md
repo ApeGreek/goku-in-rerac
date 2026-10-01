@@ -136,7 +136,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 | 0x2e | weapon draw walk | 1 | no SetState caller in any level | 0x17 / 0 after frame 28 | — | 0x2e | weapons.rs (unreachable) | – |
 | 0x2f | slippery-floor walk | 1 | walk on surface 7 (0x140632; L00) | 2 off the surface, 0 | own case (L00 0x217970) | 0x37 / 0x6d | surface.rs (P1) | P |
 | 0x31 | sinking floor | 0x10 | surface 4 (0x140633), grounded, not in groups 7/0x10/0x14 | 0 when off it and 0x13f530 = 0 (momentum = the carried part) | vz = min(disp.z − 50·dt², −40·dt²), turns with 0x13f440, particles 47, sound slot 0x141570, body roll springs | 100 | surface.rs (P1) | P |
-| 0x38..0x3a | the Hydrodisplacer's use poses | 0x13 | the Hydrodisplacer item's update `0x309cd0` (item 22) on a pad 341 | 0 (0x38 / 0x39 unless holding item 0x16; 0x3a on the wrap) | velocity to the pad's centre clamped to 2·dt, yaw toward the pad's (≤ 9.42·dt a tick) | 0x46 / 0x47 / 0x48 (8 ticks) | with G-WPN-006 | – |
+| 0x38..0x3a | the Hydrodisplacer's use poses | 0x13 | the Hydrodisplacer item's update `0x309cd0` (item 22) on a pad 341 | 0 (0x38 / 0x39 unless holding item 0x16; 0x3a on the wrap) | velocity to the pad's centre clamped to 2·dt, yaw toward the pad's (≤ 9.42·dt a tick) | 0x46 / 0x47 / 0x48 (8 ticks) | hydrodisplacer.rs (2026-10-01) | P |
 | 0x3c | burn bounce | 4 | surface 1 (0x140635; L00), damage 1 | jump case | jump case: h 5.5, takeoff 5, g 15·dt², 150 ticks; → 0x7c on level 10 / twice | 0x43 | damage.rs (P2) | P |
 | 0x3d | death | 0x14 | health < 1 in 0/2, landing without health | fade 0x2319b0 on wrap | ground case | 0x45 | damage.rs (P2) | P |
 | 0x3f | Magneboots walk | 1 | walk / SetState(2) with 0x13f658 = 1 | 4, 0x71, 6, 2 (off the floor), 0 (no stick after 30) | own case: 2..3.5 u/s inside ±70°, TurnTo / SetPlanarVel / gravity in mode 1 | 0x5b | boots.rs (P5) | P |
@@ -163,7 +163,7 @@ Physics column: the case of `0x2370b8` (L00 `0x217970` where level01 lacks it) a
 |---|---|---|---|
 | 0x43 idle, 0x44 walk (+0x50), 0x45 / 0x52 fall, 0x46 hurt, 0x47 death, 0x49 / 0x4c jumps (anims 7 / 9), 0x4a / 0x4b / 0x4d / 0x4e ledge (anims 10..0xc), 0x4f glide (0xe), 0x51 kick (group-6 entry in melee.rs), 0x7d burn, 0x48 (physics no-op only) | Clank (body 1; levels 0, 4, 6, 7, 9, 10, 13, 17) | 0..0x14 | Bodies (later) |
 | 0x5a idle, 0x5b walk, 0x5c fall, 0x5d hurt, 0x5e jump (h 4.2), 0x5f..0x61 attacks, 0x62 death | Giant Clank (body 2, **L**; levels 0, 4, 7, 9, 10, 13, 15, 18) | | Bodies (later) |
-| 0x53 idle, 0x54 walk, 0x55 fall, 0x56 hurt, 0x57 death, 0x58 pit fall, 0x59 ○ action | Hologuise disguise (body 3; every level) | | Bodies (later) |
+| 0x53 idle, 0x54 walk, 0x55 fall, 0x56 hurt, 0x57 death, 0x58 pit fall, 0x59 ○ action | Hologuise disguise (body 3; every level) | | bodies/disguise.rs, hologuise.rs (2026-10-01) |
 | 0x6b ride, 0x6c, 0x6d, 0x6e into water, 0x6f; 0x3e (group 0x15, level 16) | Hoverboard (levels 5, 16) | 0x16 | Hoverboard (later) |
 | 0x63 / 0x64 | cutscene control / the scene body (mode-2 scenes, the vendor); 100 is the only state group 0x14 accepts (respawn) | 0x18 | scripted.rs: ported 2026-09-28 (hero_gameplay.md §7) |
 | 0x05, 0x7e | no SetState case (0x7e: a walk-case label only) | — | Unused |
@@ -694,7 +694,7 @@ map gates and the prompt rules exclude it (`0x2aba68`, the vendor rule), the Dro
 the shot-down fall and blasts; its 0x32 branch is the skill point, G-SAV-007 deferred). The mouse 1818 (already
 ported) no longer freezes the hero (`HeroTick::Unimplemented`) in 0x1f.
 
-**Not ported, with owners:** 0x38..0x3a with the Hydrodisplacer (G-WPN-006: entry group 0x13, anim 0x46 / 0x47 /
+**Ported 2026-10-01** (`hero/hydrodisplacer.rs`): 0x38..0x3a with the Hydrodisplacer (entry group 0x13, anim 0x46 / 0x47 /
 0x48 over 8 ticks; physics (L00 `0x217970`): the velocity toward pad 341's centre clamped to 2·dt (`0x25f730`) and the yaw turned toward the pad's at up to 9.42·dt a tick; the
 transitions above); 0xc (no caller: nothing to port); the per-body idle `0x227638` / L06 `0x239528` (body 0 is
 `SetState(0, 1)`; the others are G-HERO-005's states); the vehicle word `0x140940` / `0x140944` that several 0x32

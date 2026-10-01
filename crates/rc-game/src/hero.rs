@@ -65,6 +65,11 @@ pub mod taunter;
 pub mod morph_ray;
 pub mod walloper;
 pub mod visibomb;
+pub mod hydrodisplacer;
+pub mod trespasser;
+pub mod metal_detector;
+pub mod hologuise;
+pub mod pda;
 pub mod crank;
 pub mod scripted;
 pub mod worn;
@@ -464,6 +469,10 @@ pub struct Hero {
     pub walloper: walloper::Walloper,
     /// The other bodies' fields (Clank's health, Giant Clank's energy, the body moby; [`bodies`], G-HERO-005).
     pub bodies: bodies::Bodies,
+    /// The cheat bytes 0x15edb0 as the hero code reads them (the tick copies `GameOptions::cheats` in; `crate::cheats`).
+    pub cheats: crate::cheats::Cheats,
+    /// The move ring 0x141514[16] / 0x141524 of the cheat entry `0x2285a0` (`crate::cheats::MoveEntry`).
+    pub cheat_moves: crate::cheats::MoveEntry,
 }
 
 /// Item ownership as the hero code reads it: the game state's owned table `0x13d4c0 + id` (37 items,
@@ -531,6 +540,7 @@ impl Hero {
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
             joint_targets: Default::default(), help: Default::default(), walloper: Default::default(), bodies: bodies::Bodies::default(),
+            cheats: Default::default(), cheat_moves: Default::default(),
         }
     }
 
@@ -678,6 +688,10 @@ impl Hero {
     /// The back pack classes' joint lists and class scales `(o_class, scale, first byte lists)` (the Hydro-Pack's
     /// jets: [`fx::pack_point`]).
     pub fn set_pack_joint_lists(&mut self, packs: Vec<(i16, f32, Vec<Vec<u8>>)>) { self.fx.joints.packs = std::sync::Arc::new(packs); }
+
+    /// The hand item classes' joint-list targets `(o_class, target per list)` ([`fx::JointData::items`]: the hand records
+    /// and the Metal Detector's node, [`gadgets::hand_modifiers`]).
+    pub fn set_item_joint_targets(&mut self, items: Vec<(i16, Vec<u8>)>) { self.fx.joints.items = std::sync::Arc::new(items); }
 }
 
 /// Sounds the hero update plays at the game's point inside `0x228870`, so their RNG draws (the class sound's
@@ -703,6 +717,8 @@ pub trait HeroSounds {
     fn footstep(&mut self, _moby: &crate::moby_runtime::Moby, _level: i32, _class: u8, _foot: u8, _variant: u8, _rng: &mut crate::rng::Rng) -> i32 { -1 }
     /// `SoundIsAlive(owner, slot)` 0x2a12f0 for a slot the hero's sounds took (the hand item's loops).
     fn alive(&mut self, _slot: i32) -> bool { false }
+    /// `SoundSetPitchBend(slot, pb)` 0x2a1988 on a slot the hand item's sounds took (the Metal Detector's beep).
+    fn set_pitch_bend(&mut self, _slot: i32, _pb: i32) {}
     /// `PlayClassSound(index, flags, moby)` on a moby the hand item's update created (the R.Y.N.O.'s missile, class
     /// `o_class` at `pos`, table moby `id`). Default: as [`HeroSounds::item_sound`].
     fn moby_sound(&mut self, _id: crate::moby_runtime::MobyId, o_class: i16, pos: [f32; 3], index: i32, flags: u32, rng: &mut crate::rng::Rng) -> i32 { self.item_sound(o_class, pos, index, flags, rng) }
@@ -752,7 +768,16 @@ pub fn hero_update_with_sounds(
     }
     // A body is the hero moby (`0x2070d0` → `HeroUpdateAlt` 0x2062b0, G-HERO-005): its own update.
     if hero.mode != 0 {
-        bodies::body_update(hero, moby, env, anim, rng, sounds, counter);
+        if hero.mode == bodies::body::DISGUISE {
+            // Body 3: `0x236738` plays Ratchet's class sounds on Ratchet's moby moved to the hero (not on the body moby):
+            // the hero's voices of this update are queued and played by the tick on Ratchet's moby (hologuise).
+            let mut q = hologuise::DisguiseVoices { inner: sounds, queued: Vec::new() };
+            bodies::body_update(hero, moby, env, anim, rng, &mut q, counter);
+            let queued = q.queued;
+            hologuise::queue_voices(hero, queued);
+        } else {
+            bodies::body_update(hero, moby, env, anim, rng, sounds, counter);
+        }
         // (`fx::end`'s back placement is Ratchet's: the back items do not update in a body.)
         hero.fx.view = anim.view();
         return HeroTick::Ran;
@@ -764,6 +789,8 @@ pub fn hero_update_with_sounds(
     sounds.anim_advanced(moby, &before, &anim.view(), rng);
     hero.back_follow_speed(anim.view().seq_b, rng);
     hero.input_physics_move(env, anim, rng);
+    // The disguise's timer ran out in the move (`HeroTickStateTimer`): the disguise moby asked for (super::hologuise).
+    hologuise::enter(hero);
     // The sounds the per-state physics started (the packs' loops, 0x236798): played at the physics' point.
     packs::flush_sounds(hero, moby, sounds, rng);
     surface::flush(hero, moby, sounds, rng);

@@ -25,8 +25,8 @@
 //! queued in `creature::Globals::scripts` ([`ScriptRequest`]) for the cutscene system and the hero.
 //!
 //! **A hit** (mask 0x800000; no Novalis weapon has it): `SpawnBeamExplosion(0, 0, 4, 2, 100000, 3, 15, …, 20 streaks,
-//! 3 sparks, 4 puffs, sound 1, shake, 1 debris)`, the links P+0x140.. and the ship deleted. Not ported (counted): the
-//! skill point / level sound 1 / banner 0x53d6, and the debris 1510 of `0x30be70`.
+//! 3 sparks, 4 puffs, sound 1, shake, 1 debris)`, the links P+0x140.. and the ship deleted; skill point 0x13d408 with level sound 1 and banner 0x53d6
+//! (`story::award_skill_point`). Not ported (counted): the debris 1510 of `0x30be70`.
 
 use super::flyer;
 use crate::moby_runtime::{mode, MobyId};
@@ -276,7 +276,8 @@ fn volley(w: &mut World, id: MobyId) -> bool {
 
 /// A hit (mask 0x800000): the explosion, the links and the ship deleted (module doc).
 fn kill(w: &mut World, id: MobyId, _f: f32) {
-    w.svc.unported("gunship 688: kill skill point / sound / banner / debris 0x30be70");
+    crate::moby_update::story::award_skill_point(w, 0);
+    w.svc.unported("gunship 688: debris 0x30be70");
     fx::beam_explosion(w, &flyer::KILL_BEAM, Some(id), c::pos(w, id));
     for k in 0..4 {
         if let Some(l) = link(w, id, P_LINKS + 4 * k) { w.delete_moby(l); }

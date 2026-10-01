@@ -19,7 +19,8 @@
 //! | 8 | `UnlockPlanet(3)` + banner, shown, the drop-in trigger's spawn id spent, the bridge trigger commanded for `ticks(180)` and the bridge halves +0xbc = 2 (they lower), `SetMissionDone`, checkpoint at +0x30, save, the ship shown → 10 |
 //! | 10 | z = landing z |
 //!
-//! Not ported: the big-head cheat (`FUN_002fac80`), the bridge halves' visit-state persistence `FUN_0029b0a0` (the
+//! `FUN_002fac80` at the top: the big-head cheat on the scene actors of class 0x32b at 2.75
+//! (`manip::scene_big_head`). Not ported: the bridge halves' visit-state persistence `FUN_0029b0a0` (the
 //! bridge lowers again from the mission byte on a reload). `UnlockPlanet` / `ShowPlanetBanner` go through
 //! `crate::cinematic` (the saved game's planet bits, the HUD banner); the save is logged.
 
@@ -68,6 +69,8 @@ fn aim(w: &World, t: MobyId, id: MobyId) -> Option<(usize, f32, f32)> {
 /// `MissionNpcUpdate` 0x2fad68 (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x40 { return; }
+    // FUN_002fac80: the actors' big-head cheat on the scene actors of class 0x32b at 2.75.
+    crate::moby_update::manip::scene_big_head(w, &[0x32b], 0, f32::from_bits(0x4030_0000));
     // FastDecTimer__FRs(+0x08).
     {
         let pv = &mut w.mm(id).pvars;

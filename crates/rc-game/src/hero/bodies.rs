@@ -17,8 +17,8 @@
 //!   becomes in a body.
 //! * **The body's hero update** `HeroUpdateAlt` (L00 `0x2062b0`; level01 `0x228000`): [`body_update`] (the hero part) and
 //!   [`after_update`] (the mobys it creates and places: Clank's antenna glow 0x4b4 and rotor 0x47a, Giant Clank's pilot).
-//! * The states: [`clank`] (body 1), [`giant`] (body 2). The disguise (body 3, 0x53..0x59) comes with the Hologuise
-//!   item (G-WPN-006): its entries / physics / transitions are not ported, its branches here are listed as such.
+//! * The states: [`clank`] (body 1), [`giant`] (body 2), [`disguise`] (body 3, 0x53..0x59: the Hologuise's, with the item
+//!   and the way in / out in `crate::hero::hologuise`, 2026-10-01 G-WPN-006).
 //!
 //! **Plug-and-play.** A class that hands the hero a body calls [`queue_switch`] (`SwitchCharacter`) and
 //! [`queue_leave`] (the level's leave copy) through its `World`; the per-body idle is `HeroCall::BodyIdle`. A class
@@ -45,7 +45,7 @@
 //! | +11 | 0x13fde0 = 0x13fde4 = 1 (playback speed, rate) | ported (`anim_speed`; the rate by `bind_body`) |
 //! | +12 | `0x247d00`: the anim loop cleared | ported (`clear_loop` after `bind_body`) |
 //! | +13 | `0x26be04(body)`: the hero lighting on the body moby | n/a here (the engine's hero lighting reads the hero moby, [`Hero::hero_moby`]) |
-//! | +14 | `0x229158`: the squash table 0x14162c | n/a (0x14162c is set only by the disguise's entry: G-WPN-006) |
+//! | +14 | `0x229158`: the squash table 0x14162c | ported (`hologuise::squash`, 2026-10-01) |
 //! | +15 | 0x14161c = state | ported ([`Bodies::state_param`]) |
 //! | +16 | mode 1: 0x141600 = (s16)health, health = Clank's 0x1415fc | ported |
 //! | +17 | (L00 family) mode 2: 0x140980 = 200 | ported ([`Bodies::energy`]) |
@@ -54,14 +54,14 @@
 //! | +1 | mode 2 and 0x140984 ≠ −1: `0x24b090(0x140984, 0)` (Giant Clank's energy HUD released), 0x140984 = −1 | ported ([`Bodies::energy_hud`]; the HUD element itself: `crate::hud`) |
 //! | +2 | `0x227420` | ported |
 //! | +3 | 0x1413f4 = 0; body +0x34 &= ~6; 0x13fdd4 = 0 | ported |
-//! | +4 | the disguise moby 0x13fddc deleted | ported (none is ever made: G-WPN-006) |
+//! | +4 | the disguise moby 0x13fddc deleted | ported (made by the Hologuise's timer: `hologuise`, `fx::MobySpawn::Disguise`) |
 //! | +5 | `0x2283a8` | ported |
 //! | +6 | 0x1413d0 = Ratchet; his position = the hero's; +0x98 = 0; 0x13fde4 = 1; `0x247d00` | ported ([`BodyCmd`], `bind_body(None)`, `clear_loop`) |
 //! | +7 | state ≠ 100 or game mode 0x15f5c4 ∉ {2, 6}: `SetState(0, 1)` | ported |
 //! | 0x227638 | body 0 → `SetState(0, 1)`, 1 → 0x43, 2 → 0x5a, 3 → 0x53 | ported ([`body_idle`]) |
 //! | SetState 0 (L00 case 0) | in a body: group 0, 0x1415d4 = 0, the look timer draw, `0x22b8e8`, then `0x227638` and SetState returns 1 | ported (`ground.rs`) |
 //! | SetState prologue | mode ≠ 0: 0x1413fd / 0x1413f7 / 0x1413ff / Ratchet +0x98 / after-images untouched | ported (the existing `mode == 0` gate) |
-//! | SetState prologue | mode 3 and the state not 0x53..0x59 / 0x65..0x67 / 0 / 1: `0x22cd18` → leave the disguise | NOT ported (G-WPN-006) |
+//! | SetState prologue | mode 3 and the state not 0x53..0x59 / 0x65..0x67 / 0 / 1: `0x22cd18` → leave the disguise | ported (`states::set_state`, 2026-10-01) |
 //! | HeroUpdateAlt +0 | `RatchetAnimAdvance` on the body moby | ported ([`body_update`]; the class sound of its triggers through `HeroSounds::anim_advanced`) |
 //! | +1 | `HeroMotionUpdate` | ported (`input_physics_move`) |
 //! | +2 | `HeroSurfaceReaction` | ported (`surface_reaction`; Clank's burn 0x7d: `surface.rs`) |
@@ -73,22 +73,22 @@
 //! | +8 | mode 0: return | ported |
 //! | +9 | `0x22a110`: the body's write-back (first-person hide / show, Ratchet hidden, hit slot 0xff, position / Euler / rows, `MobyBuildMatrix`) | ported (`write_back`, the tick) |
 //! | +10 | `0x229348`: the global fade 0x15f3fc | n/a (not ported on foot either; no reader in the body states) |
-//! | +11 | `0x229158` | n/a (the disguise's) |
+//! | +11 | `0x229158` | ported (`hologuise::squash` on the body moby) |
 //! | +12 | mode 1: record 25's scale = 0x15ee18; `0x2278c0` (0x15ee18 → 1.0, the glow pulse on the body moby) | ported ([`Bodies::scale18`], [`glow`]) |
-//! | +13 | mode 1: the antenna glow moby 0x4b4 created (scale ×1.7, glow 0x801432d7, 0x141650 = 0x301432d7) and placed at joint list 7 (0.0257 down its rows), its scale approaching 1.7 (×1.4 while flashing) | ported ([`after_update`]; the cheat 0x15edb3's 3.1: NOT ported, G-SAV-006) |
+//! | +13 | mode 1: the antenna glow moby 0x4b4 created (scale ×1.7, glow 0x801432d7, 0x141650 = 0x301432d7) and placed at joint list 7 (0.0257 down its rows), its scale approaching 1.7 (×1.4 while flashing) | ported ([`after_update`]; 3.1 with the cheat 0x15edb3) |
 //! | +14 | mode 1, body shown: joint list 7's point → 0x1410d0; `0x229400`: the hero's draw callback `0x229440` | NOT ported (G-REN-005: the red dot glow quad) |
 //! | +15 | mode 1: the glow phase 0x140978 (170°/s, 700°/s while the flash 0x14164c runs) and its colours by 0x14164e, tweened into the glow moby's +0x90 and 0x141650 | ported ([`after_update`]) |
 //! | +16 | mode 1: the rotor moby 0x47a created / placed at joint list 5 (rows: the joint's × Rz(−yaw)), its light = the body's; in 0x4f its sequence 1 (blend 10), else 0 (blend 17) | ported ([`after_update`]) |
 //! | +17 | mode 1: a command 0x141610 (the command menu): `PlayClassSound(cmd + 16, 0, hero)`, 0x14164e = cmd, 0x14164c = 57 | ported ([`Bodies::command`]; the menu that sets it: NOT ported, G-UI-018) |
 //! | +18 | `0x25c4f8`: the map fog writer | ported by the engine (it reads the hero position) |
-//! | +19 | mode 2: cheat 0x15edb3 → record 28's scale ×1.4 | NOT ported (G-SAV-006) |
+//! | +19 | mode 2: cheat 0x15edb3 → record 28's scale = 0x15ee18 ·1.4 | ported (`update` tail, `crate::cheats`) |
 //! | +20 | mode 2: `0x2278c0`, `0x2061f0` (the pilot: Ratchet shown when the body is, sequence 0x81 over 10 ticks, his generic advance) | ported ([`glow`], [`after_update`]) |
 //! | +21 | mode 2, body shown: joint list 6's point → 0x1410d0, `0x229400` | NOT ported (G-REN-005) |
-//! | +22 | mode 3 (the disguise's tint, 0x14162e) | NOT ported (G-WPN-006) |
+//! | +22 | mode 3 (the disguise's tint and glow points, 0x14162e; the cheat 0x15edb1's head record 30 (L01 0x17c04c) = 1.9) | ported (`hologuise::body_update`, record [`rec::R30`]) |
 //! | +23 | `0x22a260`: the hero shadow; `0x26be04`: the hero lighting | ported by the engine on the hero moby ([`Hero::hero_moby`]) |
 //! | HeroTickStateTimer | mode 2: 0x140986 (the beam's lockout) counted down | ported (`post_move`) |
 //! | HeroTickStateTimer | the body point 0x13f420 (0.4 up for Clank, 4.0 for Giant Clank) and the bolt radii 0x1415d8 / 0x1415dc (2.125 / 1.25, 15 / 3) | ported (`post_move`; `World::bolt_radii`) |
-//! | HeroTickStateTimer | the disguise's 18-tick timer 0x14162e (enter / leave body 3, moby 0x27a) | NOT ported (G-WPN-006) |
+//! | HeroTickStateTimer | the disguise's 18-tick timer 0x14162e (enter / leave body 3, moby 0x27a) | ported (`hologuise::tick_timer` / `enter` / `leave`) |
 //! | `HeroSizeCapsule` | Clank: bottom 0.45, radius 0.3, top 0.6; Giant Clank 4.45 / 3.75 / 5.25 | ported (`size_capsule`) |
 //! | `0x232978` wall check | Clank: lines at 0.35 (×0.3), 0.27 long; Giant Clank 1.5, 5.0 | ported (`wall_check`) |
 //! | `HeroWallLedgeCheckB` / `C` | Clank's heights (top line 0.875..0.7, 0.725 max climb, 0.7 above the ground, wall from −0.4, hang −0.71, 0.32 out, steps 0.0625) and states | ported (`ledge.rs`) |
@@ -101,6 +101,7 @@
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 
 pub mod clank;
+pub mod disguise;
 pub mod giant;
 
 use super::anim::AnimCtl;
@@ -189,13 +190,15 @@ pub struct Bodies {
     pub glow_colour: u32,
     /// 0x14161c (s16): the state the switch entered (the checkpoint saves it).
     pub state_param: i32,
-    /// 0x15ee18: the body's head scale (approaches 1.0 by 0.05 a tick in `0x2278c0`; 1.8 with the cheat 0x15edb3, not ported).
+    /// 0x15ee18: the body's head scale (approaches 1.0 by 0.05 a tick in `0x2278c0`; 1.8 with the cheat 0x15edb3).
     pub scale18: f32,
     /// The glow word `0x2278c0` wrote this tick into the hero moby's +0x90 (bodies 1 / 2; applied by the tick).
     pub body_glow: Option<u32>,
     /// The body's joint records (L00 0x17a680 + 0xb0·rec: 24..26 kind 2 on Clank's lists 4..6; 27..29 kind 3 on Giant
     /// Clank's lists 2, 1, 0; spring 0.02 / 0.2), and those attached to the body moby (its +0x64 list, head first).
-    pub joints: [JointRec; 6],
+    /// Record 30 (L01 0x17bfa0: kind 4 on the disguise's list 3, spring 0.02 / 0.2): the disguise's head (the cheat
+    /// 0x15edb1 scales it 1.9 in body 3, `super::hologuise::body_update`).
+    pub joints: [JointRec; 7],
     pub manips: Vec<u8>,
     /// Commands to the moby table ([`apply_cmds`]).
     pub cmds: Vec<BodyCmd>,
@@ -253,6 +256,7 @@ impl Default for Bodies {
                 JointRec::of_kind(27, 2, 3, k, d),
                 JointRec::of_kind(28, 1, 3, k, d),
                 JointRec::of_kind(29, 0, 3, k, d),
+                JointRec::of_kind(30, 3, 4, k, d),
             ],
             manips: Vec::new(),
             cmds: Vec::new(),
@@ -273,6 +277,7 @@ pub mod rec {
     pub const R27: usize = 3;
     pub const R28: usize = 4;
     pub const R29: usize = 5;
+    pub const R30: usize = 6;
 }
 
 impl Bodies {
@@ -482,6 +487,11 @@ pub(super) fn body_update(h: &mut Hero, moby: &mut Moby, env: &Env, anim: &mut d
     anim.advance(h.anim_speed);
     sounds.anim_advanced(moby, &before, &anim.view(), rng);
     h.input_physics_move(env, anim, rng);
+    // `HeroTickStateTimer`'s end of the disguise's timer in body 3: leave the body (super::hologuise).
+    if h.gadgets.disguise.due.is_some() {
+        let mut c = Ctx { env, anim: &mut *anim, rng: &mut *rng, voice: None };
+        super::hologuise::leave(h, &mut c);
+    }
     super::packs::flush_sounds(h, moby, sounds, rng);
     super::surface::flush(h, moby, sounds, rng);
     h.surface_reaction(env, anim, rng);
@@ -508,9 +518,14 @@ pub(super) fn body_update(h: &mut Hero, moby: &mut Moby, env: &Env, anim: &mut d
     if !h.joint_targets.is_empty() || h.body_joints().is_some() {
         moby.joint_mods = h.body_joints().map(|j| h.bodies.modifiers(&j.targets)).unwrap_or_default();
     }
+    // `0x229158`: the squash on the body moby (super::hologuise); then body 3's part of `HeroUpdateAlt`.
+    super::hologuise::squash(h, moby);
+    super::hologuise::body_update(h, &*anim, counter);
     // 0x2278c0 on the body (bodies 1 / 2).
     if matches!(h.mode, body::CLANK | body::GIANT) {
         if h.mode == body::CLANK { h.bodies.joints[rec::R25].scale = h.bodies.scale18; }
+        // +19, body 2: the cheat 0x15edb3 → record 28's scale = 0x15ee18 · 1.4.
+        if h.mode == body::GIANT && h.cheats.on(crate::cheats::slot::CLANK) { h.bodies.joints[rec::R28].scale = h.bodies.scale18 * 1.4; }
         glow(h, counter);
     }
 }
@@ -534,11 +549,18 @@ fn springs(h: &mut Hero) {
     }
 }
 
+/// `0x2278c0`'s first call: `Approach(1.0, 0.05, &0x15ee18)`, 1.8 (0x3fe66666) with the cheat 0x15edb3 (in every
+/// body: the hero update `0x228870` and `HeroUpdateAlt`).
+pub fn approach_head_scale(h: &mut Hero) {
+    let t = if h.cheats.on(crate::cheats::slot::CLANK) { f32::from_bits(0x3fe6_6666) } else { 1.0 };
+    let s = &mut h.bodies.scale18;
+    *s += (t - *s).clamp(-0.05, 0.05);
+}
+
 /// `0x2278c0` in bodies 1 / 2: 0x15ee18 → 1.0 (0.05 a tick), the glow pulse on the hero moby (+0x90, mode |= 0x10;
 /// `idle::clank_glow_word`); the blink is Ratchet-mode only.
 pub fn glow(h: &mut Hero, counter: i32) {
-    let s = &mut h.bodies.scale18;
-    *s += (1.0 - *s).clamp(-0.05, 0.05);
+    approach_head_scale(h);
     h.bodies.body_glow = Some(super::idle::clank_glow_word(counter, h.health, h.f53e));
 }
 
@@ -580,6 +602,14 @@ pub fn after_update(
         }
     }
     if h.mode == body::CLANK { clank::after_update(h, table, body, hits, sounds, rng, counter); }
+    // Body 3: the hero's draw callback `0x229440` (registered once a frame by `0x229400`): the disguise's glow quads.
+    if h.mode == body::DISGUISE {
+        let hero = h.clone();
+        hits.world(table, &hero, rng, counter, &mut |w| {
+            w.svc.draw_callbacks.register(crate::moby_update::classes::draw_callbacks::Callback::DisguiseGlow, body);
+            w.svc.draw_callbacks.disguise = Some((hero.gadgets.disguise.glow_points, hero.gadgets.disguise.tint));
+        });
+    }
     if h.mode == body::GIANT { giant::after_update(h, table, ratchet, body, anim, hits, rng, counter); }
     // The hits the states queued, on the moby world (`0x26e830`, `coll_sphere_mobys`).
     let pending = std::mem::take(&mut h.bodies.hits);

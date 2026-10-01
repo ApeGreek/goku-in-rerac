@@ -18,6 +18,7 @@
 //! | states 2, 3 | position = +0x00 + row 2 (+0xe0) set to 3.109 (gp−0x4eb8) | [`update`] |
 //! | states 4, 5 | `0x270cc0(60°, 270°·dt², 360°·dt², 180°·dt, +0x14, +0x20)` (gp−0x4ec8 / −0x4ec4 / −0x4ec0); rot.x = +0x10 − +0x14; at 60°: not drawn, mode \| 1, → 6 (door) / 7 (petal) | [`update`] (`turn::turn_toward`) |
 //! | states 8, 9 | the same turn toward 0; at 0 → 2 / 3 | [`update`] |
+//! | `0x2f5360` / `0x2f53e8` | the open / close other classes call (Blarg's NPCs 1105 / 1109) | [`open`] / [`close`] |
 //! | | no particle, light, hit, save flag | n/a |
 
 use crate::moby_runtime::{mode, MobyId};
@@ -131,6 +132,43 @@ pub fn update(w: &mut World, id: MobyId) {
             w.mm(id).state = if s == 8 { 2 } else { 3 };
         }
         _ => {}
+    }
+}
+
+/// `0x2f5360(door)`: the door opened by another class (Blarg's scientist 1105): +0xbc = 1; a closed door (state 2)
+/// plays sound 0, → 4, +0x18 = +0x14 = 0, its petals → 5.
+pub fn open(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < 0x40 { return; }
+    w.mm(id).cmd = 1;
+    if w.m(id).state != 2 { return; }
+    w.play_sound(0, 0, id);
+    w.mm(id).state = 4;
+    c::set_pf(w, id, 0x18, 0.0);
+    c::set_pf(w, id, 0x14, 0.0);
+    for k in 0..PETALS {
+        if let Some(p) = petal(w, id, k) { w.mm(p).state = 5; }
+    }
+}
+
+/// `0x2f53e8(door)`: the door closed again by another class: +0xbc = 1; an open door (state 6) plays sound 0, is drawn
+/// and shown, → 8, +0x18 = 0, its petals → 9, shown and drawn.
+pub fn close(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < 0x40 { return; }
+    w.mm(id).cmd = 1;
+    if w.m(id).state != 6 { return; }
+    w.play_sound(0, 0, id);
+    let m = w.mm(id);
+    m.visible = 1;
+    m.state = 8;
+    m.mode &= !mode::HIDDEN;
+    c::set_pf(w, id, 0x18, 0.0);
+    for k in 0..PETALS {
+        if let Some(p) = petal(w, id, k) {
+            let m = w.mm(p);
+            m.state = 9;
+            m.mode &= !mode::HIDDEN;
+            m.visible = 1;
+        }
     }
 }
 

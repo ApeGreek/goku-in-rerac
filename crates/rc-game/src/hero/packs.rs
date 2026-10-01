@@ -95,6 +95,8 @@ pub enum SoundCmd {
     ItemLoop { n: usize, index: i32, flags: u32 },
     /// The hand item's loop `n` released (`release_voice_slot` when still its sound) and forgotten.
     ItemRelease { n: usize },
+    /// `SoundSetPitchBend(loop n, pb)` 0x2a1988 on the hand item's loop `n` (the Metal Detector's beep).
+    ItemPitch { n: usize, pb: i32 },
     /// `PlayClassSound(index, flags, moby)` on a moby the item's update created (`HeroSounds::moby_sound`).
     MobySound { moby: crate::moby_runtime::MobyId, o_class: i16, pos: [f32; 3], index: i32, flags: u32 },
 }
@@ -178,7 +180,7 @@ pub(super) fn flush_sounds(h: &mut Hero, moby: &crate::moby_runtime::Moby, sound
             SoundCmd::Voice { index, flags } => { sounds.voice(moby, index, flags, rng); }
             SoundCmd::Release { slot } => sounds.release(moby, slot),
             // The hand item's loops are flushed with the item sounds (super::gadgets::flush_item_sounds).
-            SoundCmd::ItemLoop { .. } | SoundCmd::ItemRelease { .. } | SoundCmd::MobySound { .. } => {}
+            SoundCmd::ItemLoop { .. } | SoundCmd::ItemRelease { .. } | SoundCmd::ItemPitch { .. } | SoundCmd::MobySound { .. } => {}
         }
     }
 }

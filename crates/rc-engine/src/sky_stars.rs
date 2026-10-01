@@ -90,7 +90,7 @@ fn load_tables(level: u32) -> Result<OverlayTables> {
 }
 
 #[derive(Resource)]
-struct StarSim {
+pub(crate) struct StarSim {
     stars: SkyStars,
     /// Own stream when there is no particle simulation (it is the game's shared stream otherwise).
     fallback_rng: Rng,
@@ -156,7 +156,8 @@ pub struct SkyStarsPlugin;
 impl Plugin for SkyStarsPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<SkyStarMaterial>::default())
-            .add_systems(PostStartup, setup)
+            .add_systems(crate::level_switch::LevelPostStartup, setup)
+            .add_systems(crate::level_switch::LevelUnload, crate::level_switch::remove::<StarSim>)
             .add_systems(FixedUpdate, star_frame.after(crate::particle_render::tick).after(crate::gameplay::GameTick))
             .add_systems(PostUpdate, build_meshes);
     }
@@ -172,16 +173,39 @@ fn setup(
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
     let (Some(ls), Some(slot)) = (level.0.sky.as_ref(), slot) else { return };
-    let Some(info) = level_stars(ls.level) else { return };
+    if let Some(sim) = spawn_stars(&mut commands, ls, slot.0, RenderLayers::layer(SKY_LAYER), &mut meshes, &mut images, &mut materials, &mut buffers) {
+        commands.insert_resource(sim);
+    }
+}
+
+/// The star step of sky `ls` (its level's generator, [`level_stars`]) drawn in sky order slot `slot` on render layer
+/// `layer`; the simulation the caller inserts (one at a time: the level's, or the title world's while it is shown,
+/// crate::title_world). None: no star step, or `RC_SKY_STARS=0`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_stars(
+    commands: &mut Commands,
+    ls: &crate::sky_render::LevelSky,
+    slot: u32,
+    layer: RenderLayers,
+    meshes: &mut Assets<Mesh>,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<SkyStarMaterial>,
+    buffers: &mut Assets<ShaderBuffer>,
+) -> Option<StarSim> {
+    let info = level_stars(ls.level)?;
     if std::env::var("RC_SKY_STARS").is_ok_and(|v| v.trim() == "0") {
         println!("sky stars: RC_SKY_STARS=0, not generated or drawn (the rand stream then differs from the game's)");
-        return;
+        return None;
     }
-    let tables = match load_tables(ls.level) {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("sky stars: {e:#}; stars disabled");
-            return;
+    let tables = if ls.level == rc_game::sky_stars::TITLE_LEVEL {
+        rc_game::sky_stars::OverlayTables::default()
+    } else {
+        match load_tables(ls.level) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("sky stars: {e:#}; stars disabled");
+                return None;
+            }
         }
     };
     let initial: Vec<Star> = ls.sprite_scratch.as_chunks::<RECORD>().0.iter().map(|c| Star(*c)).collect();
@@ -204,13 +228,13 @@ fn setup(
         let mat = materials.add(SkyStarMaterial {
             texture: images.add(crate::sky_render::sky_image(tex)),
             sprites: buffer.clone(),
-            bias: slot.0 as f32 * ORDER_SPACING + g as f32,
+            bias: slot as f32 * ORDER_SPACING + g as f32,
         });
         commands.spawn((
             Mesh3d(mesh.clone()),
             MeshMaterial3d(mat),
             Transform::IDENTITY,
-            RenderLayers::layer(SKY_LAYER),
+            layer.clone(),
             NoFrustumCulling,
             Visibility::Hidden,
             StarDraw(groups.len()),
@@ -221,14 +245,14 @@ fn setup(
     println!(
         "sky stars: level {:02}, {} records ({} twinkle, {} fixed, {} moving), drawn before shell {} (sky order slot {}), \
          textures {:?}, scratch {} bytes ({} non-zero){}",
-        ls.level, info.count, info.twinkle, info.fixed, info.count - info.twinkle - info.fixed, info.before_shell, slot.0, texs,
+        ls.level, info.count, info.twinkle, info.fixed, info.count - info.twinkle - info.fixed, info.before_shell, slot, texs,
         ls.sprite_scratch.len(), nonzero,
         if matches!(ls.level, 6 | 17) { format!(", overlay tables {tables:x?}") } else { String::new() }
     );
     let mut fallback_rng = Rng::new();
     fallback_rng.srand(LEVEL_SEED);
     let stats = std::env::var("RC_STAR_STATS").is_ok_and(|v| v.trim() == "1");
-    commands.insert_resource(StarSim { stars: SkyStars::new(ls.level, tables, initial), fallback_rng, frames: 0, groups, drawn: 0, stats });
+    Some(StarSim { stars: SkyStars::new(ls.level, tables, initial), fallback_rng, frames: 0, groups, drawn: 0, stats })
 }
 
 /// One star frame per game tick, after the particle tick (same `rand` stream).
@@ -300,7 +324,10 @@ fn build_meshes(
     }
     *drawn_out = drawn;
     for (mut v, d) in &mut draws {
-        let vis = if groups[d.0].1.len() == 0 { Visibility::Hidden } else { Visibility::Inherited };
+        // A draw of another star simulation (the level's under the title world's, crate::title_world) past this one's
+        // groups is left alone (it is on a layer no camera shows meanwhile).
+        let Some(g) = groups.get(d.0) else { continue };
+        let vis = if g.1.len() == 0 { Visibility::Hidden } else { Visibility::Inherited };
         if *v != vis { *v = vis; }
     }
     for (_, sprites, h) in groups.iter_mut() {

@@ -46,8 +46,9 @@
 //! The held-count HUD element (`queue_animation_update(4, 0x753f, …)`, every tick of the update) is `crate::hud`'s,
 //! derived each tick from the cannon's state (`hud::Inputs::suck_active`, `update_suck` / `draw_suck`).
 //! Not ported: the stats 0x1416c8..
-//! (G-SAV-009), the gold cannon 0x13e529 (not mirrored: 5 slots; G-WPN-009), the pad's released mask 0x13cae8 |= 5 as
-//! it goes away (G-HERO-025), the aim with the weapon lowered at a wall 0x141618 (G-WPN-011).
+//! (G-SAV-009), the gold cannon 0x13e529 (not mirrored: 5 slots; G-WPN-009), the aim with the weapon lowered at a wall
+//! 0x141618 (G-WPN-011). The pad's released mask 0x13cae8 |= 5 as it goes away with L1 / L2 held is ported (2026-10-01,
+//! G-HERO-025: `Gadgets::released_or`, applied to the pad by the tick right after the item updates).
 
 use super::guns::{self, add3, len3, scale3, sub3};
 use super::items::{HitSink, ItemEnv};
@@ -355,7 +356,12 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
         }
         _ => {}
     }
-    if away { hero.fx.item_voices.push(SoundCmd::ItemRelease { n: super::fx::LOOP_ITEM }); }
+    if away {
+        hero.fx.item_voices.push(SoundCmd::ItemRelease { n: super::fx::LOOP_ITEM });
+        // L1 / L2 held as it goes away: the pad's released mask 0x13cae8 |= 5 (applied by the tick right after the
+        // item updates: the hand items get the pad read-only; `super::gadgets::Gadgets::released_or`).
+        if env.pad.held & 5 != 0 { hero.gadgets.released_or |= 5; }
+    }
 }
 
 fn hard_blend(hero: &mut Hero, env: &ItemEnv, seq: u8) {

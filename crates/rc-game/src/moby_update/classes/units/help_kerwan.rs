@@ -27,7 +27,7 @@
 //! | 0x2e0010 | in cuboid +0x44, ok, idle, `H[0x79]` 0 → `(20015, 0x79)` | [`update`] |
 //! | 0x2e0080 | in cuboid +0x7c, group < 2, `H[0x4f]` and `M[20]` 0, two or more owned hand items (slot type 0, not 8 / 0x18; `0x179bc8` = the item definitions' +8 on this level) → `(20005, 0x4f)` | [`update`] (`Inventory::slot_type`) |
 //! | 0x2e0140 | in cuboid +0x70 → global flag 0x13d3a0 (0x18) := 1 | [`update`] (G-SAV-010) |
-//! | 0x2e0168 | in cuboid +0x74, skill point 0x13d40b not earned → skill point, `allocate_voice_for_bank_entry(1, 0, 0)`, banner 0x53d6 | NOT ported (G-SAV-007 [deferred]) |
+//! | 0x2e0168 | in cuboid +0x74, skill point 0x13d40b not earned → skill point, `allocate_voice_for_bank_entry(1, 0, 0)`, banner 0x53d6 | [`update`] (`story::award_skill_point`) |
 //! | no particle, save, other moby written | | n/a |
 
 use super::hints::{bump_move, flag, group_ok, hero_dist, idle, in_cuboid, older_than, owned, pvi, request, run_list, set_flag, set_pvi, ticks};
@@ -122,4 +122,6 @@ pub fn update(w: &mut World, id: MobyId) {
         if n > 1 { request(w, 0x4e25, 0x4f); }
     }
     if in_cuboid(w, id, 0x70) { set_flag(w, 0x18); }
+    // Skill point 0x13d40b (level03's `allocate_voice_for_bank_entry` 0x27a588 is `PlayLevelSoundAtMoby`'s code).
+    if in_cuboid(w, id, 0x74) { crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d40b)); }
 }

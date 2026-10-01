@@ -97,6 +97,12 @@ pub trait HeroWorld {
     /// The target list 0x1abe80 as the melee aim search `0x22e238` reads it ([`super::melee::MeleeTarget`]; empty: no
     /// targets).
     fn melee_targets(&self) -> &[super::melee::MeleeTarget] { &[] }
+    /// The class (+0xa6), position (+0x10) and yaw (+0x48) of moby `id` as the moby loop left it: what the hero's
+    /// physics reads of its ground moby 0x13f64c (the Hydrodisplacer's poses 0x38..0x3a on a pad 341). None: unknown.
+    fn moby_pose(&self, id: usize) -> Option<(i16, [f32; 3], f32)> {
+        let _ = id;
+        None
+    }
 }
 
 /// The carriers of a moby table as the moby loop left it (built once per tick, before the hero update).
@@ -113,6 +119,9 @@ pub struct Carriers {
     pub targets: super::swingshot::Targets,
     /// The melee aim search's targets ([`HeroWorld::melee_targets`]; the caller sets them, `Carriers::collect` leaves none).
     pub melee: Vec<super::melee::MeleeTarget>,
+    /// The hero's ground moby 0x13f64c `(id, class, position, yaw)` as the moby loop left it ([`HeroWorld::moby_pose`];
+    /// the caller sets it, `Carriers::collect` leaves none).
+    pub ground: Option<(usize, i16, [f32; 3], f32)>,
 }
 
 impl Carriers {
@@ -130,7 +139,7 @@ impl Carriers {
             .collect();
         let hero_slot = table.mobys.get(hero_moby).map_or(0, |m| m.class_slot);
         let ledge_mobys = table.mobys.iter().enumerate().filter(|(_, m)| triggers::record_ledge_flag(m)).map(|(i, _)| i).collect();
-        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new() }
+        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new(), ground: None }
     }
 }
 
@@ -142,6 +151,7 @@ impl HeroWorld for Carriers {
     fn swing_targets(&self) -> Option<&super::swingshot::Targets> { Some(&self.targets) }
     fn camera(&self) -> Option<([f32; 3], f32, f32)> { Some((self.targets.camera, self.targets.cam_yaw, self.targets.cam_pitch)) }
     fn melee_targets(&self) -> &[super::melee::MeleeTarget] { &self.melee }
+    fn moby_pose(&self, id: usize) -> Option<(i16, [f32; 3], f32)> { self.ground.filter(|g| g.0 == id).map(|g| (g.1, g.2, g.3)) }
 }
 
 /// The carry fields of the hero block.

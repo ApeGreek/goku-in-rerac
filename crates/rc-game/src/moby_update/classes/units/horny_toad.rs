@@ -309,7 +309,8 @@ pub fn update(w: &mut World, id: MobyId) {
             w.mm(id).b7f = 0x15;
         }
     }
-    // 0x263ac8(2.1, moby, 1, +0x200): the big-head manipulator (the cheat flag 0x15edb7; G-SAV-006): not modelled.
+    // 0x263ac8(2.1, moby, 1, +0x200): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.1, id, 1, id, 0x200);
     let tpos = |w: &World| tm.map(|m| c::pos(w, m)).unwrap_or([0.0; 4]);
     match state(w, id) {
         st::INIT => {

@@ -19,8 +19,8 @@
 //!
 //! Novalis has five: 860 (trigger cuboid 42, camera 43, Ratchet to 42; also commanded by the mission NPC 790 for 7 s
 //! while it drops in), 863 (camera 51, commanded by 790 for 3 s when the hinged bridge 746 lowers), 859 / 861 / 862
-//! (no cuboid and no commander on the disc: never fire). Not ported: the big-head cheat's manipulators
-//! `FUN_002fb4b8` (scene actors 920 / 447 with cheat 0x15edb0).
+//! (no cuboid and no commander on the disc: never fire). `FUN_002fb4b8` at the top: the big-head cheat 0x15edb0 on
+//! the scene actors 920 / 447 at 2.1 (`manip::scene_big_head`).
 
 use crate::cinematic;
 use crate::moby_runtime::MobyId;
@@ -42,6 +42,8 @@ fn cuboid(w: &World, i: i32) -> Option<([f32; 3], [f32; 3])> {
 /// `CameraTriggerUpdate` 0x2fb5b0 (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x38 { return; }
+    // FUN_002fb4b8: the actors' big-head cheat on the scene actors of class 0x398 / 0x1bf at 2.1.
+    crate::moby_update::manip::scene_big_head(w, &[0x398, 0x1bf], 0, f32::from_bits(0x4006_6666));
     let pi = |w: &World, o: usize| p::i32(&w.m(id).pvars, o);
     match w.m(id).state {
         0 => {

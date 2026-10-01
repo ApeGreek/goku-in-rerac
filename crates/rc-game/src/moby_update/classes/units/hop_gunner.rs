@@ -388,7 +388,8 @@ pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     if w.m(id).visible == 0 && 40.0 < c::dist3(c::pos(w, id), cam) { return; }
-    // 0x26dae0(2.5, moby, 6, +0x170): the big-head manipulator (the cheat flag; G-SAV-006): not modelled.
+    // 0x26dae0(2.5, moby, 6, +0x170): the big-head cheat (0x15edb7).
+    crate::moby_update::manip::big_head(w, 2.5, id, 6, id, 0x170);
     if w.m(id).visible != 0 && c::dist3(c::pos(w, id), cam) < 29.0 {
         crate::shadows::probe_down(w, id);
         w.mm(id).b7f = 0x17;

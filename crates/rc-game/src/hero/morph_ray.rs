@@ -23,8 +23,8 @@
 //! the meter (+0x18) starts at its record's health and the full scale (+0x14) is its record's s16 +0x04 (a scale of 1
 //! or less: the meter starts empty, an instant morph). Each tick with a target (or the lock) the meter falls by
 //! `3·dt·(1 + 0.33·gold)` (`gp−0x54f0`); the HUD's meter (`gp−0x54e4`, element `queue_animation_update(4, 0x7533)`) shows
-//! `10000 − 10000·meter / scale`. At 0 the target is **morphed** (`react::morph_target`, the skill point of class 625 on
-//! level 5 aside) and dropped. A target deleted meanwhile is dropped.
+//! `10000 − 10000·meter / scale`. At 0 the target is **morphed** (`react::morph_target`; class 625 on level 5 first earns
+//! skill point 0x13d410 through `story::award_skill_point`) and dropped. A target deleted meanwhile is dropped.
 //!
 //! **The beam** ([`Beam`]): twelve points `range/12` apart bending from the last tick's shape toward the aim (a lerp of
 //! `0.9 − 0.5·i/12`; from point 7 on also toward the target), a ring of 20 around each (radius `0.05 + 1.184·i/12`),
@@ -596,9 +596,14 @@ pub fn update(hero: &mut Hero, table: &mut MobyTable, _anim: &dyn super::anim::A
             m.hud_value = 10000 - if m.full != 0.0 { ((m.meter * 10000.0) / m.full) as i32 } else { 0 };
         }
         if let (Some(t), true) = (m.target, m.meter <= 0.0) {
-            // (level 5, class 625: the skill point 0x13d410, level sound 1 and banner 0x53d6 — G-SAV-007.)
             let mut made = None;
-            hits.world(table, &*hero, rng, tick, &mut |w| { made = crate::moby_update::creature::react::morph_target(w, t); });
+            hits.world(table, &*hero, rng, tick, &mut |w| {
+                // Level 5, class 625 (0x271) morphed: skill point 0x13d410, level sound 1, banner 0x53d6.
+                if w.svc.level == 5 && w.m(t).o_class == 0x271 {
+                    crate::moby_update::story::award_skill_point(w, crate::moby_update::story::skill_index(0x13_d410));
+                }
+                made = crate::moby_update::creature::react::morph_target(w, t);
+            });
             let m = &mut hero.weapons.reactive.morph;
             if let Some(c) = made { m.morphs.push(c); }
             m.target = None;

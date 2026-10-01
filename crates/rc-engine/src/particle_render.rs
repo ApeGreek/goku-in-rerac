@@ -298,7 +298,8 @@ impl Plugin for ParticlePlugin {
         // The game ticks at 60 Hz; the determinism plugin sets this clock only in frame-exact mode.
         if !crate::determinism::deterministic() { app.insert_resource(Time::<Fixed>::from_hz(crate::determinism::TICK_HZ)); }
         app.add_plugins(MaterialPlugin::<ParticleMaterial>::default())
-            .add_systems(Startup, setup)
+            .add_systems(crate::level_switch::LevelStartup, setup)
+            .add_systems(crate::level_switch::LevelUnload, (crate::level_switch::remove::<ParticleSim>, crate::level_switch::remove::<ParticleMesh>))
             .add_systems(FixedUpdate, tick)
             .add_systems(PostUpdate, build_sprites.after(crate::fog_state::FogSet));
     }

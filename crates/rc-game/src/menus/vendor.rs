@@ -34,12 +34,15 @@
 //!   idle timer reset; short of bolts → ticker 20320, sound 0. A cancel plays sound 0.
 //! * **2** leave (40 frames, the world runs), then seq 1, `VendorExit`: mode 0, the HUD slots released, Ratchet shown
 //!   and teleported 3.5 in front of the vendor, `CameraScript2(2)` (the follow camera blends back), the vendor's
-//!   state 1, sound 6, music resumed. A weapon bought with a demo scene (0x1ca4a0) would play it first (substate 3):
-//!   not ported (the exit runs instead).
+//!   state 1, sound 6, music resumed. A weapon bought with a demo scene (0x1ca4a0) plays it first (substate 3: the
+//!   space-scene player `crate::travel::space::SUB_DEMO` in the vendor's frame, `rc-engine` `travel_render`), then
+//!   `VendorExit(1)` (the follow camera reset behind Ratchet).
 //!
 //! **Screens** ([`screens`]): six 512×128 targets placed over the vendor's monitor joints; their content is
 //! [`Vendor::screen_content`] (target pixels), their static [`Vendor::statics`]; the engine places and composes them.
-//! **Not ported**: the weapon demo scenes, the PDA's remote vendor's own presentation (the list and prices are).
+//! The weapon demo: the decision and the request here ([`VendorOut::weapon_demo`]), the playback by the space-scene
+//! player (`crate::travel::space::ShipMode::demo_start`). The PDA's remote vendor: the list and prices here, its moby and view in the engine
+//! (`interact_render::remote_vendor`), no hologram ([`Vendor::scene`]) and no cone.
 
 pub mod layout;
 pub mod salesman;
@@ -233,8 +236,47 @@ pub struct VendorOut {
     pub purchase: Option<(usize, bool, i32, i32)>,
     /// The salesman starts this voice line (stream id; `vendor_audio` entry = id − 10000).
     pub voice: Option<i32>,
+    /// Substate 2's end: the four arm manipulators 0x166300 detached from the vendor (`DetachManipulator`).
+    pub detach_arms: bool,
+    /// Substate 2's end with a bought weapon that has a demo scene: `VendorStartWeaponDemo` 0x2ae7f8 instead of the
+    /// exit (substate 3).
+    pub weapon_demo: Option<WeaponDemo>,
+    /// `VendorExit`: the dialogue line stopped (0x15172a ∉ {6, 7} → 5).
+    pub stop_voice: bool,
     /// The selection changed (`FUN_002af3f0`: the item model and the hologram are rebuilt).
     pub selection_changed: bool,
+}
+
+/// `VendorStartWeaponDemo` 0x2ae7f8 (substate 2's end, the vendor not the PDA's, a weapon bought (0x1ca988 ≥ 0) whose
+/// demo scene 0x1ca4a0[item] ≥ 0): `CameraScript2(2)`; the dialogue line stopped (0x15172a ∉ {6, 7} → 5); 0x15f5d8 = 1;
+/// the vendor's +0x20 = 1; substate 3, timer 0; the scene's frame: the origin 0x1caa00 = vendor rows · gp−0x5b10 +
+/// vendor position, z + 2 then `GroundHeight(0.5, origin)`; the rotation 0x1ca9f0 = (0, 0, vendor yaw + π) → the matrix
+/// 0x1ca9c0; the scene state cleared (0x16cce0 0x1c0 bytes, 0x17c7c0 0x40); the scene buffer 0x1611cc − 0x40000; fade
+/// 0x15f3fc = 0, gp−0x7800 = 0; the hand item: the held item ≠ the bought one → `FUN_002305e8(0, 0)`, 0x141408 = item (0
+/// for the Drone Device 0x18); `select_world_object_resource_tables(item class)`; `FUN_002594e0(scene)` (the space-scene
+/// lump `unknown_1530[scene]` read, `FadeToBlack(4)`, its chunk table); 0x1516ec = 10036 (`vendor_audio[36]`); chunk 0
+/// parsed; the stream waited for and started. Substate 3 then plays the scene (the space-scene player of mode 6: the
+/// camera and actors in the vendor's frame) and ends with the actors deleted, `VendorExit(1)` (or `FUN_002aecf0` for the
+/// demo-only entry `FUN_002aea70`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeaponDemo {
+    pub item: usize,
+    /// The scene: `unknown_1530[scene]` (NTSC; PAL + 14).
+    pub scene: i32,
+    /// `vendor_audio` stream id of the demo's sound (0x2734).
+    pub stream: i32,
+}
+
+/// The weapon demo's stream (0x1516ec = 0x2734).
+pub const DEMO_STREAM: i32 = 0x2734;
+
+/// `OpenVendorMenu` 0x2ae1a0's four manipulators 0x166300 (0x40 bytes each, .bss) on the vendor's joint lists
+/// 0x14..0x17: (list, translation); quaternion identity, scale 1 (`AttachManipulator`); with fewer than 8 entries record
+/// 2's translation y (0x1663b4) = +0x681·(7 − n) and record 3's (0x1663f4) = −0x681·(7 − n), else 0: the arms that lay
+/// the monitors out for a short list.
+pub fn arm_manipulators(entries: usize) -> [(u8, [f32; 3]); 4] {
+    let d = if entries < 8 { ((7 - entries as i32) * 0x681) as f32 } else { 0.0 };
+    [(0x14, [0.0; 3]), (0x15, [0.0; 3]), (0x16, [0.0, d, 0.0]), (0x17, [0.0, -d, 0.0])]
 }
 
 /// The popup moby (0x1ca960 + 0x400, class 0x471).
@@ -386,6 +428,9 @@ impl Vendor {
 
     fn full(&self, gs: &GameState, item: usize) -> bool { self.tables.shop.max_ammo(item) as i32 <= gs.global.ammo[item] }
 
+    /// 0x1ca4a0[item]: the item's weapon demo scene (None: −1, or no table).
+    fn layout_demo(&self, item: usize) -> Option<i32> { self.tables.layout.as_ref()?.demo.get(item).copied().filter(|&s| s >= 0) }
+
     /// `set_scrolling_status_message(msg)` 0x2aede0: 18 spaces and the text, scroll 0.
     pub fn set_ticker(&mut self, text: &[u8]) {
         self.ticker = vec![b' '; TICKER_PAD];
@@ -426,15 +471,35 @@ impl Vendor {
             }
             1 => self.menu(inp, gs, items, session, assets, rng, &mut out),
             2 => {
+                // The demo test before the timer (0x1ca980 = 0, 0x1ca988 ≥ 0, 0x1ca4a0[0x1ca988] ≥ 0).
+                let demo = (!self.remote && self.bought >= 0).then(|| self.layout_demo(self.bought as usize)).flatten();
                 self.t += 1;
                 if self.t >= FLY_TICKS || self.remote {
                     out.anim.push(VendorAnim::Blend { seq: 1, frame: 0, ticks: 8 });
-                    // A bought weapon with a demo scene (0x1ca4a0 ≥ 0) would run `VendorStartWeaponDemo`: not ported.
-                    out.exit = true;
-                    out.sounds.push(sound::CLOSED);
+                    // DetachManipulator(vendor, 0x166300 + 0x40·k) for the attached records.
+                    out.detach_arms = true;
+                    match demo {
+                        Some(scene) => {
+                            // VendorStartWeaponDemo: substate 3 (the engine plays the scene and exits: VendorExit(1)).
+                            self.sub = 3;
+                            self.t = 0;
+                            out.weapon_demo = Some(WeaponDemo { item: self.bought as usize, scene, stream: DEMO_STREAM });
+                            out.stop_voice = true;
+                        }
+                        None => {
+                            out.exit = true;
+                            out.stop_voice = true;
+                            out.sounds.push(sound::CLOSED);
+                        }
+                    }
                 }
             }
-            _ => out.exit = true,
+            // Substate 3: the demo scene runs (the engine's; its end is `VendorExit(1)`).
+            3 => {}
+            _ => {
+                out.exit = true;
+                out.stop_voice = true;
+            }
         }
         out
     }
@@ -933,6 +998,9 @@ pub struct VendorScene {
     pub hologram: Option<ScreenMoby>,
     /// The popup (+0x400) while buying.
     pub popup: Option<ScreenMoby>,
+    /// The popup's target: the spinning class-13 moby +0x500 behind "How many?" (`FUN_002b2848`'s `DrawMobyList`, only
+    /// for an ammo entry not full whose unit price the bolts cover).
+    pub popup_panel: Option<ScreenMoby>,
 }
 
 /// `EulerToMatrix` (x, y, z): rows of R = Rz·Ry·Rx (row i = image of axis i).
@@ -996,10 +1064,11 @@ impl Vendor {
                 anim: None,
                 ambient: lit,
             });
-            // The hologram: bob sin(φ)/20, yaw φ (not the vendor's).
+            // The hologram: bob sin(φ)/20, yaw φ (not the vendor's); none for the PDA's remote vendor (`DrawWorld_Mode5`).
             let bob = [0.0, 0.0, self.spin.sin() / 20.0];
             let base = add3(l.holo_base, bob);
-            if e.ammo {
+            if self.remote {
+            } else if e.ammo {
                 if let Some(h) = l.ammo_holo.get(item).filter(|h| h.class != 0) {
                     sc.hologram = Some(ScreenMoby {
                         class: h.class as i16,
@@ -1021,6 +1090,12 @@ impl Vendor {
         }
         if let Some(p) = self.popup.as_ref() {
             sc.popup = Some(ScreenMoby { class: POPUP_CLASS, position: pos, rows: euler_rows(euler), anim: Some((p.anim, p.snapshot.clone())), ambient: 0x0010_1010 });
+            // FUN_002b2848: the quantity case draws +0x500 (placed and turned by `VendorModeUpdate` every frame) first.
+            if let Some(e) = self.current() {
+                if e.ammo && !self.full(gs, e.item) && gs.global.bolts >= self.ammo_unit(e.item) {
+                    sc.popup_panel = Some(ScreenMoby { class: BACKDROP_CLASS, position: to_world(rows, pos, l.spin[1]), rows: euler_rows(self.backdrop[1]), anim: None, ambient: lit });
+                }
+            }
         }
         sc
     }

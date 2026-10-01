@@ -17,7 +17,7 @@ pub struct ReticlePlugin;
 
 impl Plugin for ReticlePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ReticleDraw>().add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
+        app.init_resource::<ReticleDraw>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<ReticleDraw>).add_systems(PostUpdate, draw.before(bevy::asset::AssetEventSystems));
     }
 }
 
