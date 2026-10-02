@@ -120,6 +120,9 @@
 //! | U485 | 221 Quartu's shaking critters (15): head look-at, shake, dust, death pieces | level15 0x2c2938 | [`quartu_critter`] |
 //! | U567 | 1355 Veldin's divers (18; released by the boss 1422): wander, dive, crash, trails and glows | level18 0x2efb88, draws 0x2f0390 / 0x2f06c0 | [`veldin_diver`] |
 //! | U162 | 617 Eudora's path riders (04) | level04 0x2d6f68 | [`eudora_path_rider`] |
+//! | U167 | 466 / 480 / 485 / 486 / 488 / 490 / 493 / 494 / 495 / 498 / 555 Eudora's flying machines (04): path flight, rotors, riders, landing pads, blown apart and back | level04 0x2ca420 | [`eudora_flyers`] |
+//! | U174 | 642 Eudora's drifting speck (04): sinks on the level wind, grows in, fades, starts again | level04 0x2d7e90 | [`eudora_drifter`] |
+//! | U179 | 1549 Eudora's cutscene FX driver (04): the infobot's thrusters in scenes 0 / 1 | level04 0x2e53a0 | [`eudora_scene_fx`] |
 //! | U180 | 810 Rilgar's rocking floats (05) | level05 0x30bdd8 | [`rilgar_rocker`] |
 //! | U195 | 895 Rilgar's flaps (05) | level05 0x3166a0 | [`rilgar_flap`] |
 //! | U283 | 467 / 472 Batalia's linked lifts (08) | level08 0x2ea398 | [`batalia_lift`] |
@@ -345,6 +348,9 @@ pub mod fleet_laser;
 pub mod quartu_critter;
 pub mod veldin_diver;
 pub mod eudora_path_rider;
+pub mod eudora_flyers;
+pub mod eudora_drifter;
+pub mod eudora_scene_fx;
 pub mod rilgar_rocker;
 pub mod rilgar_flap;
 pub mod batalia_lift;
@@ -614,6 +620,9 @@ pub const PORTS: &[UnitPort] = &[
     // Draw callback only (the group's trails: `Callback::UnitQuads` payload; the glows are `UnitGlow` of the row above).
     UnitPort { unit: "U567 1355 trail", level: veldin_diver::REFERENCE_LEVEL, func: veldin_diver::TRAIL_FN, classes: &[], update: empty::update, joints: &[] },    // Draw callback only (the teleporter pads 1135's beam `0x3094f0`: `Callback::UnitQuads` payload; the pads are the
     UnitPort { unit: "U162 617", level: eudora_path_rider::REFERENCE_LEVEL, func: eudora_path_rider::UPDATE_FN, classes: &eudora_path_rider::CLASSES, update: eudora_path_rider::update, joints: &[] },
+    UnitPort { unit: "U167 466", level: eudora_flyers::REFERENCE_LEVEL, func: eudora_flyers::UPDATE_FN, classes: &eudora_flyers::CLASSES, update: eudora_flyers::update, joints: &eudora_flyers::JOINTS },
+    UnitPort { unit: "U174 642", level: eudora_drifter::REFERENCE_LEVEL, func: eudora_drifter::UPDATE_FN, classes: &eudora_drifter::CLASSES, update: eudora_drifter::update, joints: &[] },
+    UnitPort { unit: "U179 1549", level: eudora_scene_fx::REFERENCE_LEVEL, func: eudora_scene_fx::UPDATE_FN, classes: &eudora_scene_fx::CLASSES, update: eudora_scene_fx::update, joints: &[] },
     UnitPort { unit: "U180 810", level: rilgar_rocker::REFERENCE_LEVEL, func: rilgar_rocker::UPDATE_FN, classes: &rilgar_rocker::CLASSES, update: rilgar_rocker::update, joints: &[] },
     UnitPort { unit: "U195 895", level: rilgar_flap::REFERENCE_LEVEL, func: rilgar_flap::UPDATE_FN, classes: &rilgar_flap::CLASSES, update: rilgar_flap::update, joints: &[] },
     UnitPort { unit: "U283 467", level: batalia_lift::REFERENCE_LEVEL, func: batalia_lift::UPDATE_FN, classes: &batalia_lift::CLASSES, update: batalia_lift::update, joints: &[] },
