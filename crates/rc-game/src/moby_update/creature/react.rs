@@ -212,10 +212,11 @@ pub const OTHER_REFS: [(u32, [u32; 3], Table); 6] = [
 /// The classes' sequence tables as their inits store them in the suck record's +0x70 (the game: a pointer to the
 /// class's gp table; the port: [`seq_table_id`] of the entry here). Entries 1 approach, 2 rise, 3 pulled, 4 held,
 /// 5 fired, 6 bounce, 7 let go. 193: level09 gp−0x5328 (0x1618d8).
-/// 63: level13 gp−0x5860 (0x1613a0).
-pub const SEQ_TABLES: [[u8; 9]; 2] = [[0, 0, 0, 7, 2, 8, 8, 6, 2], [5, 5, 5, 7, 3, 8, 8, 2, 3]];
+/// 63: level13 gp−0x5860 (0x1613a0). 340: level04 gp−0x5388 (0x161878).
+pub const SEQ_TABLES: [[u8; 9]; 3] = [[0, 0, 0, 7, 2, 8, 8, 6, 2], [5, 5, 5, 7, 3, 8, 8, 2, 3], [1, 1, 1, 9, 0, 11, 11, 10, 0]];
 pub const SEQS_193: usize = 0;
 pub const SEQS_63: usize = 1;
+pub const SEQS_340: usize = 2;
 /// 1445's table (level16 gp−0x4db8, 0x161e48) holds the same bytes as 193's.
 pub const SEQS_1445: usize = SEQS_193;
 
