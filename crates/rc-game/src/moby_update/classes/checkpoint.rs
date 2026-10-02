@@ -21,8 +21,9 @@
 //! `SetMissionDone(+0xb0)` is [`crate::cinematic::set_mission_done`] (the engine applies it after the tick, so the
 //! state 0 → 1 step below sees it on the next tick; nothing reads that state).
 //!
-//! **Not ported**: the record's copy of the visit state 0x1baaa0 → 0x1bb700 and the hero's light word / ambient /
-//! control mode / music (the death reload restores them; the engine's respawn only places the hero).
+//! The record also keeps (`0x29ac10`'s tail): the visit state 0x1baaa0 → 0x1bb700, Ratchet's moby's light word and
+//! ambient (+0x38 / +0x3c; +0x80 is not modelled), the body (0x1413f4, 0x14161c), the reverb request and the music track
+//! (0x1bc304: the pending track 0x1516f2, else the current 0x151708); the death reload's `0x29adc8` puts them back.
 //!
 //! [`SaveBits::checkpoint`]: crate::moby_update::services::SaveBits::checkpoint
 
@@ -120,7 +121,10 @@ pub(crate) fn record(w: &mut World, r: Record) {
     w.svc.save.checkpoint_visit = w.svc.save.visit.clone();
     // 0x1bb6f4 = the body 0x1413f4, 0x1bb6fc = 0x14161c (crate::hero::bodies; the reload switches back into the body).
     w.svc.save.checkpoint_body = (w.hero.mode, w.hero.bodies.state_param);
-    // 0x1bb6ec..0x1bb6f2: the reverb request saved with the record (crate::audio::reverb).
+    // 0x1bb6e0 / 0x1bb6e4: Ratchet's moby's light word and ambient.
+    w.svc.save.checkpoint_light = w.hero_moby.and_then(|h| w.table.mobys.get(h)).map(|m| (m.light, m.ambient));
+    // 0x1bb6ec..0x1bb6f2: the reverb request saved with the record (crate::audio::reverb), and 0x1bc304 the music
+    // track (0x1516f2 pending, else 0x151708: `AudioSystem::checkpoint_saved`).
     if let Some(s) = w.sound.as_deref_mut() { s.checkpoint_saved(); }
 }
 

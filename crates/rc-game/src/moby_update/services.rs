@@ -611,6 +611,10 @@ pub struct SaveBits {
     pub collected: HashMap<i16, u8>,
     /// `0x1bb6b0..`: the checkpoint record (class 805, `FUN_0029ac10`): the death reload's respawn point.
     pub checkpoint: Option<crate::moby_update::classes::checkpoint::Record>,
+    /// `0x1bb6e0` / `0x1bb6e4`: Ratchet's moby's light word and ambient (+0x38 / +0x3c) the record saved; the respawn
+    /// `0x29adc8` puts them back (+0x80, the hero lighting's colour `0x26be04`, is not modelled: the engine does not
+    /// drive the hero's zone lighting yet).
+    pub checkpoint_light: Option<(u32, [u8; 4])>,
     /// `0x1bb6f4` / `0x1bb6fc`: the body word 0x1413f4 and 0x14161c the record saved (the reload `0x29adc8` switches
     /// back into body 1 / 2 with them: `crate::hero::bodies`).
     pub checkpoint_body: (u8, i32),
@@ -1255,29 +1259,6 @@ impl HeroFields {
             rail_reach: None,
             rail_radius: [None; 8],
             hydro_full: None,
-        }
-    }
-
-    /// These stores moved onto a new hero block: the fields [`HeroFields::of`] copied from the old hero (carried so
-    /// that [`HeroFields::apply`] keeps them) are `h`'s, the classes' requests stay. The death reload's load pass
-    /// queues stores on the dead hero (Veldin's Clank 834 hides himself from the back in its state 0) and the hero init then
-    /// makes a new one: applied as they were, they would put the dead hero's health 0 back (a death loop).
-    pub fn rebased(&self, h: &Hero) -> HeroFields {
-        let b = HeroFields::of(h);
-        HeroFields {
-            platform: b.platform,
-            momentum: b.momentum,
-            sink_hold: b.sink_hold,
-            flow: b.flow,
-            jump_lockout: b.jump_lockout,
-            edge_brake: b.edge_brake,
-            health: b.health,
-            ammo: b.ammo,
-            water_level: b.water_level,
-            dive_lock: b.dive_lock,
-            speed: b.speed,
-            jump_lock: b.jump_lock,
-            ..*self
         }
     }
 

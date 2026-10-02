@@ -570,13 +570,15 @@ impl GameState {
 
     /// Everything a level start does to the saved state and the session (§4 steps 1-5), in the game's
     /// order: `FUN_00251da0` (items / vendor), planet unlock if `level ≠ 0`, elapsed += 180, hero init
-    /// (session cleared, HP = max HP, empty hand → bomb glove), `visited = 1` if 0, record 3007.
+    /// (session cleared, HP = max HP, empty hand → bomb glove, no head item), `visited = 1` if 0, record 3007.
     pub fn apply_level_start(&mut self, level: i32, items: &ItemTables, session: &mut SessionState) {
         self.level_items(level, items, session);
         if level != 0 { if let Ok(p) = usize::try_from(level) { if p < LEVEL_SLOTS { self.unlock_planet(p); } } }
         self.global.elapsed = self.global.elapsed.wrapping_add(LEVEL_LOAD_ELAPSED);
         session.hero_init(self.global.max_hp);
         if self.global.equipped[0] == 0 { self.global.equipped[0] = item::BOMB_GLOVE as i32; }
+        // `FUN_00226e90` (every level load): the saved head item 0x141668 = 0.
+        self.global.equipped[2] = 0;
         let Some(l) = usize::try_from(level).ok().filter(|&l| l < LEVEL_SLOTS) else { return };
         let lv = &mut self.levels[l];
         if lv.visited == 0 { lv.visited = 1; }

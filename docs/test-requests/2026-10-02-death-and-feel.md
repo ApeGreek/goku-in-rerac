@@ -21,3 +21,16 @@
 ### D5. Camera and stick response
 - **Claim:** the right stick turns the camera at full speed before the stick reaches its edge, and small tilts
   register sooner than before, close to the original on PCSX2.
+
+### D6. The death fade and pause
+- **Claim:** after any death the screen fades to black in about a quarter of a second, stays black for about
+  three quarters of a second, then Ratchet is simply back at the checkpoint, with no fade-in. The same happens
+  falling out of the level.
+
+### D7. What Ratchet keeps after a death
+- **Claim:** after a death Ratchet holds the weapon he last had out, keeps his boots, his pack and Clank, but any
+  headgear (the O2 Mask, the Pilot's Helmet, the Sonic Summoner) is off until you put it on again.
+
+### D8. The checkpoint's music after a death
+- **Claim:** dying after a checkpoint plays the music that was playing when the checkpoint was reached, from the
+  start.

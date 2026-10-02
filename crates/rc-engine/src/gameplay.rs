@@ -66,13 +66,13 @@
 //! * **Hits and death** (`rc_game::hero::damage`, docs/plan/hero_states.md P2): the tick hands Ratchet's hit
 //!   message to the hero (the moby hit log, `MobySystem::hit_message`); after the tick the damage events go to
 //!   the game state (hits 0x15eea8 / 0x13df88[level], deaths 0x15eeac / 0x13dfd8[level], the killer's mission
-//!   deaths `LevelMissions::hero_death`). **Respawn on the game's death flag** 0x141401 (`Hero::fell_out`, raised
-//!   by the death sequence 0x2319b0 at the end of every death state, or by x/y outside 2..1022), never on
-//!   entering a state: no catch-up tick after it, then the death reload's hero side — the hero init (HP = max
-//!   HP), at the checkpoint record (class 805's `0x29ac10`: position and Euler, camera snapped behind) when one was
-//!   reached, else at the level's uid-0 moby. The level's mobys are not reloaded (the game's `LoadLevelCoreData(0,
-//!   1)` is not reproduced); tick counter and RNG continue. `R` respawns on demand (e.g. out of a frozen
-//!   unported state).
+//!   deaths `LevelMissions::hero_death`; a death clears bit 31 of the help records, `0x225938`). **Respawn on the
+//!   game's death flag** 0x141401 (`Hero::fell_out`, raised by the death sequence 0x2319b0 at the end of every
+//!   death state, or by x/y outside 2..1022), never on entering a state: no catch-up tick, `FadeToBlack(16)` and the
+//!   disc reload's black ([`RELOAD_BLACK`], `scene_render::FadeHold`), then on the next tick the death reload in the
+//!   game's order: the mobys ([`death_reload`]), the hero side ([`respawn`]: the slot items kept but the headgear,
+//!   the checkpoint record's place, light and body), the checkpoint's visit records, the load pass, the music from
+//!   the checkpoint's track. `R` respawns on demand (the hero side only, e.g. out of a frozen unported state).
 //!
 //! * **Game state** (both modes, before the app runs): the persistent state and the session of a direct
 //!   boot into this level, from the port of docs/plan/game_state.md (`rc_game::game_state`): new game from
@@ -488,6 +488,11 @@ fn load_game_state(root: &std::path::Path, index: u32) -> anyhow::Result<(GameSt
 #[derive(Resource, Default)]
 struct TickBudget(u32);
 
+/// The black frames between the death fade and the respawn: the PS2's `LoadLevelCoreData(0, 1)` re-reads the level
+/// from the disc with the screen black (measured on the original: 0.70 s after the 16-frame fade; the port's reload
+/// takes a frame, so the black is held for this many frames).
+pub const RELOAD_BLACK: u32 = 42;
+
 /// The running game and Ratchet's draw state.
 #[derive(Resource)]
 pub struct Play {
@@ -543,6 +548,9 @@ pub struct Play {
     back_classes: Option<BackPacks>,
     trace: bool,
     respawn: bool,
+    /// The death flag 0x141401 was set: the fade and the reload's black run (`scene_render::FadeHold`), the reload
+    /// itself ([`death_reload`], [`respawn`]) on the first tick after them.
+    pub death_pending: bool,
     frozen_hint: bool,
     /// Ratchet's entities hidden (his moby's mode bit 1: the first-person view hides him, `HeroSyncMoby`).
     ratchet_hidden: bool,
@@ -1335,6 +1343,7 @@ fn setup(
         back_classes,
         trace: std::env::var("RC_PLAY_TRACE").is_ok_and(|v| v.trim() == "1"),
         respawn: false,
+        death_pending: false,
         frozen_hint: false,
     };
     publish_anim(&mut play, anim.as_deref_mut());
@@ -1462,7 +1471,7 @@ fn publish_anim(p: &mut Play, anim: Option<&mut MobyAnim>) {
 /// as the game's is, so the engine's maps follow it: Ratchet's moby, the ship, the driven statics, the class-27
 /// emitters, and the instances whose spawn changed are hidden / shown. [`respawn`] then makes the hero side.
 #[allow(clippy::too_many_arguments)]
-fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, coll: &rc_formats::collision::Collision, state: Option<&GameState>, occl: Option<&mut MobyOcclusion>, anim: Option<&mut MobyAnim>, particles: Option<&mut ParticleSim>) {
+fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, state: Option<&GameState>, occl: Option<&mut MobyOcclusion>, anim: Option<&mut MobyAnim>, particles: Option<&mut ParticleSim>) {
     // The class table as the load builds it (the loader ORs each instance's mode bits into it again).
     let mut classes = class_table(lv, &external_update_fn);
     let ship_ii = p.ship.map(|(_, ii)| ii);
@@ -1515,7 +1524,17 @@ fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, coll: &rc_for
     // The "use" system's talk slots and save values by the new instance → moby map (before the load pass, as the load).
     crate::interact_render::install(&mut p.svc, lv, &statics.instance_to_moby, state);
     p.svc.build_grid(&mut p.game.mobys);
-    // The load pass on the running stream and counter.
+    p.reload_shown = shown;
+    println!(
+        "gameplay: death reload: {} static mobys ({} gone this visit, {} back)",
+        n_static, was.difference(&now).count(), p.reload_shown.len()
+    );
+}
+
+/// The death reload's end (`LoadLevelCoreData` after `0x29adc8`): the talk cooldown 0x179590 = 0, the load pass on the
+/// respawned hero (counter 0, `InitLevelRenderGlobals` reset it), then `0x15f5cc++`.
+fn reload_load_pass(p: &mut Play, coll: &rc_formats::collision::Collision, particles: Option<&mut ParticleSim>) {
+    p.svc.interact.cooldown = 0;
     let mut sched = Scheduler::new();
     let n_load = {
         let hero = p.game.hero.clone();
@@ -1528,14 +1547,9 @@ fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, coll: &rc_for
         w.missions = &p.missions;
         sched.load_pass(&mut w)
     };
-    // The respawn's last step `0x29b080`: the checkpoint's visit records written back (rc_game::moby_update::visit).
-    rc_game::moby_update::visit::restore(&mut p.game.mobys, &p.svc.save.checkpoint_visit);
     p.sched = sched;
-    p.reload_shown = shown;
-    println!(
-        "gameplay: death reload: {} static mobys ({} gone this visit, {} back), {n_load} run by the load pass",
-        n_static, was.difference(&now).count(), p.reload_shown.len()
-    );
+    p.game.finish_load();
+    println!("gameplay: death reload: {n_load} run by the load pass");
 }
 
 /// The entities of instances a death reload made spawn (their level load had hidden them: `SpawnHidden`).
@@ -1552,43 +1566,59 @@ fn show_reloaded(play: Option<ResMut<Play>>, mut commands: Commands, gameplay_en
     }
 }
 
-/// Respawn (the death reload's hero side): the hero, pad and camera as at load, at the checkpoint record when one
-/// was reached, else at the level's uid-0 moby; tick counter and RNG continue.
-fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAnimClass, death_z: f32, state: Option<&GameState>, session: Option<&mut SessionState>) {
+/// The respawn: the death reload's hero side (`InitLevelRenderGlobals` and `0x29adc8` inside `LoadLevelCoreData(0,
+/// 1)`), also the R key's. In the game's order:
+/// * the hero init `0x226b70`: the slot item ids (+0x28 of the slots at 0x140408 + 0x50·k: hand, feet, head, back)
+///   survive the clear of the hero block 0x13f350..0x141660 (the slot states and the requests 0x141408.. do not); an
+///   empty saved hand item 0x141660 becomes the bomb glove; HP = max HP;
+/// * `FUN_00226e90`: the saved head item 0x141668 = 0, so the headgear does not come back (the saved hand, feet and
+///   back items lie outside the cleared block: the weapon, the boots and the pack are made again by the first hero
+///   update); the no-air flag 0x14161b and the state 0x1413d4 = 0 (the fresh hero's);
+/// * the camera init and the level's camera slots (0x20ef58); the tick counter 0x15f5cc = 0;
+/// * with a checkpoint record, `0x29adc8`: the record's position and Euler angles, Ratchet's moby's light word and
+///   ambient, the body (made by the next tick) and the camera snapped behind him.
+///
+/// The RNG continues. Stores the dead hero's tick queued for the next tick are dropped (the game's land on the old
+/// hero block before the clear).
+fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAnimClass, death_z: f32, state: Option<&mut GameState>, session: Option<&mut SessionState>) {
     let mut table = std::mem::take(&mut p.game.mobys);
     table.mobys[p.hero_id] = p.spawn_moby.clone();
-    let (counter, rng, options) = (p.game.counter, p.game.rng, p.game.options);
+    let (rng, options) = (p.game.rng, p.game.options);
+    let old = &p.game.hero;
+    let ids = (old.items.slot.id, old.feet_slot.id, old.head_slot.id, old.back_slot.slot.id);
     // The hero init on the running stream (its fidget-timer draw included).
     let mut g = Game::with_rng(coll, table, p.hero_id, options, death_z, rng);
-    g.counter = counter;
     g.item_data = p.item_data.clone();
     g.grind_paths = p.game.grind_paths.clone();
     hero_level_setup(&mut g.hero, p.back_classes.as_ref(), p.level);
     g.hero.joint_targets = p.game.hero.joint_targets.clone();
     // Ratchet's and the packs' joint lists (level data the hero's effects read).
     g.hero.fx.joints = p.game.hero.fx.joints.clone();
-    // Hero init 0x226b70: the hero block is cleared, HP = max HP.
+    (g.hero.items.slot.id, g.hero.feet_slot.id, g.hero.head_slot.id, g.hero.back_slot.slot.id) = ids;
     if let (Some(gs), Some(s)) = (state, session) {
         s.hero_init(gs.global.max_hp);
         g.hero.health = s.hp;
+        let e = &mut gs.global.equipped;
+        if e[0] == 0 { e[0] = rc_game::game_state::item::BOMB_GLOVE as i32; }
+        e[2] = 0;
     }
-    // The death reload's placement `0x29adc8`: with a checkpoint record (class 805 → `0x29ac10`) the hero block's
-    // position and Euler angles are the record's (the rest of the hero init stays); the camera snaps behind him.
     if let Some(cp) = p.svc.save.checkpoint {
         use rc_game::hero::physics::{euler_rows, from_f32x3};
         g.hero.pos = from_f32x3(cp.pos);
         g.hero.rot = from_f32x3(cp.rot);
         g.hero.rows = euler_rows(g.hero.rot);
+        if let Some((light, ambient)) = p.svc.save.checkpoint_light {
+            let m = &mut g.mobys.mobys[p.hero_id];
+            (m.light, m.ambient) = (light, ambient);
+        }
         let cam = rc_game::follow_camera::CamInput { hero: &g.hero, pad: &g.pad, coll, mobys: None, hero_moby: None };
         g.camera = rc_game::follow_camera::Camera::new(&cam, options.camera);
     }
-    // The level's camera slots as the reload makes them (the slot init 0x20ef58).
     g.camera.set_level(p.game.camera.level_cams.restarted());
     p.game = g;
-    // The stores the reload's load pass queued on the dead hero land on the new one (`HeroFields::rebased`).
-    if let Some((c, f)) = p.svc.hero_writes.take() { p.svc.hero_writes = Some((c, f.rebased(&p.game.hero))); }
-    // The death reload's switch back into the checkpoint's body (`0x29adc8`), made by the next tick; the body moby's
-    // animation binding is dropped with the old hero.
+    p.svc.hero_writes = None;
+    // The switch back into the checkpoint's body, made by the next tick; the body moby's animation binding is
+    // dropped with the old hero.
     p.body_anim = None;
     if p.svc.save.checkpoint.is_some() {
         let (body, st) = p.svc.save.checkpoint_body;
@@ -1645,8 +1675,22 @@ fn tick(
     let p = &mut *play;
     let class = &lv.mobys.anim[p.class];
     if std::mem::take(&mut p.respawn) {
-        respawn(p, coll, class, lv.death_z, state.as_deref().map(|s| &s.0), session.as_deref_mut().map(|s| &mut s.0));
+        let counter = p.game.counter;
+        respawn(p, coll, class, lv.death_z, state.as_deref_mut().map(|s| &mut s.0), session.as_deref_mut().map(|s| &mut s.0));
+        p.game.counter = counter;
         println!("gameplay: respawned at the uid-0 moby (R)");
+    }
+    // The death reload (`LoadLevelCoreData(0, 1)`), once the fade and the reload's black ran (`scene_render::FadeHold`):
+    // the mobys, the hero side, the checkpoint's visit records (`0x29b080`), the load pass; then the main loop's
+    // `music_start_track` with the checkpoint's track.
+    if std::mem::take(&mut p.death_pending) {
+        let checkpoint = p.svc.save.checkpoint.is_some();
+        death_reload(p, lv, state.as_deref().map(|s| &s.0), occl.as_deref_mut(), anim.as_deref_mut(), particles.as_deref_mut());
+        respawn(p, coll, class, lv.death_z, state.as_deref_mut().map(|s| &mut s.0), session.as_deref_mut().map(|s| &mut s.0));
+        if checkpoint { rc_game::moby_update::visit::restore(&mut p.game.mobys, &p.svc.save.checkpoint_visit); }
+        reload_load_pass(p, coll, particles.as_deref_mut());
+        if let Some(a) = audio.as_deref_mut() { a.system().death_reload(checkpoint); }
+        println!("gameplay: death reload done: respawned at {}", if checkpoint { "the checkpoint" } else { "the uid-0 moby" });
     }
 
     let input = match &script.0 {
@@ -1947,7 +1991,10 @@ fn tick(
                 if let Some(gs) = gs {
                     gs.global.total_deaths += 1;
                     if let Some(l) = gs.levels.get_mut(level_index as usize) { l.deaths += 1; }
+                    // 0x225938: bit 31 of the 148 help records' masks (0x14196c + 8·k) cleared, so their help plays again.
+                    for r in gs.global.help.iter_mut() { r.mask &= 0x7fff_ffff; }
                 }
+                for r in p.svc.help.records.help.iter_mut() { r.mask &= 0x7fff_ffff; }
                 p.missions.hero_death(killer_mission);
                 println!("gameplay: tick {}: Ratchet died in state {:#x} (killer class {killer_class:?}, mission {killer_mission:?})", p.game.counter, p.game.hero.state);
             }
@@ -1956,18 +2003,15 @@ fn tick(
     if let HeroTick::Unimplemented(s) = report.hero {
         if !std::mem::replace(&mut p.frozen_hint, true) { println!("gameplay: hero frozen in unported state {s:#x}; R respawns"); }
     }
-    // The death flag 0x141401 (the death sequence 0x2319b0, or x/y outside 2..1022): the main loop runs no
-    // catch-up tick and does the death reload at the end of the frame — here the hero init at the respawn point
-    // (the checkpoint record, else the level's spawn).
-    if p.game.hero.fell_out != 0 {
+    // The death flag 0x141401: the death sequence 0x2319b0 and the bounds check (x / y outside 2..1022) both call
+    // `FadeToBlack(16)` and set it; the main loop runs no catch-up tick, skips `DrawWorld` and reloads at the end of
+    // the frame (the disc read keeps the screen black, [`RELOAD_BLACK`]).
+    if p.game.hero.fell_out != 0 && !p.death_pending {
         let (at, st) = (p.game.hero.position(), p.game.hero.state);
         budget.0 = 0;
-        death_reload(p, lv, coll, state.as_deref().map(|s| &s.0), occl.as_deref_mut(), anim.as_deref_mut(), particles.as_deref_mut());
-        respawn(p, coll, class, lv.death_z, state.as_deref().map(|s| &s.0), session.as_deref_mut().map(|s| &mut s.0));
-        // The sounds and the music stopped, the checkpoint's reverb back (0x29adc8), the track from the start.
-        if let Some(a) = audio_cell.borrow_mut().as_deref_mut() { a.system().death_reload(p.svc.save.checkpoint.is_some()); }
-        let from = if p.svc.save.checkpoint.is_some() { "the checkpoint" } else { "the uid-0 moby" };
-        println!("gameplay: tick {}: death flag 0x141401 (state {st:#x} at {at:.2?}); respawned at {from}", p.game.counter);
+        p.death_pending = true;
+        p.svc.cinematic.requests.push(rc_game::cinematic::EngineRequest::FadeToBlack { frames: rc_game::menus::scale_ticks(0x10) });
+        println!("gameplay: tick {}: death flag 0x141401 (state {st:#x} at {at:.2?}): fade to black, then the reload", p.game.counter);
     }
 
     publish_anim(p, anim.as_deref_mut());

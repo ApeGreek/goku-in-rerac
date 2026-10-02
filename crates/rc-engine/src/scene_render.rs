@@ -885,8 +885,11 @@ fn apply_camera(active: Res<ActiveScene>, source: Option<Res<CameraSource>>, mut
 pub struct FadeHold {
     /// n (0: no hold).
     pub frames: u32,
-    /// The step drawn this frame (0..n).
+    /// The step drawn this frame (0..n + tail).
     pub k: u32,
+    /// Black frames after the n fade steps (the death reload's black, [`crate::gameplay::RELOAD_BLACK`]; a second
+    /// `FadeToBlack` of the same tick over the black image).
+    pub tail: u32,
     /// The view the last frame showed (before the asking tick) and the one before each tick.
     view: Option<crate::play_camera::PlayView>,
     before: Option<crate::play_camera::PlayView>,
@@ -894,7 +897,9 @@ pub struct FadeHold {
 
 impl FadeHold {
     /// Black coverage of this frame (0 without a hold).
-    pub fn coverage(&self) -> f32 { if self.frames == 0 { 0.0 } else { rc_game::scene_player::fade_to_black_coverage(self.frames, self.k.min(self.frames - 1)) } }
+    pub fn coverage(&self) -> f32 {
+        if self.frames == 0 { 0.0 } else if self.k >= self.frames { 1.0 } else { rc_game::scene_player::fade_to_black_coverage(self.frames, self.k) }
+    }
 }
 
 /// Before each tick: the next step of a running hold (the tick stays suspended until n steps were drawn), and the
@@ -902,7 +907,7 @@ impl FadeHold {
 fn fade_step(mut hold: ResMut<FadeHold>, view: Option<Res<crate::play_camera::PlayView>>) {
     if hold.frames > 0 {
         hold.k += 1;
-        if hold.k >= hold.frames {
+        if hold.k >= hold.frames + hold.tail {
             println!("scene: FadeToBlack({}) done: the tick resumes", hold.frames);
             *hold = FadeHold::default();
         }
@@ -914,18 +919,21 @@ fn fade_step(mut hold: ResMut<FadeHold>, view: Option<Res<crate::play_camera::Pl
 fn fade_take(mut hold: ResMut<FadeHold>, play: Option<ResMut<Play>>, frame: Res<crate::determinism::FrameNumber>) {
     use rc_game::cinematic::EngineRequest as R;
     let Some(mut p) = play else { return };
-    let mut n = None;
+    let mut fades = Vec::new();
     p.svc.cinematic.requests.retain(|r| match *r {
         R::FadeToBlack { frames } => {
-            n = Some(frames.max(1) as u32);
+            fades.push(frames.max(1) as u32);
             false
         }
         _ => true,
     });
-    let Some(n) = n else { return };
-    println!("scene: app frame {}: FadeToBlack({n}) after gameplay tick {}: the next {n} frames fade the last view to black", frame.0, ticks_since_load(p.game.counter));
+    let Some(&n) = fades.first() else { return };
+    // A later fade of the same tick draws over the black image (the kill volume's 10, then the death sequence's 16);
+    // a death adds the reload's black ([`crate::gameplay::RELOAD_BLACK`]).
+    let tail = fades[1..].iter().sum::<u32>() + if p.death_pending { crate::gameplay::RELOAD_BLACK } else { 0 };
+    println!("scene: app frame {}: FadeToBlack({n}) after gameplay tick {}: the next {n} frames fade the last view to black, {tail} more black", frame.0, ticks_since_load(p.game.counter));
     let view = hold.before;
-    *hold = FadeHold { frames: n, k: 0, view, before: view };
+    *hold = FadeHold { frames: n, k: 0, tail, view, before: view };
 }
 
 /// The held view over the play camera while a hold runs.

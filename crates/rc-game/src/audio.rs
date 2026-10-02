@@ -550,6 +550,8 @@ pub struct AudioSystem {
     /// crate::fog_zones::UnderwaterState): the tick's sound step puts it into the listener
     /// ([`class_sounds::sound_step`]).
     pub underwater: bool,
+    /// The checkpoint record's music track 0x1bc304 ([`AudioSystem::checkpoint_saved`]); None: no record this visit.
+    pub checkpoint_track: Option<i16>,
     started: bool,
     snd_cmds: Vec<SndCommand>,
     stream_cmds: Vec<StreamCommand>,
@@ -595,6 +597,7 @@ impl AudioSystem {
             reverb_boxes,
             reverb_log: None,
             underwater: false,
+            checkpoint_track: None,
             started: false,
             snd_cmds: Vec::new(),
             stream_cmds: Vec::new(),
@@ -732,6 +735,7 @@ impl AudioSystem {
         fresh.play_log = self.play_log.take();
         fresh.reverb_log = self.reverb_log.take();
         fresh.underwater = self.underwater;
+        fresh.checkpoint_track = self.checkpoint_track;
         fresh.spu.reverb.enabled = self.spu.reverb.enabled;
         // The reverb request and the boxes' pvars are the game's (kept); the effect is switched off (dirty bit 8).
         fresh.reverb = self.reverb;
@@ -763,17 +767,25 @@ impl AudioSystem {
 
     /// The main loop's death reload (`entry` on the death flag 0x141401): `sound_StopAllSounds` and `music_Stop`
     /// ([`AudioSystem::movie_stop`]'s state), the reload (`FUN_00244110(0, 1)`; with a checkpoint record `0x29adc8` puts
-    /// its reverb back, [`AudioSystem::checkpoint_restored`]), then `music_start_track(0x151708, 1, 0x400)`: the
-    /// current track from the start.
+    /// its reverb and its music track back), then `music_start_track(0x151708, 1, 0x400)`: that track from the start.
     pub fn death_reload(&mut self, checkpoint: bool) {
         self.movie_stop();
-        if checkpoint { self.checkpoint_restored(); }
+        if checkpoint {
+            self.checkpoint_restored();
+            // 0x29adc8: 0x151708 = the record's track 0x1bc304.
+            if let Some(t) = self.checkpoint_track { self.music.main.track = t; }
+        }
         let track = self.music.main.track;
         self.music.start_track(track, 1, 0x400, &mut self.stream_cmds);
     }
 
-    /// The checkpoint record (`0x29ac10`): the reverb request saved.
-    pub fn checkpoint_saved(&mut self) { self.reverb.checkpoint(); }
+    /// The checkpoint record (`0x29ac10`): the reverb request saved, and the music track 0x1bc304 (the pending track
+    /// 0x1516f2 when one is set, else the current 0x151708).
+    pub fn checkpoint_saved(&mut self) {
+        self.reverb.checkpoint();
+        let m = &self.music;
+        self.checkpoint_track = Some(if m.pending_track != -1 { m.pending_track as i16 } else { m.main.track });
+    }
 
     /// The death reload's placement (`0x29adc8`): the saved reverb back (resent at the next `sound_update`).
     pub fn checkpoint_restored(&mut self) { self.reverb.restore(); }
