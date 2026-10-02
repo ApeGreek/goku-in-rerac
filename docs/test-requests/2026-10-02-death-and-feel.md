@@ -34,3 +34,7 @@
 ### D8. The checkpoint's music after a death
 - **Claim:** dying after a checkpoint plays the music that was playing when the checkpoint was reached, from the
   start.
+
+### D9. The respawn view
+- **Claim:** after a death past a checkpoint, Ratchet faces the way the original faces him there, with the camera
+  straight behind him (Novalis' landing pad, Aridia's first checkpoint).

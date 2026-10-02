@@ -1575,8 +1575,8 @@ fn show_reloaded(play: Option<ResMut<Play>>, mut commands: Commands, gameplay_en
 ///   back items lie outside the cleared block: the weapon, the boots and the pack are made again by the first hero
 ///   update); the no-air flag 0x14161b and the state 0x1413d4 = 0 (the fresh hero's);
 /// * the camera init and the level's camera slots (0x20ef58); the tick counter 0x15f5cc = 0;
-/// * with a checkpoint record, `0x29adc8`: the record's position and Euler angles, Ratchet's moby's light word and
-///   ambient, the body (made by the next tick) and the camera snapped behind him.
+/// * with a checkpoint record, `0x29adc8`: the record's position and Euler angles (also Ratchet's moby's matrix),
+///   Ratchet's moby's light word and ambient, the body (made by the next tick) and the camera snapped behind him.
 ///
 /// The RNG continues. Stores the dead hero's tick queued for the next tick are dropped (the game's land on the old
 /// hero block before the clear).
@@ -1607,6 +1607,9 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
         g.hero.pos = from_f32x3(cp.pos);
         g.hero.rot = from_f32x3(cp.rot);
         g.hero.rows = euler_rows(g.hero.rot);
+        // `0x221960(moby + 0xc0, 0x13f3e0)`: Ratchet's moby's matrix from the record's Euler angles (the camera
+        // reset below snaps behind it; the target yaw 0x13f4d0 stays the hero init's).
+        g.hero.write_back(&mut g.mobys.mobys[p.hero_id]);
         if let Some((light, ambient)) = p.svc.save.checkpoint_light {
             let m = &mut g.mobys.mobys[p.hero_id];
             (m.light, m.ambient) = (light, ambient);
