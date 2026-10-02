@@ -1020,8 +1020,9 @@ fn setup(
         return;
     };
     if table.hero() != Some(hero_id) { warn!("gameplay: MobyTable::hero() = {:?}, using moby {hero_id} (instance {hero_ii})", table.hero()); }
-    // RC_HERO_AT=x,y,z[,yaw] (debug): Ratchet's moby placed there before the hero init (which ground-snaps it).
-    if let Some(v) = std::env::var("RC_HERO_AT").ok().map(|v| v.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()) {
+    // RC_HERO_AT=x,y,z[,yaw] (debug): Ratchet's moby placed there before the hero init (which ground-snaps it); the boot's
+    // level only (a level reached by travel starts where the game puts him).
+    if let Some(v) = std::env::var("RC_HERO_AT").ok().filter(|_| generation.0 == 0).map(|v| v.split(',').filter_map(|t| t.trim().parse::<f32>().ok()).collect::<Vec<_>>()) {
         if v.len() >= 3 {
             let m = &mut table.mobys[hero_id];
             m.position = [v[0], v[1], v[2], m.position[3]];

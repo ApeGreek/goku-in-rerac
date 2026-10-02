@@ -313,6 +313,14 @@ fn pre_tick(
         println!("travel: RC_LANDING=1: the boot's level entry with its landing");
         level_entry(t, p, &mut mm, gs.as_deref_mut(), &level.0, audio.as_deref_mut());
     }
+    // `0x15f570` is one flag: setting it again while `DoSpaceTransition` runs asks for nothing more (the transition
+    // clears it), so a leave request made during a transition is dropped (Veldin's Clank 834 asks on two ticks).
+    if t.tr.is_some() {
+        let mut q = queue();
+        let before = q.len();
+        q.retain(|r| !matches!(r, Request::Leave(_)));
+        if t.trace && q.len() != before { println!("travel: a leave request during the transition dropped (0x15f570 already set)"); }
+    }
     if t.tr.is_none() {
         let reqs: Vec<Request> = queue().drain(..).collect();
         for r in reqs {
