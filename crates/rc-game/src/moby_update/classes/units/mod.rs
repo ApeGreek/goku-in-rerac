@@ -152,6 +152,7 @@
 //! | L03 578, 627 | 578 Kerwan's blob layers (03) and the blobs 627 they drop: patrol a path, drop five blobs every 300 ticks; the blobs burst when stepped on or touched | level03 0x2c9eb8, 0x2cbea8 | [`kerwan_layer`] |
 //! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
 //! | U134 | 455 the pod spawners (03, 08, 14) and their pods 545: once Ratchet is near, lobbed pods bounce, rest and hatch one of the spawner's placed creatures | level03 0x2bef68, 0x2c4718, 0x2bec60 | [`pod_spawner`] |
+//! | U139 | 631 Kerwan's Blarg hover ship (a 574 riding it) and its flame stream 848: arrives along a path, patrols facing Ratchet, sprays flames from its turret, exits and switches paths | level03 0x2cca00, 0x2ce238, 0x2d47c0 | [`hover_ship`] |
 //! | — | 1475 Kalebo III's board missile (16; created by the board weapon, item 0x24; the Devastator missile's trail) | level16 0x2a3f38 (0x2a3e30 the spawn) | [`board_missile`] |
 //! | U509 | 933 Kalebo's floating mines (16): bob, spin, pulse; blown up by a hit or a touch, the placed ones back out of view | level16 0x2ddde0 | [`kalebo_mine`] |
 //! | U521 | 1401 Kalebo's mine drones (16): wait in their cuboid, fly a path carrying a new race mine 933, drop it, fly back | level16 0x2e37a0 (0x2de298 the mine) | [`kalebo_mine_drone`] |
@@ -375,6 +376,7 @@ pub mod kerwan_transport;
 pub mod kerwan_layer;
 pub mod pod_launcher;
 pub mod pod_spawner;
+pub mod hover_ship;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
 pub mod board_missile;
@@ -638,6 +640,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
     UnitPort { unit: "U134 455", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::UPDATE_FN, classes: &pod_spawner::CLASSES, update: pod_spawner::update, joints: &pod_spawner::CLASSES },
     UnitPort { unit: "U134 545", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::POD_FN, classes: &pod_spawner::POD_CLASSES, update: pod_spawner::pod_update, joints: &[] },
+    UnitPort { unit: "U139 631", level: hover_ship::REFERENCE_LEVEL, func: hover_ship::UPDATE_FN, classes: &hover_ship::CLASSES, update: hover_ship::update, joints: &hover_ship::CLASSES },
+    UnitPort { unit: "U139 848", level: hover_ship::REFERENCE_LEVEL, func: hover_ship::FLAME_FN, classes: &hover_ship::FLAME_CLASSES, update: hover_ship::flame_update, joints: &[] },
     UnitPort { unit: "U581 582", level: veldin_rails::REFERENCE_LEVEL, func: veldin_rails::UPDATE_FN, classes: &veldin_rails::CLASSES, update: veldin_rails::update, joints: &[] },
     UnitPort { unit: "U597 1434", level: veldin_turnover::REFERENCE_LEVEL, func: veldin_turnover::UPDATE_FN, classes: &veldin_turnover::CLASSES, update: veldin_turnover::update, joints: &[] },
     UnitPort { unit: "U602 1799", level: veldin_scene_jet::REFERENCE_LEVEL, func: veldin_scene_jet::UPDATE_FN, classes: &veldin_scene_jet::CLASSES, update: veldin_scene_jet::update, joints: &[] },
@@ -735,8 +739,8 @@ pub const PORTS: &[UnitPort] = &[
     // Story drivers (batch 6, lane story: docs/plan/progression.md `## story`).
     UnitPort { unit: "U114 786", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::SURFER_FN, classes: &aridia_story::SURFER_CLASSES, update: aridia_story::surfer_update, joints: &aridia_story::SURFER_CLASSES },
     UnitPort { unit: "U115 788", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::AGENT_FN, classes: &aridia_story::AGENT_CLASSES, update: aridia_story::agent_update, joints: &[] },
-    UnitPort { unit: "U142 890", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::HELGA_FN, classes: &kerwan_story::HELGA_CLASSES, update: kerwan_story::helga_update, joints: &[] },
-    UnitPort { unit: "U145 909", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::AL_FN, classes: &kerwan_story::AL_CLASSES, update: kerwan_story::al_update, joints: &[] },
+    UnitPort { unit: "U142 890", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::HELGA_FN, classes: &kerwan_story::HELGA_CLASSES, update: kerwan_story::helga_update, joints: &kerwan_story::HELGA_CLASSES },
+    UnitPort { unit: "U145 909", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::AL_FN, classes: &kerwan_story::AL_CLASSES, update: kerwan_story::al_update, joints: &kerwan_story::AL_CLASSES },
     UnitPort { unit: "U169 1120", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::SUCK_FN, classes: &eudora_story::SUCK_CLASSES, update: eudora_story::suck_cannon_update, joints: &[] },
     UnitPort { unit: "U170 1190", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::INFORMANT_FN, classes: &eudora_story::INFORMANT_CLASSES, update: eudora_story::informant_update, joints: &[] },
     UnitPort { unit: "U200 918", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::GIRL_FN, classes: &rilgar_story::GIRL_CLASSES, update: rilgar_story::race_girl_update, joints: &[] },

@@ -25,7 +25,7 @@ and the Heli-Pack giver, the troopers and hounds, the movers, the help director)
 | 816 / 1012 | 3 / 2 | the called platforms and the two-way shuttles | **ported 2026-10-02** (`units::kerwan_transport`) |
 | 455 / 545 | 2 / 0 | the pod spawners (also levels 08 / 14) and their pods: they delete their placed 573s at init and hatch them back from lobbed pods once Ratchet is near | **ported 2026-10-02** (`units::pod_spawner`; bounce and revival shared with `units::pod_launcher`) |
 | 578 / 627 | 5 / 0 | the Blarg mine layers and the mines they drop | **ported 2026-10-02** (`units::kerwan_layer`) |
-| 631 / 848 | 1 / 0 | the Blarg hover ship (a 574 gunner riding it) and its flame stream 848 | open (decoded, notes below) |
+| 631 / 848 | 1 / 0 | the Blarg hover ship (a 574 gunner riding it) and its flame stream 848 | **ported 2026-10-02** (`units::hover_ship`; the flame also serves Quartu's 233) |
 
 ## Shared-system changes in this pass
 
@@ -66,6 +66,9 @@ state 2 releases the voice and deletes.
 
 ## Open
 
-- 631 (and its flame stream 848).
-- "manipulator: target joint list not loaded" ×4 on the smoke run (another class's manipulator target).
-- The user's QA: docs/test-requests/2026-10-02-kerwan.md.
+- The user's QA: docs/test-requests/2026-10-02-kerwan.md (K1–K9).
+
+Closed 2026-10-02: 455 / 545 (`units::pod_spawner`), 631 / 848 (`units::hover_ship`), and the "manipulator: target joint
+list not loaded" warnings: Helga 890 and the Heli-Pack giver 909 turn their heads with manipulators on their own joint
+lists 0 / 1, which their unit rows did not ask the loader for (`joints` now names their classes). The smoke run's
+unported log is empty.
