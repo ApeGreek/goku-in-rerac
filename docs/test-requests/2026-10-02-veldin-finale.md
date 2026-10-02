@@ -40,3 +40,11 @@
   speed. Coming within about 30, the tank turns its turret toward Ratchet with a slight sway and fires shells from
   alternating barrels with a ring of smoke; up close the shells curve toward him. A shell bursts on whatever it hits
   and hurts. A hit flashes the tank; six damage blows it up into pieces.
+
+### F9. The hover troopers and dropships (638, 1356)
+- **Claim:** troopers hover with a gentle wobble, humming, jets puffing, heads and guns turning to Ratchet; idle ones
+  drift between two spots; near Ratchet they square up and fire bursts of three green shots. A hit knocks one back and
+  wakes its group; three damage sends it flying until it bursts in sparks and flashes. Entering a dropship's area makes
+  it appear, fly in, lower its ramp and drop its troopers one by one, then leave or hover nearby lobbing curving shots
+  that explode. Twelve damage brings a dropship down: it sinks and rolls, then explodes into pieces. Ten trooper kills
+  without hits from other weapons earn a skill point. On Kalebo III the same enemies behave the same way.

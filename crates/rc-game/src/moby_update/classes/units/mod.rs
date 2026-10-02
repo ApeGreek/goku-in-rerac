@@ -190,6 +190,8 @@
 //! | U519 | 1443 (16) / 1890 (18) the energy fans (blades and rings until their switch group is thrown) | level18 0x2fae48, draw 0x2fb018 (level16 0x2e5708) | [`energy_fan`] |
 //! | U599 | 1563 the cutscene effects of Veldin's last level (18; the seat glows, the jets and blasts of scene 4, the piece's glow and beam, the flash, the puffs) | level18 0x2f88e8, draws 0x2f9780 / 0x2f9a98 / 0x2f9c20 / 0x2f9eb8, the Morph-o-Ray beam 0x2c04b8 | [`veldin_finale_fx`] |
 //! | U598 | 1454 the tanks of Veldin's last level (18; a path, a turret, shells 41 that may home, treads 331) | level18 0x2f7c40, 0x2a7220, 0x2ce7d0 | [`veldin_tank`] |
+//! | U511 | 1356 the dropships (16, 18; the approach with the troopers, the drop, the exit, the homing shots 50) | level18 0x2f0920, 0x2a7b90 | [`dropship`] |
+//! | U504 | 638 the hover troopers (16, 18; patrols, bursts of shots 49, the dropship's passengers) | level18 0x2dc918, 0x2a76e0 | [`drop_trooper`] |
 //! | U581 | 582 the rail chooser of Veldin's last level (18; the twice-laid rails, one way live at a time; two nanotech clusters) | level18 0x2d62e8 | [`veldin_rails`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
@@ -365,6 +367,8 @@ pub mod veldin_finale_fx;
 pub mod veldin_lock_field;
 pub mod veldin_pool;
 pub mod veldin_rails;
+pub mod drop_trooper;
+pub mod dropship;
 pub mod energy_fan;
 pub mod veldin_scene_jet;
 pub mod veldin_ship;
@@ -633,6 +637,12 @@ pub const PORTS: &[UnitPort] = &[
     // The tank's shells and treads (created only: not in the census's placed units).
     UnitPort { unit: "U598 41", level: veldin_tank::REFERENCE_LEVEL, func: veldin_tank::SHELL_FN, classes: &veldin_tank::SHELL_CLASSES, update: veldin_tank::shell_update, joints: &[] },
     UnitPort { unit: "U598 331", level: veldin_tank::REFERENCE_LEVEL, func: veldin_tank::TREAD_FN, classes: &veldin_tank::TREAD_CLASSES, update: veldin_tank::tread_update, joints: &[] },
+    UnitPort { unit: "U511 1356", level: dropship::REFERENCE_LEVEL, func: dropship::UPDATE_FN, classes: &dropship::CLASSES, update: dropship::update, joints: &dropship::CLASSES },
+    // The dropship's shots (created only).
+    UnitPort { unit: "U511 50", level: dropship::REFERENCE_LEVEL, func: dropship::SHOT_FN, classes: &dropship::SHOT_CLASSES, update: dropship::shot_update, joints: &[] },
+    UnitPort { unit: "U504 638", level: drop_trooper::REFERENCE_LEVEL, func: drop_trooper::UPDATE_FN, classes: &drop_trooper::CLASSES, update: drop_trooper::update, joints: &drop_trooper::CLASSES },
+    // The trooper's shots (created only).
+    UnitPort { unit: "U504 49", level: drop_trooper::REFERENCE_LEVEL, func: drop_trooper::SHOT_FN, classes: &drop_trooper::SHOT_CLASSES, update: drop_trooper::shot_update, joints: &[] },
     UnitPort { unit: "U24 530", level: veldin_ship::REFERENCE_LEVEL, func: veldin_ship::UPDATE_FN, classes: &veldin_ship::CLASSES, update: veldin_ship::update, joints: &veldin_ship::CLASSES },
     UnitPort { unit: "U36 1440", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::UPDATE_FN, classes: &veldin_beamer::CLASSES, update: veldin_beamer::update, joints: &veldin_beamer::CLASSES },
     UnitPort { unit: "U37 1471", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::MANAGER_FN, classes: &veldin_beamer::MANAGER_CLASSES, update: veldin_beamer::manager, joints: &[] },
