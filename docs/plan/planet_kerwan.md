@@ -23,7 +23,7 @@ and the Heli-Pack giver, the troopers and hounds, the movers, the help director)
 | 1548 | 1 | the cutscene FX driver | **ported 2026-10-02** (`units::kerwan_scene_fx`) |
 | 914 | 1 | the talking bystander (skill point 5) | **ported 2026-10-02** (`units::kerwan_bystander`) |
 | 816 / 1012 | 3 / 2 | the called platforms and the two-way shuttles | **ported 2026-10-02** (`units::kerwan_transport`) |
-| 455 / 545 | 2 / 0 | the spawner (also levels 08 / 14) and the objects 545 it throws (`0x2c45d8`: `CreateMoby(545)`, velocity, random spin, life `ticks(500)`) | open |
+| 455 / 545 | 2 / 0 | the pod spawners (also levels 08 / 14) and their pods: they delete their placed 573s at init and hatch them back from lobbed pods once Ratchet is near | **ported 2026-10-02** (`units::pod_spawner`; bounce and revival shared with `units::pod_launcher`) |
 | 578 / 627 | 5 / 0 | the Blarg mine layers and the mines they drop | **ported 2026-10-02** (`units::kerwan_layer`) |
 | 631 / 848 | 1 / 0 | the Blarg hover ship (a 574 gunner riding it) and its flame stream 848 | open (decoded, notes below) |
 
@@ -66,6 +66,6 @@ state 2 releases the voice and deletes.
 
 ## Open
 
-- 455 (and its projectile 545), 631.
+- 631 (and its flame stream 848).
 - "manipulator: target joint list not loaded" ×4 on the smoke run (another class's manipulator target).
 - The user's QA: docs/test-requests/2026-10-02-kerwan.md.

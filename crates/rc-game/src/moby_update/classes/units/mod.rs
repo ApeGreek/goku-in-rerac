@@ -151,6 +151,7 @@
 //! | L03 816, 1012 | 816 Kerwan's called platforms and 1012 its two-way shuttles (03): flown along splines, ridden with △ | level03 0x2d3198, 0x2dccc0 (the follower 0x2d3918) | [`kerwan_transport`] |
 //! | L03 578, 627 | 578 Kerwan's blob layers (03) and the blobs 627 they drop: patrol a path, drop five blobs every 300 ticks; the blobs burst when stepped on or touched | level03 0x2c9eb8, 0x2cbea8 | [`kerwan_layer`] |
 //! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
+//! | U134 | 455 the pod spawners (03, 08, 14) and their pods 545: once Ratchet is near, lobbed pods bounce, rest and hatch one of the spawner's placed creatures | level03 0x2bef68, 0x2c4718, 0x2bec60 | [`pod_spawner`] |
 //! | — | 1475 Kalebo III's board missile (16; created by the board weapon, item 0x24; the Devastator missile's trail) | level16 0x2a3f38 (0x2a3e30 the spawn) | [`board_missile`] |
 //! | U509 | 933 Kalebo's floating mines (16): bob, spin, pulse; blown up by a hit or a touch, the placed ones back out of view | level16 0x2ddde0 | [`kalebo_mine`] |
 //! | U521 | 1401 Kalebo's mine drones (16): wait in their cuboid, fly a path carrying a new race mine 933, drop it, fly back | level16 0x2e37a0 (0x2de298 the mine) | [`kalebo_mine_drone`] |
@@ -373,6 +374,7 @@ pub mod kerwan_bystander;
 pub mod kerwan_transport;
 pub mod kerwan_layer;
 pub mod pod_launcher;
+pub mod pod_spawner;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
 pub mod board_missile;
@@ -634,6 +636,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
+    UnitPort { unit: "U134 455", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::UPDATE_FN, classes: &pod_spawner::CLASSES, update: pod_spawner::update, joints: &pod_spawner::CLASSES },
+    UnitPort { unit: "U134 545", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::POD_FN, classes: &pod_spawner::POD_CLASSES, update: pod_spawner::pod_update, joints: &[] },
     UnitPort { unit: "U581 582", level: veldin_rails::REFERENCE_LEVEL, func: veldin_rails::UPDATE_FN, classes: &veldin_rails::CLASSES, update: veldin_rails::update, joints: &[] },
     UnitPort { unit: "U597 1434", level: veldin_turnover::REFERENCE_LEVEL, func: veldin_turnover::UPDATE_FN, classes: &veldin_turnover::CLASSES, update: veldin_turnover::update, joints: &[] },
     UnitPort { unit: "U602 1799", level: veldin_scene_jet::REFERENCE_LEVEL, func: veldin_scene_jet::UPDATE_FN, classes: &veldin_scene_jet::CLASSES, update: veldin_scene_jet::update, joints: &[] },

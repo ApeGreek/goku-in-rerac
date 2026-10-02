@@ -289,6 +289,17 @@ impl Clusters {
     }
 }
 
+/// Class updates the port runs outside the class registry (level-01 addresses): the particle emitter the scheduler runs
+/// through the engine's external hook, and the water strips whose update only queues the strip draw (or fills its
+/// table, or moves its z) that `rc-engine`'s water renderer does.
+const OUTSIDE: [(u32, &str); 5] = [
+    (0x2bd100, "Emitter"),
+    (0x2f6128, "WaterStrip"),
+    (0x2f6180, "WaterStrip"),
+    (0x2feb58, "WaterStrip"),
+    (0x309c98, "WaterStrip"),
+];
+
 /// A level function's identity across levels: boot address, level-01 copy (the port's code identity, then the
 /// cluster table), the cluster (`C:`), else the masked-code hash (`H:`).
 /// The level-01 copy must be a function start there, and for a short function (under 8 words, whose masked words
@@ -454,7 +465,7 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
 
     for &level in levels {
         let Some(ov) = reference(level) else { eprintln!("level {level:02}: no overlay"); continue };
-        let ports = LevelPorts::from_overlays(&ov, &reference, &[]);
+        let ports = LevelPorts::from_overlays(&ov, &reference, &OUTSIDE.map(|(a, _)| a));
         let gp = rc_formats::test_data::gameplay(level).with_context(|| format!("level {level:02} gameplay"))?;
         let instances = rc_formats::gameplay::parse_moby_instances(&gp).with_context(|| format!("level {level:02} instances"))?;
         let tests = rc_formats::moby_spawn::loader_spawns(&instances, &mut rc_formats::moby_spawn::SpawnSave::default());
@@ -474,7 +485,13 @@ pub fn run(extracted: &Path, repo: &Path, work: &Path, out: &Path, tag_file: Opt
             update_classes.entry(e.update).or_default().push(e.o_class);
         }
         for (&update, cls) in &update_classes {
-            let ported: Vec<String> = cls.iter().filter_map(|&c| ports.get(c as i16)).map(|u| format!("{u:?}")).collect();
+            let ported: Vec<String> = cls
+                .iter()
+                .filter_map(|&c| {
+                    let c = c as i16;
+                    ports.get(c).map(|u| format!("{u:?}")).or_else(|| ports.external(c).and_then(|a| OUTSIDE.iter().find(|o| o.0 == a)).map(|o| o.1.to_string()))
+                })
+                .collect();
             let is_ported = !ported.is_empty();
             let (p, _c): (usize, usize) = cls.iter().map(|c| placed.get(c).copied().unwrap_or_default()).fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
             if p == 0 && !is_ported { continue; }

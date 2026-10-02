@@ -360,10 +360,21 @@ pub fn spawn_pod(w: &mut World, launcher: MobyId, start: [f32; 4], vel: [f32; 4]
 
 /// The bounce of 0x30b3b0 after a line or sphere hit `o` (module table: the velocity, the rest test, the sound).
 fn bounce(w: &mut World, id: MobyId, o: &CollOutput) {
+    bounce_velocity(w, id, o, POD);
+    if c::pu8(w, id, pd::COOL) == 0 {
+        w.play_sound(0, 0, id);
+        c::set_pu8(w, id, pd::COOL, 12);
+    }
+}
+
+/// The velocity part of a pod's bounce (velocity at pvar +0; also Kerwan's pods, [`super::pod_spawner`]): off a pod
+/// of class `pod` the vertical speed ·= `randf(0.9, 1.1)`; else reflected off the normal, and with the slope under
+/// 40° and no surface id: off the world ·0.5 (under 0.025: state 1, at rest), off another moby ·1.2.
+pub fn bounce_velocity(w: &mut World, id: MobyId, o: &CollOutput, pod: i16) {
     let n = [o.normal[0], o.normal[1], o.normal[2], 0.0];
     let slope = || c::atan(n[2], c::len2(n));
     match o.moby {
-        Some(m) if w.m(m).o_class == POD => {
+        Some(m) if w.m(m).o_class == pod => {
             let f = w.rng.randf(0.9, 1.1);
             let vz = c::pf(w, id, 8) * f;
             c::set_pf(w, id, 8, vz);
@@ -382,10 +393,6 @@ fn bounce(w: &mut World, id: MobyId, o: &CollOutput) {
                 }
             }
         }
-    }
-    if c::pu8(w, id, pd::COOL) == 0 {
-        w.play_sound(0, 0, id);
-        c::set_pu8(w, id, pd::COOL, 12);
     }
 }
 
@@ -534,8 +541,17 @@ pub fn hatch(w: &mut World, launcher: MobyId, p: [f32; 4]) -> Option<MobyId> {
     let m = group_first(w, g, GroupWalk::Dead)?;
     let n = c::pu8(w, launcher, lv::COUNT).wrapping_add(1);
     c::set_pu8(w, launcher, lv::COUNT, n);
-    let info = w.classes.info(w.m(m).o_class).unwrap_or_default();
     let grow = c::pu8(w, launcher, lv::GROW) != 0;
+    revive(w, launcher, m, p, grow, (0xff, 0xff));
+    Some(m)
+}
+
+/// The revival of a dead member `m` at `p` by a pod's `launcher` (0x30a778's body; also Kerwan's `0x2bec60`,
+/// [`super::pod_spawner`]): state 0, the class's mode, scale and collision, the given update / draw distances, a tenth
+/// of the scale with `grow`, the hard cut to sequence 0, the suck record and the damage record reset, the bolts split
+/// with the launcher, Ratchet's light, `MobyBuildMatrix`.
+pub fn revive(w: &mut World, launcher: MobyId, m: MobyId, p: [f32; 4], grow: bool, (update_dist, draw_dist): (u8, i16)) {
+    let info = w.classes.info(w.m(m).o_class).unwrap_or_default();
     {
         let mm = w.mm(m);
         mm.position = [p[0], p[1], p[2], 0.0];
@@ -543,8 +559,8 @@ pub fn hatch(w: &mut World, launcher: MobyId, p: [f32; 4]) -> Option<MobyId> {
         mm.cmd = 0;
         mm.mode = info.mode_bits;
         mm.scale = info.scale;
-        mm.update_dist = 0xff;
-        mm.draw_dist = 0xff;
+        mm.update_dist = update_dist;
+        mm.draw_dist = draw_dist;
         mm.visible = 1;
         if info.glow.is_some() { mm.mode |= mode::GLOW; }
         if info.b0f != 0 { mm.mode |= mode::CLASS_F; }
@@ -576,5 +592,4 @@ pub fn hatch(w: &mut World, launcher: MobyId, p: [f32; 4]) -> Option<MobyId> {
             c::set_pf(w, m, d, hp);
         }
     }
-    Some(m)
 }
