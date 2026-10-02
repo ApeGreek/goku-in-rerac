@@ -1264,9 +1264,11 @@ fn setup(
     let mut driven = driven;
     if let (Some(id), Some(ii)) = (ship_id, ship_ii) {
         driven.push((id, ii, occl.anim_index(ii)));
+        // Hidden here; the occlusion pass shows the one group it picks (`MobyOcclusion::reshow`).
         for (e, tag) in &gameplay_entities {
-            if tag.0 as usize == ii { commands.entity(e).remove::<SpawnHidden>().insert(Visibility::Inherited); }
+            if tag.0 as usize == ii { commands.entity(e).remove::<SpawnHidden>().insert(Visibility::Hidden); }
         }
+        occl.reshow(ii);
         if let (Some(a), Some(k)) = (anim.as_mut(), occl.anim_index(ii)) { (a.hidden[k], a.pending[k]) = (false, None); }
     }
     let dynamic = DynMobys::new(lv, game.mobys.mobys.len() - n_static, &mut buffers);
@@ -1537,14 +1539,15 @@ fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, coll: &rc_for
 }
 
 /// The entities of instances a death reload made spawn (their level load had hidden them: `SpawnHidden`).
-fn show_reloaded(play: Option<ResMut<Play>>, mut commands: Commands, gameplay_entities: GameplayEntities, occl: Option<Res<MobyOcclusion>>, mut anim: Option<ResMut<MobyAnim>>) {
+fn show_reloaded(play: Option<ResMut<Play>>, mut commands: Commands, gameplay_entities: GameplayEntities, mut occl: Option<ResMut<MobyOcclusion>>, mut anim: Option<ResMut<MobyAnim>>) {
     let Some(mut p) = play else { return };
     if p.reload_shown.is_empty() { return; }
     let shown = std::mem::take(&mut p.reload_shown);
     for (e, tag) in &gameplay_entities {
-        if shown.contains(&(tag.0 as usize)) { commands.entity(e).remove::<SpawnHidden>().insert(Visibility::Inherited); }
+        if shown.contains(&(tag.0 as usize)) { commands.entity(e).remove::<SpawnHidden>().insert(Visibility::Hidden); }
     }
     for &ii in &shown {
+        if let Some(o) = occl.as_deref_mut() { o.reshow(ii); }
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), occl.as_deref().and_then(|o| o.anim_index(ii))) { a.hidden[k] = false; }
     }
 }

@@ -1993,6 +1993,12 @@ impl MobyOcclusion {
     /// (crate::moby_spawn) are the caller's to exclude.
     pub fn drawn(&self, ii: usize) -> bool { self.shown.get(ii).is_some_and(|s| s.is_some()) }
 
+    /// Forgets the group instance `ii` shows, for a caller that made all of its entities hidden (a spawn-hidden
+    /// instance revealed): the next [`update_moby_occlusion`] switches on exactly the group (and metal) it picks.
+    /// Showing every entity instead would show all its LOD / blend groups at once, and a later hide would then only
+    /// switch off the picked one.
+    pub fn reshow(&mut self, ii: usize) { if let Some(s) = self.shown.get_mut(ii) { *s = None; } }
+
     /// The placement the moby loop gave static instance `ii` this tick: position (+0x10), rotation rows
     /// (+0xc0.., row i = image of model axis i), scale (+0x2c), the light block for those rows (None: keep
     /// the loaded one) and hidden (deleted or mode & 1). Rewrites its `MobyInst` record (uploaded by

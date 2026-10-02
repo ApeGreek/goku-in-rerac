@@ -367,6 +367,7 @@ fn tick(
             scale: None,
             hidden: !drawn,
             glow: None,
+            head: None,
         })
         .collect();
     rt.frames += 1;

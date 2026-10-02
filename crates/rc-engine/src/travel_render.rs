@@ -942,9 +942,24 @@ pub(crate) fn upload_gfx(
             }
             a.chunk = Some(pose.chunk);
         }
-        let s = AnimState { seq_a: a.slot, frame_a: pose.frame_a, seq_b: a.slot, frame_b: pose.frame_b, t: pose.t, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
         let mods = pose.moby.and_then(|id| table.and_then(|t| t.mobys.get(id))).map(|m| m.joint_mods.as_slice()).unwrap_or(&[]);
-        let f = moby_anim::evaluate_posed(&a.anim, &s, None, &[], mods);
+        let f = match pose.head {
+            // The flight: sequence 2 frame 0 with the streamed frame's joints 0..3 (`space::flight_sequence`), lent to
+            // the slot for this evaluation.
+            Some(h) => {
+                let streamed = scene.chunks.get(pose.chunk).and_then(|c| c.actors.get(pose.actor)).map(|x| &x.sequence);
+                let patched = streamed.and_then(|q| space::flight_sequence(&a.anim, q, h as usize));
+                let s = AnimState { seq_a: a.slot, frame_a: 0, seq_b: a.slot, frame_b: 0, t: pose.t, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
+                let keep = a.anim.sequences.get_mut(a.slot as usize).map(|q| std::mem::replace(q, patched));
+                let f = moby_anim::evaluate_posed(&a.anim, &s, None, &[], mods);
+                if let (Some(k), Some(q)) = (keep, a.anim.sequences.get_mut(a.slot as usize)) { *q = k; }
+                f
+            }
+            None => {
+                let s = AnimState { seq_a: a.slot, frame_a: pose.frame_a, seq_b: a.slot, frame_b: pose.frame_b, t: pose.t, speed: 1.0, rate: 1.0, flags: 0, trigger_count: 0, skip_advance: true };
+                moby_anim::evaluate_posed(&a.anim, &s, None, &[], mods)
+            }
+        };
         let at = a.base as usize * 64;
         for (i, b) in f.iter().take(a.slots as usize).flat_map(|r| r.iter().flatten().flat_map(|v| v.to_le_bytes())).enumerate() {
             if let Some(x) = palette.get_mut(at + i) { *x = b; }

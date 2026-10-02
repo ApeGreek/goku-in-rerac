@@ -29,7 +29,7 @@
 //! | 0x2a4080 sub 3 | the first tick: `music_Pause(0)`, the stream 40015 + ship, `FadeToBlack(ticks(12))`, the ship's sequences 1 → 2 at t 0, +0x72 = 0xff, +0x94 = 0; with a path: the riders `CreateMoby(0)` / `CreateMoby(10)` (+0x32 = 0x1ff, +0x72 = 0xff, +0x94 = 0, mode \|= 6, the hero's light); `CameraScript(0x167240, 0x167250, 1, 0, 0)`; the path's points get their turn rates as w (normalised to 20° at the sharpest), the first segment's length, the start (ship) and end (point 0) of the approach, its pitch and yaw | [`ShipMode::fly_away_start`] |
 //! | | each tick: the camera eases between the two cuboids (`FUN_00270830(1, 0.666·dt², 0.666·dt², 0.5·dt)`), `0x316dd0` / `0x316e28`; until `ticks(150)` the ship eases to the path's start (`(1 − cos(π·tick/120))/2`, 1 from `ticks(120)`): position, pitch, yaw, its blend +0x54, fade −0.125, the exhaust `fun_0022f5b0(−3.75·dt)` while < 1; then speed += 0.8 (≤ 100), ✕ / △ or the last 6 points start the fade (0.0625), ships 0 / 1 flames (0x32, 10), t += speed·dt / segment; past the end or the fade at 1: 0x15f5d8 = 1, 0x15f570 = 1 (leave); else the path pose (`0x277d40`, its roll into +0x40), a trail sample, `RegisterDrawCallback(0x2a2d28)`, the fade +0.0625 once started; the riders on their seats (`rows·0x1be200 / 0x1be230 + pos`, the ship's rotation) | [`ShipMode::fly_away_tick`] |
 //! | `EnterSpaceLoadingLoop` 0x2a5868 | sub 4, 0x13e054 = −1, fade 1, white 0, 0x1413d0 = 0, 0x15f5d8 = 0, the memory slots / VRAM heads / view context reset (n/a: the engine's), the `transition` lump read and decompressed (`rc_formats::transition`): its GS image, its classes 531..533 (byte-identical to the `spaceships` files' the engine draws), the chrome map TEX0 (identical to the levels'), `LoadSky` (the flight sky), the FX bank (`GetEffectTex` during the flight), the particle textures (n/a: no particle pass in the flight's draw), the planet picture `[dest]` (0x160640) and the caption `[19 + 19·max(lang − 1, 0) + dest]` (0x160648); `FadeToBlack(ticks(12))`; variant v = `rand() >> 16 & 3` (v 4 and 0x13e08c = 2 for dest 0 or dest 1 with planet 3 locked), the count 0, the trail reset (head / count 0), 0x1605b0 = 0x1605a0 (16 bytes: −370, −280, 280, 0), the scene state cleared, variant v's chunk table, chunk 0, the flight's sound bank (`snd_bank_load_from_ee_cb`, its handle 0x15ed5c; the loop waits for it) | [`ShipMode::flight_start`] (the lump's data: `rc-engine` `flight_render`) |
-//! | `SpaceLoadingLoop` 0x2a33b0 (sub 4) | `FUN_002ab920` (the draw lists empty); fade −= 0.25 (≥ 0); ticks +1; tick 1 (not the first-arrival flights): `snd_play_sound_vol_pan_pmpb(0x15ed5c, v, 0x400, 0, 0, 0)` (the bank's sound v); chunk roll at > 0x5f; at the end: the actors deleted (their class slots freed); while the load runs (0x15ee48 < 3; not the first-arrival flights) the count 0x13e08c = 0; count > 1 → done (0x15ee4a = 0, 0x15f5d8 = 1, no draw this frame); count 0 → v = (v + `(rand() >> 16) % 3` + 1) & 3, else v = 4; the trail reset, count +1, 0x1605b0 = 0x1605a0, the scene state cleared, the next variant's chunk 0; the camera (`build_object_rotation_matrix`, tan ≥ 0x1be0c8[v]); v 4: 0x1605b0 += (end − tick)/end · 0x1605c0; the shell translation 0x160520 = 0x1be060[v]·(tick − ticks(120))·20·f (f = (end − tick)/end in v 4, else 1); 0x1604c4 = 0x1be0b0[v] (the sky's turn); per actor two half-ticks (k = 0, 1; t = (tick & 1)·0.5 + k·0.25): the position lerp, +0x52 / +0x53 = 2, frames 0 / 0, `update_moby_animation_state`, the streamed frames' 0x20-byte headers copied into the frame buffers (the engine evaluates the streamed frames themselves), +0x72 = +0x71 = 0xff, +0x32 = 0x1ff, `MobyBuildMatrix`, +0x52 / +0x53 = the streamed slot, `MobyAttachToJoint(moby, 1 / 2)` (joint lists 1 and 2: the engines) → a trail sample (head +1 & 31, count ≤ 32); v 4 on the first-arrival flights: the actor hidden (mode \| 1), the trail count 0; v 4 in the last 56 ticks: scale = class scale·(end − tick)/56, the head alpha of the three ships' trail colours 0x1bdfb0 = end − tick, else 0x38; `IncrementTickCounter` | [`ShipMode::flight_tick`] |
+//! | `SpaceLoadingLoop` 0x2a33b0 (sub 4) | `FUN_002ab920` (the draw lists empty); fade −= 0.25 (≥ 0); ticks +1; tick 1 (not the first-arrival flights): `snd_play_sound_vol_pan_pmpb(0x15ed5c, v, 0x400, 0, 0, 0)` (the bank's sound v); chunk roll at > 0x5f; at the end: the actors deleted (their class slots freed); while the load runs (0x15ee48 < 3; not the first-arrival flights) the count 0x13e08c = 0; count > 1 → done (0x15ee4a = 0, 0x15f5d8 = 1, no draw this frame); count 0 → v = (v + `(rand() >> 16) % 3` + 1) & 3, else v = 4; the trail reset, count +1, 0x1605b0 = 0x1605a0, the scene state cleared, the next variant's chunk 0; the camera (`build_object_rotation_matrix`, tan ≥ 0x1be0c8[v]); v 4: 0x1605b0 += (end − tick)/end · 0x1605c0; the shell translation 0x160520 = 0x1be060[v]·(tick − ticks(120))·20·f (f = (end − tick)/end in v 4, else 1); 0x1604c4 = 0x1be0b0[v] (the sky's turn); per actor two half-ticks (k = 0, 1; t = (tick & 1)·0.5 + k·0.25): the position lerp, +0x52 / +0x53 = 2, frames 0 / 0, `update_moby_animation_state` (both frame buffers at sequence 2 frame 0), the first 0x20 payload bytes of streamed frames f and f + 1 copied into it (joints 0..3: f + 1's stay), +0x72 = +0x71 = 0xff, +0x32 = 0x1ff, `MobyBuildMatrix`, +0x52 / +0x53 = the streamed slot, `MobyAttachToJoint(moby, 1 / 2)` (joint lists 1 and 2: the engines) → a trail sample (head +1 & 31, count ≤ 32); v 4 on the first-arrival flights: the actor hidden (mode \| 1), the trail count 0; v 4 in the last 56 ticks: scale = class scale·(end − tick)/56, the head alpha of the three ships' trail colours 0x1bdfb0 = end − tick, else 0x38; `IncrementTickCounter` | [`ShipMode::flight_tick`] (the pose: [`flight_sequence`]) |
 //! | `VendorStartWeaponDemo` 0x2ae7f8 (scene part) | the frame: origin = vendor rows · (4, 0, 0) (gp−0x5b10) + its position, z + 2, `GroundHeight(0.5)`; Euler (0, 0, yaw + π) → 0x1ca9c0; the scene state cleared; fade 0, white 0; `FUN_002594e0(unknown_1530[0x1ca4a0[item]])` (its `FadeToBlack(4)`); 0x1516ec = 0x2734 (`vendor_audio[36]`); chunk 0; the stream waited for | [`DemoFrame::of_moby`], [`ShipMode::demo_start`] (the vendor's part: `menus::vendor`, `rc-engine` `interact_render`) |
 //! | `VendorModeUpdate` substate 3 | the world part (moby loop, level callbacks, hero update, particles); chunk / scene tick + 1; fade + 0.1 (≤ 1) past `end − 12`, else − 0.125 (≥ 0); before the end: chunk roll (≥ 0x60), the camera in the demo's frame (record tan; eye = rows·e + origin, Euler z + yaw), each actor (frames, t, cut, position in the frame, +0x71 = 0xff, yaw, `MobyBuildMatrix`, +0x7f → `FUN_0026f0e0`, class 0 → `FUN_0024a1d0`), `UpdateAllPointLights`, `IncrementTickCounter`; at the end: fade 0, tan 0.63, the actors deleted, `VendorExit(1)` (or `FUN_002aecf0` for the item offer's demo `FUN_002aea70`: NOT ported, G-UI-006) | [`ShipMode::demo_tick`] ([`SpaceEvent::DemoDone`]) |
 //! | `DrawWorldPaused` 0x2a3b90 (sub 4's draw, `dispatch_game_state_update` 0x2a57f0) | tan ≥ 0.63 for the sky only; `DrawSkyShells` 0x29f260 (per shell k < count: euler (0, y_k, 0x1604c4 + z_k), rows ·s_k, translation 0x160520: [`FLIGHT_SHELLS`]); v 4: the planet picture `fun_0022e8c8` 0x2a31d0 (one `FastDrawQuadReal`, corners 0x1bdfd0·0x1be010[level] + 0x1605b0, ST 0x1bdd30, RGBA 0x80808080, ALPHA 0x44, TEST 0x31801: Z neither tested nor written); `DrawMobys` (the actors); not the first-arrival flights: the trail of actor 0 (`fun_0022e420`, FX 0); v 4 past tick 0x3c: the caption `fun_0022ea08` 0x2a3310 (`DrawTexturedQuad(0x20, H − 0x58, 0x100, 0x20)`, alpha min((tick − 0x3c)·2, 0x80)); not the first-arrival flights: the canopy glass `ShipDrawCallback` 0x2a70a8 of actor 0 (FX 1 in sub 4); the card busy (0x13d364 > 2 or 0x13d36c ≥ 0): the card icon FX 2 at (0x2c, H − 0x60, 64, 64) and FX 3 turning once per 55 vsyncs at (76, H − 64) 17×17 (`fun_00200600`); the black fade | [`FlightDraw`] (drawn by `rc-engine` `flight_render`) |
@@ -185,6 +185,10 @@ impl DemoFrame {
     }
 }
 
+/// An actor's class animation with its streamed slot: (the chunk it was set for, the class, the slot, the flight's
+/// streamed frame the slot was last patched from).
+pub type ActorAnim = (usize, Arc<rc_formats::moby_anim::MobyAnimClass>, u8, Option<usize>);
+
 /// One actor's pose this frame (ship-local transform applied).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorPose {
@@ -206,6 +210,27 @@ pub struct ActorPose {
     pub hidden: bool,
     /// The glow word (+0x90) when the table moby glows (mode & 0x10: Clank's `FUN_00228bc0`).
     pub glow: Option<u32>,
+    /// The flight's pose ([`flight_sequence`]): the streamed frame whose joints 0..3 replace those of the class's
+    /// sequence 2 frame 0 (frames a / b then 0).
+    pub head: Option<u8>,
+}
+
+/// The pose of a flight actor (`SpaceLoadingLoop` 0x2a33b0): with +0x52 / +0x53 = 2 and +0x50 / +0x51 = 0,
+/// `update_moby_animation_state` points both frame buffers (+0x68, +0x6c) at the class's sequence 2 frame 0, and the two
+/// `FastMemCopy(buffer + 0x10, streamed + 0x10, 0x20)` write the first 0x20 payload bytes (the quaternions of joints
+/// 0..3) of streamed frame f, then of f + 1, into that one frame: f + 1's stay. Everything else (the other joints, the
+/// scale and translation records, the header) is sequence 2 frame 0's: the canopy stays shut. `MobyBuildMatrix`,
+/// `MobyAttachToJoint` (`MobyAnimEvalChain` reads +0x68 / +0x6c) and the draw all see this frame. A one-frame sequence
+/// (sequence 2's header); None when the class has no sequence 2 frame. Past the stream's end: its last frame [L].
+pub fn flight_sequence(anim: &rc_formats::moby_anim::MobyAnimClass, streamed: &rc_formats::moby_anim::MobySequence, f: usize) -> Option<rc_formats::moby_anim::MobySequence> {
+    let base = anim.sequences.get(2)?.as_ref()?;
+    let mut frame = base.frames.first()?.clone();
+    if let Some(src) = streamed.frames.get(f + 1).or(streamed.frames.last()) {
+        let n = 0x20.min(frame.payload.len()).min(src.payload.len());
+        frame.payload[..n].copy_from_slice(&src.payload[..n]);
+        for j in 0..frame.quats.len().min(4) { frame.quats[j] = frame.quat_at(j); }
+    }
+    Some(rc_formats::moby_anim::MobySequence { header: base.header, frames: vec![frame], triggers: Vec::new() })
 }
 
 /// One frame's output.
@@ -292,7 +317,8 @@ pub struct ShipMode {
     /// buffered state, then `continue_audio_stream_if_ready`).
     pub stream: Option<i32>,
     /// Per actor: its class animation with the streamed slot, for the chunk it was set for ([`ShipMode::actor_joint`]).
-    pub actor_anim: Vec<Option<(usize, Arc<rc_formats::moby_anim::MobyAnimClass>, u8)>>,
+    /// The flight's: the streamed frame its slot was last patched from ([`flight_sequence`]).
+    pub actor_anim: Vec<Option<ActorAnim>>,
     /// 0x17c7c0 attached: the Ratchet actor's head manipulator of this scene (`FUN_0024a1d0`; the entry clears it).
     pub head_attached: bool,
     /// A weapon demo's frame ([`SUB_DEMO`]).
@@ -667,7 +693,7 @@ impl ShipMode {
                 if class == 0 { self.ratchet_actor(w, id); }
             }
             let glow = id.and_then(|i| (w.m(i).mode & 0x10 != 0).then(|| w.m(i).glow));
-            poses.push(ActorPose { actor: k, class, chunk: self.chunk, frame_a: f as u8, frame_b: (f + 1) as u8, t, position: pos, yaw: fr.yaw, moby: id, scale: None, hidden: false, glow });
+            poses.push(ActorPose { actor: k, class, chunk: self.chunk, frame_a: f as u8, frame_b: (f + 1) as u8, t, position: pos, yaw: fr.yaw, moby: id, scale: None, hidden: false, glow, head: None });
         }
         self.last_actors = poses.clone();
         out.actors = poses;
@@ -769,7 +795,7 @@ impl ShipMode {
                 }
                 self.actor_fx(w, id, class, k, &a.sequence);
             }
-            poses.push(ActorPose { actor: k, class, chunk: self.chunk, frame_a: f as u8, frame_b: (f + 1) as u8, t, position: pos, yaw: syaw, moby: id, scale: None, hidden: false, glow: id.and_then(|i| (w.m(i).mode & 0x10 != 0).then(|| w.m(i).glow)) });
+            poses.push(ActorPose { actor: k, class, chunk: self.chunk, frame_a: f as u8, frame_b: (f + 1) as u8, t, position: pos, yaw: syaw, moby: id, scale: None, hidden: false, glow: id.and_then(|i| (w.m(i).mode & 0x10 != 0).then(|| w.m(i).glow)), head: None });
         }
         self.last_actors = poses.clone();
         out.actors = poses;
@@ -1132,7 +1158,7 @@ impl ShipMode {
     /// chunk's sequence `seq`, re-pointed when the chunk changes; the class from the flight's skeletons, else the level's.
     fn actor_anim_for(&mut self, w: &World, k: usize, class: i32, seq: Option<&rc_formats::moby_anim::MobySequence>) -> Option<(Arc<rc_formats::moby_anim::MobyAnimClass>, u8)> {
         if self.actor_anim.len() <= k { self.actor_anim.resize(k + 1, None); }
-        let fresh = !matches!(&self.actor_anim[k], Some((c, _, _)) if *c == self.chunk);
+        let fresh = !matches!(&self.actor_anim[k], Some((c, _, _, _)) if *c == self.chunk);
         if fresh {
             let base = match self.flight.rigs.get(&class) {
                 Some(r) => r.anim.clone(),
@@ -1141,9 +1167,21 @@ impl ShipMode {
             let mut anim = base;
             let slot = anim.sequences.len() as u8;
             anim.sequences.push(seq.cloned());
-            self.actor_anim[k] = Some((self.chunk, Arc::new(anim), slot));
+            self.actor_anim[k] = Some((self.chunk, Arc::new(anim), slot, None));
         }
-        self.actor_anim[k].as_ref().map(|(_, a, s)| (a.clone(), *s))
+        self.actor_anim[k].as_ref().map(|(_, a, s, _)| (a.clone(), *s))
+    }
+
+    /// [`Self::actor_anim_for`] with the slot holding the flight's pose of streamed frame `f` ([`flight_sequence`]).
+    fn flight_anim_for(&mut self, w: &World, k: usize, class: i32, seq: &rc_formats::moby_anim::MobySequence, f: usize) -> Option<(Arc<rc_formats::moby_anim::MobyAnimClass>, u8)> {
+        self.actor_anim_for(w, k, class, Some(seq))?;
+        let (_, anim, slot, key) = self.actor_anim.get_mut(k)?.as_mut()?;
+        if *key != Some(f) {
+            let patched = flight_sequence(anim, seq, f);
+            if let Some(q) = Arc::make_mut(anim).sequences.get_mut(*slot as usize) { *q = patched; }
+            *key = Some(f);
+        }
+        Some((anim.clone(), *slot))
     }
 
     /// `MobyAttachToJoint(moby, list)` of actor `k` (class `class`, table moby `id`) in its current pose: the joint
@@ -1240,8 +1278,9 @@ impl ShipMode {
                 if let Some(id) = id {
                     let m = w.mm(id);
                     (m.position[0], m.position[1], m.position[2]) = (pos[0], pos[1], pos[2]);
-                    m.anim.frame_a = fr as u8;
-                    m.anim.frame_b = (fr + 1) as u8;
+                    // +0x50 / +0x51 = 0: both frame buffers at the slot's one frame (`flight_sequence`).
+                    m.anim.frame_a = 0;
+                    m.anim.frame_b = 0;
                     m.anim.t = t;
                     m.b72 = 0xff;
                     m.b71 = 0xff;
@@ -1250,7 +1289,7 @@ impl ShipMode {
                     // the class's sequence 2), then the streamed slot.
                     (m.anim.seq_a, m.anim.seq_b) = (2, 2);
                     w.build_matrix(id);
-                    if let Some((_, slot)) = self.actor_anim_for(w, k, class, Some(&a.sequence)) {
+                    if let Some((_, slot)) = self.flight_anim_for(w, k, class, &a.sequence, fr) {
                         let m = w.mm(id);
                         (m.anim.seq_a, m.anim.seq_b) = (slot, slot);
                     }
@@ -1284,7 +1323,7 @@ impl ShipMode {
                         }
                     }
                 }
-                pose = Some(ActorPose { actor: k, class, chunk: self.chunk, frame_a: fr as u8, frame_b: (fr + 1) as u8, t, position: pos, yaw: id.map_or(0.0, |i| w.m(i).rotation[2]), moby: id, scale, hidden, glow: None });
+                pose = Some(ActorPose { actor: k, class, chunk: self.chunk, frame_a: fr as u8, frame_b: (fr + 1) as u8, t, position: pos, yaw: id.map_or(0.0, |i| w.m(i).rotation[2]), moby: id, scale, hidden, glow: None, head: Some(fr as u8) });
             }
             if let Some(p) = pose { poses.push(p); }
         }
