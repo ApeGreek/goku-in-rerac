@@ -36,6 +36,21 @@ page tracks Veldin's first visit (level 00); the finale (level 18) gets its own 
 
 Scene-only actor classes (no update): 110, 1365, 1515.
 
+## The hero on Veldin
+
+Level 00's collision uses surfaces 9 (97 triangles), 0xa (3,649), 0xc (38,505) and 0x1f (43,933) (2026-10-02 dump of
+the world mesh). Level 00 runs the superset reaction (`hero::surface::LEVEL_RULES[0]`), checked against L00 `0x20b960`:
+0xc is the pit flag 0x14063a (the 0x79 pit fall), 9 sets 0x14063e (read by the grind jump test, L00 `0x229b70`,
+ported in `hero::boots`), 0xa and 0x1f have no rule in any level. No slippery (7), magnetic (2) or liquid floor, so
+level 00's extra hero code behind those surfaces (G-HERO-031) stays inert on this visit.
+
+## Play-through (2026-10-02, smoke runs)
+
+Verified: the opening scene 4 at the level's start; the walk to Clank; the drones waking in their regions and
+firing (Ratchet loses health, #197 zaps its toad); Clank's talk chaining scenes 1 → 2 → movie 1 (`mpegs[3]`) → 3; the
+travel to Novalis's space flight; the help desk's first message. Test requests: docs/test-requests/2026-10-02-veldin.md.
+
 ## Open
 
-- A full play-through: the walk to Clank, the talk's chained scenes and movie, the exit to Novalis; then what it shows.
+- Nothing Veldin-specific left in the port's code. Hands-on QA by the user (the test request) and the finale visit
+  (level 18, its own page) remain.
