@@ -144,6 +144,11 @@
 //! | U154 | 432 / 1052 Eudora's crank followers (04): posed by a bolt crank, swap their own class (`class_swap`) | level04 0x2c6858 | [`eudora_crank_follower`] |
 //! | U225 | 1066 Blarg's creature wakers (06): the cuboid, then one dormant member of the group thrown out every 20 ticks | level06 0x2fda30 (the wake 0x2e9d10) | [`blarg_waker`] |
 //! | U140 | 899 Kerwan's path-mover lines (03) and the movers 898 they create: platforms 2.9 apart gliding along the path, carrying riders | level03 0x2db280, 0x2db198, 0x2db020 | [`kerwan_path_spawner`] |
+//! | L03 825 | 825 Kerwan's turntable (03): turns at 0.48 rad/s, carrying its riders | level03 0x2d3e58 | [`kerwan_turntable`] |
+//! | L03 997 | 997 Kerwan's riser (03): rises 4 units once its save bits are set | level03 0x2dca30 | [`kerwan_riser`] |
+//! | L03 1548 | 1548 Kerwan's cutscene FX driver (03): the infobot's thrusters in scenes 4 / 10, smoke from actor 3 in scene 3 | level03 0x2e01d0 | [`kerwan_scene_fx`] |
+//! | L03 914 | 914 Kerwan's talking bystander (03): talks before the Swingshot (a checkpoint after node 2), blown up by an explosion for skill point 5, then smokes | level03 0x2dbd90 | [`kerwan_bystander`] |
+//! | L03 816, 1012 | 816 Kerwan's called platforms and 1012 its two-way shuttles (03): flown along splines, ridden with △ | level03 0x2d3198, 0x2dccc0 (the follower 0x2d3918) | [`kerwan_transport`] |
 //! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
 //! | — | 1475 Kalebo III's board missile (16; created by the board weapon, item 0x24; the Devastator missile's trail) | level16 0x2a3f38 (0x2a3e30 the spawn) | [`board_missile`] |
 //! | U509 | 933 Kalebo's floating mines (16): bob, spin, pulse; blown up by a hit or a touch, the placed ones back out of view | level16 0x2ddde0 | [`kalebo_mine`] |
@@ -360,6 +365,11 @@ pub mod eudora_crank_lift;
 pub mod eudora_crank_follower;
 pub mod blarg_waker;
 pub mod kerwan_path_spawner;
+pub mod kerwan_turntable;
+pub mod kerwan_riser;
+pub mod kerwan_scene_fx;
+pub mod kerwan_bystander;
+pub mod kerwan_transport;
 pub mod pod_launcher;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
@@ -610,6 +620,12 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U140 899", level: kerwan_path_spawner::REFERENCE_LEVEL, func: kerwan_path_spawner::UPDATE_FN, classes: &kerwan_path_spawner::CLASSES, update: kerwan_path_spawner::spawner_update, joints: &[] },
     // The movers 899 creates (created only: not in the census's placed units).
     UnitPort { unit: "U140 898", level: kerwan_path_spawner::REFERENCE_LEVEL, func: kerwan_path_spawner::MOVER_FN, classes: &kerwan_path_spawner::MOVER_CLASSES, update: kerwan_path_spawner::mover_update, joints: &[] },
+    UnitPort { unit: "L03 825", level: kerwan_turntable::REFERENCE_LEVEL, func: kerwan_turntable::UPDATE_FN, classes: &kerwan_turntable::CLASSES, update: kerwan_turntable::update, joints: &[] },
+    UnitPort { unit: "L03 997", level: kerwan_riser::REFERENCE_LEVEL, func: kerwan_riser::UPDATE_FN, classes: &kerwan_riser::CLASSES, update: kerwan_riser::update, joints: &[] },
+    UnitPort { unit: "L03 1548", level: kerwan_scene_fx::REFERENCE_LEVEL, func: kerwan_scene_fx::UPDATE_FN, classes: &kerwan_scene_fx::CLASSES, update: kerwan_scene_fx::update, joints: &[] },
+    UnitPort { unit: "L03 914", level: kerwan_bystander::REFERENCE_LEVEL, func: kerwan_bystander::UPDATE_FN, classes: &kerwan_bystander::CLASSES, update: kerwan_bystander::update, joints: &[] },
+    UnitPort { unit: "L03 816", level: kerwan_transport::REFERENCE_LEVEL, func: kerwan_transport::PLATFORM_FN, classes: &kerwan_transport::PLATFORM_CLASSES, update: kerwan_transport::update_816, joints: &[] },
+    UnitPort { unit: "L03 1012", level: kerwan_transport::REFERENCE_LEVEL, func: kerwan_transport::SHUTTLE_FN, classes: &kerwan_transport::SHUTTLE_CLASSES, update: kerwan_transport::update_1012, joints: &[] },
     UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },

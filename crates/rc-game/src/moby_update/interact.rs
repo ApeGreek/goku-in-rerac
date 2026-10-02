@@ -458,6 +458,9 @@ pub struct Interact {
     /// The talk system's own slot-12 request this tick (`NpcTalkUpdate` bumps handle 0x160130 while the hero is in
     /// range and △ is not pressed).
     pub talk_shown: bool,
+    /// A class's own slot-12 request this tick (Kerwan's transporters 1012 create the prompt element themselves and
+    /// keep it up for 10 ticks through their handle).
+    pub class_shown: bool,
     /// The level's text (`msg_string`), set by the loader.
     pub messages: Arc<Vec<Message>>,
     /// 0x15ed88: the language (price separators).
@@ -536,6 +539,7 @@ impl Interact {
     pub fn begin_tick(&mut self, pressed: u32, hero_state: i32) {
         self.pressed = pressed;
         self.talk_shown = false;
+        self.class_shown = false;
         if hero_state != 0x1d && hero_state != 0x32 {
             self.prompt.tick();
             self.prompt_hud = self.prompt.shown();
@@ -833,6 +837,8 @@ pub fn talk_update_at(w: &mut World, id: MobyId, base: usize) -> bool {
 pub fn set_talked(w: &mut World, id: MobyId, v: u32) {
     let g = talk_slot(w, id);
     if g < 0 { return; }
+    // Kerwan's transports 816 / 1012 store it every tick: a store of the same value writes nothing.
+    if w.svc.interact.game.talked.get(g as usize) == Some(&v) { return; }
     if let Some(t) = w.svc.interact.game.talked.get_mut(g as usize) { *t = v; }
     w.svc.interact.writes.push(GameWrite::Talked(g as usize, v));
 }

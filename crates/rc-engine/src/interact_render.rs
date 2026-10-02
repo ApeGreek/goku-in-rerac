@@ -259,7 +259,7 @@ pub fn after_tick(
     vr.lang = it.lang;
     let mut feed = feed;
     if let Some(f) = feed.as_deref_mut() {
-        f.prompt = it.prompt_hud || it.talk_shown;
+        f.prompt = it.prompt_hud || it.talk_shown || it.class_shown;
         if f.prompt_text != it.prompt.text { f.prompt_text = it.prompt.text.clone(); }
     }
     let mut audio = audio;
