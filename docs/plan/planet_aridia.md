@@ -17,7 +17,7 @@ overlay disassembled, gp words, instances, cuboids, splines; `cargo run -p rc-tr
 | 792 | 1 | the platform an animated arm carries | **ported** (`units::aridia_arm_platform`) |
 | 1213 | 6 | the big path ships (also 1973 on 09 / 10) | **ported** (`units::path_ship`, the [`BIG`] kind) |
 | 1479 | 5 | the fire vents (type-2 flame streams and spark bursts) | **ported** (`units::aridia_fire`) |
-| 713 | 1 | the launch tube: Ratchet walks in, is held (state 0x72) and carried along a path under a scripted camera, its two child mobys 1057 / 1058 | open |
+| 713 | 1 | the launch tube: Ratchet walks in, is held (state 0x72) and carried to the other end while the camera flies the path; its rings 1057 / 1058 and four doors | **ported** (`units::aridia_tube`) |
 
 ## Shared-system changes in this pass
 
@@ -25,9 +25,9 @@ overlay disassembled, gp words, instances, cuboids, splines; `cargo run -p rc-tr
 - `DrawCallbacks::tick`: the tick counter the frame's draw reads (the lift's spinning glow column).
 - `engine_trail::Blob::size_div` (the big path ships on level 10 divide the blob sizes by 1.5).
 - `breakables::novalis::puffs` takes the puffs' colours; `puffs` / `bits` shared with 762.
+- `cinematic::script_mode` (level02 `0x2f8a18`): the script camera's mode and timer mid-script.
 - 788 (the Hoverboard agent) now asks the loader for its joint lists (its head-turn manipulators warned without them).
 
 ## Open
 
-- 713 (the launch tube).
 - The user's QA: docs/test-requests/2026-10-02-aridia.md.

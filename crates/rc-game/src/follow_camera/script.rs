@@ -266,6 +266,22 @@ impl Camera {
     /// D+0x50..0x58): its position and Euler springs, each (k, damping, max).
     pub fn camera_script_springs(&mut self, pos: [f32; 3], euler: [f32; 3]) { self.script.springs = Some([pos, euler]); }
 
+    /// Level02 `0x2f8a18(mode, ticks)` (the launch tube 713's ride): the script camera's mode (+0x88); modes 2 and 3
+    /// restart its timer (D+0xe0 = D+0xe4 = `ticks`), mode 3 also takes Ratchet's position as its anchor (D+0x110) and
+    /// the current view's (yaw, elevation, distance) about it (D+0xfc, from 0x1673c0); other modes keep the timer.
+    pub fn camera_script_mode(&mut self, mode: u8, ticks: i32, hero: [f32; 3]) {
+        let cur = to_f32x3(self.out.pos);
+        let s = &mut self.script;
+        s.mode = mode;
+        if mode != MODE_LERP && mode != MODE_ORBIT { return; }
+        if mode == MODE_ORBIT {
+            s.anchor = hero;
+            s.orbit = spherical(cur, hero);
+        }
+        s.timer = ticks;
+        s.total = ticks;
+    }
+
     /// `0x316e88(a, b)`: mode 3's distance curve end slopes (D+0x124 = a, D+0x128 = b).
     pub fn camera_script_curve(&mut self, a: f32, b: f32) { self.script.curve = [a, b]; }
 

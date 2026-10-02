@@ -157,6 +157,7 @@
 //! | U110 | 762 Aridia's boulder (02): a blast bursts it, remembered by a global flag | level02 0x2e0720 | [`aridia_boulder`] |
 //! | U113 | 792 Aridia's arm platform (02): rides an animated arm's joint, swings between its ends | level02 0x2e2228 | [`aridia_arm_platform`] |
 //! | U120 | 1479 Aridia's fire vents (02): flame streams and spark bursts along their facing | level02 0x2ef020 | [`aridia_fire`] |
+//! | U103 | 713 Aridia's launch tube (02): rises at the end Ratchet nears, carries him to the other end under a flying camera | level02 0x2ddc88 | [`aridia_tube`] |
 //! | U97 | 651 Aridia's anti-grav lifts (02): ride their cylinder between its ends, come for Ratchet, glow while moving | level02 0x2dbd38, draw 0x2dc2c8 | [`aridia_lift`] |
 //! | U134 | 455 the pod spawners (03, 08, 14) and their pods 545: once Ratchet is near, lobbed pods bounce, rest and hatch one of the spawner's placed creatures | level03 0x2bef68, 0x2c4718, 0x2bec60 | [`pod_spawner`] |
 //! | U139 | 631 Kerwan's Blarg hover ship (a 574 riding it) and its flame stream 848: arrives along a path, patrols facing Ratchet, sprays flames from its turret, exits and switches paths | level03 0x2cca00, 0x2ce238, 0x2d47c0 | [`hover_ship`] |
@@ -390,6 +391,7 @@ pub mod aridia_gates;
 pub mod aridia_boulder;
 pub mod aridia_arm_platform;
 pub mod aridia_fire;
+pub mod aridia_tube;
 pub mod hover_ship;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
@@ -662,6 +664,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U110 762", level: aridia_boulder::REFERENCE_LEVEL, func: aridia_boulder::UPDATE_FN, classes: &aridia_boulder::CLASSES, update: aridia_boulder::update, joints: &[] },
     UnitPort { unit: "U113 792", level: aridia_arm_platform::REFERENCE_LEVEL, func: aridia_arm_platform::UPDATE_FN, classes: &aridia_arm_platform::CLASSES, update: aridia_arm_platform::update, joints: &[] },
     UnitPort { unit: "U120 1479", level: aridia_fire::REFERENCE_LEVEL, func: aridia_fire::UPDATE_FN, classes: &aridia_fire::CLASSES, update: aridia_fire::update, joints: &[] },
+    UnitPort { unit: "U103 713", level: aridia_tube::REFERENCE_LEVEL, func: aridia_tube::UPDATE_FN, classes: &aridia_tube::CLASSES, update: aridia_tube::update, joints: &[] },
     UnitPort { unit: "U97 651", level: aridia_lift::REFERENCE_LEVEL, func: aridia_lift::UPDATE_FN, classes: &aridia_lift::CLASSES, update: aridia_lift::update, joints: &[] },
     UnitPort { unit: "U97 651 glow", level: aridia_lift::REFERENCE_LEVEL, func: aridia_lift::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U134 455", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::UPDATE_FN, classes: &pod_spawner::CLASSES, update: pod_spawner::update, joints: &pod_spawner::CLASSES },

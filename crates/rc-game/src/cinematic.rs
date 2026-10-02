@@ -7,6 +7,7 @@
 //! | `CameraScript(pos, euler, mode, ticks, collide)` 0x316ef8 | [`camera_script`] | the script camera (type 5) switched in ([`crate::follow_camera::script`]) |
 //! | `0x316dd0` / `0x316e28` | [`camera_targets`] | its target position / Euler |
 //! | `0x316e88(a, b)` | [`camera_curve`] | mode 3's distance curve |
+//! | level02 `0x2f8a18(mode, ticks)` | [`script_mode`] | the script camera's mode and timer (the launch tube's ride) |
 //! | `CameraScript2(kind)` 0x317070 | [`camera_script2`] | back to the follow camera (cut or blend) |
 //! | `0x15f404 = 1 / 0` | [`letterbox`] | the letterbox bars (`DrawScreenFade` 0x21b7d8) and the HUD hidden (`HudDraw` 0x24fb50); the creature layer's `Globals::cutscene` *is* this global |
 //! | `SetState(s, play)` 0x23cf98 | [`hero_state`] | Ratchet's state (0x72: held, no control) |
@@ -47,6 +48,8 @@ pub enum CinematicCall {
     CameraCurve { a: f32, b: f32 },
     /// `0x312b40`: the script camera's springs, (k, damping, max) for its position and its Euler.
     ScriptSprings { pos: [f32; 3], euler: [f32; 3] },
+    /// Level02 `0x2f8a18(mode, ticks)`: the script camera's mode and timer.
+    ScriptMode { mode: u8, ticks: i32 },
     /// `CameraScript2(kind)` on level `level`.
     CameraRelease { kind: u8, level: u32 },
     /// `HeroTeleport(…, reset_cam = 1)`'s `CameraResetBehindHero` 0x20ee80 (after the hero calls of the tick).
@@ -190,6 +193,10 @@ pub fn camera_targets(w: &mut World, pos: Option<[f32; 3]>, euler: Option<[f32; 
 pub fn script_springs(w: &mut World, a: [f32; 6]) {
     w.svc.cinematic.calls.push(CinematicCall::ScriptSprings { pos: [a[1], a[0], a[2]], euler: [a[4], a[3], a[5]] });
 }
+
+/// Level02 `0x2f8a18(mode, ticks)`: the script camera's mode and timer
+/// ([`crate::follow_camera::Camera::camera_script_mode`]).
+pub fn script_mode(w: &mut World, mode: u8, ticks: i32) { w.svc.cinematic.calls.push(CinematicCall::ScriptMode { mode, ticks }); }
 
 /// `0x316e88(a, b)`.
 pub fn camera_curve(w: &mut World, a: f32, b: f32) { w.svc.cinematic.calls.push(CinematicCall::CameraCurve { a, b }); }
@@ -421,6 +428,7 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             }
             CinematicCall::CameraCurve { a, b } => cam.camera_script_curve(a, b),
             CinematicCall::ScriptSprings { pos, euler } => cam.camera_script_springs(pos, euler),
+            CinematicCall::ScriptMode { mode, ticks } => cam.camera_script_mode(mode, ticks, crate::hero::physics::to_f32x3(inp.hero.pos)),
             CinematicCall::CameraTargets { pos, euler } => cam.camera_script_targets(pos, euler),
             CinematicCall::CameraRelease { kind, level } => cam.camera_script2(kind, level),
             // CameraResetBehindHero 0x20ee80 on the follow camera (the hero's pose is this tick's: the class stores
