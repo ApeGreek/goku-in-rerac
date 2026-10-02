@@ -17,7 +17,7 @@ aid: `rc-trace peek` (the overlay disassembled, gp words, instances, cuboids, sp
 | 427 | 13 | the gunners: keep their distance in an area, fire bursts of gun shots (184), strike up close, dissolve when killed; gun 499 on joint 1 | **ported** (`units::eudora_gunner`) |
 | 217 | 5 | the loggers carrying a prop (570): growl, walk a path, swing; flinch, stagger, knocked down, blown up | **ported** (`units::eudora_logger`; its leg-walker states are unreachable in the game) |
 | 563 | 17 (10 created) | the leg walkers on the shared leg walker: chase inside an area, kick, dash away when knocked, chop wood (chips 1516) | **ported** (`units::eudora_walker`, `creature::legs`) |
-| 86 | 3 | flock spawners: five class-85 members each, flocking around a centre that follows a path | open (the boids library `0x1f30e0` / `0x1f3a80`) |
+| 86 | 3 | flock spawners: five class-85 members each, flocking around a centre that follows a path | **ported** (`units::eudora_flock`: the engine's boids `0x1f30e0` / `0x1f3a80`, their reachable branches) |
 
 ## Shared-system changes in this pass
 
@@ -33,9 +33,10 @@ aid: `rc-trace peek` (the overlay disassembled, gp words, instances, cuboids, sp
 - The flyers' hit count (gp−0x7e08) lasts the power-on session in the game; the port's starts at 0 on each level load.
 - A flyer's landing writes a 32-bit delay over the driver's 16-bit one, so the driver resumes at once and the flyer
   flies on while turning toward the pad (the game's).
+- The boids' pull to the flock centre is gated by a distance to an uninitialised stack vector in the game; the port
+  always pulls.
 - One gunner has no area path: the game prints it and dissolves the gunner at its first update.
 
 ## Open
 
-- 86, the flocks.
 - The user's QA: docs/test-requests/2026-10-02-eudora.md.
