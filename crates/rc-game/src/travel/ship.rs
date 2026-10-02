@@ -6,6 +6,7 @@
 //!
 //! | address | what | here |
 //! |---|---|---|
+//! | +0x74 | `ShipUpdate` runs on the loader's ship only (`svc.travel.moby`); the scene and flight actors of a ship class (`CreateMoby(531..533)`) get the class table's empty update | [`update`] (the early return) |
 //! | 0x2a1c40 state 0x2a | the level-10 Clank boarding (scene 9 started): waits while game mode 2; then once each, guarded by the global flags 0x13d3d0..0x13d3d3: scene 4 when item 28 is owned (0x13d4dc), scene 5, movie 0xb, scene 6 when planet 11 is unlocked (0x13dd4b); then state 0, mode &= ~0x41, 0x13e058 = 1 (the take-off auto-skips), 0x15f630 = 1 | [`update`] (`cinematic::start_scene` / `start_movie`, `interact::set_global_flag`) |
 //! | 0x2a1c6c | drawn (+0x31): +0xbc += 2; glow +0x90 = `v | v<<8 | v<<16`, v = `(int)(fast_cos((+0xbc − 0x80)·2π/256)·50) + 0x96` (533: red `v >> 1`); `RegisterDrawCallback2(0x2a70a8)` (the glass); xy distance to the camera 0x167240 < 32 → `RegisterDrawCallback(0x2a2130)` (the shadow) | [`update`] (`fast_cos` as `f32::cos` [L]) |
 //! | 0x2a1d44 | the hatch flag (pvar +0xc, s16): off → on when the hero (0x13f3d0) is within xy 6 of the ship and within 4 (3-D) of the hatch `rows·0x1bdd00[ship] + pos`; on → off beyond 4.1; mode bit 1 (hidden) → off | [`update`] |
@@ -104,6 +105,10 @@ fn set_pv16(m: &mut Moby, off: usize, v: i16) {
 
 /// `ShipUpdate` 0x2a1c40 (module docs).
 pub fn update(w: &mut World, id: MobyId) {
+    // The loader installs `ShipUpdate` on the ship it creates (+0x74) only: another moby of a ship class (the actors of
+    // the mode-6 scenes and of the flight, `CreateMoby(531..533)`) runs the class table's entry, the empty update on
+    // level 01 [L: on the other levels].
+    if w.svc.travel.moby != Some(id) { return; }
     if w.m(id).state == STATE_BOARDING {
         boarding(w, id);
         return;
