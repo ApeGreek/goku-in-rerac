@@ -188,16 +188,6 @@ fn to_bite(w: &mut World, id: MobyId) {
     blend(w, id, 5, t);
 }
 
-/// `0x250a78(dist, height, K)`: the ballistic arc of a flight that rises `height` and covers `dist`.
-fn ballistic(w: &mut World, id: MobyId, dist: f32, height: f32, kr: usize) {
-    let g = c::pf(w, id, kr + knock::k::GRAVITY);
-    let up = ((height + height) * g).abs().sqrt();
-    c::set_pf(w, id, kr + knock::k::UP, up);
-    let t = (up + up) / g;
-    c::set_pf(w, id, kr + knock::k::SPEED, (dist + dist) / t);
-    c::set_pf(w, id, kr + knock::k::DRAG, (dist + dist) / (t * t));
-}
-
 /// `0x2c6a20`: the hits (module doc).
 fn hits(w: &mut World, id: MobyId) {
     let ready = link(w, id, pv::TROOPER).is_some_and(|t| trooper_ready(w, t));
@@ -222,7 +212,7 @@ fn hits(w: &mut World, id: MobyId) {
         // `FastArcTan(pos − attacker)`: a dead store (the aim below overwrites it).
         w.mm(id).mode &= !mode::TARGETABLE;
         c::set_pf(w, id, kr + knock::k::UP, c::DT * 10.0);
-        ballistic(w, id, 4.5, 2.0, kr);
+        knock::ballistic(w, id, 4.5, 2.0, kr);
         c::set_pf(w, id, kr + knock::k::KEY_APEX, 5.0);
         c::set_pf(w, id, kr + knock::k::KEY_LAND, 12.0);
         let dir = h.dir.map(|x| f32::from_bits(x.0));

@@ -84,6 +84,17 @@ pub fn lob_up(t: f32, g: f32, from: V, to: V, time: &mut f32) -> f32 {
     -((from[2] - to[2]) + g * d * d * 0.5) / d
 }
 
+/// `0x250a78(dist, height, K)` (level03; level04 `0x255150`): the ballistic arc of a flight that rises `height` and covers
+/// `dist`: up = √(2·height·g), t = 2·up / g, speed = 2·dist / t, drag = 2·dist / t².
+pub fn ballistic(w: &mut World, id: MobyId, dist: f32, height: f32, kr: usize) {
+    let g = super::pf(w, id, kr + k::GRAVITY);
+    let up = ((height + height) * g).abs().sqrt();
+    super::set_pf(w, id, kr + k::UP, up);
+    let t = (up + up) / g;
+    super::set_pf(w, id, kr + k::SPEED, (dist + dist) / t);
+    super::set_pf(w, id, kr + k::DRAG, (dist + dist) / (t * t));
+}
+
 /// `0x271418(angle, moby, K, seq, ticks, frame)`: start a flight along `angle` (module doc): the velocity from
 /// `K.18` / `K.1c`, yaw target `angle + π`, timer `ticks(300)`, phase 0; a creature with no health left (the header's
 /// damage record +0) flies without collision (flag 0x20, +0x94 = 0); then the flight animation (blend, or the

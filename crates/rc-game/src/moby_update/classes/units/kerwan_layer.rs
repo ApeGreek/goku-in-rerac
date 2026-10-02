@@ -110,22 +110,12 @@ fn link(w: &World, id: MobyId, o: usize) -> Option<MobyId> {
     usize::try_from(c::pi32(w, id, o) - 1).ok().filter(|&m| m < w.table.mobys.len())
 }
 
-/// `0x250a78(dist, height, K)`: the ballistic arc of a flight that rises `height` and covers `dist`.
-fn ballistic(w: &mut World, id: MobyId, dist: f32, height: f32, kr: usize) {
-    let g = c::pf(w, id, kr + knock::k::GRAVITY);
-    let up = ((height + height) * g).abs().sqrt();
-    c::set_pf(w, id, kr + knock::k::UP, up);
-    let t = (up + up) / g;
-    c::set_pf(w, id, kr + knock::k::SPEED, (dist + dist) / t);
-    c::set_pf(w, id, kr + knock::k::DRAG, (dist + dist) / (t * t));
-}
-
 /// The knockback / death flight of a hit (module table).
 #[allow(clippy::too_many_arguments)]
 fn flight(w: &mut World, id: MobyId, dir: c::V, gravity: f32, dist: f32, height: f32, seq: u8, keys: (f32, f32)) {
     let kr = lp::K;
     c::set_pf(w, id, kr + knock::k::GRAVITY, gravity * DT2);
-    ballistic(w, id, dist, height, kr);
+    knock::ballistic(w, id, dist, height, kr);
     c::set_pu8(w, id, kr + 0x3d, 0);
     c::set_pi32(w, id, kr + knock::k::FLAGS, 9);
     let (mut sp, mut up) = (c::pf(w, id, kr + knock::k::SPEED), c::pf(w, id, kr + knock::k::UP));
