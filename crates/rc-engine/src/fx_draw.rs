@@ -797,11 +797,12 @@ fn draw_list1(
                     }
                     // A census unit port's quads (the laser fences 838, …).
                     Callback::UnitQuads(i) => {
-                        let Some(g) = rc_game::moby_update::classes::units::fx_quads(&p.game.mobys, &p.svc, i, id) else { continue };
-                        if g.quads.is_empty() { continue; }
-                        let mut b = PrimBuf::default();
-                        for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
-                        out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
+                        for g in rc_game::moby_update::classes::units::fx_quad_groups(&p.game.mobys, &p.svc, i, id) {
+                            if g.quads.is_empty() { continue; }
+                            let mut b = PrimBuf::default();
+                            for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
+                            out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
+                        }
                     }
                     // The ship's shadow (`0x2a2130`), flames (`0x2a2ab8`) and trail (`0x2a2d28`): rc_game::travel::ship's quads.
                     Callback::ShipShadow | Callback::ShipFlames | Callback::ShipTrail => {

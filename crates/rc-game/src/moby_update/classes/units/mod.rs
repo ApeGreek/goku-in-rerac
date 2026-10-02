@@ -181,6 +181,7 @@
 //! | U561 | 1428 the fleet's item scene (flags 2 / 0x78) (17) | level17 0x2f1790 | [`fleet_story`] |
 //! | U31 | 834 Veldin's Clank (flag 8, the trip to Novalis) (00) | level00 0x2d9dc8 | [`veldin_story`] |
 //! | U24 | 530 Ratchet's ship on Veldin (00; hidden behind the scenes' own ship, its canopy glass) | level00 0x2d1e80 | [`veldin_ship`] |
+//! | U36, U37 | 1440 Veldin's beam drones (00; fly in, fire a crackling beam, two hits) and 1471 their beam manager (the three beam slots, the strands, sparks and draw) | level00 0x2e0b88, 0x2e1df0 | [`veldin_beamer`] |
 //! | U38 | 1545 Veldin's cutscene FX driver (00; the infobot's thrusters, scene 4's dust) | level00 0x2e3800 | [`veldin_scene_fx`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
@@ -354,6 +355,7 @@ pub mod kalebo_mine;
 pub mod board_missile;
 pub mod veldin_ship;
 pub mod veldin_scene_fx;
+pub mod veldin_beamer;
 pub mod pokitaru_teleporter;
 pub mod drip;
 pub mod water_current;
@@ -591,6 +593,11 @@ pub const PORTS: &[UnitPort] = &[
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
     UnitPort { unit: "U24 530", level: veldin_ship::REFERENCE_LEVEL, func: veldin_ship::UPDATE_FN, classes: &veldin_ship::CLASSES, update: veldin_ship::update, joints: &veldin_ship::CLASSES },
+    UnitPort { unit: "U36 1440", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::UPDATE_FN, classes: &veldin_beamer::CLASSES, update: veldin_beamer::update, joints: &veldin_beamer::CLASSES },
+    UnitPort { unit: "U37 1471", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::MANAGER_FN, classes: &veldin_beamer::MANAGER_CLASSES, update: veldin_beamer::manager, joints: &[] },
+    // Draw callbacks only (1440's eye glow `0x2e1c78`: `Callback::UnitGlow`; 1471's beams `0x2e2af0`: `UnitFrame` + `UnitQuads`).
+    UnitPort { unit: "U36 1440 eye", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::EYE_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U37 1471 beams", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U38 1545", level: veldin_scene_fx::REFERENCE_LEVEL, func: veldin_scene_fx::UPDATE_FN, classes: &veldin_scene_fx::CLASSES, update: veldin_scene_fx::update, joints: &[] },
     UnitPort { unit: "1475 board missile", level: board_missile::REFERENCE_LEVEL, func: board_missile::UPDATE_FN, classes: &board_missile::CLASSES, update: board_missile::update, joints: &[] },
     UnitPort { unit: "U509 933", level: kalebo_mine::REFERENCE_LEVEL, func: kalebo_mine::UPDATE_FN, classes: &kalebo_mine::CLASSES, update: kalebo_mine::update, joints: &[] },
@@ -730,6 +737,8 @@ pub fn update(w: &mut World, id: MobyId, i: u16) { (PORTS[i as usize].update)(w,
 #[derive(Clone, Debug, Default)]
 pub struct Globals {
     words: std::collections::HashMap<u32, u32>,
+    /// Veldin's beam slots (level00 0x161bf8.., `veldin_beamer`).
+    pub veldin_beams: veldin_beamer::Beams,
 }
 
 impl Globals {
@@ -849,6 +858,15 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
     }
 }
 
+/// The quad groups of the draw callback unit row `i` registered for moby `id` (`Callback::UnitQuads(i)`): the rows
+/// whose callback draws more than one texture or blend (1471's beams), else [`fx_quads`]'s one group.
+pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Vec<FxQuads> {
+    match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
+        Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::fx_quad_groups(svc),
+        _ => fx_quads(table, svc, i, id).into_iter().collect(),
+    }
+}
+
 /// The glow quads of the draw callback unit row `i` registered for moby `id` (`Callback::UnitGlow(i)`; draw only).
 pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Vec<GlowQuad> {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
@@ -858,6 +876,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((veldin_boss::REFERENCE_LEVEL, veldin_boss::DRAW_FN)) => veldin_boss::glow_quads(table, svc, id),
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::GLOW_FN)) => veldin_hopper::glow_quads(table, svc, id),
         Some((path_ship::REFERENCE_LEVEL, path_ship::UPDATE_FN)) => path_ship::glow_quads(table, svc, id),
+        Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::EYE_FN)) => veldin_beamer::glow_quads(table, svc, id),
         _ => Vec::new(),
     }
 }
@@ -871,6 +890,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((gemlik_ship::REFERENCE_LEVEL, gemlik_ship_hud::HUD_FN)) => gemlik_ship_hud::hud_frame(w, id),
         Some((pokitaru_jet::REFERENCE_LEVEL, pokitaru_jet_hud::HUD_FN)) => pokitaru_jet_hud::hud_frame(w, id),
         Some((fleet_ship::REFERENCE_LEVEL, fleet_ship_hud::HUD_FN)) => fleet_ship_hud::hud_frame(w, id),
+        Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::frame(w, id),
         _ => {}
     }
 }

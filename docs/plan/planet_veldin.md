@@ -28,8 +28,8 @@ page tracks Veldin's first visit (level 00); the finale (level 18) gets its own 
 | 834 | 1 | Clank (the talk, the exit) | ported (`units::veldin_story`) |
 | 1060 | 21 | lamps | ported (`units::lamp`) |
 | 1413 | 1 | the help director | ported (`units::help_veldin`) |
-| 1440 | 9 | the path-flying beam creatures around the crash site | **open**: level00 `0x2e0b88` (+ `0x2e1678`, `0x2e1aa8`, `0x2e1c78`, `0x2e1f28`, `0x2e2040`, `0x2e2190`) |
-| 1471 | 1 | the beam manager (three slots 0x161bf8.., their sounds and draw `0x2e2af0`) | **open**: level00 `0x2e1df0` (+ `0x2e20f8`, `0x2e2250`, `0x2e2c88`, `0x2e3388`) |
+| 1440 | 9 | the beam drones around the crash site (fly in along a path, fire a crackling beam, two hits; #197 zaps toad #154, its second target +0x1bc) | **ported 2026-10-02** (`units::veldin_beamer`) |
+| 1471 | 1 | the beam manager (three slots 0x161bf8.., the strands, sparks, point lights and draw `0x2e2af0`) | **ported 2026-10-02** (`units::veldin_beamer`; the draw through `Callback::UnitFrame` + a multi-group `UnitQuads`) |
 | 1545 | 1 | the cutscene FX driver (the infobot's thrusters in scenes 2 / 3, scene 4's dust) | **ported 2026-10-02** (`units::veldin_scene_fx`) |
 | 1564 | 25 | path gliders | ported (`units::path_glider`) |
 | 1781 / 1782 | 33 / 36 | grass | ported |
@@ -38,5 +38,4 @@ Scene-only actor classes (no update): 110, 1365, 1515.
 
 ## Open
 
-- 1440 + 1471 (above).
 - A full play-through: the walk to Clank, the talk's chained scenes and movie, the exit to Novalis; then what it shows.
