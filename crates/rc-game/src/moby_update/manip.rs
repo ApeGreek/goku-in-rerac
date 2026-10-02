@@ -148,6 +148,14 @@ pub fn set_axis(w: &mut World, target: MobyId, owner: MobyId, ofs: usize, a: f32
     sync(w, target, owner, ofs);
 }
 
+/// The record's rotation +0x10 written whole, `q` (x, y, z, w): two `FUN_00221e38` axes combined by `fun_001fa3c0`
+/// (the turret of level 18's tank 1454, `classes::units::veldin_tank`).
+pub fn set_quat(w: &mut World, target: MobyId, owner: MobyId, ofs: usize, q: [f32; 4]) {
+    ensure(w, owner, ofs, rec::NODE);
+    p::set_v4f(&mut w.mm(owner).pvars, ofs + rec::QUAT, q);
+    sync(w, target, owner, ofs);
+}
+
 /// `FUN_002777d8(k, d, moby, rec, list)`: the NPC look-at record at `ofs` of `owner`'s pvars, linked into `moby`'s list
 /// `list` (module doc). The owner writes this tick's target angles (+0x60..) and scale (+0x70) before the call.
 pub fn look(w: &mut World, moby: MobyId, owner: MobyId, ofs: usize, list: u8, k: f32, d: f32) {

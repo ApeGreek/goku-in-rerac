@@ -163,11 +163,15 @@ pub fn lob(w: &mut World, yaw: f32, pitch: f32, from: c::V, dir: c::V, at: c::V,
 }
 
 /// `0x2d5488(m, v)` (module doc).
-fn trail(w: &mut World, id: MobyId, v: c::V) {
+fn trail(w: &mut World, id: MobyId, v: c::V) { trail_for(w, id, v, 0x14) }
+
+/// The smoke and glow of [`trail`] with both puffs living `ticks(life)` (the tank shot 41's `0x2a7220` makes the same
+/// two with 10, `units::veldin_tank`).
+pub(crate) fn trail_for(w: &mut World, id: MobyId, v: c::V, life: i32) {
     let rv = w.rng.rand_vec(0.1 * DT, 0.2 * DT);
     let f = w.rng.randf(0.0, 1.0);
     let q = c::add(c::scale(v, f), c::pos(w, id));
-    let n = w.ticks(0x14);
+    let n = w.ticks(life);
     let a = crate::particles::type44::Spawn { size: 40000.0, growth: 1000.0, damp: 1.0, fall: f32::from_bits(0xb951_b717), w: 0.0, pos: v3(q), vel: rv, life: n, alpha: 0x7f, rgb: 0x60_6060, spin: 3 };
     if let Some(sys) = w.particles.as_deref_mut() {
         *w.svc.fx.part_spawns.entry(44).or_default() += 1;
@@ -183,7 +187,7 @@ fn trail(w: &mut World, id: MobyId, v: c::V) {
         fx::part44(w, &a);
     }
     let up = rotate(&w.m(id).rows.map(|r| r.map(f32::to_bits)), [0.0, 0.0, 0.02, 0.0]);
-    let n = w.ticks(0x14);
+    let n = w.ticks(life);
     fx::part21(w, 20000.0, q, up, 0x4f00_7fff, 0x1fff_ffff, n, 1);
 }
 

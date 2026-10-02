@@ -189,6 +189,7 @@
 //! | U594 | 1402 the Hydrodisplacer pools of Veldin's last level (18; two heights, their groups carried, the surface meshes) | level18 0x2f2310, draws 0x2f2970 / 0x2f2620 / 0x2f27c8 | [`veldin_pool`] |
 //! | U519 | 1443 (16) / 1890 (18) the energy fans (blades and rings until their switch group is thrown) | level18 0x2fae48, draw 0x2fb018 (level16 0x2e5708) | [`energy_fan`] |
 //! | U599 | 1563 the cutscene effects of Veldin's last level (18; the seat glows, the jets and blasts of scene 4, the piece's glow and beam, the flash, the puffs) | level18 0x2f88e8, draws 0x2f9780 / 0x2f9a98 / 0x2f9c20 / 0x2f9eb8, the Morph-o-Ray beam 0x2c04b8 | [`veldin_finale_fx`] |
+//! | U598 | 1454 the tanks of Veldin's last level (18; a path, a turret, shells 41 that may home, treads 331) | level18 0x2f7c40, 0x2a7220, 0x2ce7d0 | [`veldin_tank`] |
 //! | U581 | 582 the rail chooser of Veldin's last level (18; the twice-laid rails, one way live at a time; two nanotech clusters) | level18 0x2d62e8 | [`veldin_rails`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
@@ -367,6 +368,7 @@ pub mod veldin_rails;
 pub mod energy_fan;
 pub mod veldin_scene_jet;
 pub mod veldin_ship;
+pub mod veldin_tank;
 pub mod veldin_turnover;
 pub mod veldin_scene_fx;
 pub mod veldin_beamer;
@@ -627,6 +629,10 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U599 1563 glow", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U599 1563 beam", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U599 1563 morph beam", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::MORPH_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U598 1454", level: veldin_tank::REFERENCE_LEVEL, func: veldin_tank::UPDATE_FN, classes: &veldin_tank::CLASSES, update: veldin_tank::update, joints: &veldin_tank::CLASSES },
+    // The tank's shells and treads (created only: not in the census's placed units).
+    UnitPort { unit: "U598 41", level: veldin_tank::REFERENCE_LEVEL, func: veldin_tank::SHELL_FN, classes: &veldin_tank::SHELL_CLASSES, update: veldin_tank::shell_update, joints: &[] },
+    UnitPort { unit: "U598 331", level: veldin_tank::REFERENCE_LEVEL, func: veldin_tank::TREAD_FN, classes: &veldin_tank::TREAD_CLASSES, update: veldin_tank::tread_update, joints: &[] },
     UnitPort { unit: "U24 530", level: veldin_ship::REFERENCE_LEVEL, func: veldin_ship::UPDATE_FN, classes: &veldin_ship::CLASSES, update: veldin_ship::update, joints: &veldin_ship::CLASSES },
     UnitPort { unit: "U36 1440", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::UPDATE_FN, classes: &veldin_beamer::CLASSES, update: veldin_beamer::update, joints: &veldin_beamer::CLASSES },
     UnitPort { unit: "U37 1471", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::MANAGER_FN, classes: &veldin_beamer::MANAGER_CLASSES, update: veldin_beamer::manager, joints: &[] },

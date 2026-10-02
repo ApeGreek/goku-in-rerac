@@ -34,3 +34,9 @@
   of the turned-over piece and a white flash fills the view; a ring of grey puffs spreads before the camera in scene
   3; a jet trail streaks in scene 5; and in scene 1 a crackling Morph-o-Ray beam (the item's own look) fires for
   about a second.
+
+### F8. The tanks (1454)
+- **Claim:** three tanks roll along their routes, turning in place on sharp corners, their treads running with their
+  speed. Coming within about 30, the tank turns its turret toward Ratchet with a slight sway and fires shells from
+  alternating barrels with a ring of smoke; up close the shells curve toward him. A shell bursts on whatever it hits
+  and hurts. A hit flashes the tank; six damage blows it up into pieces.
