@@ -588,7 +588,7 @@ pub fn update(w: &mut World, id: MobyId) {
     let path = if c::pi16(w, id, p::USE_A) != 0 { a } else { b };
     let area = usize::try_from(path).ok().filter(|&s| s < w.svc.splines.len());
     let Some(area) = area.filter(|_| a != -1 && b != -1) else {
-        w.svc.unported("eudora gunner: no area path (the game prints and dissolves it)");
+        // The game prints the missing path and dissolves it.
         return dissolve(w, id);
     };
     let aim = t.aim;

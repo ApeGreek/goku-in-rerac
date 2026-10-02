@@ -58,7 +58,8 @@ pub struct MobySequenceHeader {
     pub trigger_count: u8,
     /// 0x13: always 0 on the disc.
     pub pad: u8,
-    /// 0x14: trigger-data pointer (non-zero in 4 sequences on the disc); not read by the animation code.
+    /// 0x14: trigger-data pointer (non-zero in 4 sequences on the disc); not read by the animation code (the level04
+    /// leg walker reads it: [`gait_records`]).
     pub trigger_data: u32,
     /// 0x18: rate override: if ≠ 0 it replaces every frame's rate in `MobyAnimAdvance`.
     pub rate_override: f32,
@@ -191,6 +192,26 @@ pub fn parse_sequences(class_blob: &[u8], class: &MobyClass) -> Result<Vec<Optio
         .sequence_pointers
         .iter()
         .map(|&p| if p <= 0 { Ok(None) } else { parse_sequence(class_blob, p as usize).map(Some) })
+        .collect()
+}
+
+/// The 0x50-byte record a sequence header's +0x14 points to (class-relative), as words: the gait record of the level04
+/// leg walker (`rc_game::moby_update::creature::legs`: +0x00 the sequence id, +0x04 the stride, +0x18 / +0x1c and
+/// +0x28..+0x4c foot-contact key ranges; +0x08..+0x10 and +0x20..+0x3c are written by its set-up). Per sequence of the
+/// class's pointer list with a non-zero pointer: (sequence index, record).
+pub fn gait_records(class_blob: &[u8], class: &MobyClass) -> Vec<(u8, [u32; 20])> {
+    let b = Buf(class_blob);
+    class
+        .sequence_pointers
+        .iter()
+        .enumerate()
+        .filter(|(_, &p)| p > 0)
+        .filter_map(|(i, &p)| {
+            let h: MobySequenceHeader = b.pod(p as usize, "moby sequence header").ok()?;
+            if h.trigger_data == 0 { return None; }
+            let w: Vec<u32> = b.pod_slice(h.trigger_data as usize, 20, "gait record").ok()?;
+            Some((i as u8, w.try_into().ok()?))
+        })
         .collect()
 }
 

@@ -8,7 +8,8 @@
 //! | [`target`] | `0x274b78`, `0x274df8` | target acquisition: Ratchet (or a decoy nearer than the range), none in his cutscene states |
 //! | [`turn`] | `SpringTurn2` 0x26d058, `0x270cc0` / 0x270ac0 / 0x2709f8, `Approach` 0x270728 | turning towards a heading, eased approach |
 //! | [`walker`] | `SeedJumpPattern` 0x26d930, `0x26d9a8`, `0x26d8b0` / `0x26d610`, `0x26d1d0`, `0x26de80`, `0x26d270`, level00 `0x261630` | ground walking: speed ramp, ledge probe, moby-vs-world move with step-up and gravity, the walk toward a point, the free ground move, the random wander |
-//! | [`knock`] | `0x271418`, `0x271558`, `0x26fa48`, `0x26faf0` | knockback / thrown / death flight: ballistic move, landing, bounce, crate hits, anim timing |
+//! | [`knock`] | `0x271418`, `0x271558`, `0x26fa48`, `0x26faf0` | knockback / thrown / death flight: ballistic move, landing, bounce, crate hits, anim timing; `0x250a78` the ballistic arc |
+//! | [`legs`] | level04 `0x2922d0`..`0x295fe8` (L01 `0x2b5160`..) | the leg walker: planted feet, hips, ground fit, gaits from the step ahead |
 //! | [`damage`] | `0x26f378` (+ `MobyGetHitMessage` 0x26f320 in `services`) | the hit resolver: per-attack-kind cooldown, damage tables, the wrench's push redirect |
 //! | [`attack`] | `0x26eaa8`, `0x26e090`, `0x26e830`, level00 `0x2599e8` | hits dealt (to Ratchet through his moby's hit message, P2's intake), group alert, the sphere hit ahead of a moby (at a joint) |
 //! | [`flash`] | `0x272318` / `0x2723f8` | the hit flash on the moby's ambient colour |
@@ -36,6 +37,7 @@ pub mod flash;
 pub mod fx;
 pub mod ground;
 pub mod knock;
+pub mod legs;
 pub mod projectile;
 pub mod react;
 pub mod region;

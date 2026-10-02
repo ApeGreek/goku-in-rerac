@@ -851,6 +851,9 @@ pub struct Services {
     /// for `FUN_002645a8(moby, list, out)` ([`World::joint_point`]). Filled for the classes whose update needs
     /// it ([`crate::moby_update::classes::needs_joint_lists`]).
     pub joint_lists: HashMap<i16, Vec<Vec<u8>>>,
+    /// Per (class, sequence): the gait record its sequence header's +0x14 points to (`rc_formats::moby_anim::gait_records`),
+    /// for the leg walker (`crate::moby_update::creature::legs`). Filled with [`Services::joint_lists`] for the same classes.
+    pub gaits: HashMap<(i16, u8), [u32; 20]>,
     /// Per class: each joint list's manipulator target joint (the second byte list's first entry,
     /// `rc_formats::moby_anim::list_target`; 0xff: none), for `AttachManipulator` on that class's mobys
     /// ([`crate::moby_update::manip`]). Filled with [`Services::joint_lists`] for the same classes.
@@ -970,6 +973,7 @@ impl Services {
             coll_classes: Arc::new(HashMap::new()),
             pose_cache: Arc::new(Mutex::new(PoseCache::default())),
             joint_lists: HashMap::new(),
+            gaits: HashMap::new(),
             joint_targets: HashMap::new(),
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
             hero_writes: None,
@@ -1544,6 +1548,14 @@ impl<'a> World<'a> {
     }
 
     /// The sphere kernel 0x212960 `(r, &centre, flags, ignore)`: the world mesh, then the mobys.
+    /// `coll_capsule(r, h, &base, flags, ignore)` 0x2135a0 (level04 `0x1e4308`): the vertical capsule `base .. base +
+    /// (0, 0, h)` of radius `r`, world and mobys; the output's pushed centre is the base moved out of the hit.
+    pub fn coll_capsule(&self, base: [f32; 3], height: f32, r: f32, flags: u32, ignore: Option<MobyId>) -> Option<CollOutput> {
+        let src = self.svc.scene_parts(self.table, self.classes);
+        let sc = self.svc.scene(&src);
+        crate::collision_query::coll_capsule_m(self.coll.unwrap_or(no_mesh()), Some(&sc), base, height, r, QueryFlags(flags), ignore)
+    }
+
     pub fn coll_sphere(&self, centre: V4, r: Pf, flags: u32, ignore: Option<MobyId>) -> Option<CollOutput> {
         let src = self.svc.scene_parts(self.table, self.classes);
         let sc = self.svc.scene(&src);

@@ -124,6 +124,7 @@
 //! | U163 | 340 Eudora's brawler bots (04): wander or patrol, circle in on Ratchet, swing; pushed back, blown up | level04 0x2c2270 | [`eudora_brawler`] |
 //! | U164 | 427 Eudora's gunners (04): keep their distance inside an area, fire bursts of gun shots, strike up close, dissolve when killed | level04 0x2c4850 | [`eudora_gunner`] |
 //! | U162 | 217 Eudora's loggers (04): carry a prop, walk a path when roused, swing; flinch, stagger, knocked down, blown up | level04 0x2ba520 | [`eudora_logger`] |
+//! | U170 | 563 Eudora's leg walkers (04) on the shared leg walker (`creature::legs`), and their wood chips 1516 | level04 0x2d16b8, 0x2e5178 | [`eudora_walker`] |
 //! | U172 | 584 Eudora's grabbable blocks (04): a carrier with a ledge record | level04 0x2d3580 | [`eudora_ledge_block`] |
 //! | U174 | 642 Eudora's drifting speck (04): sinks on the level wind, grows in, fades, starts again | level04 0x2d7e90 | [`eudora_drifter`] |
 //! | U179 | 1549 Eudora's cutscene FX driver (04): the infobot's thrusters in scenes 0 / 1 | level04 0x2e53a0 | [`eudora_scene_fx`] |
@@ -358,6 +359,7 @@ pub mod eudora_ledge_block;
 pub mod eudora_brawler;
 pub mod eudora_gunner;
 pub mod eudora_logger;
+pub mod eudora_walker;
 pub mod eudora_scene_fx;
 pub mod rilgar_rocker;
 pub mod rilgar_flap;
@@ -632,6 +634,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U163 340", level: eudora_brawler::REFERENCE_LEVEL, func: eudora_brawler::UPDATE_FN, classes: &eudora_brawler::CLASSES, update: eudora_brawler::update, joints: &eudora_brawler::CLASSES },
     UnitPort { unit: "U164 427", level: eudora_gunner::REFERENCE_LEVEL, func: eudora_gunner::UPDATE_FN, classes: &eudora_gunner::CLASSES, update: eudora_gunner::update, joints: &eudora_gunner::CLASSES },
     UnitPort { unit: "U162 217", level: eudora_logger::REFERENCE_LEVEL, func: eudora_logger::UPDATE_FN, classes: &eudora_logger::CLASSES, update: eudora_logger::update, joints: &eudora_logger::CLASSES },
+    UnitPort { unit: "U170 563", level: eudora_walker::REFERENCE_LEVEL, func: eudora_walker::UPDATE_FN, classes: &eudora_walker::CLASSES, update: eudora_walker::update, joints: &eudora_walker::CLASSES },
+    UnitPort { unit: "U170 1516 chip", level: eudora_walker::REFERENCE_LEVEL, func: eudora_walker::CHIP_FN, classes: &eudora_walker::CHIP_CLASSES, update: eudora_walker::chip_update, joints: &[] },
     UnitPort { unit: "U172 584", level: eudora_ledge_block::REFERENCE_LEVEL, func: eudora_ledge_block::UPDATE_FN, classes: &eudora_ledge_block::CLASSES, update: eudora_ledge_block::update, joints: &[] },
     UnitPort { unit: "U174 642", level: eudora_drifter::REFERENCE_LEVEL, func: eudora_drifter::UPDATE_FN, classes: &eudora_drifter::CLASSES, update: eudora_drifter::update, joints: &[] },
     UnitPort { unit: "U179 1549", level: eudora_scene_fx::REFERENCE_LEVEL, func: eudora_scene_fx::UPDATE_FN, classes: &eudora_scene_fx::CLASSES, update: eudora_scene_fx::update, joints: &[] },

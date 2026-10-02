@@ -876,6 +876,23 @@ fn class_joint_data_where(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16
     Ok(out)
 }
 
+/// The gait records (`rc_formats::moby_anim::gait_records`) of the level's classes `want` picks, by (class, sequence).
+fn class_gaits(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16) -> bool) -> anyhow::Result<HashMap<(i16, u8), [u32; 20]>> {
+    use anyhow::Context;
+    let wanted: Vec<&rc_formats::moby::LevelMobyClass> = lv.mobys.classes.iter().filter(|c| want(c.o_class as i16)).collect();
+    let mut out = HashMap::new();
+    if wanted.is_empty() { return Ok(out); }
+    let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
+    let data = rc_data::level_core_data(&root, index).context("decompressing core_data")?;
+    let core = rc_formats::level::parse_level_core(&crate::disc_source::level_file(&root, index, "core_index.bin")?, data.len()).context("parsing core index")?;
+    for c in wanted {
+        let name = format!("moby_class/{:04}", c.o_class);
+        let Some(blob) = core.blocks.iter().find(|b| b.name == name).and_then(|b| data.get(b.offset..b.offset + b.size)) else { continue };
+        for (seq, rec) in rc_formats::moby_anim::gait_records(blob, &c.class) { out.insert((c.o_class as i16, seq), rec); }
+    }
+    Ok(out)
+}
+
 fn rows_bits(rows: &[[f32; 4]; 4]) -> [V4; 3] { [0, 1, 2].map(|i| rows[i].map(f32::to_bits)) }
 fn rows3(rows: &[[f32; 4]; 4]) -> [[f32; 3]; 3] { [0, 1, 2].map(|i| [rows[i][0], rows[i][1], rows[i][2]]) }
 fn pos3(m: &Moby) -> [f32; 3] { [m.position[0], m.position[1], m.position[2]] }
@@ -1155,6 +1172,10 @@ fn setup(
     match class_joint_lists(lv) {
         Ok((j, t)) => (svc.joint_lists, svc.joint_targets) = (j, t),
         Err(e) => eprintln!("gameplay: no class joint lists ({e:#}): the Blarg flyers' exhaust sits at the flyer origin"),
+    }
+    match class_gaits(lv, |o| level_ports().needs_joint_lists(o)) {
+        Ok(g) => svc.gaits = g,
+        Err(e) => eprintln!("gameplay: no gait records ({e:#}): the leg walkers stand still"),
     }
     // The other bodies' classes (Clank 0x57, Giant Clank 0x1a3, rc_game::hero::bodies): their joint lists for the hero's
     // joint points and joint modifiers, and for the moby world's joint matrices (Clank's antenna glow and rotor).
