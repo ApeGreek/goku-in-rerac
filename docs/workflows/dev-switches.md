@@ -35,11 +35,11 @@ module that reads it: `grep -rn '"RC_' crates/` lists them all.
 | `RC_CACHE` | `0`: do not use or write the engine cache `<data>/cache/v1` (decompress in memory, once per process) |
 | `RC_PERF_LOG` | `1`: print one line per game-data lump request (engine cache, memory or decompressed; MiB, ms) |
 | `RC_AUDIO` | `0`: no audio (the level's sound bank and music are not loaded); the `cargo xtask test-*` commands set it |
-| `RC_LEVEL` | Level index to load (default 1, Novalis) |
+| `RC_LEVEL` | Start straight in this level (skips the front end unless `RC_FRONTEND=1`). Without it the game boots into the front end; the level loaded behind it is Novalis (1) |
 | `RC_LANDING` | `1`: the boot's level enters as after a level change (`entry`: the music pause / unpause and `ShipLandingStart`'s landing scene); default: the level's start in mode 0 (or `RC_HERO_AT`) |
-| `RC_FRONTEND` | `1`: boot into the front end (the card check, the logos, the title world, PRESS START, the main menu) instead of straight into the level |
+| `RC_FRONTEND` | The front end (the card check, the logos, the title world, PRESS START, the main menu) is the default start. `0`: skip it and start in the level; `1`: keep it even with `RC_LEVEL` |
 | `RC_UNPORTED` | `1`: every 600 ticks, print the calls the moby loop met without a port so far (`Services::unported`, by name and count) |
-| `RC_SKIP_LOGOS` | `1` (with `RC_FRONTEND=1`): skip the publisher logos movie and go straight to the title |
+| `RC_SKIP_LOGOS` | `1`: in the front end, skip the publisher logos movie and go straight to the title |
 | `RC_SAVE_DIR` | the memory-card folder (`0` or empty: no card); default `<config>/rerac/memcard`. `RC_SAVE_TRACE=1` logs every card state change |
 | `RC_CAM` | Starting camera `ex,ey,ez,tx,ty,tz` (eye and target, game units) |
 | `RC_SCREENSHOT` | Save a screenshot to this path, then exit |

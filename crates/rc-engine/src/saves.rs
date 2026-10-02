@@ -18,7 +18,7 @@
 //! * **The level exits** (`FUN_002a29a0(level)`): New Game / Load / the dialogs' new game without a card go through the
 //!   one level change (`media_render::request_level_exit` → `EngineRequest::LeaveLevel`, the travel lane's), with
 //!   0x13e05a (`ShipGlobals::reset_trip`): 1 for a new game's story trip, 0 for a loaded game.
-//! * **The front end** (`RC_FRONTEND=1`; [`FrontEndRt`]): the boot flow of `rc_game::frontend` run by crate::menu_render
+//! * **The front end** (the default start; [`front_end_requested`], [`FrontEndRt`]): the boot flow of `rc_game::frontend` run by crate::menu_render
 //!   over the loaded level (the world hidden behind the menu layer cleared to opaque black, the tick suspended): the card
 //!   check, the logos movie, the still, the title with its logo, PRESS START, the attract movies and the main menu (the
 //!   level's copy of the front-end page tree, kind 0x2d). The title world (the space flight behind the title) is drawn by
@@ -169,8 +169,16 @@ pub struct FrontEndRt {
     pub paused: bool,
 }
 
-/// `RC_FRONTEND=1`: start in the front end (the boot flow) instead of the level.
-pub fn front_end_requested() -> bool { std::env::var("RC_FRONTEND").is_ok_and(|v| v.trim() == "1") }
+/// Start in the front end (the boot flow: the card check, the logos, the title, the main menu) instead of the level. The
+/// default; `RC_LEVEL` (a development start straight into a level) skips it unless `RC_FRONTEND=1`, and `RC_FRONTEND=0`
+/// always skips it.
+pub fn front_end_requested() -> bool {
+    match std::env::var("RC_FRONTEND").map(|v| v.trim().to_owned()) {
+        Ok(v) if v == "1" => true,
+        Ok(v) if v == "0" => false,
+        _ => std::env::var("RC_LEVEL").is_err(),
+    }
+}
 
 /// The front end's pictures and its state machine (the card check, the first attract movie `rand() % 4`).
 pub fn front_end(lang: u32, rand: i32) -> rc_game::frontend::FrontEnd {

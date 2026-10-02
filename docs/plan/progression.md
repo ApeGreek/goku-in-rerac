@@ -34,7 +34,7 @@ Boot → title → main menu → game, the memory card, the save points and the 
    loads it (0x13e05a = 1 for a new game: the story trip; 0 for a load). Port: `EngineRequest::LeaveLevel` + 
    `ShipGlobals::reset_trip` (the travel lane's level change).
 
-Port: `RC_FRONTEND=1` runs this flow over the loaded level (the world hidden behind the menu layer cleared to opaque
+Port: the engine's default start runs this flow over the loaded level (the world hidden behind the menu layer cleared to opaque
 black, the tick suspended). Not ported: the title world (the space flight behind the title, its mobys and particles,
 the title music) — G-SAV-012; the runtime language switch's text reload — G-UI-020.
 
@@ -99,7 +99,7 @@ the session, the ship index 0x13e056, the options, the menu mode, the movie play
 | the end page's challenge restart (`process_global_state_flags` 0x295c98: `FUN_002a29a0(0)`) | `LeaveLevel(0)` |
 | the ship to the planet it is on (`ShipTravelTo(level)`) | **not** a level change: the landing scene from tick 240 |
 | a death, a fall, `HeroCall::Reload` (0x141401) | **not** a level change: `LoadLevelCoreData(0, 1)` inside the same `entry` loop (the port respawns; the mobys' re-creation is G-CLS-030) |
-| the boot (`startlevel` 0x1e9658: 0x13e05a = 1, level −1, `do_space_transition`) | the engine's start (`RC_LEVEL`, or the saves lane's front end with `RC_FRONTEND=1`) |
+| the boot (`startlevel` 0x1e9658: 0x13e05a = 1, level −1, `do_space_transition`) | the engine's start: the front end by default, or straight into `RC_LEVEL` (development) |
 
 **Mode 6** (`rc_game::travel::space::ShipMode`, one call per 60 Hz frame after the world part of `GameStateUpdate`,
 which is the gameplay tick: scene form for subs 0 / 8, with the follow camera for sub 3; the blocking `FadeToBlack`s

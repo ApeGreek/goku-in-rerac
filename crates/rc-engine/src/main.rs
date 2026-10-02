@@ -5,7 +5,8 @@
 //!
 //! Environment:
 //! - `RC_DATA_DIR`   the game data folder when `--data-dir` is absent; else `RC_EXTRACTED`, else `<workspace>/extracted`
-//! - `RC_LEVEL`      level index (default 1 = Novalis)
+//! - `RC_LEVEL`      start straight in this level (skips the front end unless `RC_FRONTEND=1`; without it the front
+//!   end's New Game / Load decides)
 //! - `RC_SCREENSHOT` if set, save a PNG of the window there after the scene has rendered, then exit
 //! - `RC_SCREENSHOT_DELAY` seconds to wait before that capture (default 3); with `RC_SCREENSHOT_FRAME`
 //!   the capture is frame-exact instead (crate::determinism) and this wall-clock one is not scheduled
@@ -15,7 +16,8 @@
 //! - `RC_PLAY=0`, `RC_PLAY_SCRIPT`, `RC_PLAY_TRACE=1` the game tick / scripted pad / per-tick trace, crate::gameplay
 //! - `RC_PLAY_FLY=1` start on the fly camera with the game ticking; `RC_DEBUG_HIT=moby@tick,...` debug hits
 //!   (flags 0x10000, damage 1) before those ticks' moby loop, crate::gameplay
-//! - `RC_FRONTEND=1` start in the front end (card check, logos, title, main menu), crate::saves; `RC_SAVE_DIR=<dir>` the
+//! - `RC_FRONTEND`   the front end (card check, logos, title, main menu) is the default start; `0` skips it, `1` keeps it
+//!   with `RC_LEVEL`, crate::saves; `RC_SAVE_DIR=<dir>` the
 //!   memory-card folder (`0`: no card), `RC_SAVE_TRACE=1` the card's states
 //! - `RC_SCENE=0` / `RC_SCENE=<k>`, `RC_SUBTITLES=0` in-engine scenes (Novalis arrival = scene 5), crate::scene_render
 //! - `RC_UNLOCK_PLANETS=<p>,…` planets unlocked from the start (the ship's planet page), crate::gameplay;

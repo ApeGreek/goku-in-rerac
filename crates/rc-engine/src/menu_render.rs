@@ -404,7 +404,7 @@ fn setup(
         voice_vag: None,
         front_text: None,
     });
-    // The memory card (crate::saves) and, with RC_FRONTEND=1, the boot flow (the first rand() of the boot: newlib's
+    // The memory card (crate::saves) and, unless a level start was asked for (crate::saves::front_end_requested), the boot flow (the first rand() of the boot: newlib's
     // initial state [L]).
     // Once per process: the boot's (crate::level_switch runs this set-up again for every level; a Quit Game's level change
     // to the front end sets the flag itself, crate::travel_render).
@@ -415,7 +415,7 @@ fn setup(
     if crate::saves::front_end_active() {
         fer.fe = Some(crate::saves::front_end(lh.lang, rc_game::rng::Rng::new().rand()));
         mm.state.set(Mode::Menu);
-        println!("menus: front end (RC_FRONTEND=1): the boot flow runs over the loaded level, the world hidden");
+        println!("menus: front end: the boot flow runs over the loaded level, the world hidden");
     }
     // The snapshot is the menu layer's background: a UI node of its 2D camera.
     commands.spawn((
@@ -545,7 +545,7 @@ fn menu_frame(
     let (Some(mut rt), Some(mut play), Some(mut gs), Some(mut sess)) = (rt, play, gs, sess) else { return };
     let rt = &mut *rt;
     let (gs, sess) = (&mut gs.0, &mut sess.0);
-    // The front end (crate::saves, RC_FRONTEND=1): the boot flow instead of the level's modes.
+    // The front end (crate::saves): the boot flow instead of the level's modes.
     if fer.fe.is_some() {
         let busy = movies.as_deref().is_some_and(|m| m.busy());
         let fer = &mut *fer;
