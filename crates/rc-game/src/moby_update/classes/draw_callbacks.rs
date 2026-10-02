@@ -95,6 +95,9 @@ pub struct DrawCallbacks {
     /// For the draw-only callbacks that draw in a joint's frame (the ship glass: `0x264508(m, 0, M)`): the matrix
     /// (rows x, y, z, point) of the registering moby this tick, taken where the port has the pose (a scene actor's).
     pub matrices: std::collections::HashMap<MobyId, [[f32; 4]; 4]>,
+    /// The tick counter 0x15f5cc the frame's draw reads (after the tick's increment): the draw-only callbacks that
+    /// animate with it (Aridia's lift glow `0x2dc2c8`). Set by the scheduler's tick.
+    pub tick: u64,
     /// The Walloper glow's flicker drawn by the last [`run_frame`] (`randi(4) ≠ 0`: the dim colour 0x307f4040, else the
     /// bright 0x7f7f4040); None: no Walloper draw ran.
     pub walloper_dim: Option<bool>,

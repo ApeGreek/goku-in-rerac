@@ -206,6 +206,9 @@ impl SoundSink for ClassSoundSink<'_> {
     fn set_pitch_bend(&mut self, slot: i32, pb: i32) {
         if let Some(s) = usize::try_from(slot).ok().and_then(|i| self.audio.slots.slots.get_mut(i)) { s.pb = pb; }
     }
+    fn set_volume(&mut self, slot: i32, vol: i32) {
+        if let Some(s) = usize::try_from(slot).ok().and_then(|i| self.audio.slots.slots.get_mut(i)) { s.vol = vol; }
+    }
     /// The checkpoint record's reverb copy ([`AudioSystem::checkpoint_saved`]).
     fn checkpoint_saved(&mut self) { self.audio.checkpoint_saved(); }
     /// The voice handoff: the slot's owner (+0x18) and position (+0x20) rewritten by a class (no state test, as the

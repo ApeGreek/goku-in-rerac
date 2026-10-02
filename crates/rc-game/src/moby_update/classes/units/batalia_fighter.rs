@@ -72,7 +72,7 @@ mod trail_k {
     pub const C2: (u32, u32) = (0x2080_2040, 0x2060_1020);
     pub const OFFSET: [f32; 4] = [f32::from_bits(0xc013_3333), 0.0, f32::from_bits(0x3e99_999a), 0.0];
     /// The blob row (`super::super::engine_trail`): byte 9 = trunc(8) − 0x70.
-    pub const BLOB: super::super::engine_trail::Blob = super::super::engine_trail::Blob { k1: V1, k2: V2, jitter: JITTER, w1: W1, w2: W2, c1: C1, c2: C2, t: T, spread: T_SPREAD, byte9: -0x70 };
+    pub const BLOB: super::super::engine_trail::Blob = super::super::engine_trail::Blob { k1: V1, k2: V2, jitter: JITTER, w1: W1, w2: W2, c1: C1, c2: C2, t: T, spread: T_SPREAD, byte9: -0x70, size_div: 1.0 };
 }
 
 fn len2(v: [f32; 4]) -> f32 { (v[0] * v[0] + v[1] * v[1]).sqrt() }

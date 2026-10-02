@@ -50,6 +50,8 @@ const DT: f32 = 1.0 / 60.0;
 const BITS: [i16; 3] = [696, 697, 698];
 /// The gunship shell.
 const SHELL: i16 = 0x2ae;
+/// The smoke puffs' colours on Novalis.
+const SMOKE: (u32, u32) = (0x5f78_7878, 0x18_1818);
 
 type V = [f32; 4];
 
@@ -92,7 +94,7 @@ fn puff(w: &mut World, size: f32, pos: V, vel: V, c1: u32, c2: u32, life: i32) {
 /// A burst of `n` rock bits: per bit the throw direction `randf(−1, 1)`×3, the offset (`randf(±ox)`, `randf(±oy)`
 /// along the yaw, `randf(z0, z1)` up), the speed `randf(1, 5)·dt`, the class `randi(3)`, the scale `randf(s0, s1)`,
 /// the life `rand_range(60, 180)`, then `SpawnDebrisMoby(scale, 1, 1, 0.75, …, keep 0)`.
-fn bits(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, z: (f32, f32), scale: (f32, f32)) {
+pub(crate) fn bits(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, z: (f32, f32), scale: (f32, f32)) {
     for _ in 0..n {
         let d = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), 0.0];
         let a = w.rng.randf(-ox, ox);
@@ -109,9 +111,9 @@ fn bits(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, z: (f32, f32), sc
 
 /// A burst of `n` smoke puffs (704 / 729): direction `randf(−1, 1)`×3, offset along the yaw (`randf(±ox)`,
 /// `randf(±oy)`, `randf(0, zt)`), speed `randf(s0, s1)·dt`, size `randf(z0, z1)·210000`, life `ticks(rand_range(l0,
-/// l1))`, then the spawner.
+/// l1))`, then the spawner with colours `rgba` (also Aridia's boulder 762, [`crate::moby_update::classes::units::aridia_boulder`]).
 #[allow(clippy::too_many_arguments)]
-fn puffs(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, zt: f32, speed: (f32, f32), size: (f32, f32), life: (i32, i32)) {
+pub(crate) fn puffs(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, zt: f32, speed: (f32, f32), size: (f32, f32), life: (i32, i32), rgba: (u32, u32)) {
     for _ in 0..n {
         let d = [w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), w.rng.randf(-1.0, 1.0), 0.0];
         let a = w.rng.randf(-ox, ox);
@@ -122,7 +124,7 @@ fn puffs(w: &mut World, id: MobyId, n: usize, ox: f32, oy: f32, zt: f32, speed: 
         let size = w.rng.randf(size.0, size.1) * 210000.0;
         let l = w.rng.rand_range(life.0, life.1);
         let life = w.ticks(l);
-        puff(w, size, at, v, 0x5f78_7878, 0x18_1818, life);
+        puff(w, size, at, v, rgba.0, rgba.1, life);
     }
 }
 
@@ -132,7 +134,7 @@ pub fn rock_update(w: &mut World, id: MobyId) {
     w.mm(id).hit_slot = 0xff;
     if !hit.is_some_and(|h| Pf::ZERO < h.damage) { return; }
     w.play_sound(0, 0x10, id);
-    puffs(w, id, 200, 1.0, 0.3, 2.0, (0.5, 1.5), (0.5, 1.0), (0x1e, 0x5a));
+    puffs(w, id, 200, 1.0, 0.3, 2.0, (0.5, 1.5), (0.5, 1.0), (0x1e, 0x5a), SMOKE);
     bits(w, id, 40, 1.2, 0.4, (0.5, 2.0), (0.04, 0.09));
     set_death_bits(w, id, 0, -1);
     w.delete_moby(id);
@@ -170,7 +172,7 @@ pub fn wall_update(w: &mut World, id: MobyId) {
     }
     if w.get_hit(id, 0x80_0000, false).is_none() { return; }
     w.play_sound(0, 0, id);
-    puffs(w, id, 500, 4.0, 1.0, 8.0, (1.5, 3.5), (1.5, 3.5), (0x78, 0xf0));
+    puffs(w, id, 500, 4.0, 1.0, 8.0, (1.5, 3.5), (1.5, 3.5), (0x78, 0xf0), SMOKE);
     bits(w, id, 100, 4.0, 1.0, (1.0, 8.0), (0.05, 0.15));
     mark_dead(w, id);
     // (The game also sets the byte 0x13d396 = 1; nothing in the port reads it.)

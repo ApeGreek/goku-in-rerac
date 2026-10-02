@@ -139,7 +139,7 @@
 //! | U438 | 1805 Gemlik's breakable props (13) | level13 0x30cdb8 | [`gemlik_breakable`] |
 //! | U570 | 1750 the save before the last boss (18): `MakeWholeSave` into the ending buffer once | level18 0x2fad08 | [`ending_save`] |
 //! | U252 | 1041 Umbris' lobbing turrets (07) and their shot 882 | level07 0x30d4d8, 0x30bbc8 | [`umbris_lobber`] |
-//! | U118 | 1212 the path ships (02, 09): path, exhaust ([`engine_trail`], shared with [`batalia_fighter`]), glow quads | level02 0x2ec4b8, draw 0x2ec308 | [`path_ship`] |
+//! | U118 | 1212 the path ships (02, 09) and the big ones 1213 / 1973 (02, 09, 10): path, exhaust ([`engine_trail`], shared with [`batalia_fighter`]), glow quads | level02 0x2ec4b8, draw 0x2ec308 | [`path_ship`] |
 //! | U155 | 434 Eudora's crank lifts (04): posed by a bolt crank, sink back unwinding it | level04 0x2c6bb8 | [`eudora_crank_lift`] |
 //! | U154 | 432 / 1052 Eudora's crank followers (04): posed by a bolt crank, swap their own class (`class_swap`) | level04 0x2c6858 | [`eudora_crank_follower`] |
 //! | U225 | 1066 Blarg's creature wakers (06): the cuboid, then one dormant member of the group thrown out every 20 ticks | level06 0x2fda30 (the wake 0x2e9d10) | [`blarg_waker`] |
@@ -151,6 +151,13 @@
 //! | L03 816, 1012 | 816 Kerwan's called platforms and 1012 its two-way shuttles (03): flown along splines, ridden with △ | level03 0x2d3198, 0x2dccc0 (the follower 0x2d3918) | [`kerwan_transport`] |
 //! | L03 578, 627 | 578 Kerwan's blob layers (03) and the blobs 627 they drop: patrol a path, drop five blobs every 300 ticks; the blobs burst when stepped on or touched | level03 0x2c9eb8, 0x2cbea8 | [`kerwan_layer`] |
 //! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
+//! | U99, U101, U104 | 656, 675, 732 Aridia's animated props (02): clips and random rests; 732 hums | level02 0x2dca10, 0x2dd370, 0x2df1a8 | [`aridia_idlers`] |
+//! | U105 | 733 Aridia's background cannon and its shell 1208 (02): turns, fires a smoking shell, its boom travels to the camera | level02 0x2df3d8, 0x2ebf20 | [`aridia_cannon`] |
+//! | U106 | 735 / 736 Aridia's gate halves (02): swing to their target pose once triggered | level02 0x2df948 | [`aridia_gates`] |
+//! | U110 | 762 Aridia's boulder (02): a blast bursts it, remembered by a global flag | level02 0x2e0720 | [`aridia_boulder`] |
+//! | U113 | 792 Aridia's arm platform (02): rides an animated arm's joint, swings between its ends | level02 0x2e2228 | [`aridia_arm_platform`] |
+//! | U120 | 1479 Aridia's fire vents (02): flame streams and spark bursts along their facing | level02 0x2ef020 | [`aridia_fire`] |
+//! | U97 | 651 Aridia's anti-grav lifts (02): ride their cylinder between its ends, come for Ratchet, glow while moving | level02 0x2dbd38, draw 0x2dc2c8 | [`aridia_lift`] |
 //! | U134 | 455 the pod spawners (03, 08, 14) and their pods 545: once Ratchet is near, lobbed pods bounce, rest and hatch one of the spawner's placed creatures | level03 0x2bef68, 0x2c4718, 0x2bec60 | [`pod_spawner`] |
 //! | U139 | 631 Kerwan's Blarg hover ship (a 574 riding it) and its flame stream 848: arrives along a path, patrols facing Ratchet, sprays flames from its turret, exits and switches paths | level03 0x2cca00, 0x2ce238, 0x2d47c0 | [`hover_ship`] |
 //! | — | 1475 Kalebo III's board missile (16; created by the board weapon, item 0x24; the Devastator missile's trail) | level16 0x2a3f38 (0x2a3e30 the spawn) | [`board_missile`] |
@@ -376,6 +383,13 @@ pub mod kerwan_transport;
 pub mod kerwan_layer;
 pub mod pod_launcher;
 pub mod pod_spawner;
+pub mod aridia_lift;
+pub mod aridia_idlers;
+pub mod aridia_cannon;
+pub mod aridia_gates;
+pub mod aridia_boulder;
+pub mod aridia_arm_platform;
+pub mod aridia_fire;
 pub mod hover_ship;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
@@ -620,6 +634,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U252 1041", level: umbris_lobber::REFERENCE_LEVEL, func: umbris_lobber::UPDATE_FN, classes: &umbris_lobber::CLASSES, update: umbris_lobber::update, joints: &umbris_lobber::CLASSES },
     UnitPort { unit: "U252 882", level: umbris_lobber::REFERENCE_LEVEL, func: umbris_lobber::SHOT_FN, classes: &umbris_lobber::SHOT_CLASSES, update: umbris_lobber::shot_update, joints: &[] },
     UnitPort { unit: "U118 1212", level: path_ship::REFERENCE_LEVEL, func: path_ship::UPDATE_FN, classes: &path_ship::CLASSES, update: path_ship::update, joints: &path_ship::CLASSES },
+    UnitPort { unit: "U118 1213", level: path_ship::REFERENCE_LEVEL, func: path_ship::BIG_FN, classes: &path_ship::BIG_CLASSES, update: path_ship::update, joints: &path_ship::BIG_CLASSES },
     UnitPort { unit: "U155 434", level: eudora_crank_lift::REFERENCE_LEVEL, func: eudora_crank_lift::UPDATE_FN, classes: &eudora_crank_lift::CLASSES, update: eudora_crank_lift::update, joints: &eudora_crank_lift::CLASSES },
     UnitPort { unit: "U154 432", level: eudora_crank_follower::REFERENCE_LEVEL, func: eudora_crank_follower::UPDATE_FN, classes: &eudora_crank_follower::CLASSES, update: eudora_crank_follower::update, joints: &[] },
     UnitPort { unit: "U225 1066", level: blarg_waker::REFERENCE_LEVEL, func: blarg_waker::UPDATE_FN, classes: &blarg_waker::CLASSES, update: blarg_waker::update, joints: &[] },
@@ -638,6 +653,17 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
+    UnitPort { unit: "U99 656", level: aridia_idlers::REFERENCE_LEVEL, func: aridia_idlers::FN_656, classes: &aridia_idlers::CLASSES_656, update: aridia_idlers::update_656, joints: &[] },
+    UnitPort { unit: "U101 675", level: aridia_idlers::REFERENCE_LEVEL, func: aridia_idlers::FN_675, classes: &aridia_idlers::CLASSES_675, update: aridia_idlers::update_675, joints: &[] },
+    UnitPort { unit: "U104 732", level: aridia_idlers::REFERENCE_LEVEL, func: aridia_idlers::FN_732, classes: &aridia_idlers::CLASSES_732, update: aridia_idlers::update_732, joints: &[] },
+    UnitPort { unit: "U105 733", level: aridia_cannon::REFERENCE_LEVEL, func: aridia_cannon::UPDATE_FN, classes: &aridia_cannon::CLASSES, update: aridia_cannon::update, joints: &aridia_cannon::CLASSES },
+    UnitPort { unit: "U105 1208", level: aridia_cannon::REFERENCE_LEVEL, func: aridia_cannon::SHELL_FN, classes: &aridia_cannon::SHELL_CLASSES, update: aridia_cannon::shell_update, joints: &[] },
+    UnitPort { unit: "U106 735", level: aridia_gates::REFERENCE_LEVEL, func: aridia_gates::UPDATE_FN, classes: &aridia_gates::CLASSES, update: aridia_gates::update, joints: &[] },
+    UnitPort { unit: "U110 762", level: aridia_boulder::REFERENCE_LEVEL, func: aridia_boulder::UPDATE_FN, classes: &aridia_boulder::CLASSES, update: aridia_boulder::update, joints: &[] },
+    UnitPort { unit: "U113 792", level: aridia_arm_platform::REFERENCE_LEVEL, func: aridia_arm_platform::UPDATE_FN, classes: &aridia_arm_platform::CLASSES, update: aridia_arm_platform::update, joints: &[] },
+    UnitPort { unit: "U120 1479", level: aridia_fire::REFERENCE_LEVEL, func: aridia_fire::UPDATE_FN, classes: &aridia_fire::CLASSES, update: aridia_fire::update, joints: &[] },
+    UnitPort { unit: "U97 651", level: aridia_lift::REFERENCE_LEVEL, func: aridia_lift::UPDATE_FN, classes: &aridia_lift::CLASSES, update: aridia_lift::update, joints: &[] },
+    UnitPort { unit: "U97 651 glow", level: aridia_lift::REFERENCE_LEVEL, func: aridia_lift::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U134 455", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::UPDATE_FN, classes: &pod_spawner::CLASSES, update: pod_spawner::update, joints: &pod_spawner::CLASSES },
     UnitPort { unit: "U134 545", level: pod_spawner::REFERENCE_LEVEL, func: pod_spawner::POD_FN, classes: &pod_spawner::POD_CLASSES, update: pod_spawner::pod_update, joints: &[] },
     UnitPort { unit: "U139 631", level: hover_ship::REFERENCE_LEVEL, func: hover_ship::UPDATE_FN, classes: &hover_ship::CLASSES, update: hover_ship::update, joints: &hover_ship::CLASSES },
@@ -738,7 +764,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U255 1069", level: riding_floats::REFERENCE_LEVEL_1069, func: riding_floats::UPDATE_FN_1069, classes: &riding_floats::CLASSES_1069, update: riding_floats::float_1069, joints: &[] },
     // Story drivers (batch 6, lane story: docs/plan/progression.md `## story`).
     UnitPort { unit: "U114 786", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::SURFER_FN, classes: &aridia_story::SURFER_CLASSES, update: aridia_story::surfer_update, joints: &aridia_story::SURFER_CLASSES },
-    UnitPort { unit: "U115 788", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::AGENT_FN, classes: &aridia_story::AGENT_CLASSES, update: aridia_story::agent_update, joints: &[] },
+    UnitPort { unit: "U115 788", level: aridia_story::REFERENCE_LEVEL, func: aridia_story::AGENT_FN, classes: &aridia_story::AGENT_CLASSES, update: aridia_story::agent_update, joints: &aridia_story::AGENT_CLASSES },
     UnitPort { unit: "U142 890", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::HELGA_FN, classes: &kerwan_story::HELGA_CLASSES, update: kerwan_story::helga_update, joints: &kerwan_story::HELGA_CLASSES },
     UnitPort { unit: "U145 909", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::AL_FN, classes: &kerwan_story::AL_CLASSES, update: kerwan_story::al_update, joints: &kerwan_story::AL_CLASSES },
     UnitPort { unit: "U169 1120", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::SUCK_FN, classes: &eudora_story::SUCK_CLASSES, update: eudora_story::suck_cannon_update, joints: &[] },
@@ -946,6 +972,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::RING_FN)) => veldin_shots::ring_quads(table, svc, id),
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::AURA_DRAW_FN)) => veldin_shots::aura_quads(table, svc, id),
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::BEAM_FN)) => veldin_hopper::beam_quads(table, svc, id),
+        Some((aridia_lift::REFERENCE_LEVEL, aridia_lift::DRAW_FN)) => aridia_lift::fx_quads(table, svc, id),
         Some((qwark_ship::REFERENCE_LEVEL, qwark_ship::BEAM_FN)) => qwark_ship::beam_quads(table, svc, id),
         Some((ship_fighter::REFERENCE_LEVEL, ship_fighter::TRAIL_FN)) | Some((ship_fighter::FLEET_LEVEL, ship_fighter::FLEET_TRAIL_FN)) => ship_fighter::trail_quads(table, svc, id),
         _ => None,
@@ -979,7 +1006,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((veldin_diver::REFERENCE_LEVEL, veldin_diver::UPDATE_FN)) => veldin_diver::glow_quads(table, svc, id),
         Some((veldin_boss::REFERENCE_LEVEL, veldin_boss::DRAW_FN)) => veldin_boss::glow_quads(table, svc, id),
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::GLOW_FN)) => veldin_hopper::glow_quads(table, svc, id),
-        Some((path_ship::REFERENCE_LEVEL, path_ship::UPDATE_FN)) => path_ship::glow_quads(table, svc, id),
+        Some((path_ship::REFERENCE_LEVEL, path_ship::UPDATE_FN | path_ship::BIG_FN)) => path_ship::glow_quads(table, svc, id),
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::EYE_FN)) => veldin_beamer::glow_quads(table, svc, id),
         Some((veldin_finale_fx::REFERENCE_LEVEL, veldin_finale_fx::SEAT_FN)) => veldin_finale_fx::glow_quads(table, svc),
         Some((super::mouse::REFERENCE_LEVEL, super::mouse::GLOW_FN)) => super::mouse::glow_quads(table, id),

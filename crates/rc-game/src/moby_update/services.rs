@@ -536,6 +536,8 @@ pub trait SoundSink {
     /// `SoundSetPitchBend(slot, pb)` 0x2a1988: the slot's pitch bend (+0x14), sent with its next parameters (the
     /// Visibomb's loop). Default: nothing.
     fn set_pitch_bend(&mut self, _slot: i32, _pb: i32) {}
+    /// `SoundSetVolume(slot, vol)` 0x2a1968: the slot's volume scale (+0x10, 0x400 = 1). Default: nothing.
+    fn set_volume(&mut self, _slot: i32, _vol: i32) {}
     /// The checkpoint record `0x29ac10` saves the sound layer's reverb request. Default: nothing.
     fn checkpoint_saved(&mut self) {}
     /// The voice handoff (G-AUD-010): a class's own store of a new owner and position into a playing slot's record
@@ -1628,6 +1630,12 @@ impl<'a> World<'a> {
     pub fn set_pitch_bend(&mut self, slot: i32, pb: i32) {
         if slot < 0 { return; }
         if let Some(s) = self.sound.as_deref_mut() { s.set_pitch_bend(slot, pb); }
+    }
+
+    /// `SoundSetVolume(slot, vol)` 0x2a1968 ([`SoundSink::set_volume`]).
+    pub fn set_volume(&mut self, slot: i32, vol: i32) {
+        if slot < 0 { return; }
+        if let Some(s) = self.sound.as_deref_mut() { s.set_volume(slot, vol); }
     }
 
     /// `CreateMoby(o_class)` 0x263390 with the class as loaded (the game's init defaults, a zeroed 0x80-byte

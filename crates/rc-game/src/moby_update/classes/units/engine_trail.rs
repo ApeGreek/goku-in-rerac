@@ -26,6 +26,8 @@ pub struct Blob {
     pub spread: f32,
     /// Added to `trunc(8)` for the record's byte 9 (0x60 for the ships, −0x70 for the fighters).
     pub byte9: i32,
+    /// The sizes (w) divided by it after their draws (1; 1.5 for the big path ships on level 10, level02 0x2ed658).
+    pub size_div: f32,
 }
 
 /// `truncate_float_to_s32(multiply_global_scale(x))`.
@@ -41,6 +43,10 @@ pub fn blob(w: &mut World, b: &Blob, point: [f32; 4], d: [f32; 4]) {
     v2 = c::add(v2, [j[0], j[1], j[2], 0.0]);
     v1[3] = w.rng.randf(b.w1.0, b.w1.1);
     v2[3] = w.rng.randf(b.w2.0, b.w2.1);
+    if b.size_div != 1.0 {
+        v1[3] /= b.size_div;
+        v2[3] /= b.size_div;
+    }
     let c1 = tween(w.rng.randf(0.0, 1.0), b.c1);
     let c2 = tween(w.rng.randf(0.0, 1.0), b.c2);
     let r0 = w.rng.randf(0.0, 1.0);

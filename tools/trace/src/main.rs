@@ -49,6 +49,10 @@ Commands:
       Only the tie/shrub lit-colour part (level 01).
   save-state NAME [--from FILE.p2s | latest] [--force]
       Keeps a PCSX2 savestate: copies the newest one (or --from) to ~/PS2/ratchet1/savestates/NAME.p2s.
+  peek <dis ADDR [N] | words SPEC.. | inst CLASS|-INDEX[,..] [--short] | cuboid I.. | spline I.. | vtbl [CLASS..]> LEVEL
+      Porting aids, read-only: the level overlay disassembled from ADDR (hex, N instructions), words at gp offsets
+      (`-5264` or the decompiler's `ad9c`) or absolute addresses (`@1ba5d0`), moby instances with their pvar words,
+      cuboids, splines, the class table. Usage: `peek dis 03 2cca00 80`.
   disc-check [--iso IMAGE] [--extracted DIR] [--extract-into DIR]
       The checks that need your disc image (no test reads it; docs/workflows/testing.md §10): the
       disc reader against extracted/ on every level, the save_game lump and SYSTEM.CNF, and the extractor's
@@ -180,6 +184,27 @@ fn run() -> Result<i32> {
             let o = rc_trace::overlay_diff::Options { cite, fns, callee_depth, name, out, max_lines };
             let s = rc_trace::overlay_diff::run(&extracted, &rc_trace::work_dir(), &rc_trace::repo_root(), &o)?;
             println!("overlay-diff: {} rows, cells {:?}, {} rows with own differences -> {}", s.rows, s.counts, s.own_diff_rows, s.out.display());
+            Ok(0)
+        }
+        "peek" => {
+            let extracted = a.extracted()?;
+            let short = a.flag("--short");
+            if a.0.len() < 2 { bail!("peek <dis|words|inst|cuboid|spline|vtbl> LEVEL ..."); }
+            let what = a.0.remove(0);
+            let level: u32 = a.0.remove(0).parse().context("peek level")?;
+            let rest = std::mem::take(&mut a.0);
+            let hex = |s: &str| u32::from_str_radix(s.trim_start_matches("0x"), 16).context("hex address");
+            let nums = |v: &[String]| -> Result<Vec<i32>> { v.iter().flat_map(|s| s.split(',')).map(|x| x.parse::<i32>().context("number")).collect() };
+            use rc_trace::level_peek as lp;
+            match what.as_str() {
+                "dis" => lp::dis(&extracted, level, hex(rest.first().context("address")?)?, rest.get(1).map_or(Ok(40), |n| n.parse()).context("count")?)?,
+                "words" => lp::words(&extracted, level, &rest)?,
+                "inst" => lp::instances(level, &nums(&rest)?, short)?,
+                "cuboid" => lp::cuboids(level, &nums(&rest)?.into_iter().map(|x| x as usize).collect::<Vec<_>>())?,
+                "spline" => lp::splines(level, &nums(&rest)?.into_iter().map(|x| x as usize).collect::<Vec<_>>())?,
+                "vtbl" => lp::vtbl(&extracted, level, &nums(&rest)?)?,
+                _ => bail!("peek: unknown {what}"),
+            }
             Ok(0)
         }
         "disc-check" => {

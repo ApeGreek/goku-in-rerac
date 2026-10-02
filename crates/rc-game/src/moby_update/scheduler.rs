@@ -387,6 +387,7 @@ impl Scheduler {
     pub fn tick(&mut self, w: &mut World) -> usize {
         // The last frame's draw callbacks (their state and rand parts), before any update: classes::draw_callbacks.
         classes::draw_callbacks::run_frame(w);
+        w.svc.draw_callbacks.tick = w.counter + 1;
         // The Hoverboard hero code's stores of the last hero update (classes::units::hoverboard).
         classes::units::hoverboard::apply(w);
         let (list, targets) = build_active_list(w.table, w.camera, &w.svc.groups);

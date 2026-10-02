@@ -15,6 +15,7 @@ pub mod hero_analysis;
 pub mod hero_record;
 pub mod hero_replay;
 pub mod hero_trace;
+pub mod level_peek;
 pub mod mips;
 pub mod novalis_spawn;
 pub mod overlay_diff;
