@@ -142,11 +142,13 @@ pub struct Beam {
     pub drawn: Option<u64>,
     /// Type-78 sparks queued (`super::fx::PartSpawn::Spark78`), a count for the tests.
     pub sparks78: u32,
+    /// gp−0x54f4 (level18 gp−0x54b4): the range the lay and the pulses use (8; level 18's scene 1 sets 24).
+    pub range: f32,
 }
 
 impl Default for Beam {
     fn default() -> Self {
-        Beam { reset: true, seg: 0.0, phase: 0.0, pts: [[0.0; 3]; POINTS], rings: [[[0.0; 3]; RING]; POINTS], strands: [[[0.0; 3]; POINTS]; 2], pulse_timer: 0, pulses: [Pulse::default(); 3], scroll: [0.0; 4], glow_at: [0.0; 3], gravity: [0.0, 0.0, -1.0], gold: false, drawn: None, sparks78: 0 }
+        Beam { reset: true, seg: 0.0, phase: 0.0, pts: [[0.0; 3]; POINTS], rings: [[[0.0; 3]; RING]; POINTS], strands: [[[0.0; 3]; POINTS]; 2], pulse_timer: 0, pulses: [Pulse::default(); 3], scroll: [0.0; 4], glow_at: [0.0; 3], gravity: [0.0, 0.0, -1.0], gold: false, drawn: None, sparks78: 0, range: RANGE }
     }
 }
 
@@ -262,7 +264,7 @@ impl Beam {
     pub fn lay(&mut self, muzzle: [f32; 3], row1: [f32; 3]) {
         if !self.reset { return; }
         self.reset = false;
-        self.seg = RANGE / 12.0;
+        self.seg = self.range / 12.0;
         let d = scale3(row1, -self.seg);
         self.pts[0] = muzzle;
         for i in 1..POINTS { self.pts[i] = add3(self.pts[i - 1], d); }
@@ -348,9 +350,9 @@ impl Beam {
             let p = &mut self.pulses[k];
             if p.timer < ticks(30) { p.alpha -= f32::from_bits(0x4008_887b); }
             p.dist += 8.0 * dt;
-            let f = (p.dist / RANGE).min(1.0);
+            let f = (p.dist / self.range).min(1.0);
             p.size = 0.1 + (1.5 - 0.1) * f;
-            if RANGE <= p.dist {
+            if self.range <= p.dist {
                 p.pos = add3(p.pos, scale3(p.dir, 8.0 * dt));
             } else {
                 let idx = if seg == 0.0 { 0 } else { ((p.dist / seg) as i32).max(0) as usize };
@@ -689,10 +691,22 @@ fn beam(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn Hi
             }
         }
     };
+    let word = target.and_then(|t| table.mobys.get(t.0)).and_then(targeting::aim_height).map_or(0, f32::to_bits);
     let m = &mut hero.weapons.reactive.morph;
     let (yaw, pitch) = (m.yaw, m.pitch);
-    m.beam.shape(muzzle, yaw, pitch, target.map(|t| t.1), len, gravity);
     m.beam.drawn = Some(tick);
+    let mut parts = std::mem::take(&mut hero.fx.parts);
+    beam_step(&mut hero.weapons.reactive.morph.beam, muzzle, row1, yaw, pitch, target.map(|t| (t.0, t.1, word)), len, gravity, rng, &mut parts);
+    hero.fx.parts = parts;
+}
+
+/// The rest of `0x2d2d08` after the length: the shape, the sparkles at the strands' ends and the sparks along the beam
+/// (queued in `parts` as [`super::fx::PartSpawn`]s), the pulses and the scrolls. `target`: the target, its position
+/// and its aim word. Shared by the hero's item and the scenes that fire the beam (level 18's 1563,
+/// `moby_update::classes::units::veldin_finale_fx`).
+#[allow(clippy::too_many_arguments)]
+pub fn beam_step(b: &mut Beam, muzzle: [f32; 3], row1: [f32; 3], yaw: f32, pitch: f32, target: Option<(MobyId, [f32; 3], u32)>, len: f32, gravity: [f32; 3], rng: &mut Rng, parts: &mut Vec<super::fx::PartSpawn>) {
+    b.shape(muzzle, yaw, pitch, target.map(|t| t.1), len, gravity);
     // The sparkles at the strands' ends, the sparks along the beam.
     let s = rng.randf(0.1, 2.0);
     let r = rng.randi(2);
@@ -700,21 +714,20 @@ fn beam(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn Hi
     let life = ticks(30);
     for (k, rgb) in [(0usize, 0x7f7f_2020u32), (1, 0x7f20_207f)] {
         if rng.randi(2) == 0 {
-            let p = hero.weapons.reactive.morph.beam.strands[k][POINTS - 1];
+            let p = b.strands[k][POINTS - 1];
             let pos = [p[0], p[1], p[2], 1.0];
-            hero.fx.parts.push(super::fx::PartSpawn::Sparkle { s12: s * 0.1, s13: s, s14: f32::from_bits(0x3b44_9ba6), pos, life, rgba: rgb, b8: 0, t0: sgn, vel: [0.0; 3] });
+            parts.push(super::fx::PartSpawn::Sparkle { s12: s * 0.1, s13: s, s14: f32::from_bits(0x3b44_9ba6), pos, life, rgba: rgb, b8: 0, t0: sgn, vel: [0.0; 3] });
             sgn = -sgn;
-            hero.fx.parts.push(super::fx::PartSpawn::Sparkle { s12: s * 0.07, s13: s * 0.7, s14: f32::from_bits(0x3b44_9ba6), pos, life, rgba: 0x7f7f_7f7f, b8: 0x20, t0: sgn, vel: [0.0; 3] });
+            parts.push(super::fx::PartSpawn::Sparkle { s12: s * 0.07, s13: s * 0.7, s14: f32::from_bits(0x3b44_9ba6), pos, life, rgba: 0x7f7f_7f7f, b8: 0x20, t0: sgn, vel: [0.0; 3] });
         }
     }
-    let m = &mut hero.weapons.reactive.morph;
-    let dir = with_len(sub3(m.beam.pts[1], m.beam.pts[0]), 0.2);
+    let dir = with_len(sub3(b.pts[1], b.pts[0]), 0.2);
     if rng.randi(2) == 0 {
         // The sparks (0x2d3388..0x2d35e8): from 0.25 ahead of the first point along the item's −row 1, the beam's step
         // turned by ±15° about the gravity and about beam × gravity, a colour of the table 0x20ab10; life = the
         // beam's length / its step ×1.2 (×3 with a target); a coloured one (mode 0, spin sgn) and a white core (mode
         // 1, −sgn), both homing on the target.
-        let pos = add3(m.beam.pts[0], with_len(row1, -0.25));
+        let pos = add3(b.pts[0], with_len(row1, -0.25));
         let c = SPARK_RGBA[rng.randi(5) as usize];
         let a1 = rng.randf_sym(0.0, f32::from_bits(0x3e86_0a92));
         let a2 = rng.randf_sym(0.0, f32::from_bits(0x3e86_0a92));
@@ -723,20 +736,18 @@ fn beam(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn Hi
         let tgt = target.map(|t| t.0);
         let mut life = ((len * 1.2) / 0.2) as i32;
         if tgt.is_some() { life *= 3; }
-        let word = tgt.and_then(|t| table.mobys.get(t)).and_then(targeting::aim_height).map_or(0, f32::to_bits);
+        let word = target.map_or(0, |t| t.2);
         let pos = [pos[0], pos[1], pos[2], 1.0];
         let spark = |s1: f32, s2: f32, rgba: u32, mode: i32, spin: i8| super::fx::PartSpawn::Spark78 {
             s1, s2, pos, life: life as i16, rgba, mode, spin: spin as u8, vel, target: tgt, target_word: word,
         };
-        hero.fx.parts.push(spark(s * 0.1, s, c, 0, sgn));
-        hero.fx.parts.push(spark(s * 0.07, s * 0.7, 0x7f7f_7f7f, 1, -sgn));
-        let m = &mut hero.weapons.reactive.morph;
-        m.beam.sparks78 += 2;
+        parts.push(spark(s * 0.1, s, c, 0, sgn));
+        parts.push(spark(s * 0.07, s * 0.7, 0x7f7f_7f7f, 1, -sgn));
+        b.sparks78 += 2;
     }
-    let m = &mut hero.weapons.reactive.morph;
-    m.beam.pulses_step();
-    m.beam.glow_at = add3(m.beam.pts[0], with_len(row1, -0.5));
-    m.beam.step_scrolls();
+    b.pulses_step();
+    b.glow_at = add3(b.pts[0], with_len(row1, -0.5));
+    b.step_scrolls();
 }
 
 /// The Morph-o-Ray's leftovers when it leaves the hand without its own update (the light, the loop sound, the beam).

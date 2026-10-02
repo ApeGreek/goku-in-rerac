@@ -1679,6 +1679,7 @@ fn tick(
         w.sound = sink.as_mut().map(|s| s as &mut dyn rc_game::moby_update::services::SoundSink);
         w.camera = cam.pos;
         w.camera_yaw = cam.yaw().to_f32();
+        w.camera_rows = cam.rows_f32();
         w.coll = Some(coll);
         w.particles = parts.as_deref_mut().map(|p| &mut p.sys);
         w.view = view_cull.as_ref();

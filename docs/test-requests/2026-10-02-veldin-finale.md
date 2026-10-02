@@ -27,3 +27,10 @@
 ### F6. The energy fan (1890; also Kalebo III's 1443)
 - **Claim:** a humming disc of spinning blades with a glow running round it and four rings turning through it blocks
   the way; throwing every switch of its set removes it (a sound plays at the switch nearest Ratchet).
+
+### F7. The finale's scene effects (1563)
+- **Claim:** in the finale's scenes: the boss copy's seat lights pulse; in the ships' escape (scene 4) the ships trail
+  bright exhausts, blow up one after another, then a big blast goes off over the arena, a glow and a long beam grow out
+  of the turned-over piece and a white flash fills the view; a ring of grey puffs spreads before the camera in scene
+  3; a jet trail streaks in scene 5; and in scene 1 a crackling Morph-o-Ray beam (the item's own look) fires for
+  about a second.

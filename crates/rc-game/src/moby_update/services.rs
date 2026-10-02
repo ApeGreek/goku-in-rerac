@@ -1389,6 +1389,9 @@ pub struct World<'a> {
     pub camera: V4,
     /// `0x167258`: the camera's yaw (the previous tick's; level18's copy of the camera block has it at 0x1677d8).
     pub camera_yaw: f32,
+    /// `0x167450` / `0x167460` / `0x167470`: the camera's forward, left and up rows (the previous tick's; level18's
+    /// copy at 0x1679d0..).
+    pub camera_rows: [[f32; 3]; 3],
     /// `0x16d140..`: the view the crate respawn's `FastBSphereCheck` uses (None: never out of view).
     pub view: Option<&'a BSphereView>,
     /// The game's one `rand` stream (shared with the particles and the hero).
@@ -1455,6 +1458,7 @@ impl<'a> World<'a> {
             hero_moby,
             camera: hero.pos,
             camera_yaw: 0.0,
+            camera_rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
             view: None,
             rng,
             coll: None,

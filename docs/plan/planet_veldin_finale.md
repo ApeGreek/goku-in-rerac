@@ -24,11 +24,13 @@ gliders 1564, 1584, the save before the boss 1750, Giant Clank's pad 1899, the h
 | 638 | 46 | a creature (also on Kalebo III, 16) | open |
 | 1356 | 10 | a creature (also on Kalebo III, 16) | open |
 | 1454 | 3 | a creature | open |
-| 1563 | 1 | a creature / effect driver | open |
+| 1563 | 1 | the cutscene effects (the seat glows, scene 4's jets, blasts and the big blast, the piece's glow and beam, the white flash, scene 3's puffs, scene 5's trail, scene 1's Morph-o-Ray beam) | **ported 2026-10-02** (`units::veldin_finale_fx`; the beam through `hero::morph_ray::beam_step`, now shared) |
 
 ## Open
 
-- The classes 638, 1356, 1454, 1563 (next on this page).
+- The classes 638, 1356, 1454 (next on this page).
+- Scene 1 sets the Morph-o-Ray's range word to 24 for the rest of the level (the hero's item would reach 24 after
+  it); the port keeps the item at 8 [L].
 - The grind-path cuts of the falling platforms (G-HERO-039); the rail chooser's radius channel is the hero side
   such a cut would also need.
 - The pools' ripple patch word (`0x1db508 + n·0x1190`) has no reader on level 18: no ripple manager sets up the patch

@@ -188,6 +188,7 @@
 //! | U593 | 1392 the fields beside the Trespasser locks of Veldin's last level (18; a hum and pulsing bands until the lock is solved) | level18 0x2f1e68, draw 0x2f1fd8 | [`veldin_lock_field`] |
 //! | U594 | 1402 the Hydrodisplacer pools of Veldin's last level (18; two heights, their groups carried, the surface meshes) | level18 0x2f2310, draws 0x2f2970 / 0x2f2620 / 0x2f27c8 | [`veldin_pool`] |
 //! | U519 | 1443 (16) / 1890 (18) the energy fans (blades and rings until their switch group is thrown) | level18 0x2fae48, draw 0x2fb018 (level16 0x2e5708) | [`energy_fan`] |
+//! | U599 | 1563 the cutscene effects of Veldin's last level (18; the seat glows, the jets and blasts of scene 4, the piece's glow and beam, the flash, the puffs) | level18 0x2f88e8, draws 0x2f9780 / 0x2f9a98 / 0x2f9c20 / 0x2f9eb8, the Morph-o-Ray beam 0x2c04b8 | [`veldin_finale_fx`] |
 //! | U581 | 582 the rail chooser of Veldin's last level (18; the twice-laid rails, one way live at a time; two nanotech clusters) | level18 0x2d62e8 | [`veldin_rails`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
@@ -359,6 +360,7 @@ pub mod pod_launcher;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
 pub mod board_missile;
+pub mod veldin_finale_fx;
 pub mod veldin_lock_field;
 pub mod veldin_pool;
 pub mod veldin_rails;
@@ -618,6 +620,13 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U519 1890", level: energy_fan::REFERENCE_LEVEL, func: energy_fan::UPDATE_FN, classes: &energy_fan::CLASSES, update: energy_fan::update, joints: &[] },
     // Draw callback only (the fan's blades and rings `0x2fb018`: `Callback::UnitQuads`, two groups).
     UnitPort { unit: "U519 1890 fan", level: energy_fan::REFERENCE_LEVEL, func: energy_fan::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U599 1563", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::UPDATE_FN, classes: &veldin_finale_fx::CLASSES, update: veldin_finale_fx::update, joints: &[] },
+    // Draw callbacks only (1563's flash, glow and beam: `Callback::UnitQuads`; the seat glows: `UnitGlow`).
+    UnitPort { unit: "U599 1563 flash", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::FLASH_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U599 1563 seat", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::SEAT_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U599 1563 glow", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U599 1563 beam", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U599 1563 morph beam", level: veldin_finale_fx::REFERENCE_LEVEL, func: veldin_finale_fx::MORPH_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U24 530", level: veldin_ship::REFERENCE_LEVEL, func: veldin_ship::UPDATE_FN, classes: &veldin_ship::CLASSES, update: veldin_ship::update, joints: &veldin_ship::CLASSES },
     UnitPort { unit: "U36 1440", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::UPDATE_FN, classes: &veldin_beamer::CLASSES, update: veldin_beamer::update, joints: &veldin_beamer::CLASSES },
     UnitPort { unit: "U37 1471", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::MANAGER_FN, classes: &veldin_beamer::MANAGER_CLASSES, update: veldin_beamer::manager, joints: &[] },
@@ -765,6 +774,8 @@ pub struct Globals {
     words: std::collections::HashMap<u32, u32>,
     /// Veldin's beam slots (level00 0x161bf8.., `veldin_beamer`).
     pub veldin_beams: veldin_beamer::Beams,
+    /// Veldin's last level's cutscene effects (`veldin_finale_fx`: its level words and this tick's draws).
+    pub veldin_finale: veldin_finale_fx::Fx,
     /// The pool meshes of level 18 (`veldin_pool`; read from the overlay by the engine at the level load).
     pub veldin_pools: Option<std::sync::Arc<veldin_pool::Meshes>>,
 }
@@ -894,6 +905,7 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::fx_quad_groups(svc),
         Some((energy_fan::REFERENCE_LEVEL, energy_fan::DRAW_FN)) => energy_fan::fx_quad_groups(table, svc, id),
+        Some((veldin_finale_fx::REFERENCE_LEVEL, f)) if [veldin_finale_fx::FLASH_FN, veldin_finale_fx::GLOW_FN, veldin_finale_fx::BEAM_FN, veldin_finale_fx::MORPH_FN].contains(&f) => veldin_finale_fx::fx_quad_groups(svc, f),
         _ => fx_quads(table, svc, i, id).into_iter().collect(),
     }
 }
@@ -908,6 +920,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::GLOW_FN)) => veldin_hopper::glow_quads(table, svc, id),
         Some((path_ship::REFERENCE_LEVEL, path_ship::UPDATE_FN)) => path_ship::glow_quads(table, svc, id),
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::EYE_FN)) => veldin_beamer::glow_quads(table, svc, id),
+        Some((veldin_finale_fx::REFERENCE_LEVEL, veldin_finale_fx::SEAT_FN)) => veldin_finale_fx::glow_quads(table, svc),
         _ => Vec::new(),
     }
 }
