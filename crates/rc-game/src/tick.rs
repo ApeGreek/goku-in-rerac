@@ -253,6 +253,10 @@ impl Game {
         if let Some(f) = &hero_writes { f.apply(&mut self.hero); }
         // A class's store of the death height 0x15f638 (Kalebo's race host 1455).
         if let Some(z) = hero_writes.as_ref().and_then(|f| f.death_z) { self.death_z = Pf::f(z); }
+        // Their grind path radius stores (Veldin's rail chooser 582): the hero's rails.
+        for (i, r) in hero_writes.iter().flat_map(|f| f.rail_radius.iter().flatten()) {
+            if let Some(g) = std::sync::Arc::make_mut(&mut self.grind_paths).get_mut(*i as usize) { g.bsphere[3] = *r; }
+        }
         // Their camera shakes (stores into 0x167260 / 0x167270; the camera update at the end of the tick applies them).
         for r in hooks.world.as_deref_mut().map(|w| w.take_camera_shakes()).unwrap_or_default() { self.camera.request_shake(r); }
         // 0x15f5c4 for the hero code that tests it (the disguise's timer and gate: crate::hero::hologuise).

@@ -339,6 +339,8 @@ fn set_visible(vis: &mut Query<&mut Visibility>, s: &mut Option<FxSlot>, show: b
 pub struct LevelFx {
     pub nanotech: Option<NanotechTables>,
     pub ship_glass: Option<ShipGlassTables>,
+    /// Level 18's pool meshes (`rc_game` `units::veldin_pool`; handed to the moby loop at the level load).
+    pub veldin_pools: Option<std::sync::Arc<rc_game::moby_update::classes::units::veldin_pool::Meshes>>,
 }
 
 impl LevelFx {
@@ -351,7 +353,9 @@ impl LevelFx {
             eprintln!("fx: ship glass tables: {e}");
             None
         });
-        LevelFx { nanotech, ship_glass }
+        let veldin_pools = rc_game::moby_update::classes::units::veldin_pool::Meshes::parse(ov, level);
+        if level == rc_game::moby_update::classes::units::veldin_pool::REFERENCE_LEVEL && veldin_pools.is_none() { eprintln!("fx: the pool meshes of level 18 did not read"); }
+        LevelFx { nanotech, ship_glass, veldin_pools }
     }
 }
 

@@ -1144,6 +1144,16 @@ pub struct HeroFields {
     pub board: Option<MobyId>,
     /// 0x13fc14 += n: the Hoverboard's boost from a pickup 133 (`classes::units::board_boost`).
     pub board_boost: i32,
+    /// A class's store of 0x13f51a (s16, `Hero::f51a`: the grind reach's wider catch): Veldin's rail chooser 582 holds
+    /// it at 5.
+    pub rail_reach: Option<i16>,
+    /// A class's stores of grind path radii (`0x15f70c[i]` +0x0c, the bounding sphere's: 0 takes the rail out of the
+    /// grind search), in order: Veldin's rail chooser 582. The tick applies them to the hero's rails
+    /// ([`HeroFields::set_rail_radius`]; the moby loop's own copy is `Services::volumes`).
+    pub rail_radius: [Option<(u16, f32)>; 8],
+    /// A class's store of 0x141400 (`Gadgets::hydro_full`: the Hydrodisplacer holds water): Veldin's pools 1402 give a
+    /// full gadget back at their first update.
+    pub hydro_full: Option<bool>,
 }
 
 /// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
@@ -1235,7 +1245,15 @@ impl HeroFields {
             death_z: None,
             board: None,
             board_boost: 0,
+            rail_reach: None,
+            rail_radius: [None; 8],
+            hydro_full: None,
         }
+    }
+
+    /// Queues a grind path's radius store (a ninth in one tick is dropped: the chooser 582 makes eight at most).
+    pub fn set_rail_radius(&mut self, rail: usize, r: f32) {
+        if let Some(s) = self.rail_radius.iter_mut().find(|s| s.is_none()) { *s = Some((rail as u16, r)); }
     }
 
     /// Queues a call into the hero code (in order; a fifth call in one tick is dropped: no class makes more
@@ -1291,6 +1309,8 @@ impl HeroFields {
         if let Some(v) = self.head_request { h.head_slot.request = v; }
         if let Some(v) = self.clank_hidden { h.back_slot.clank_hidden = v; }
         if let Some(v) = self.no_vel_clamp { h.no_vel_clamp = v; }
+        if let Some(v) = self.rail_reach { h.f51a = v; }
+        if let Some(v) = self.hydro_full { h.gadgets.hydro_full = v; }
         if let Some(b) = self.board { h.board.moby = Some(b); }
         h.board.boost_timer += self.board_boost;
         if let Some(p) = self.pose {
