@@ -615,3 +615,26 @@ fn the_morph_ray_keep_byte_and_the_taunter_act_on_the_gunner() {
 }
 
 
+
+/// A Kerwan trooper 574 knocked by a flat push (the jump attack's shockwave: facing·2, z 0, damage 2, the exact
+/// marker) lands and recovers: the flight's drag stops it horizontally, then gravity still brings it down
+/// (`0x221460` keeps z when it zeroes xy; it used to hang in the air in state 0xa).
+#[test]
+fn trooper_lands_after_a_flat_push() {
+    let Some(mut lv) = load(3) else { eprintln!("skipped: no extracted/"); return };
+    let t = lv.of_class(574)[0];
+    let p = lv.table.mobys[t].position;
+    let hero = hero_at([p[0] - 2.0, p[1], p[2]]);
+    lv.load_pass(&hero);
+    for _ in 0..30 { lv.tick(&hero); }
+    let h = lv.hero_idx;
+    let tmpl = HitTemplate { dir: [Pf::f(2.0), Pf::ZERO, Pf::ZERO, Pf::b(0x45af_df66)], attacker: Some(h), flags: 0x1_0000, b18: 0, b19: 1, h1a: 0x47, damage: Pf::f(2.0), w20: 1 };
+    lv.hit(&hero, t, &tmpl);
+    lv.tick(&hero);
+    assert_eq!(lv.table.mobys[t].state, 0xa, "knocked");
+    let left = (0..200).find(|_| {
+        lv.tick(&hero);
+        lv.table.mobys[t].state != 0xa
+    });
+    assert!(left.is_some(), "still knocked after 200 ticks at {:?}", lv.table.mobys[t].position);
+}

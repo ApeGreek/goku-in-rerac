@@ -177,11 +177,8 @@ fn rider(w: &World, id: MobyId) -> Option<MobyId> { usize::try_from(c::pi32(w, i
 fn fcos(a: f32) -> f32 { crate::hero::physics::fast_cos(Pf::f(a)).to_f32() }
 fn fsin(a: f32) -> f32 { crate::hero::physics::fast_sin(Pf::f(a)).to_f32() }
 
-/// `0x1f8ee8` (L03): the vector scaled so that its xy length is `l` (every lane).
-fn set_len_xy(v: c::V, l: f32) -> c::V {
-    let n = c::len2(v);
-    if n == 0.0 { v } else { c::scale(v, l / n) }
-}
+/// `0x1f8ee8` (L03, = L01 0x221460): the xy scaled to length `l`, z and w kept ([`c::set_len2`]).
+fn set_len_xy(v: c::V, l: f32) -> c::V { c::set_len2(v, l) }
 
 fn spline(w: &World, p: i32) -> Option<usize> { usize::try_from(p).ok().filter(|&i| i < w.svc.splines.len()) }
 fn points(w: &World, p: usize) -> Vec<[f32; 4]> { w.svc.splines[p].iter().map(|q| q.map(f32::from_bits)).collect() }

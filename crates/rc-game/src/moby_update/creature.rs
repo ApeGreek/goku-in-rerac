@@ -144,19 +144,21 @@ pub fn len2(v: V) -> f32 { (v[0] * v[0] + v[1] * v[1]).sqrt() }
 pub fn dist3(a: V, b: V) -> f32 { len3(sub(a, b)) }
 /// `VecDistance2` 0x221398: the xy distance.
 pub fn dist2(a: V, b: V) -> f32 { len2(sub(a, b)) }
-/// `FastVecNormalize(l, out, v)` 0x221410: `v` (all lanes) scaled to 3-D length `l`; the zero vector gives
-/// `vf0 + vf0 = (0, 0, 0, 2)`.
+/// `FastVecNormalize(l, out, v)` 0x221410: `v.xyz` scaled to 3-D length `l` (`vmulq.xyz`), w kept; the zero vector
+/// gives xyz = `vf0 + vf0` = 0, w kept.
 pub fn set_len3(v: V, l: f32) -> V {
     let n = len3(v);
-    if n == 0.0 { return [0.0, 0.0, 0.0, 2.0]; }
-    scale(v, l / n)
+    if n == 0.0 { return [0.0, 0.0, 0.0, v[3]]; }
+    let q = l / n;
+    [v[0] * q, v[1] * q, v[2] * q, v[3]]
 }
-/// `fun_001f9c48(l, out, v)` 0x221460: `v` (all lanes, z included) scaled so its **xy** length is `l`; zero xy gives
-/// `(0, 0, 0, 2)`.
+/// `fun_001f9c48(l, out, v)` 0x221460: `v.xy` scaled so its xy length is `l` (`vmulq.xy`), z and w kept; zero xy
+/// gives xy = 0, z and w kept (a knocked flight whose drag stopped it still falls).
 pub fn set_len2(v: V, l: f32) -> V {
     let n = len2(v);
-    if n == 0.0 { return [0.0, 0.0, 0.0, 2.0]; }
-    scale(v, l / n)
+    if n == 0.0 { return [0.0, 0.0, v[2], v[3]]; }
+    let q = l / n;
+    [v[0] * q, v[1] * q, v[2], v[3]]
 }
 /// `FUN_002745f0(max, v)`: `v` scaled down to 3-D length `max` when longer.
 pub fn clamp_len3(v: V, max: f32) -> V { if max < len3(v) { set_len3(v, max) } else { v } }

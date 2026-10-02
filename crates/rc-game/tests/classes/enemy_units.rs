@@ -208,7 +208,9 @@ fn ratchet_near_a_falling_mine_and_a_decoy_contact() {
         d.mode |= mode::NO_UPDATE;
         d.position = [s[0] + 5.0, s[1], s[2], 1.0];
     }
-    throw(&mut lv, id, [s[0], s[1], s[2] + 0.1], [0.0, 0.0, 0.0], s[2], 10_000);
+    // Landing above the step east of the pool spot (floor 103.16 vs the spot's 102.9): the chase's gravity
+    // (−10·dt² a tick, `0x221460` keeps it) would otherwise sink a mine rolled into the step.
+    throw(&mut lv, id, [s[0], s[1], s[2] + 0.8], [0.0, 0.0, 0.0], s[2] + 0.8, 10_000);
     let mut blew = None;
     for t in 0..400 {
         lv.tick(&hero);
