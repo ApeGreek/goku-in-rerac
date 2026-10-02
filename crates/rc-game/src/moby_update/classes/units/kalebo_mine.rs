@@ -18,6 +18,8 @@
 //! | tail (states 0..2) | the glow's phase += π/60 (gp−0x4fb8); s = sin: glow = 0xff000000 \| (⌊32s⌋ + 0x30) · 0x10100 \| (⌊48s⌋ + 0xcf); rotation += the spin rates | [`tail`] |
 //!
 //! The resolver's null-attacker read (`hit +0x20` = 0: the game reads the class at 0xa6) is taken as "not 643" [L].
+//! Ratchet's contact moby 0x13f58c (`Hero::cap_moby`) is not filled by the port yet (gaps.md G-HERO-033), so the touch
+//! blast never fires; hits do.
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{self as c, fx};

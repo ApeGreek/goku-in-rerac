@@ -84,8 +84,9 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
 
 ### B12. Kalebo III's floating mines (933)
 - **Claim:** the mines along the grind rails float 0.7 above the rail, bobbing into place, spinning slowly and
-  pulsing their glow. A hit blows one up; touching one blows it up and hurts Ratchet. A blown-up mine comes back
-  once it is out of view. The mines the drones carry and drop disappear whenever Ratchet is not grinding.
+  pulsing their glow. A hit blows one up, and a blown-up mine comes back once it is out of view. The mines the
+  drones carry and drop disappear whenever Ratchet is not grinding. (Touching a mine does nothing yet: Ratchet's
+  "touched moby" is not tracked, gaps.md G-HERO-033.)
 
 ### B13. Kalebo III's board weapon (level 16)
 - **Claim:** a box at the top left of the race HUD shows a missile icon and the weapons held (dim red at 0). Riding
@@ -94,3 +95,12 @@ Level 5. The board waits at (275.5, 334.4, 73.6); `RC_HERO_AT=272,333,74` lands 
   sparks; it bursts on the first wall or racer it meets. A racer it hits blows up (+250 score). Each shot spends a
   weapon a little under a second later. Holding weapons for 20 seconds without firing shows a hint. Leaving the board
   puts the launcher away.
+
+### B14. Upright through the jumps (fix 2026-10-02)
+- **Claim:** on either race, a ramp jump keeps Ratchet upright on the board (he no longer rolls over in the air), the
+  steering stays steady in the air, and a straight landing carries on riding instead of crashing.
+
+### B15. Kalebo III's race from the start
+- **Claim:** talking to the race host and agreeing starts the race: Ratchet is placed at the start on the board, the
+  sea lowers, the race music plays, and the five racers set off with him; three laps end it with the host's finish.
+  (Not smoke-tested by the port yet: the runs so far mounted the board directly.)
