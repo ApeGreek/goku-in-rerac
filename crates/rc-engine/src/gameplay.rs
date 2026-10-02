@@ -1585,6 +1585,8 @@ fn respawn(p: &mut Play, coll: &rc_formats::collision::Collision, class: &MobyAn
     // The level's camera slots as the reload makes them (the slot init 0x20ef58).
     g.camera.set_level(p.game.camera.level_cams.restarted());
     p.game = g;
+    // The stores the reload's load pass queued on the dead hero land on the new one (`HeroFields::rebased`).
+    if let Some((c, f)) = p.svc.hero_writes.take() { p.svc.hero_writes = Some((c, f.rebased(&p.game.hero))); }
     // The death reload's switch back into the checkpoint's body (`0x29adc8`), made by the next tick; the body moby's
     // animation binding is dropped with the old hero.
     p.body_anim = None;
@@ -1962,10 +1964,8 @@ fn tick(
         budget.0 = 0;
         death_reload(p, lv, coll, state.as_deref().map(|s| &s.0), occl.as_deref_mut(), anim.as_deref_mut(), particles.as_deref_mut());
         respawn(p, coll, class, lv.death_z, state.as_deref().map(|s| &s.0), session.as_deref_mut().map(|s| &mut s.0));
-        // 0x29adc8 also puts the checkpoint's reverb back (rc_game::audio::reverb).
-        if p.svc.save.checkpoint.is_some() {
-            if let Some(a) = audio_cell.borrow_mut().as_deref_mut() { a.system().checkpoint_restored(); }
-        }
+        // The sounds and the music stopped, the checkpoint's reverb back (0x29adc8), the track from the start.
+        if let Some(a) = audio_cell.borrow_mut().as_deref_mut() { a.system().death_reload(p.svc.save.checkpoint.is_some()); }
         let from = if p.svc.save.checkpoint.is_some() { "the checkpoint" } else { "the uid-0 moby" };
         println!("gameplay: tick {}: death flag 0x141401 (state {st:#x} at {at:.2?}); respawned at {from}", p.game.counter);
     }

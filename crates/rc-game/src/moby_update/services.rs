@@ -1258,6 +1258,29 @@ impl HeroFields {
         }
     }
 
+    /// These stores moved onto a new hero block: the fields [`HeroFields::of`] copied from the old hero (carried so
+    /// that [`HeroFields::apply`] keeps them) are `h`'s, the classes' requests stay. The death reload's load pass
+    /// queues stores on the dead hero (Veldin's Clank 834 hides himself from the back in its state 0) and the hero init then
+    /// makes a new one: applied as they were, they would put the dead hero's health 0 back (a death loop).
+    pub fn rebased(&self, h: &Hero) -> HeroFields {
+        let b = HeroFields::of(h);
+        HeroFields {
+            platform: b.platform,
+            momentum: b.momentum,
+            sink_hold: b.sink_hold,
+            flow: b.flow,
+            jump_lockout: b.jump_lockout,
+            edge_brake: b.edge_brake,
+            health: b.health,
+            ammo: b.ammo,
+            water_level: b.water_level,
+            dive_lock: b.dive_lock,
+            speed: b.speed,
+            jump_lock: b.jump_lock,
+            ..*self
+        }
+    }
+
     /// Queues a grind path's radius store (a ninth in one tick is dropped: the chooser 582 makes eight at most).
     pub fn set_rail_radius(&mut self, rail: usize, r: f32) {
         if let Some(s) = self.rail_radius.iter_mut().find(|s| s.is_none()) { *s = Some((rail as u16, r)); }

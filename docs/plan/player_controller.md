@@ -446,7 +446,9 @@ to before this wiring at frame 120).
 
 - **Input** (`input_map.rs`): every frame the devices become the 18 libpad2 bytes (`PadInput`), so `PadState` decodes exactly
   what a DualShock would send. Left stick: WASD / arrows (full deflection, bytes 0/255; Shift = half = walk) or the gamepad
-  stick passed through linearly (`round(127.5 + 127.5·v)`, y flipped; the game's own dead zone 48/76 applies). ✕ Space /
+  stick scaled per axis by 1.33 and clamped (`STICK_SCALE`, PCSX2's DualShock 2 default: a full diagonal reads full on both
+  axes as on a DualShock 2; unscaled, a round-gate pad's full diagonal decoded to length 0.80, under the walk / run 0.82),
+  then `round(127.5 + 127.5·v)`, y flipped; the game's own dead zone 48/76 applies. ✕ Space /
   South, □ J / West, ○ K / East, △ L / North, L1 Q / left bumper, R1 E or Ctrl / right bumper, L2 Z, R2 C (triggers),
   Start Enter, Select Backspace, R3 V or middle mouse / right stick click, d-pad T/F/G/H. Right stick: mouse motion while the
   right button is held (12 px per frame = full), `,` / `.`, or the gamepad right stick. Buttons are digital (pressure 0xff).

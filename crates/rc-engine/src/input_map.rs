@@ -3,10 +3,11 @@
 //! what a PS2 pad would give it (docs/plan/player_controller.md §1, "Engine wiring").
 //!
 //! Encoding. Sticks: 127/128 = centre, 0 = full up/left, 255 = full down/right; the game's per-axis dead
-//! zone (|b − 127| < 48) and scale (/76) are applied by `PadState`, not here. A gamepad stick is passed
-//! through linearly (`round(127.5 + 127.5·v)`, Bevy's y up → PS2 y down), like the raw analog value of a
-//! DualShock; keys give full deflection (0 / 255), or half deflection (`PadInput::axis_byte(±0.5)`) with
-//! Shift held. Buttons are digital: pressure 0xff while held (`PadInput::press`).
+//! zone (|b − 127| < 48) and scale (/76) are applied by `PadState`, not here. A gamepad stick is scaled per
+//! axis by [`STICK_SCALE`] and clamped, then mapped linearly (`round(127.5 + 127.5·v)`, Bevy's y up → PS2 y
+//! down): the DualShock 2's range, which reads full on both axes at a full diagonal; keys give full deflection
+//! (0 / 255), or half deflection (`PadInput::axis_byte(±0.5)`) with Shift held. Buttons are digital: pressure
+//! 0xff while held (`PadInput::press`).
 //!
 //! Scripted input (`RC_PLAY_SCRIPT`), for deterministic runs: see [`Script`]. With a script the devices are
 //! ignored.
@@ -23,6 +24,14 @@ play controls (PS2 pad):  left stick = WASD / arrow keys (Shift: half stick = wa
                           Start/Select, stick clicks L3/R3, d-pad
 engine keys:              Tab = fly camera <-> game camera (the fly camera takes the keys; the pad is neutral) |
                           R = respawn at the level's uid-0 moby | P = print the camera | Esc releases the cursor";
+
+/// A gamepad stick's scale per axis before the byte, clamped (PCSX2's DualShock 2 default, 133 %). A DualShock 2
+/// reads full on both axes at a full diagonal; a modern pad's round gate gives 0.71 on each, which the game's dead
+/// zone and scale decode to a stick length of 0.80, under the walk / run table's 0.82 (`SPEED_TABLE`): held fully
+/// toward a diagonal, Ratchet walked. Scaled, a full diagonal decodes to full on both axes, the right stick turns the
+/// camera at full rate from about three quarters of its travel, and the game's dead zone (48 of 127) covers about
+/// 28 % of the travel instead of 38 %.
+pub const STICK_SCALE: f32 = 1.33;
 
 /// Mouse pixels per frame for a full right-stick deflection.
 const MOUSE_FULL: f32 = 12.0;
@@ -81,12 +90,12 @@ pub fn sample(keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>, mot
     if let Some(g) = gamepad {
         let (l, r) = (g.left_stick(), g.right_stick());
         if l != Vec2::ZERO {
-            p.lx = raw_axis(l.x);
-            p.ly = raw_axis(-l.y);
+            p.lx = raw_axis(l.x * STICK_SCALE);
+            p.ly = raw_axis(-l.y * STICK_SCALE);
         }
         if r != Vec2::ZERO {
-            p.rx = raw_axis(r.x);
-            p.ry = raw_axis(-r.y);
+            p.rx = raw_axis(r.x * STICK_SCALE);
+            p.ry = raw_axis(-r.y * STICK_SCALE);
         }
         for (gb, b) in [
             (GamepadButton::South, button::CROSS),

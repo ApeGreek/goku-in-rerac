@@ -1005,7 +1005,7 @@ impl Camera {
         self.stick_apply(yi, pi);
         if self.avoidance(inp) { self.resets += 1; }
         self.placement(inp);
-        self.rows();
+        self.rows(inp.hero.pos);
         self.spring_back();
     }
 
@@ -1712,43 +1712,49 @@ impl Camera {
         }
     }
 
-    /// Rows 0x3141e8.
-    fn rows(&mut self) {
+    /// Rows 0x3141e8. Mode 11 (the fall 0x77, [`FollowCamera::vertical_target`]): the forward straight at Ratchet
+    /// (`hero` 0x13f3d0 − the position), the blend timer counted down here and again below (twice a tick).
+    fn rows(&mut self, hero: V4) {
         let up_s = self.g.up_s;
         let d = &mut self.cam;
         let mut fwd = d.rows[0];
-        let lh = vsub(d.look, vscale(up_s, dot(d.look, up_s)));
-        let ph = vsub(d.pos, vscale(up_s, dot(d.pos, up_s)));
-        let hv = vsub(lh, ph);
-        let l = len(hv);
-        if Pf::b(0x3d4c_cccd) <= l { fwd = vscale(hv, Pf::ONE / l); }
-        let left = norm(cross(fwd, up_s), Pf::ONE);
-        d.pivot_h_s = interp(d.pivot_h_s, d.pivot_h, Pf::b(0x3b83_126f), Pf::b(0x3e4c_cccd), Pf::ZERO, &mut d.pivot_h_v);
-        d.look_h_s = interp(d.look_h_s, d.look_h, Pf::b(0x3b83_126f), Pf::b(0x3e4c_cccd), Pf::ZERO, &mut d.look_h_v);
-        let dh = d.pivot_h_s - d.look_h_s;
-        let e = dot(d.placed, up_s);
-        let a = vsub(vscale(up_s, -e), hv);
-        let w = vsub(d.pos, a);
-        let w = vsub(w, vscale(up_s, -dh));
-        let v = vsub(w, d.pos);
-        let lv = len(v);
-        if lv != Pf::ZERO {
-            let mut pit = HALF_PI - asin(dot(fwd, v) / lv);
-            let up = cross(left, fwd);
-            d.rows[2] = up;
-            if dot(up, v) < Pf::ZERO { pit = -pit; }
-            let el = fast_arctan(len(d.off), dot(d.off, up_s));
-            let mut q = el / DEG40;
-            let mut tb = Pf::ZERO;
-            if q < Pf::b(0xbdcc_cccd) {
-                q = -q;
-                if Pf::b(0x3f00_0000) < q { q = Pf::ONE - q; }
-                tb = (q + q) * Pf::b(0x3e86_0a92) + Pf::ZERO;
+        if d.mode == 11 {
+            fwd = norm(vsub(hero, d.pos), Pf::ONE);
+            dec_timer(&mut d.row_blend);
+        } else {
+            let lh = vsub(d.look, vscale(up_s, dot(d.look, up_s)));
+            let ph = vsub(d.pos, vscale(up_s, dot(d.pos, up_s)));
+            let hv = vsub(lh, ph);
+            let l = len(hv);
+            if Pf::b(0x3d4c_cccd) <= l { fwd = vscale(hv, Pf::ONE / l); }
+            let left = norm(cross(fwd, up_s), Pf::ONE);
+            d.pivot_h_s = interp(d.pivot_h_s, d.pivot_h, Pf::b(0x3b83_126f), Pf::b(0x3e4c_cccd), Pf::ZERO, &mut d.pivot_h_v);
+            d.look_h_s = interp(d.look_h_s, d.look_h, Pf::b(0x3b83_126f), Pf::b(0x3e4c_cccd), Pf::ZERO, &mut d.look_h_v);
+            let dh = d.pivot_h_s - d.look_h_s;
+            let e = dot(d.placed, up_s);
+            let a = vsub(vscale(up_s, -e), hv);
+            let w = vsub(d.pos, a);
+            let w = vsub(w, vscale(up_s, -dh));
+            let v = vsub(w, d.pos);
+            let lv = len(v);
+            if lv != Pf::ZERO {
+                let mut pit = HALF_PI - asin(dot(fwd, v) / lv);
+                let up = cross(left, fwd);
+                d.rows[2] = up;
+                if dot(up, v) < Pf::ZERO { pit = -pit; }
+                let el = fast_arctan(len(d.off), dot(d.off, up_s));
+                let mut q = el / DEG40;
+                let mut tb = Pf::ZERO;
+                if q < Pf::b(0xbdcc_cccd) {
+                    q = -q;
+                    if Pf::b(0x3f00_0000) < q { q = Pf::ONE - q; }
+                    tb = (q + q) * Pf::b(0x3e86_0a92) + Pf::ZERO;
+                }
+                d.bias = ang_interp(d.bias, tb, Pf::b(0x3ba3_d70a), Pf::b(0x3e4c_cccd), Pf::ZERO, &mut d.bias_v);
+                let mut p = sub_rot(pit, d.bias);
+                if DEG70 < p { p = DEG70; } else if p < -DEG70 { p = -DEG70; }
+                fwd = norm(rot(fwd, p, left), Pf::ONE);
             }
-            d.bias = ang_interp(d.bias, tb, Pf::b(0x3ba3_d70a), Pf::b(0x3e4c_cccd), Pf::ZERO, &mut d.bias_v);
-            let mut p = sub_rot(pit, d.bias);
-            if DEG70 < p { p = DEG70; } else if p < -DEG70 { p = -DEG70; }
-            fwd = norm(rot(fwd, p, left), Pf::ONE);
         }
         if d.row_blend != 0 {
             dec_timer(&mut d.row_blend);

@@ -761,6 +761,17 @@ impl AudioSystem {
         if p.music_track >= 0 && m.main.state == 0 && m.phase == 0 && m.pending_track == -1 { m.main.track = p.music_track as i16; }
     }
 
+    /// The main loop's death reload (`entry` on the death flag 0x141401): `sound_StopAllSounds` and `music_Stop`
+    /// ([`AudioSystem::movie_stop`]'s state), the reload (`FUN_00244110(0, 1)`; with a checkpoint record `0x29adc8` puts
+    /// its reverb back, [`AudioSystem::checkpoint_restored`]), then `music_start_track(0x151708, 1, 0x400)`: the
+    /// current track from the start.
+    pub fn death_reload(&mut self, checkpoint: bool) {
+        self.movie_stop();
+        if checkpoint { self.checkpoint_restored(); }
+        let track = self.music.main.track;
+        self.music.start_track(track, 1, 0x400, &mut self.stream_cmds);
+    }
+
     /// The checkpoint record (`0x29ac10`): the reverb request saved.
     pub fn checkpoint_saved(&mut self) { self.reverb.checkpoint(); }
 
