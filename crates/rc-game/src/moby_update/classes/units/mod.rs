@@ -180,6 +180,8 @@
 //! | U529 | 1377 the Map-O-Matic giver (flags 0x70 / 0x71) (16) | level16 0x2e3190 | [`kalebo_story`] |
 //! | U561 | 1428 the fleet's item scene (flags 2 / 0x78) (17) | level17 0x2f1790 | [`fleet_story`] |
 //! | U31 | 834 Veldin's Clank (flag 8, the trip to Novalis) (00) | level00 0x2d9dc8 | [`veldin_story`] |
+//! | U24 | 530 Ratchet's ship on Veldin (00; hidden behind the scenes' own ship, its canopy glass) | level00 0x2d1e80 | [`veldin_ship`] |
+//! | U38 | 1545 Veldin's cutscene FX driver (00; the infobot's thrusters, scene 4's dust) | level00 0x2e3800 | [`veldin_scene_fx`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
@@ -350,6 +352,8 @@ pub mod pod_launcher;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
 pub mod board_missile;
+pub mod veldin_ship;
+pub mod veldin_scene_fx;
 pub mod pokitaru_teleporter;
 pub mod drip;
 pub mod water_current;
@@ -586,6 +590,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
+    UnitPort { unit: "U24 530", level: veldin_ship::REFERENCE_LEVEL, func: veldin_ship::UPDATE_FN, classes: &veldin_ship::CLASSES, update: veldin_ship::update, joints: &veldin_ship::CLASSES },
+    UnitPort { unit: "U38 1545", level: veldin_scene_fx::REFERENCE_LEVEL, func: veldin_scene_fx::UPDATE_FN, classes: &veldin_scene_fx::CLASSES, update: veldin_scene_fx::update, joints: &[] },
     UnitPort { unit: "1475 board missile", level: board_missile::REFERENCE_LEVEL, func: board_missile::UPDATE_FN, classes: &board_missile::CLASSES, update: board_missile::update, joints: &[] },
     UnitPort { unit: "U509 933", level: kalebo_mine::REFERENCE_LEVEL, func: kalebo_mine::UPDATE_FN, classes: &kalebo_mine::CLASSES, update: kalebo_mine::update, joints: &[] },
     UnitPort { unit: "U521 1401", level: kalebo_mine_drone::REFERENCE_LEVEL, func: kalebo_mine_drone::UPDATE_FN, classes: &kalebo_mine_drone::CLASSES, update: kalebo_mine_drone::update, joints: &[] },

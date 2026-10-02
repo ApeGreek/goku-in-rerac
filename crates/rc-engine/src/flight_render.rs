@@ -269,7 +269,7 @@ fn draw_fx(
             }
             if let (Some((o_class, m)), Some(t)) = (d.glass, level.0.water.fx.ship_glass.as_ref()) {
                 if let Some(g) = t.of(o_class) {
-                    let mut grp = crate::fx_draw::ship_glass_prims(g, &m, cam);
+                    let mut grp = crate::fx_draw::ship_glass_prims(g, &m, cam, true, &mut crate::fx_draw::GlassFade::default());
                     // `ShipDrawCallback` in mode 6 sub 4: FX 1 (the flight bank's) instead of 0x15.
                     grp.fx = FLIGHT_GLASS_FX;
                     groups.push(grp);

@@ -38,9 +38,11 @@
 //! to it: a quirk kept), then scaled to length 0.1; with `e` = unit(point − camera) the reflection `r = unit(e −
 //! 2(n·e)n)` gives the sphere map `s = r.x/m + ½`, `t = r.y/m + ½`, `m = 2·√(2(r.z + 1))`. Drawn as `FastDrawQuadReal`
 //! quads, FX 0x15 (the nanotech crate glass's texture), the class colour on all four corners (530: 0x50807060),
-//! TEX1 bilinear, ALPHA 0x44. Not modelled: the 60-tick cross-fade of the ST when the ship switches between the
-//! near (live ST) and far (frozen ST) states outside scenes (in a scene, game mode ≠ 0, the ST is always live), and
-//! FX 1 instead of 0x15 in the mode-6 space scenes with `0x13e050 == 4`.
+//! TEX1 bilinear, ALPHA 0x44. The near / far state ([`GlassFade`], 2026-10-02): outside scenes (game mode 0) the ST
+//! follows the camera only while it is within 16 of the ship in x and y; farther, it stays as it was, and coming back
+//! it fades from that frozen ST to the live one over `ticks(60)` (level 00's ship 530 draws through its own copy
+//! `0x2d19b0`, the same tables and draw, which tests the distance in every game mode). Not modelled: the mode-6 space
+//! scenes with `0x13e050 == 4` (FX 1 instead of 0x15, `crate::flight_render`), which freeze the ST [L].
 //!
 //! **The glow quad** (level01 `0x2781d0`, [`glow_quad`]): the engine's shared soft-glow billboard, called by class draw
 //! callbacks and the hero's glow drawer: the vendor's four glow points (`0x2ba9c0`), the mouse 1818's glow sprites
@@ -657,10 +659,45 @@ fn ship_glass_st(w: [f32; 3], n: [f32; 3], cam: [f32; 3]) -> [f32; 2] {
     [r[0] / m + 0.5, r[1] / m + 0.5]
 }
 
-/// The draw of callback `0x2a70a8` for one ship (module doc): `m` = the matrix of its joint list 0.
-pub fn ship_glass_prims(g: &ShipGlass, m: &[[f32; 4]; 4], cam: [f32; 3]) -> FxGroup {
+/// The ship glass's near / far state (the callback's globals: level01 gp −0x669c the first-draw state, −0x6698 the
+/// "near" byte (level00's 530: moby +0xbc), −0x6694 the timer (530: pvar +0x40), the current ST 0x1c0c40 and the
+/// frozen ST 0x1c0f70), kept per ship moby.
+#[derive(Default)]
+pub struct GlassFade {
+    started: bool,
+    near: bool,
+    timer: i32,
+    st: Vec<[f32; 2]>,
+    frozen: Vec<[f32; 2]>,
+}
+
+/// The draw of callback `0x2a70a8` (level00's 530: `0x2d19b0`, the same draw) for one ship (module doc): `m` = the
+/// matrix of its joint list 0. `live`: the ST follows the camera this draw (a scene, or the camera within 16 of the
+/// ship in x and y); otherwise the ST stays as it was, and coming back it fades from that frozen ST to the live one
+/// over `ticks(60)` (`fade`, the callback's state).
+pub fn ship_glass_prims(g: &ShipGlass, m: &[[f32; 4]; 4], cam: [f32; 3], live: bool, fade: &mut GlassFade) -> FxGroup {
     let world: Vec<[f32; 3]> = g.pts.iter().map(|&p| apply4(m, p)).collect();
-    let st: Vec<[f32; 2]> = world.iter().zip(&g.normals).map(|(&w, &n)| ship_glass_st(w, apply4(m, n), cam)).collect();
+    let n = g.pts.len();
+    if fade.st.len() != n { fade.st = vec![[0.0; 2]; n]; }
+    if fade.frozen.len() != n { fade.frozen = vec![[0.0; 2]; n]; }
+    let t60 = rc_game::hero::physics::ticks(60);
+    if live || !fade.started {
+        fade.near = true;
+        if fade.timer > 0 { fade.timer -= 1; }
+        let k = fade.timer as f32 / t60 as f32;
+        for (i, (&w, &nm)) in world.iter().zip(&g.normals).enumerate() {
+            let l = ship_glass_st(w, apply4(m, nm), cam);
+            fade.st[i] = if !fade.started || fade.timer == 0 { l } else { [l[0] + (fade.frozen[i][0] - l[0]) * k, l[1] + (fade.frozen[i][1] - l[1]) * k] };
+        }
+        fade.started = true;
+    } else {
+        if fade.near {
+            fade.near = false;
+            fade.frozen.clone_from(&fade.st);
+        }
+        fade.timer = t60;
+    }
+    let st = &fade.st;
     let mut prims = PrimBuf::default();
     for q in &g.quads {
         let k = q.map(|i| i as usize);
@@ -691,6 +728,8 @@ struct FxDraw {
     slots2: FxSlots,
     /// The tick counter the last draw used (redrawn once per tick, like the other callbacks).
     drawn: Option<u64>,
+    /// The ship glass's near / far state per ship moby ([`GlassFade`]).
+    glass: std::collections::HashMap<usize, GlassFade>,
 }
 
 type MainCamera<'w, 's> = Query<'w, 's, &'static Transform, (With<Camera3d>, Without<crate::sky_render::SkyCamera>)>;
@@ -734,7 +773,11 @@ fn draw_list1(
                         // actor's, set after the tick's moby loop), else the matrix the registration took.
                         let drawn = scene.as_deref().and_then(|rt| crate::scene_render::drawn_actor(rt, id)).map(|a| a.joint_matrix(0));
                         let Some(m) = drawn.or_else(|| cbs.matrices.get(&id).copied()) else { continue };
-                        out.push(ship_glass_prims(g, &m, cam));
+                        // Live: a scene's actor; the camera (0x167240) within 16 of the ship in x and y; level 01's code
+                        // (not level 00's 530 copy) also in any game mode but 0.
+                        let near = (cam[0] - mo.position[0]).abs() < 16.0 && (cam[1] - mo.position[1]).abs() < 16.0;
+                        let live = drawn.is_some() || near || (p.svc.level != 0 && p.svc.game_mode != 0);
+                        out.push(ship_glass_prims(g, &m, cam, live, state.glass.entry(id).or_default()));
                     }
                     // The glow points (the beam: crate::vendor_render).
                     Callback::VendorBeam => {

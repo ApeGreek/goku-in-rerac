@@ -178,7 +178,7 @@ fn drop35(w: &mut World, p: [f32; 4], vel: [f32; 4], kind: i32, life: i32) {
 /// 0.75, 6000 + 44000·f, M.r3 − unit(M.r2)·(0.025 + 0.025·f), ±randi(16), 0, 0x503030ff)` (life `ticks(6)`, phase 2
 /// from 0x50) and 5 white cores `PartType23Spawn(0.01 + 0.015·f, 1, 1, 5000 + 25000·f, M.r3 − unit(M.r2)·(0.01 +
 /// 0.015·f), 16, 0, 0x7fffffff)` (life `ticks(2)`, a `randi(0xff)` rotation, phase 2 from 0x7f).
-fn infobot_thrusters(w: &mut World, a: &SceneActorState) {
+pub(crate) fn infobot_thrusters(w: &mut World, a: &SceneActorState) {
     let m = a.joint_matrix(0);
     let len = (m[0][0] * m[0][0] + m[0][1] * m[0][1] + m[0][2] * m[0][2]).sqrt();
     let f = (len / 1.026).min(1.0);
