@@ -29,7 +29,7 @@
 //! 10 % a tick to 24·dt (34·dt with ✕ held), the speed 1 % a tick toward it (at most 34·dt); the loop voice's pitch
 //! bend `trunc((target − 24dt/(34dt − 24dt))·100)` (the game's expression); after the first 5 ticks the stick steers:
 //! the smoothed stick eases 10 % a tick, the roll 6 % a tick toward the smoothed x, the pitch turns by y·0.7° a tick
-//! (within ±89.94°), the yaw by x·0.7° a tick; the blob shadow (0x26eec8: not drawn, G-REN-025). The step
+//! (within ±89.94°), the yaw by x·0.7° a tick; the blob shadow (0x26eec8(0.2): `crate::shadows::blob`). The step
 //! `polar(speed, yaw, −pitch)`; for the first 60 ticks it rises over the ground (below ground + 0.4: up at 6·dt a
 //! tick and pitched up by `atan(speed, gap)`, at most 90°·dt, unless over a moby that is not a creature); out of
 //! 4.5..1018.5 on any axis the flight ends. The glow; the path is tested (`CollLine_Fix(old, new, 0, Ratchet for the
@@ -441,8 +441,8 @@ pub fn update(w: &mut World, id: MobyId) {
         }
         m.rotation[1] = pitch;
         m.rotation[2] = wrap(m.rotation[2] - sx * (SPEED_K * TURN));
-        // 0x26eec8(m, 0.2): the blob shadow (G-REN-025).
-        w.svc.unported("172 blob shadow 0x26eec8");
+        // 0x26eec8(0.2, m): the blob shadow.
+        crate::shadows::blob(w, 0.2, id);
     }
     // The step.
     let (speed, pitch, yaw) = { let m = w.m(id); (p::ff(&m.pvars, pv::SPEED), m.rotation[1], m.rotation[2]) };

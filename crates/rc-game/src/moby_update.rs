@@ -12,6 +12,7 @@ pub mod scheduler;
 pub mod services;
 pub mod story;
 pub mod triggers;
+pub mod visit;
 
 pub use scheduler::{Groups, Scheduler};
 pub use services::{ClassData, ClassTable, Services, World};

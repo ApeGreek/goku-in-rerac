@@ -36,9 +36,9 @@
 //! **Camera**: at the latch the script camera (`crate::cinematic`: `CameraScript(camera, Euler, 3, ticks(180), 0)`,
 //! targets at cuboid +0x20), at the end `CameraScript2(4)` (blend back); `SetMissionDone` goes out as the cinematic
 //! layer's engine request; the swing's curve `0x316e88(+0x28, +0x2c)` goes with it (the script camera's mode 3 is the
-//! timed swing, `crate::follow_camera::script`). **Not ported** (counted with `Services::unported`): the visit-state
-//! save of the progress `0x29b0a0`, and the tail's two Novalis global flags
-//! (`0x13d394` / `0x13d395` = 1 once the cranks with spawn ids 0x34 / 0x35 are done).
+//! timed swing, `crate::follow_camera::script`). The visit-state record of the progress `0x29b0a0(+0x00, 4, m, 2)`
+//! (`crate::moby_update::visit`, restored after a death reload) and the tail's two Novalis global flags (`0x13d394` /
+//! `0x13d395` = 1 once the cranks with spawn ids 0x34 / 0x35 are in state 5: `story::set_flag(0xc / 0xd)`).
 //!
 //! Novalis: crank #296 (spawn id 0x34, (172.85, 90.59, 62.0)) drives the door pair 665 #683 / #684; crank #297 (spawn
 //! id 0x35, (109.81, 93.46, 57.0), mission 1, checkpoint cuboid 55 at the landing pad) drives the door pair #685 /
@@ -236,7 +236,7 @@ fn held(w: &mut World, id: MobyId) -> bool {
 
 /// Done (state 3 → 4): the visit-state save, its death bits, class sound 0, then the mission and checkpoint.
 fn done(w: &mut World, id: MobyId) {
-    w.svc.unported("bolt crank 280: visit-state save 0x29b0a0");
+    crate::moby_update::visit::record_pvar(w, id, id, 0, 4);
     let (sid, level) = (w.m(id).spawn_id, w.svc.level);
     w.mm(id).state = 4;
     w.svc.save.death.insert((level, sid));
@@ -250,7 +250,7 @@ fn done(w: &mut World, id: MobyId) {
 fn mission_checkpoint(w: &mut World, id: MobyId) {
     let cub = i(w, id, CHECKPOINT);
     if cub == -1 || w.missions.mission_done(w.svc.level, w.m(id).mission) == 0xff { return; }
-    w.svc.unported("bolt crank 280: visit-state save 0x29b0a0");
+    crate::moby_update::visit::record_pvar(w, id, id, 0, 4);
     let mission = w.m(id).mission;
     crate::cinematic::set_mission_done(w, mission);
     let Some(s) = usize::try_from(cub).ok().and_then(|k| w.svc.volumes.cuboids.get(k)) else { return };
@@ -282,7 +282,9 @@ fn camera_end(w: &mut World) { crate::cinematic::camera_script2(w, 4); }
 fn tail(w: &mut World, id: MobyId) {
     let m = w.m(id);
     if w.svc.level == 1 && m.state == 5 && (m.spawn_id == 0x34 || m.spawn_id == 0x35) {
-        w.svc.unported("bolt crank 280: Novalis global flag 0x13d394 / 0x13d395");
+        let flag = if m.spawn_id == 0x34 { 0xc } else { 0xd };
+        // The game stores the byte every tick in state 5; the port writes it once (the same flag).
+        if crate::moby_update::story::flag(w, flag) != 1 { crate::moby_update::story::set_flag(w, flag, 1); }
     }
 }
 

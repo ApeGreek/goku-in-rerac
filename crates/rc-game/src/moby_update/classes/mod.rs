@@ -61,6 +61,7 @@ pub mod amoeboid;
 pub mod bolt;
 pub mod bolt_crank;
 pub mod bomb;
+pub mod burning_wreck;
 pub mod blaster_shot;
 pub mod bomb_water;
 pub mod buried_bolts;

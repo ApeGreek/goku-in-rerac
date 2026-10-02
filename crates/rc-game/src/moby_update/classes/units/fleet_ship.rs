@@ -32,7 +32,7 @@
 //! | entry | the fatal hit: the up shake (0.2, `ticks(5)`), health 0, → 7, +0x62 = `ticks(30)`, Ratchet 0.2 up, his moby +0x98 = 0, `SetState(0, 1)`, the record's class −1 / moby none, `SpawnBeamExplosion(0, 0, 4, 2, 9, 1, 15, m, v, 0, 10, 3, 16, −1, 1)`, mode \|= 0x41 | [`hits`] |
 //! | entry | hit slot 0xff; the record names this ship → 0x140958 = `trunc(health / 256 · 200)` (the edge bit 2 is never cleared here) | [`update`] |
 //! | 0 | → 1; +0x60 = 0; scale; +0x20 / +0x24 = +0x30 / +0x34; FOV 2·atan(1, tan_x) (+0xb0 / +0xac), +0xc0 = 0; +0x30.., +0x50.. = rotation, +0x40.. = position; the gauge's CLUT saved (n/a); +0xe8 = +0xf8 = 1; the mission done → 9; group +0x11c (> 0) off (`0x2539c8(g, 0, 0, 0)`); class 805 (`0x253a90(0x325, 1, 1, −1)`); +0x124 = −1 | [`init`] (`story::{group_set, class_list_set}`) |
-//! | 1 | the sphere gap below 2 and `try_set_help_message(7, 0x53e4)` held, △ pressed → `PromptRelease(7)`, → 2, +0x124 = −1; else the fade back; the blob shadow (`0x26eec8(1.5, m)`) | [`wait`] (the shadow: NOT ported, G-REN-025) |
+//! | 1 | the sphere gap below 2 and `try_set_help_message(7, 0x53e4)` held, △ pressed → `PromptRelease(7)`, → 2, +0x124 = −1; else the fade back; the blob shadow (`0x26eec8(1.5, m)`) | [`wait`] (`crate::shadows::blob`) |
 //! | 2 | `Approach(1, 4·dt, +0x130)`, the fade; at 1: the record (class, missiles 10 / 20, 20, 1, health 255 / 256, 100, 3, 3, 3, bits 0), +0xf0 = 0, +0xf4 = 0xff; `MusicRequestTrack(2, 4)`; the mount cuboid +0x120 → `HeroTeleport(it, 0x32, 1)`, the ship there | [`mount`] ([`crate::vehicle::Record::take`]) |
 //! | 2 | `force_help_message(6, 0)`; `SetState(0x32, 1)`; `CameraScript(position, rotation, 1, 0, 0)`; +0x68 = 0, speed 0.1, the stick / cooldowns 0; distances 0xff; +0x38 = +0x28 = rot.z; the offset (−15/4, 0, 1); Ratchet's moby +0x98 = −1; +0x00 = polar(0.1, yaw, −pitch); group on (1, 1, 1), class 805 (0, 0, −1); z + 3; scale / 4; Ratchet hidden; the engine voice; the help box suspended; 0x15f608 = 2; the flight; → 4 | [`mount`] |
 //! | 4 | `force_help_message(6, 0)`; 0x15f608 = 2; the engine voice restarted when gone; the flight; +0xe8 < 1 → +0xf8 = 180, → 8; the fade back; the record's bit 0 → 5 | [`update`] |
@@ -350,6 +350,8 @@ fn wait(w: &mut World, id: MobyId) {
     } else if pf(w, id, pvo::FADE) != 0.0 {
         fade(w, id, 0.0);
     }
+    // `0x26eec8(1.5, m)`: the blob shadow.
+    crate::shadows::blob(w, 1.5, id);
 }
 
 /// State 2 (module doc).

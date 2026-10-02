@@ -71,7 +71,7 @@
 //! | | Euler x / y = `0x27ddc8(velocity.x / .y)` (= L01 0x2731d0, the wrap into [−π, π)); +0x94 = the class collision for the pod and its launcher; velocity.z −= dt²·9.8; Euler x += speed·0.01, y += speed·0.02 | [`pod_update`] (`flyer::wrap_frac`) |
 //! | pod state 1 | z = `GroundHeight(0.5, position, 0)` + 0.2, w = 0; the hatchling = `0x30a778(launcher, position)`; → 2 | [`pod_update`] ([`hatch`]) |
 //! | pod state 2 | scale −= scale·speed·0.05; with a hatchling and grow: its scale += (its class scale − its scale)·speed·0.05; scale < class scale · speed · 0.05 → scale = 0.0001, and no hatchling, it deleted, no grow, or its scale ≥ its class scale − 0.01 → the pod's delete 0x30b350 | [`pod_update`] |
-//! | every pod state | the blob shadow `0x279ae0(scale·0.3 / class scale, m)` (= L01 0x26eec8) | NOT ported: G-REN-025 |
+//! | every pod state | the blob shadow `0x279ae0(scale·0.3 / class scale, m)` (= L01 0x26eec8) | [`update`] (`crate::shadows::blob`) |
 //! | | z < 5 or > 500 → the delete 0x30b350; else x, y, z clamped into [5, 1018] | [`pod_update`] |
 //! | 0x30b350 | the launcher alive and class 0x75d → its +0xb0[slot] = 0; `DeleteMoby(pod)` | [`delete_pod`] |
 //! | 0x30a778 | no launcher → none; `0x278d68(&m, group, 1, 1)` (the first *dead* member) none → `printf` (n/a), none | [`hatch`] |
@@ -441,7 +441,10 @@ pub fn pod_update(w: &mut World, id: MobyId) {
         }
         _ => {}
     }
-    // The blob shadow 0x279ae0: G-REN-025. The world box:
+    // The blob shadow `0x279ae0(scale·0.3 / class scale, m)` (= L01 0x26eec8). The world box:
+    let cs = w.classes.info(w.m(id).o_class).map_or(1.0, |i| i.scale);
+    let s = w.m(id).scale * 0.3 / cs;
+    crate::shadows::blob(w, s, id);
     let p = w.m(id).position;
     if p[2] < 5.0 || 500.0 < p[2] {
         delete_pod(w, id);

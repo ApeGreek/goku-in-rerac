@@ -192,6 +192,7 @@
 //! | U598 | 1454 the tanks of Veldin's last level (18; a path, a turret, shells 41 that may home, treads 331) | level18 0x2f7c40, 0x2a7220, 0x2ce7d0 | [`veldin_tank`] |
 //! | U511 | 1356 the dropships (16, 18; the approach with the troopers, the drop, the exit, the homing shots 50) | level18 0x2f0920, 0x2a7b90 | [`dropship`] |
 //! | U504 | 638 the hover troopers (16, 18; patrols, bursts of shots 49, the dropship's passengers) | level18 0x2dc918, 0x2a76e0 | [`drop_trooper`] |
+//! | — | 1510 the burning wreck of a flyer 660 / gunship 688 (01; created only) | level01 0x30ba18, draw 0x30bfa8 | [`super::burning_wreck`] |
 //! | U581 | 582 the rail chooser of Veldin's last level (18; the twice-laid rails, one way live at a time; two nanotech clusters) | level18 0x2d62e8 | [`veldin_rails`] |
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
@@ -643,6 +644,13 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U504 638", level: drop_trooper::REFERENCE_LEVEL, func: drop_trooper::UPDATE_FN, classes: &drop_trooper::CLASSES, update: drop_trooper::update, joints: &drop_trooper::CLASSES },
     // The trooper's shots (created only).
     UnitPort { unit: "U504 49", level: drop_trooper::REFERENCE_LEVEL, func: drop_trooper::SHOT_FN, classes: &drop_trooper::SHOT_CLASSES, update: drop_trooper::shot_update, joints: &[] },
+    // The flyers' and gunship's wreck (created only; the module sits with its level-01 ships).
+    UnitPort { unit: "1510", level: super::burning_wreck::REFERENCE_LEVEL, func: super::burning_wreck::UPDATE_FN, classes: &super::burning_wreck::CLASSES, update: super::burning_wreck::update, joints: &[] },
+    // The Summoner mouse 1818's glow sprites (draw only; its update is `classes::mouse`).
+    UnitPort { unit: "1818 glow", level: super::mouse::REFERENCE_LEVEL, func: super::mouse::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    // The blob shadows' draw (`fun_001f4880`, `crate::shadows::blob`; draw only).
+    UnitPort { unit: "blob shadow", level: 1, func: crate::shadows::BLOB_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "1510 glow", level: super::burning_wreck::REFERENCE_LEVEL, func: super::burning_wreck::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U24 530", level: veldin_ship::REFERENCE_LEVEL, func: veldin_ship::UPDATE_FN, classes: &veldin_ship::CLASSES, update: veldin_ship::update, joints: &veldin_ship::CLASSES },
     UnitPort { unit: "U36 1440", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::UPDATE_FN, classes: &veldin_beamer::CLASSES, update: veldin_beamer::update, joints: &veldin_beamer::CLASSES },
     UnitPort { unit: "U37 1471", level: veldin_beamer::REFERENCE_LEVEL, func: veldin_beamer::MANAGER_FN, classes: &veldin_beamer::MANAGER_CLASSES, update: veldin_beamer::manager, joints: &[] },
@@ -921,6 +929,14 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::fx_quad_groups(svc),
         Some((energy_fan::REFERENCE_LEVEL, energy_fan::DRAW_FN)) => energy_fan::fx_quad_groups(table, svc, id),
+        Some((1, crate::shadows::BLOB_FN)) => {
+            let quads = svc.blobs.1.iter().filter(|b| b.0 == id).map(|(_, b)| {
+                let (corners, st) = crate::shadows::blob_quad(b);
+                FxQuad { corners, st, rgba: [0x4080_8080; 4] }
+            }).collect();
+            vec![FxQuads { fx: 0, additive: false, quads }]
+        }
+        Some((super::burning_wreck::REFERENCE_LEVEL, super::burning_wreck::DRAW_FN)) => super::burning_wreck::fx_quads(table, svc, id).into_iter().collect(),
         Some((veldin_finale_fx::REFERENCE_LEVEL, f)) if [veldin_finale_fx::FLASH_FN, veldin_finale_fx::GLOW_FN, veldin_finale_fx::BEAM_FN, veldin_finale_fx::MORPH_FN].contains(&f) => veldin_finale_fx::fx_quad_groups(svc, f),
         _ => fx_quads(table, svc, i, id).into_iter().collect(),
     }
@@ -937,6 +953,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((path_ship::REFERENCE_LEVEL, path_ship::UPDATE_FN)) => path_ship::glow_quads(table, svc, id),
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::EYE_FN)) => veldin_beamer::glow_quads(table, svc, id),
         Some((veldin_finale_fx::REFERENCE_LEVEL, veldin_finale_fx::SEAT_FN)) => veldin_finale_fx::glow_quads(table, svc),
+        Some((super::mouse::REFERENCE_LEVEL, super::mouse::GLOW_FN)) => super::mouse::glow_quads(table, id),
         _ => Vec::new(),
     }
 }

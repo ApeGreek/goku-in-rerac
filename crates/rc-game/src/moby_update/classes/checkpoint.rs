@@ -116,6 +116,8 @@ pub(crate) fn record(w: &mut World, r: Record) {
         }
     }
     w.svc.save.checkpoint = Some(r);
+    // 0x1baaa0 → 0x1bb700: the visit records the reload writes back (crate::moby_update::visit).
+    w.svc.save.checkpoint_visit = w.svc.save.visit.clone();
     // 0x1bb6f4 = the body 0x1413f4, 0x1bb6fc = 0x14161c (crate::hero::bodies; the reload switches back into the body).
     w.svc.save.checkpoint_body = (w.hero.mode, w.hero.bodies.state_param);
     // 0x1bb6ec..0x1bb6f2: the reverb request saved with the record (crate::audio::reverb).

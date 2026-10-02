@@ -167,8 +167,6 @@ pub enum GameWrite {
     UnlockPlanet(usize),
     /// `0x13d5bc + 16·i` (the landmark record's +0xc: "talked to" flag of talk slot i, chunk 15).
     Talked(usize, u32),
-    /// `memcard_Save(0, −1)` (not ported: counted).
-    Save,
     /// `*(0x14bec0 + level·4 + index) = 1`: gold bolt `index` of `level` collected (class 1134).
     GoldBolt { level: usize, index: usize },
     /// `GiveItem(item, equip)` 0x275760 called by a class (Pokitaru's commando 114: the O2 Mask, item 6): applied by the
@@ -585,7 +583,6 @@ impl Interact {
                 GameWrite::GoldWeapon(i) => { if let Some(b) = gs.global.gold_weapons.get_mut(i) { *b = 1; } }
                 GameWrite::UnlockPlanet(pl) => gs.unlock_planet(pl),
                 GameWrite::Talked(i, v) => { if let Some(l) = gs.global.landmarks.get_mut(i) { l.flags = v; } }
-                GameWrite::Save => {}
                 GameWrite::GoldBolt { level, index } => {
                     if let Some(b) = gs.levels.get_mut(level).and_then(|l| l.gold_bolts.get_mut(index)) { *b = 1; }
                 }

@@ -92,6 +92,19 @@ pub fn jet_puffs(w: &mut World, glow: f32, core: f32, a: V, b: V, vel: V) {
     }
 }
 
+/// `PartType74Spawn(m, p, v, desc, additive)` 0x28a7a8 (`particles::type74`): a puff carried in moby `id`'s frame; one
+/// `rand()` with a record (or without the particle system). Callers: Gemlik's ship 69, the Summoner's mouse 1818.
+pub fn part74(w: &mut World, id: MobyId, p: V, v: [f32; 3], d: crate::particles::type74::Desc, additive: bool) {
+    *w.svc.fx.part_spawns.entry(74).or_default() += 1;
+    let m = w.m(id);
+    let (mp, rows) = ([m.position[0], m.position[1], m.position[2]], [0, 1, 2].map(|k| [m.rows[k][0], m.rows[k][1], m.rows[k][2]]));
+    let Some(sys) = w.particles.as_deref_mut() else {
+        w.rng.rand();
+        return;
+    };
+    if crate::particles::type74::spawn(sys, w.rng, id, mp, rows, p, v, d, additive).is_none() { w.svc.fx.part_failed += 1; }
+}
+
 /// `PartType05Spawn(grow, size, pos, r, g, b, life)` 0x27e750 (`particles::type05`, no draws): life 0 makes no call
 /// to `CreatePart` (nothing counted). The decoy's and the Glove of Doom canister's pops, the morph's flash.
 pub fn part05(w: &mut World, grow: f32, size: f32, pos: [f32; 4], rgb: [u32; 3], life: i32) {

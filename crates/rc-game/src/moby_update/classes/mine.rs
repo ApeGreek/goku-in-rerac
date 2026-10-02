@@ -48,7 +48,7 @@
 //! which the game leaves as the stack held them, are 0); the held mine's orientation (the glove's joint-0 frame turned
 //! by π about x) is not written (the glove is not a table moby); the release's wall test starts at Ratchet (at the
 //! launch height; the disassembly's `lq`); the mines' list 0x1b0c30 is the table's mines; a mine on a moving platform
-//! does not ride it (0x13f64c: never set in the port); the blob shadow `0x26eec8` is not drawn (G-REN-025); the gold
+//! does not ride it (0x13f64c: never set in the port); the blob shadow `0x26eec8(0.25)` is `crate::shadows::blob`; the gold
 //! mine (0x13e531) is not mirrored; the global 0x1613d0 that blows every mine up (0 in level01's data; its writer is
 //! not in the ported code) is not read.
 
@@ -536,7 +536,11 @@ fn after_move(w: &mut World, id: MobyId, drift: V, normal: V) {
     c::set_pf(w, id, pv::BOB_PHASE, ph);
     let amp = c::pf(w, id, pv::BOB_AMP);
     w.mm(id).position[2] += amp * ph.sin() * fade + 0.4;
-    if w.m(id).cmd == 0 { return; }
+    if w.m(id).cmd == 0 {
+        // `FUN_0026eec8(0.25)`: the blob shadow.
+        crate::shadows::blob(w, 0.25, id);
+        return;
+    }
     explode(w, id, drift, normal);
 }
 

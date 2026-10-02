@@ -26,7 +26,7 @@
 //!
 //! **A hit** (mask 0x800000; no Novalis weapon has it): `SpawnBeamExplosion(0, 0, 4, 2, 100000, 3, 15, …, 20 streaks,
 //! 3 sparks, 4 puffs, sound 1, shake, 1 debris)`, the links P+0x140.. and the ship deleted; skill point 0x13d408 with level sound 1 and banner 0x53d6
-//! (`story::award_skill_point`). Not ported (counted): the debris 1510 of `0x30be70`.
+//! (`story::award_skill_point`). The wreck 1510 of `0x30be70`: `classes::burning_wreck`.
 
 use super::flyer;
 use crate::moby_runtime::{mode, MobyId};
@@ -275,10 +275,12 @@ fn volley(w: &mut World, id: MobyId) -> bool {
 }
 
 /// A hit (mask 0x800000): the explosion, the links and the ship deleted (module doc).
-fn kill(w: &mut World, id: MobyId, _f: f32) {
+fn kill(w: &mut World, id: MobyId, f: f32) {
     crate::moby_update::story::award_skill_point(w, 0);
-    w.svc.unported("gunship 688: debris 0x30be70");
     fx::beam_explosion(w, &flyer::KILL_BEAM, Some(id), c::pos(w, id));
+    // `0x30be70(2f, m, P+0xd0 − P+0xe0)`: the wreck 1510 (`classes::burning_wreck`).
+    let dir = c::sub(c::pv4(w, id, 0xd0), c::pv4(w, id, 0xe0));
+    super::burning_wreck::spawn(w, f + f, id, dir);
     for k in 0..4 {
         if let Some(l) = link(w, id, P_LINKS + 4 * k) { w.delete_moby(l); }
     }

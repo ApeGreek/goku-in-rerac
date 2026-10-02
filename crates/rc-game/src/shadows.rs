@@ -10,6 +10,8 @@
 //! | *UpdateHeroShadow* 0x22a260 | [`update_hero_shadow`] | `HeroUpdateAlt` 0x228000, 0x228870 | the engine after each tick |
 //! | *ShadowSetGround* 0x26eff8 | [`set_ground`] | `PathEnemyUpdate` | `moby_update::classes::path_enemy` |
 //! | *ShadowProbeDown* 0x26f020 | [`probe_down`] | `AmoeboidUpdate`, `GroundCritterUpdate`, `TalkingNpcUpdate` | the three class updates |
+//! | `0x26eec8` (scale, moby) (L04 `0x24d018`, L18 `0x25c328`, L09 `0x279ae0`, L13 `0x266070`: one source) | [`blob`] | the blob shadows of small movers (the Summoner's mouse, the Drone Device's drones, the Visibomb, the pods, the ship pickups, Gemlik's ship, the ring shell) | the same classes |
+//! | `fun_001f4880` 0x21b260 (`RunDrawCallbacks_2`) | [`blob_quad`] | the blob list's draw | `classes::units` draw row, `rc-engine` fx_draw |
 //! | *ShadowProbeAlongDir* 0x26f0e0 | [`probe_along_dir`] | the scene actors (0x2a4080, `CutsceneModeUpdate`, `VendorModeUpdate`) | the engine every scene frame, on the drawn pose (crate `rc-engine` `shadow_render`) |
 //!
 //! The slab `[lo, hi]` (+0x84, +0x88) is the height band the volume is clipped to; `hi ≤ 0` = no shadow.
@@ -151,6 +153,54 @@ pub fn update_hero_shadow(
 pub fn set_ground(m: &mut Moby, z: f32) {
     m.shadow_hi = z + 0.2;
     m.shadow_lo = z - 0.2;
+}
+
+/// One blob shadow of the list 0x16e500 (32 × 0x20; the count 0x15f434 cleared by `ResetDrawGlobals` each frame):
+/// +0x00 the point on the ground (z + 0.025), +0x0c its size, +0x10 the ground's normal (raw: the hit's +0x40).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Blob {
+    pub point: [f32; 3],
+    pub size: f32,
+    pub normal: [f32; 3],
+}
+
+/// The list's capacity.
+pub const BLOBS: usize = 32;
+
+/// `0x26eec8(scale, m)`: drawn (+0x31) and room in the list → `GroundHeight(0.5, position, 0)` (a line from 0.5 above
+/// down to 0.01); a hit: the point at the hit's z + 0.025, the normal the hit's, size = scale · max(0.25, (8 −
+/// \|z − ground\|) / 8). The port keeps the list in `Services::blobs` (stamped with the tick: a new tick starts it
+/// empty) and registers the draw for the moby ([`blob_quad`]).
+pub fn blob(w: &mut World, scale: f32, id: MobyId) {
+    if w.m(id).visible == 0 { return; }
+    if w.svc.blobs.0 != w.counter { w.svc.blobs = (w.counter, Vec::new()); }
+    if BLOBS <= w.svc.blobs.1.len() { return; }
+    let p = w.m(id).position;
+    let a = crate::moby_update::services::pv([p[0], p[1], p[2] + 0.5, p[3]]);
+    let b = crate::moby_update::services::pv([p[0], p[1], f32::from_bits(0x3c23_d70a), p[3]]);
+    let Some(h) = w.coll_line(a, b, 2, None) else { return };
+    let g = h.point[2];
+    let f = ((8.0 - (p[2] - g).abs()) * 0.125).max(0.25);
+    w.svc.blobs.1.push((id, Blob { point: [p[0], p[1], g + 0.025], size: scale * f, normal: h.normal }));
+    if let Some(r) = crate::moby_update::classes::units::row(1, BLOB_FN) {
+        w.svc.draw_callbacks.register(crate::moby_update::classes::draw_callbacks::Callback::UnitQuads(r), id);
+    }
+}
+
+/// The blob draw's address (level01 `0x21b260`).
+pub const BLOB_FN: u32 = 0x21_b260;
+
+/// `fun_001f4880`'s quad for one blob: the corners (±1, ±1) of 0x16cc60 laid on the ground plane (`c − n·(c·n)` with
+/// n the unit normal) at the blob's size; ST (0, 1) (0, 0) (1, 1) (1, 0); colour 0x40808080; FX 0 (`GetEffectTex(0)`),
+/// ALPHA 0x44 (blended).
+pub fn blob_quad(b: &Blob) -> ([[f32; 3]; 4], [[f32; 2]; 4]) {
+    let l = (b.normal[0] * b.normal[0] + b.normal[1] * b.normal[1] + b.normal[2] * b.normal[2]).sqrt();
+    let n = if l == 0.0 { [0.0; 3] } else { b.normal.map(|x| x / l) };
+    let corner = |x: f32, y: f32| {
+        let d = x * n[0] + y * n[1];
+        [b.point[0] + (x - n[0] * d) * b.size, b.point[1] + (y - n[1] * d) * b.size, b.point[2] - n[2] * d * b.size]
+    };
+    ([corner(1.0, -1.0), corner(-1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)], [[0.0, 1.0], [0.0, 0.0], [1.0, 1.0], [1.0, 0.0]])
 }
 
 /// *ShadowProbeDown* 0x26f020: a vertical probe from `pos.z + 0.5` down to `max(pos.z − 16, 0.5)`; a hit gives

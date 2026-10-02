@@ -614,6 +614,10 @@ pub struct SaveBits {
     /// `0x1bb6f4` / `0x1bb6fc`: the body word 0x1413f4 and 0x14161c the record saved (the reload `0x29adc8` switches
     /// back into body 1 / 2 with them: `crate::hero::bodies`).
     pub checkpoint_body: (u8, i32),
+    /// `0x1baaa0`: this visit's records of words to restore after a death reload (`crate::moby_update::visit`).
+    pub visit: Vec<crate::moby_update::visit::Visit>,
+    /// `0x1bb700`: the checkpoint's copy of [`SaveBits::visit`] (`0x29ac10`), written back by the reload's respawn.
+    pub checkpoint_visit: Vec<crate::moby_update::visit::Visit>,
 }
 
 /// Game-state words the ported classes read or add to (owned here until the game-state port takes them).
@@ -809,6 +813,8 @@ pub struct Services {
     /// The level-def plays of level03's `0x27a618` ([`World::play_level_def`]): (index, moby), in order (a test log).
     pub level_defs_played: Vec<(i32, MobyId)>,
     pub glints: Glints,
+    /// The blob shadows of this tick (`0x16e500`, `crate::shadows::blob`), stamped with the tick counter.
+    pub blobs: (u64, Vec<(MobyId, crate::shadows::Blob)>),
     pub save: SaveBits,
     pub counters: GameCounters,
     pub fx: FxStats,
@@ -943,6 +949,7 @@ impl Services {
             sounds: Vec::new(),
             level_defs_played: Vec::new(),
             glints: Glints::default(),
+            blobs: (0, Vec::new()),
             save: SaveBits::default(),
             counters: GameCounters::default(),
             fx: FxStats::default(),

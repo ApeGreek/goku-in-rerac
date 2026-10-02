@@ -16,7 +16,7 @@
 //!   `FUN_0029ac10(centre, Euler)` of that cuboid ([`super::checkpoint::record`]); state 1; when the node that
 //!   played last (talk +0x04) is 4 (Novalis:
 //!   the Infobot sold): `UnlockPlanet(2)` and `ShowPlanetBanner(2)` (`crate::cinematic`: the saved game's planet
-//!   bits and the HUD banner "Infobot for Planet Aridia acquired"), state 3, a save (logged).
+//!   bits and the HUD banner "Infobot for Planet Aridia acquired"), state 3, the save (`crate::cinematic::save`).
 //! * **3**: `DeleteMoby`.
 //! * **4 / 5** (Batalia's turret guy; state 5 moves Ratchet to a fixed point): not ported (counted).
 //!
@@ -38,7 +38,7 @@
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature as c;
-use crate::moby_update::interact::{self, talk, GameWrite};
+use crate::moby_update::interact::{self, talk};
 use crate::moby_update::manip;
 use crate::moby_update::services::{pvar as p, World};
 
@@ -102,7 +102,9 @@ pub fn update(w: &mut World, id: MobyId) {
                 crate::cinematic::unlock_planet(w, 2);
                 crate::cinematic::show_planet_banner(w, 2);
                 w.mm(id).state = 3;
-                w.svc.interact.writes.push(GameWrite::Save);
+                // `0x29b0a0(m + 0x20, 1, m, 1, 0x1baaa0)`: the sold state survives a death reload.
+                crate::moby_update::visit::record_field(w, id, id, 0x20);
+                crate::cinematic::save(w);
             }
         }
         3 => return w.delete_moby(id),

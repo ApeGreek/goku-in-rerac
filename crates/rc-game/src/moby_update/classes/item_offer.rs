@@ -19,7 +19,7 @@
 //!   has no scene): the gold weapon owned, bolts −= its gold price (`0x1c4544 + 0x18·item`), `FUN_002aea70(offer)`
 //!   (the upgrade effect, not ported: [`Handoff::GoldUpgrade`]), state 4;
 //! * state 2: the prop is deleted once its gold weapon is owned;
-//! * state 4: outside game mode 0 wait; else `memcard_Save(0, −1)` (not ported: counted) and state 3.
+//! * state 4: outside game mode 0 wait; else `memcard_Save(0, −1)` (`crate::cinematic::save`) and state 3.
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::interact::{self, talk, GameWrite, Handoff};
@@ -83,8 +83,7 @@ pub fn update(w: &mut World, id: MobyId) {
         }
         4 => {
             if w.svc.game_mode != 0 { return; }
-            w.svc.unported("item offer: memcard save");
-            w.svc.interact.writes.push(GameWrite::Save);
+            crate::cinematic::save(w);
             w.mm(id).state = 3;
         }
         _ => {}

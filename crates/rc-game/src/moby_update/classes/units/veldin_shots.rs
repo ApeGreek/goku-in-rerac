@@ -39,7 +39,7 @@
 //! | address | what it does | ported / not |
 //! |---|---|---|
 //! | 0 | one spark (`PartType02Spawn`: v1 = vel·0.5 + `rand_vec(0, dt)`, at `rand_vec(0, 0.5)` off, sizes `randf(0.75, 0.5)` / `randf(0.333, 0.25)`, colours `tween(0x804080ff, 0x8040ffff)` / `(0x80104040, 0x80002080)`, phases `1·r + 1`, `30·(randf(±0.5) + 1)`, `10·(…)`, v2.z −= 4·dt²·t1, def 0x10019) | the shell's sparks | [`ring_update`] (`fx::part02`) |
-//! | | phase += 6π·dt, +0x90 = `tween((sin + 1)/2, 0x80c0c0c0, 0x802020c0)`; vel.z −= 10·dt²; position += vel; landed (z − 0.333 < ground) → 1, z = ground + 0.333, +0x2c = `ticks(1)`; rot.y += 500°·dt; z < 10 → deleted; else the blob shadow (`0x25c328`) | the fall | [`ring_update`] (the blob shadow: NOT ported, G-REN-025) |
+//! | | phase += 6π·dt, +0x90 = `tween((sin + 1)/2, 0x80c0c0c0, 0x802020c0)`; vel.z −= 10·dt²; position += vel; landed (z − 0.333 < ground) → 1, z = ground + 0.333, +0x2c = `ticks(1)`; rot.y += 500°·dt; z < 10 → deleted; else the blob shadow (`0x25c328`) | the fall | [`ring_update`] (`crate::shadows::blob`) |
 //! | 1 | the glow; `FastDecTimer(+0x2c)` out → `PlayClassSound(0xf, 0)` as class 0x58e (`0x28d738`), 2, radius 0.5, collision off, hidden | | [`ring_update`] |
 //! | 2 | radius += +0x20; `0x2dbe80`; `RegisterDrawCallback(0x2dba20)`; radius > +0x28 → 3 | the ring | [`ring_update`] (`Callback::UnitQuads`) |
 //! | 3 | `DeleteMoby` | | [`ring_update`] |
@@ -354,8 +354,8 @@ pub fn ring_update(w: &mut World, id: MobyId) {
             }
             let r = c::add_rot(w.m(id).rotation[1], DT * f32::from_bits(0x410b_a058));
             w.mm(id).rotation[1] = r;
-            // z ≥ 10: the blob shadow `0x25c328(1, m)` (G-REN-025); below 10: deleted.
-            if w.m(id).position[2] < 10.0 { w.delete_moby(id); }
+            // z ≥ 10: the blob shadow `0x25c328(1, m)`; below 10: deleted.
+            if w.m(id).position[2] < 10.0 { w.delete_moby(id); } else { crate::shadows::blob(w, 1.0, id); }
         }
         1 => {
             ring_glow(w, id);

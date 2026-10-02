@@ -10,15 +10,15 @@
 //!   +0x14c, saves and puts Ratchet on that cuboid. He turns round to face Ratchet the first time (a talked flag).
 //!
 //! **System or not.** Per-class code on the shared systems (talk, look-at layout rows, checkpoint, `story`). The
-//! visit-state record `0x273f50` (= level01 `0x29b0a0`) both call on the course moby is the saves lane's chunk writer
-//! (G-SAV-003): not ported here, counted.
+//! visit-state record `0x273f50` (= level01 `0x29b0a0`) both call on the course moby is the shared visit system
+//! (`crate::moby_update::visit`).
 //!
 //! ## 890 coverage (level03 `0x2da870`)
 //!
 //! | address | what | status |
 //! |---|---|---|
 //! | top | `0x2da710`: in a scene with the big-head cheat, the scene camera's offset 0x15f5a0 = −0.2 / 0.2 at scene ticks 0x1ea..0x265 / 0x2ee..0x320 of scene 2 and the manipulator (2.3) on her scene actors | the manipulator: `manip::scene_big_head`; 0x15f5a0: n/a (no reader: `crate::cheats` module doc) |
-//! | state 0 | Swingshot owned (0x13d4cc): the course moby (+0xd4, class 0x3f4) +0x8c = 1 and its visit record, `DeleteMoby`; else her mission done → the same +0x8c = 1; light copied from Ratchet's moby, the name, +0xc8 = 5, `NpcTalkRegister(+0x80)`, the shadow slab, → 1 | [`helga_update`] (the visit record: NOT ported, G-SAV-003) |
+//! | state 0 | Swingshot owned (0x13d4cc): the course moby (+0xd4, class 0x3f4) +0x8c = 1 and its visit record, `DeleteMoby`; else her mission done → the same +0x8c = 1; light copied from Ratchet's moby, the name, +0xc8 = 5, `NpcTalkRegister(+0x80)`, the shadow slab, → 1 | [`helga_update`] (the visit record: `crate::moby_update::visit`) |
 //! | state 1 | `NpcTalkUpdate(+0x80)` → `PlaceAfterScene(2.3)`, → 2, the course moby's +0x8c = 1 | [`helga_update`] |
 //! | state 2, mode 2 | the scene's node (talk +0x36) 2: the course moby's +0x7c = 0, +0x8c = 0, +0xa0 = +0xd8 | [`helga_update`] |
 //! | state 2, after | node played (talk +0x04) ≠ 2: `SetMissionDone(+0xb0)`, the course moby's +0x8c = 1, the checkpoint at cuboid +0xcc; → 1; node 2: `GiveItem(12, 1)`, `ShowBanner(3016, −1)`, the moby +0xd0 made permanent (killed / collected bytes) and deleted, the course moby reset (+0x7c, +0x8c = 0, +0xa0 = +0xd8), `memcard_Save`, `DeleteMoby` | [`helga_update`] |
@@ -65,7 +65,8 @@ fn course_open(w: &mut World, id: MobyId, link: usize, visit: bool) {
     let Some(m) = story::link_of(w, p::i32(&w.m(id).pvars, link), COURSE) else { return };
     story::pvars(w, m, 0xa4);
     p::set_i32(&mut w.mm(m).pvars, 0x8c, 1);
-    if visit { w.svc.unported("kerwan 890: visit-state record 0x273f50 (G-SAV-003)"); }
+    // `0x273f50(course +0x8c, 4, npc, 2, 0x1ba720)`: the course stays open after a death reload.
+    if visit { crate::moby_update::visit::record_pvar(w, id, m, 0x8c, 4); }
 }
 
 /// The course moby reset (+0x7c = 0, +0x8c = 0, +0xa0 = the NPC's +0xd8).

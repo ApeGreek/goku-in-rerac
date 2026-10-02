@@ -1525,6 +1525,8 @@ fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, coll: &rc_for
         w.missions = &p.missions;
         sched.load_pass(&mut w)
     };
+    // The respawn's last step `0x29b080`: the checkpoint's visit records written back (rc_game::moby_update::visit).
+    rc_game::moby_update::visit::restore(&mut p.game.mobys, &p.svc.save.checkpoint_visit);
     p.sched = sched;
     p.reload_shown = shown;
     println!(
@@ -1695,6 +1697,10 @@ fn tick(
         // PromptTick 0x278eb8 and this tick's pad for the "use" system (moby_update::interact), before the loop.
         w.svc.interact.begin_tick(hero.loop_in.pad.pressed, hero.state);
         n_active = sched.tick(&mut w);
+        // RC_UNPORTED=1: the calls the moby loop met without a port so far (`Services::unported`), every 600 ticks.
+        if counter.is_multiple_of(600) && std::env::var("RC_UNPORTED").is_ok_and(|v| v == "1") {
+            eprintln!("unported after tick {counter}: {:?}", w.svc.fx.unported);
+        }
     };
     let mut parts = |hero: &Hero, cam: &CameraView, rng: &mut Rng, counter: u64| {
         if let Some(sim) = parts_cell.borrow_mut().as_deref_mut() {

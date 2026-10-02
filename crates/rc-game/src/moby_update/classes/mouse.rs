@@ -25,9 +25,9 @@
 //! 3 / 4. The walker record the game keeps in the global `0x1deb38` (one mouse per level) is kept at
 //! [`WALKER`] in the mouse's own pvar block (the port's layout).
 //!
-//! **Not ported** (counted with [`crate::moby_update::Services::unported`]): the glow sprites of draw callback
-//! 0x30de68, the jet particles (type 74, `0x30dda0`), the blob shadow `0x26eec8`, the Summoner moby's summon anim
-//! (class 0x1b1 state 1). The big-head cheat 0x15edb0 (states ≥ 3: P+0x90 on list 5 at 2.1) is
+//! The glow sprites of draw callback 0x30de68 ([`glow_quads`]) and the jet particles (type 74, `0x30dda0`, [`jets`]) are
+//! ported, and the blob shadow `0x26eec8(0.3)` (`crate::shadows::blob`). The
+//! Summoner moby's state writes (1 at the summon, 2 at the end) have no reader: class 0x1b1's update is empty. The big-head cheat 0x15edb0 (states ≥ 3: P+0x90 on list 5 at 2.1) is
 //! `manip::actor_big_head`. The camera-mode check (`0x167280`+0x86 == 0x14) is taken as
 //! false (no camera mode 0x14 in the port).
 
@@ -38,6 +38,15 @@ use std::f32::consts::{PI, TAU};
 
 /// The house's update address in the level01 class table.
 pub const HOUSE_FN: u32 = 0x2f2b68;
+/// The mouse's glow draw callback and the level its addresses are from.
+pub const GLOW_FN: u32 = 0x30_de68;
+pub const REFERENCE_LEVEL: u32 = 1;
+/// The jets' type-74 descriptors (gp−0x4b20, −0x4b10, −0x4b00 on level 01).
+const JETS: [crate::particles::type74::Desc; 3] = [
+    crate::particles::type74::Desc { rgba0: 0xcf00_00ff, rgba1: 0x0000_00cf, size_range: -10, size_base: 20, life: 11 },
+    crate::particles::type74::Desc { rgba0: 0x6000_ffff, rgba1: 0x0000_0080, size_range: -10, size_base: 30, life: 12 },
+    crate::particles::type74::Desc { rgba0: 0xefff_7f4f, rgba1: 0x00ff_0000, size_range: -12, size_base: 12, life: 7 },
+];
 pub const HOUSE_CLASSES: [i16; 1] = [604];
 /// The mouse's.
 pub const MOUSE_FN: u32 = 0x30df40;
@@ -449,7 +458,10 @@ pub fn mouse_update(w: &mut World, id: MobyId) {
         let (a, b) = (w.joint_point(id, 3), w.joint_point(id, 4));
         c::set_pv4(w, id, pvo::JOINTS, a);
         c::set_pv4(w, id, pvo::JOINTS + 0x10, b);
-        w.svc.unported("1818 glow sprites 0x30de68");
+        // `RegisterDrawCallback(0x30de68)`: the glow sprites at the two joint points ([`glow_quads`]).
+        if let Some(r) = crate::moby_update::classes::units::row(REFERENCE_LEVEL, GLOW_FN) {
+            w.svc.draw_callbacks.register(crate::moby_update::classes::draw_callbacks::Callback::UnitGlow(r), id);
+        }
     }
     match w.m(id).state {
         0 => init(w, id, house),
@@ -500,10 +512,29 @@ pub fn mouse_update(w: &mut World, id: MobyId) {
     }
     if w.m(id).state >= 0x80 { return; }
     if w.m(id).state >= 2 {
-        w.svc.unported("1818 blob shadow 0x26eec8");
-        if w.m(id).visible != 0 { w.svc.unported("1818 jet particles (type 74) 0x30dda0"); }
+        crate::shadows::blob(w, f32::from_bits(0x3e99_999a), id);
+        jets(w, id);
     }
     house_collision(w, house, true);
+}
+
+/// The mouse's jets (`0x30dda0`): drawn → at joint list 0, a velocity `(0, 0, −randf(1, 2)·dt)` and three type-74
+/// puffs with the descriptors gp−0x4b20 / −0x4b10 / −0x4b00 (additive).
+fn jets(w: &mut World, id: MobyId) {
+    if w.m(id).visible == 0 { return; }
+    let r = w.rng.randf(1.0, 2.0);
+    let v = [0.0, 0.0, -(r * DT)];
+    let p = w.joint_point(id, 0);
+    for d in JETS { crate::moby_update::creature::fx::part74(w, id, p, v, d, true); }
+}
+
+/// `0x30de68` (draw only): two glow quads (size 0.1, pull 0.08, 0x2528aa28) at the joint points +0x70 / +0x80.
+pub fn glow_quads(table: &crate::moby_runtime::MobyTable, id: MobyId) -> Vec<crate::moby_update::classes::units::GlowQuad> {
+    let Some(m) = table.mobys.get(id).filter(|m| m.pvars.len() >= pvo::JOINTS + 0x20) else { return Vec::new() };
+    (0..2).map(|k| {
+        let q = p::v4f(&m.pvars, pvo::JOINTS + 0x10 * k);
+        crate::moby_update::classes::units::GlowQuad { size: f32::from_bits(0x3dcc_cccd), pull: f32::from_bits(0x3da3_d70a), point: [q[0], q[1], q[2]], rgba: 0x2528_aa28 }
+    }).collect()
 }
 
 fn init(w: &mut World, id: MobyId, house: Option<MobyId>) {
@@ -555,7 +586,8 @@ fn idle(w: &mut World, id: MobyId, house: Option<MobyId>) {
         }
     }
     target_beside(w, id);
-    if w.hero.worn.head.as_ref().is_some_and(|m| m.o_class == SUMMONER_CLASS) { w.svc.unported("1818 Summoner moby summon state (0x1b1 state 1)"); }
+    // The Summoner moby's state = 1 (0x140480 +0x20): no reader (class 0x1b1's update 0x2e30b0 is `jr ra`, and no other
+    // code reads it), so the port keeps no state on the worn head moby.
     w.svc.mouse.summoned = Some(id);
     let blend6 = w.ticks(6) as f32;
     let f = w.hero_fields_mut();

@@ -51,10 +51,11 @@
 //!   countdown is 0; the countdown runs 7 → 0.
 //! * **State 2**: back to 0 once a spline index is set. **State 3**: the delay, then state 1.
 //!
-//! **Not ported (counted in `FxStats::unported`):** of the kill on a hit 0x800000 (state 0x65, `SpawnBeamExplosion`
-//! [`KILL_BEAM`], the links and itself deleted, the first kill's skill point 0x13d408 / level sound 1 / banner 0x53d6
-//! through `story::award_skill_point`: ported), the wreck `FUN_0030be70` (class 1510); the group
-//! synchronisation (group ≥ 0); the level-3/9 combat
+//! The kill on a hit 0x800000 is ported: state 0x65, `SpawnBeamExplosion` [`KILL_BEAM`], the links and itself
+//! deleted, the first kill's skill point 0x13d408 / level sound 1 / banner 0x53d6 (`story::award_skill_point`) and the
+//! wreck 1510 (`FUN_0030be70`, `classes::burning_wreck`).
+//!
+//! **Not ported (counted in `FxStats::unported`):** the group synchronisation (group ≥ 0); the level-3/9 combat
 //! block (hit 0x210000, the 0x13a hide timer); the class-specific sounds; the debug lines. `0x161b00`
 //! (gp−0x5100, "flyers paused", 0 on Novalis) is taken as 0.
 
@@ -342,7 +343,7 @@ pub fn update(w: &mut World, id: MobyId) {
         p::set_ff(&mut m.pvars, P_SPEED, v);
     }
     if hit.is_some() {
-        if w.m(id).state != DEAD { kill(w, id); }
+        if w.m(id).state != DEAD { kill(w, id, f); }
         return;
     }
     if w.m(id).state == DEAD { return; }
@@ -368,14 +369,15 @@ pub const KILL_BEAM: crate::moby_update::creature::fx::Beam = crate::moby_update
 };
 
 /// The hit branch: state 0x65, the blast ([`KILL_BEAM`]), the linked mobys (P+0x140..0x14c) and the flyer deleted.
-/// The first kill's skill point 0x13d408 with the level sound 1 and banner 0x53d6 (`story::award_skill_point`). Not
-/// ported (module doc): the wreck 1510 of `0x30be70` (G-CLS-015).
-fn kill(w: &mut World, id: MobyId) {
+/// The first kill's skill point 0x13d408 with the level sound 1 and banner 0x53d6 (`story::award_skill_point`), then
+/// the wreck 1510 (`0x30be70(f, m, P+0xd0 − P+0xe0)`: `classes::burning_wreck`).
+fn kill(w: &mut World, id: MobyId, f: f32) {
     crate::moby_update::story::award_skill_point(w, 0);
-    w.svc.unported("flyer: wreck 1510 0x30be70");
     w.mm(id).state = DEAD;
     let pos = crate::moby_update::creature::pos(w, id);
     crate::moby_update::creature::fx::beam_explosion(w, &KILL_BEAM, Some(id), pos);
+    let dir = crate::moby_update::creature::sub(p::v4f(&w.m(id).pvars, 0xd0), p::v4f(&w.m(id).pvars, 0xe0));
+    super::burning_wreck::spawn(w, f, id, dir);
     for k in 0..4 {
         let link = p::i32(&w.m(id).pvars, 0x140 + 4 * k);
         if let Ok(e) = usize::try_from(link) {

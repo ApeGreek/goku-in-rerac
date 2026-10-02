@@ -19,7 +19,7 @@
 //! | 3 | z −= 9.8·dt² (velocity); position += velocity | [`update`] |
 //! | 4 | → 5 | [`update`] |
 //! | 5, z < 20 | `DeleteMoby` | [`update`] |
-//! | tail | position clamped to [20, 1003]; the blob shadow (`0x26eec8(0.5, m)`) | [`update`] (the shadow: NOT ported, G-REN-025) |
+//! | tail | position clamped to [20, 1003]; the blob shadow (`0x26eec8(0.5, m)`) | [`update`] (`crate::shadows::blob`) |
 //! | 0x30f660 | no parachute: `0x30fd98`; a live parachute: its position / Euler = the pickup's, `MobyBuildMatrix`; the hanging point = its joint 0, offset = its position − that; 1. None: the hanging point = position, offset 0; 0 | [`attach`] |
 //! | 0x30fd98 | `CreateMoby(0x4c3)`: distances 0xff, drawn, state 0, +0xbc = 0, the pickup's position / Euler, +0x70 = the pickup; sequence 2 (`MobyAnimBlend(2, 13, 0)`), `MobyBuildMatrix`, Ratchet's light (`0x272078`) | [`make_chute`] |
 //! | 0x30f5a8 | `CreateMoby(class)`: distances 0xff, drawn, state 0, +0xbc = 0, position, velocity, rot (0, 45°, random); `MobyBuildMatrix`, Ratchet's light | [`spawn`] |
@@ -281,6 +281,7 @@ pub fn update(w: &mut World, id: MobyId) {
     }
     let cl = |x: f32| x.clamp(20.0, 1003.0);
     w.mm(id).position = [cl(p[0]), cl(p[1]), cl(p[2]), p[3]];
+    crate::shadows::blob(w, 0.5, id);
 }
 
 fn seti_chute_none(w: &mut World, id: MobyId) { set_link(w, id, pvo::CHUTE, None) }

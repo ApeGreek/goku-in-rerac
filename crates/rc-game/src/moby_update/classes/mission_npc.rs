@@ -20,8 +20,8 @@
 //! | 10 | z = landing z |
 //!
 //! `FUN_002fac80` at the top: the big-head cheat on the scene actors of class 0x32b at 2.75
-//! (`manip::scene_big_head`). Not ported: the bridge halves' visit-state persistence `FUN_0029b0a0` (the
-//! bridge lowers again from the mission byte on a reload). `UnlockPlanet` / `ShowPlanetBanner` go through
+//! (`manip::scene_big_head`). The bridge halves' +0xbc are visit records (`FUN_0029b0a0`, `crate::moby_update::visit`):
+//! restored after a death reload. `UnlockPlanet` / `ShowPlanetBanner` go through
 //! `crate::cinematic` (the saved game's planet bits, the HUD banner); the save is logged.
 
 use super::checkpoint::{self, Record};
@@ -223,6 +223,9 @@ fn mission_done(w: &mut World, id: MobyId) {
         if let (Some(a), Some(b)) = (link(w, id, 0x34), link(w, id, 0x38)) {
             w.mm(a).cmd = 2;
             w.mm(b).cmd = 2;
+            // `0x29b0a0(half + 0xbc, 1, half, 1, 0x1baaa0)` for each: the lowered command survives a death reload.
+            crate::moby_update::visit::record_field(w, a, a, 0xbc);
+            crate::moby_update::visit::record_field(w, b, b, 0xbc);
         }
     }
     let mission = w.m(id).mission;

@@ -45,7 +45,7 @@
 //! | state 0 | +0xe8 = +0xf8 = 1; the mission done → 9; groups +0x11c / +0x13c (> 0) off (0, 0, 0); [`SCENERY`] (1, 1, −1), [`SHOWN`] (1, −1, −1); class 0x102's mobys → state 0; +0x128 = −1; +0x138 = `ticks(575)` | [`init`] (`story::{group_set, class_list_set, class_state_set}`) |
 //! | state 1 | the mission done → 9; Ratchet in the mount area +0x134 → +0x7c = fade = 0.99, mount; else within 2 (`FUN_00265210`) → `try_set_help_message(7, 0x53e4)`, △ pressed (0x13cae4 & 0x10) → mount when the prompt was taken | [`wait`] (`interact::try_prompt`, `pickup::sphere_gap`) |
 //! | state 1 | mount: the reset of state 0's camera / FOV / heading words, +0xe8 = +0xf8 = 1, → 2, +0x128 = −1; else +0x7c ≠ 0 → `Approach(0, 4·dt)`, the fade | [`wait`] (`cinematic::set_fade`) |
-//! | state 1 | the blob shadow (`0x266070(1.5, m)` = L01 `0x26eec8`) | NOT ported (G-REN-025) |
+//! | state 1 | the blob shadow (`0x266070(1.5, m)` = L01 `0x26eec8`) | [`wait`] (`crate::shadows::blob`) |
 //! | state 2 | `Approach(1, 4·dt, +0x7c)`, the fade; at 1: the mount cuboid +0x130 → `HeroTeleport(its centre, Euler, 0x32, 1)`, position / rotation = it; `SetState(0x32, 1)`; `CameraScript(pos, rot, 0, 0, 0)` | [`mount`] |
 //! | state 2 | +0x68 = +0x6c = +0x70 = +0x84 = +0x80 = 0, speed = SPEED·0.1; distances 0xff; Ratchet's moby +0x98 = −1; +0x20.. = rotation; the rates 0 | [`mount`] |
 //! | state 2 | the record: class, health 255, missiles 10 / 20, 0x140948 = 20, 0x14095e = 1, the moby, 0x14094b / 49 / 4a = 3, quit 0, 256, 100; +0xf4 = 0xff, +0xf0 = 0; +0x00 = polar(SPEED·0.1, yaw, −pitch) | [`mount`] ([`crate::vehicle::Record::take`]) |
@@ -443,6 +443,8 @@ fn wait(w: &mut World, id: MobyId) {
     } else if pf(w, id, pvo::FADE) != 0.0 {
         fade(w, id, 0.0);
     }
+    // `0x266070(1.5, m)` (= L01 0x26eec8): the blob shadow.
+    crate::shadows::blob(w, 1.5, id);
 }
 
 /// State 2: the fade out and the mount (module doc).
@@ -806,17 +808,8 @@ fn guns(w: &mut World, id: MobyId, yaw: f32, pitch: f32) {
     }
 }
 
-/// `PartType74Spawn(m, p, v, desc, 1)`: one `rand()` with a record (or without the particle system).
-fn part74(w: &mut World, id: MobyId, p: [f32; 4], v: [f32; 3], d: crate::particles::type74::Desc) {
-    *w.svc.fx.part_spawns.entry(74).or_default() += 1;
-    let m = w.m(id);
-    let (mp, rows) = ([m.position[0], m.position[1], m.position[2]], [0, 1, 2].map(|k| [m.rows[k][0], m.rows[k][1], m.rows[k][2]]));
-    let Some(sys) = w.particles.as_deref_mut() else {
-        w.rng.rand();
-        return;
-    };
-    if crate::particles::type74::spawn(sys, w.rng, id, mp, rows, p, v, d, true).is_none() { w.svc.fx.part_failed += 1; }
-}
+/// `PartType74Spawn(m, p, v, desc, 1)` ([`crate::moby_update::creature::fx::part74`]).
+fn part74(w: &mut World, id: MobyId, p: [f32; 4], v: [f32; 3], d: crate::particles::type74::Desc) { crate::moby_update::creature::fx::part74(w, id, p, v, d, true) }
 
 /// `0x2b8590` (module doc); Pokitaru's jet 1242 runs the same code (`0x3112b8`, the same descriptors, its pvars at the
 /// same offsets).

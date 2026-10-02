@@ -36,7 +36,7 @@
 //! Native `f32`; the rand draws are the game's (the spheres' centre is the drone's position: the disassembly's `lq`).
 //! **Inferred [L]**: the moby list the search walks (0x15ffe4) is the table in index order; class 0x4d6's own rules
 //! (its radius, a hit budget +0x56) are not ported (no ported level has one: G-WPN-002); the type-55 trails are
-//! records only (the type is not ported: G-PRT-001); the blob shadow `0x26eec8` is not drawn (G-REN-025).
+//! `particles::type19::spawn55` (the ribbons follow joint lists 0 / 1); the blob shadow `0x26eec8(0.17)` is `crate::shadows::blob`.
 
 use crate::moby_runtime::{mode, MobyId, MobyTable};
 use crate::moby_update::creature::{self as c, fx, turn, walker, V};
@@ -236,9 +236,14 @@ fn round(w: &mut World, id: MobyId) {
 
 /// The two trails (`0x2e8dd8`: `PartType55Spawn(0.05, 0.01, drone, list 0 / 1, 0x80808080, 0x10808080)` once each).
 fn trails(w: &mut World, id: MobyId) {
-    for o in [pv::TRAIL0, pv::TRAIL1] {
+    for (list, o) in [(0i16, pv::TRAIL0), (1, pv::TRAIL1)] {
         if c::pi32(w, id, o) == 0 {
-            fx::part_unported(w, 55);
+            let at = w.joint_point(id, list as usize);
+            let class = w.m(id).o_class;
+            *w.svc.fx.part_spawns.entry(55).or_default() += 1;
+            if let Some(sys) = w.particles.as_deref_mut() {
+                if crate::particles::type19::spawn55(sys, 0.05, 0.01, id, list, class, 0x8080_8080, 0x1080_8080, [at[0], at[1], at[2]]).is_none() { w.svc.fx.part_failed += 1; }
+            }
             c::set_pi32(w, id, o, 1);
         }
     }
@@ -292,6 +297,8 @@ pub fn update(w: &mut World, id: MobyId) {
         }
         _ => {}
     }
+    // `FUN_0026eec8(0.17)`: the blob shadow.
+    if w.m(id).state < 0x80 { crate::shadows::blob(w, f32::from_bits(0x3e2e_147b), id); }
 }
 
 /// Class scale eased at 5 % a tick.
