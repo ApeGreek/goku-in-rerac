@@ -24,7 +24,7 @@ and the Heli-Pack giver, the troopers and hounds, the movers, the help director)
 | 914 | 1 | the talking bystander (skill point 5) | **ported 2026-10-02** (`units::kerwan_bystander`) |
 | 816 / 1012 | 3 / 2 | the called platforms and the two-way shuttles | **ported 2026-10-02** (`units::kerwan_transport`) |
 | 455 | 2 | the creature spawner (children 545; also levels 08 / 14) | open |
-| 578 | 5 | a creature | open |
+| 578 / 627 | 5 / 0 | the Blarg mine layers and the mines they drop | **ported 2026-10-02** (`units::kerwan_layer`) |
 | 631 | 1 | a creature (the largest unit left) | open |
 
 ## Shared-system changes in this pass
@@ -34,6 +34,6 @@ and the Heli-Pack giver, the troopers and hounds, the movers, the help director)
 
 ## Open
 
-- 455, 578, 631.
+- 455 (and its projectile 545), 631.
 - "manipulator: target joint list not loaded" ×4 on the smoke run (another class's manipulator target).
 - The user's QA: docs/test-requests/2026-10-02-kerwan.md.

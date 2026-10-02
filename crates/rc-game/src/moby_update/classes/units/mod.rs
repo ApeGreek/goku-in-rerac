@@ -149,6 +149,7 @@
 //! | L03 1548 | 1548 Kerwan's cutscene FX driver (03): the infobot's thrusters in scenes 4 / 10, smoke from actor 3 in scene 3 | level03 0x2e01d0 | [`kerwan_scene_fx`] |
 //! | L03 914 | 914 Kerwan's talking bystander (03): talks before the Swingshot (a checkpoint after node 2), blown up by an explosion for skill point 5, then smokes | level03 0x2dbd90 | [`kerwan_bystander`] |
 //! | L03 816, 1012 | 816 Kerwan's called platforms and 1012 its two-way shuttles (03): flown along splines, ridden with △ | level03 0x2d3198, 0x2dccc0 (the follower 0x2d3918) | [`kerwan_transport`] |
+//! | L03 578, 627 | 578 Kerwan's blob layers (03) and the blobs 627 they drop: patrol a path, drop five blobs every 300 ticks; the blobs burst when stepped on or touched | level03 0x2c9eb8, 0x2cbea8 | [`kerwan_layer`] |
 //! | U319 | 1885 the pod launchers (09, 13) and their pods 1886: lobbed pods bounce, rest and hatch a revived member of the launcher's group | level09 0x30ab80, 0x30b3b0, 0x30a778 | [`pod_launcher`] |
 //! | — | 1475 Kalebo III's board missile (16; created by the board weapon, item 0x24; the Devastator missile's trail) | level16 0x2a3f38 (0x2a3e30 the spawn) | [`board_missile`] |
 //! | U509 | 933 Kalebo's floating mines (16): bob, spin, pulse; blown up by a hit or a touch, the placed ones back out of view | level16 0x2ddde0 | [`kalebo_mine`] |
@@ -370,6 +371,7 @@ pub mod kerwan_riser;
 pub mod kerwan_scene_fx;
 pub mod kerwan_bystander;
 pub mod kerwan_transport;
+pub mod kerwan_layer;
 pub mod pod_launcher;
 pub mod kalebo_mine_drone;
 pub mod kalebo_mine;
@@ -626,6 +628,9 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "L03 914", level: kerwan_bystander::REFERENCE_LEVEL, func: kerwan_bystander::UPDATE_FN, classes: &kerwan_bystander::CLASSES, update: kerwan_bystander::update, joints: &[] },
     UnitPort { unit: "L03 816", level: kerwan_transport::REFERENCE_LEVEL, func: kerwan_transport::PLATFORM_FN, classes: &kerwan_transport::PLATFORM_CLASSES, update: kerwan_transport::update_816, joints: &[] },
     UnitPort { unit: "L03 1012", level: kerwan_transport::REFERENCE_LEVEL, func: kerwan_transport::SHUTTLE_FN, classes: &kerwan_transport::SHUTTLE_CLASSES, update: kerwan_transport::update_1012, joints: &[] },
+    UnitPort { unit: "L03 578", level: kerwan_layer::REFERENCE_LEVEL, func: kerwan_layer::LAYER_FN, classes: &kerwan_layer::LAYER_CLASSES, update: kerwan_layer::update_578, joints: &[] },
+    // The blobs 578 drops (created only: not in the census's placed units).
+    UnitPort { unit: "L03 627", level: kerwan_layer::REFERENCE_LEVEL, func: kerwan_layer::BLOB_FN, classes: &kerwan_layer::BLOB_CLASSES, update: kerwan_layer::update_627, joints: &[] },
     UnitPort { unit: "U319 1885", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::UPDATE_FN, classes: &pod_launcher::CLASSES, update: pod_launcher::update, joints: &pod_launcher::CLASSES },
     // The pods 1885 lobs (created only: not in the census's placed units).
     UnitPort { unit: "U319 1886", level: pod_launcher::REFERENCE_LEVEL, func: pod_launcher::POD_FN, classes: &pod_launcher::POD_CLASSES, update: pod_launcher::pod_update, joints: &[] },
