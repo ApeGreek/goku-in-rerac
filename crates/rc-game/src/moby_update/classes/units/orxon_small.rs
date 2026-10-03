@@ -1,0 +1,462 @@
+//! Orxon's small classes (level 10), read from the level10 decomp and disassembly. Native `f32`.
+//!
+//! * **1100, the cracked walls** (`0x2dd650`, census U359; 5 placed): already broken on an earlier visit (the
+//!   collected byte or the death bit) → deleted. Else draw distance 0x80, and every hit record aimed at it with flags
+//!   0x20000 from a class 0xac or 0x99 attacker: from the wall's front (the attacker's offset in the wall's frame, x
+//!   > 0.25) both death bits and deleted; else the record's target cleared.
+//! * **1033, the lift** (`0x295a38`, U343; 1 placed): the platform block's shared words (4 / 5 / 0 / 0), its rest
+//!   point; up 1.5 over `scale(45)` ticks, a wait of `ticks(120)`, sound 0, down again, a wait, sound 0, and so on.
+//!   (No riders carried: the game calls no `CarryRiders` here.)
+//! * **1031, the pressure plates** (`0x2d92b8`, U355; 4 placed): pvar 0 the door (a moby index, −1 none: dim 8),
+//!   pvar 1 a partner plate, +0x0c pressed by the partner, +0x10 a sound timer. Pressed when a moby other than a 0x3ef
+//!   stands on it (listed within 1 and its ground probe lands on the plate within 0.1) or its mission is done: the
+//!   partner's +0x0c set (none: its own cleared); pressed or pressed by the partner: a door in state 1 / 2 → 3
+//!   (opening; with the timer out sound 0 on the door and the plate, timer `ticks(30)`), bright 0x7f. Released: a door
+//!   in state 4 → 1 (sound 1 on the door, 0 on the plate), dim 8.
+//! * **353, the sliding gate** (`0x2befe8`, U348; 1 placed): its rest point (+0x00) kept; shut until its spawn's
+//!   collected byte or death bit is set; then it slides 3.75 along −y at dt a tick, and at the end its collected byte
+//!   = mission + 2 and (on level 10) the story flag 0x13d3d8 is set; open: held 3.75 off.
+//! * **1117, the sinking lava platforms** (`0x295c20`, U344; 2 placed): the platform block's shared words, the rest
+//!   height +0xa0, random phases; idle they bob (0.1 at π/2·dt + `randf_sym(8°·dt)`) and rock (2.76°, 20° / 30° a
+//!   second). Ratchet on one (`0x295bc8`, the ledge-aware test) → 2: it sinks, speeding up by 2·dt² to 2·dt, the sizzle
+//!   (sound 0) every `rand_range(40, 60)` ticks; off it → 3: it rises back (braking so it stops at its rest height:
+//!   `v −= v²/(2d)` once `v²/(4·dt²)` reaches the distance), → 1 at the top. Riders carried (`CarryRiders`, +0x60).
+//! * **1421, the bridge** (`0x2e9648`, U370) and **1424, the sliding block** (`0x2e9990`, U371): shut while Ratchet
+//!   is on foot (0x1413f4 = 0) and their spawn's latch is clear; when he stands in the cuboid (pvar 3) (1421) or once
+//!   planet 12 is unlocked (0x13dd4c), with pvars 0 / 4 set (1421) or always (1424): both death bits, the fly-by camera
+//!   record pvar 4 / 2 armed (`0x2f5a50`: +0x38 = 1, +0x39 = 0; class 19, logged), then `scale(90)` ticks of motion:
+//!   1421 lowers (rot.y −80° over them), 1424 slides 1.5 back along its yaw (+π) from its rest point (+0x00); open (3).
+//!   1424 also freezes its linked moby (pvar +0x1c, mode bit 2) until it opens. Already open: placed open at once. A
+//!   reset latch puts them back (3 → 0).
+//! * **1555, the scene thrusters** (`0x2eacd8`, U373): in a scene (game mode 2) 3 / 5 / 6 / 7 the infobot thrusters
+//!   of actor 1 / 2 / 2 / 3 (`0x278450`).
+//!
+//! | address | what | port |
+//! |---|---|---|
+//! | `0x2dd650` | 1100 | [`wall_update`] |
+//! | `0x295a38` | 1033 | [`lift_update`] |
+//! | `0x2d92b8` | 1031 | [`plate_update`] |
+//! | `0x2befe8` | 353 | [`gate_update`] |
+//! | `0x295c20` | 1117 | [`sink_update`] |
+//! | `0x2e9648` / `0x2e9990` | 1421 / 1424 | [`bridge_update`] / [`block_update`] |
+//! | `0x2eacd8` | 1555 | [`thrusters_update`] |
+
+use crate::moby_runtime::MobyId;
+use crate::moby_update::creature::{self as c, V, DT};
+use crate::moby_update::services::{pf, pv, sphere_mobys_in, World};
+use crate::moby_update::story;
+
+pub const REFERENCE_LEVEL: u32 = 10;
+pub const WALL_FN: u32 = 0x2d_d650;
+pub const LIFT_FN: u32 = 0x29_5a38;
+pub const PLATE_FN: u32 = 0x2d_92b8;
+pub const GATE_FN: u32 = 0x2b_efe8;
+pub const WALL_CLASSES: [i16; 1] = [1100];
+pub const LIFT_CLASSES: [i16; 1] = [1033];
+pub const PLATE_CLASSES: [i16; 1] = [1031];
+pub const GATE_CLASSES: [i16; 1] = [353];
+pub const SINK_FN: u32 = 0x29_5c20;
+pub const BRIDGE_FN: u32 = 0x2e_9648;
+pub const BLOCK_FN: u32 = 0x2e_9990;
+pub const THRUSTERS_FN: u32 = 0x2e_acd8;
+pub const SINK_CLASSES: [i16; 1] = [1117];
+pub const BRIDGE_CLASSES: [i16; 1] = [1421];
+pub const BLOCK_CLASSES: [i16; 1] = [1424];
+pub const THRUSTERS_CLASSES: [i16; 1] = [1555];
+
+/// The spawn's collected byte (`0x1bbb04[uid]`) or its persistent death bit.
+fn latched(w: &World, id: MobyId) -> bool {
+    let sid = w.m(id).spawn_id;
+    w.svc.save.collected.get(&sid).is_some_and(|&b| b != 0) || w.svc.save.death.contains(&(w.svc.level, sid))
+}
+
+/// Level10 `0x2dd650`: the cracked walls (module doc).
+pub fn wall_update(w: &mut World, id: MobyId) {
+    if latched(w, id) {
+        w.delete_moby(id);
+        return;
+    }
+    w.mm(id).draw_dist = 0x80;
+    let p = c::pos(w, id);
+    let r = w.m(id).rows;
+    for i in 0..w.svc.hits.records.len() {
+        let rec = w.svc.hits.records[i];
+        if rec.target != id || rec.flags & 0x2_0000 == 0 { continue; }
+        let Some(a) = rec.attacker.filter(|&a| a < w.table.mobys.len()) else { continue };
+        let class = w.m(a).o_class;
+        if class == 0xac || class == 0x99 {
+            let d = c::sub(p, w.m(a).position);
+            // The rows transposed: the offset in the wall's frame.
+            let x = r[0][0] * d[0] + r[0][1] * d[1] + r[0][2] * d[2];
+            if 0.25 < x {
+                story::death_bits(w, id);
+                w.delete_moby(id);
+                return;
+            }
+        }
+        w.svc.hits.records[i].target = usize::MAX;
+    }
+}
+
+/// Level10 `0x295a38`: the lift (module doc).
+pub fn lift_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0xb4);
+    let step = 1.5 / w.ticks(0x2d) as f32;
+    match w.m(id).state {
+        0 => {
+            let p = c::pos(w, id);
+            let pvars = &mut w.mm(id).pvars;
+            crate::moby_update::services::pvar::set_u8(pvars, 0x28, 4);
+            crate::moby_update::services::pvar::set_i16(pvars, 0x3e, 5);
+            crate::moby_update::services::pvar::set_i32(pvars, 0x20, 0);
+            crate::moby_update::services::pvar::set_i16(pvars, 0x24, 0);
+            c::set_pv4(w, id, 0xa0, p);
+            w.mm(id).state = 1;
+        }
+        1 => {
+            let z = w.m(id).position[2] + step;
+            w.mm(id).position[2] = z;
+            let top = c::pf(w, id, 0xa8) + 1.5;
+            if top <= z {
+                w.mm(id).position[2] = top;
+                w.mm(id).state = 2;
+                let t = w.ticks(0x78);
+                c::set_pi32(w, id, 0xb0, t);
+            }
+        }
+        2 | 4 => {
+            if c::dec_timer_pvar_i32(w, id, 0xb0) == 0 { return; }
+            w.play_sound(0, 0, id);
+            let s = w.m(id).state;
+            w.mm(id).state = if s == 2 { 3 } else { 1 };
+        }
+        3 => {
+            let z = w.m(id).position[2] - step;
+            w.mm(id).position[2] = z;
+            let base = c::pf(w, id, 0xa8);
+            if z <= base {
+                w.mm(id).position[2] = base;
+                w.mm(id).state = 4;
+                let t = w.ticks(0x78);
+                c::set_pi32(w, id, 0xb0, t);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn ambient(w: &mut World, id: MobyId, k: u8) {
+    let a = &mut w.mm(id).ambient;
+    a[0] = k;
+    a[1] = k;
+    a[2] = k;
+}
+
+fn link(w: &World, i: i32) -> Option<MobyId> { usize::try_from(i).ok().filter(|&m| m < w.table.mobys.len()) }
+
+/// Level10 `0x2d92b8`: the pressure plates (module doc).
+pub fn plate_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x14);
+    let Some(door) = link(w, c::pi32(w, id, 0)) else {
+        ambient(w, id, 8);
+        return;
+    };
+    let p = c::pos(w, id);
+    let list = sphere_mobys_in(w.table, w.svc, w.classes, pf(1.0), pv(p), 0, Some(id), None);
+    let mut pressed = false;
+    for q in list {
+        let qp = w.m(q).position;
+        let a: V = [qp[0], qp[1], qp[2] + 0.5, qp[3]];
+        let b: V = [qp[0], qp[1], f32::from_bits(0x3c23_d70a), qp[3]];
+        let hit = w.coll_line(pv(a), pv(b), 2, None);
+        let g = hit.map_or(0.0, |h| h.point[2]);
+        if hit.and_then(|h| h.moby) == Some(id) && (g - qp[2]).abs() < 0.1 && w.m(q).o_class != 0x3ef { pressed = true; }
+    }
+    c::dec_timer_pvar_i32(w, id, 0x10);
+    let mission = w.m(id).mission;
+    if story::mission_done(w, mission as i32) { pressed = true; }
+    if pressed {
+        match link(w, c::pi32(w, id, 4)) {
+            None => c::set_pi32(w, id, 0xc, 0),
+            Some(o) => {
+                story::pvars(w, o, 0x14);
+                c::set_pi32(w, o, 0xc, 1);
+            }
+        }
+    } else if c::pi32(w, id, 0xc) == 0 {
+        if w.m(door).state == 4 {
+            w.mm(door).state = 1;
+            if c::pi32(w, id, 0x10) == 0 {
+                w.play_sound(1, 0, door);
+                w.play_sound(0, 0, id);
+                let t = w.ticks(0x1e);
+                c::set_pi32(w, id, 0x10, t);
+            }
+        }
+        ambient(w, id, 8);
+        return;
+    } else {
+        c::set_pi32(w, id, 0xc, 0);
+    }
+    if (1..=2).contains(&w.m(door).state) {
+        w.mm(door).state = 3;
+        if c::pi32(w, id, 0x10) == 0 {
+            w.play_sound(0, 0, door);
+            w.play_sound(0, 0, id);
+            let t = w.ticks(0x1e);
+            c::set_pi32(w, id, 0x10, t);
+        }
+    }
+    ambient(w, id, 0x7f);
+}
+
+/// Level10 `0x2befe8`: the sliding gate (module doc).
+pub fn gate_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x10);
+    const SLIDE: f32 = -3.75;
+    match w.m(id).state {
+        0 => {
+            let p = c::pos(w, id);
+            c::set_pv4(w, id, 0, p);
+            if latched(w, id) { w.mm(id).state = 1; }
+        }
+        1 => {
+            let y = w.m(id).position[1] - DT;
+            w.mm(id).position[1] = y;
+            if y <= c::pf(w, id, 4) + SLIDE {
+                let sid = w.m(id).spawn_id;
+                let m = w.m(id).mission;
+                w.svc.save.collected.insert(sid, m.wrapping_add(2));
+                w.mm(id).state = 2;
+                if w.svc.level == 10 { story::set_flag(w, story::flag_index(0x13_d3d8), 1); }
+            }
+        }
+        2 => {
+            let y = c::pf(w, id, 4) + SLIDE;
+            w.mm(id).position[1] = y;
+        }
+        _ => {}
+    }
+}
+
+/// Level10 `0x295c20`: the sinking lava platforms (module doc).
+pub fn sink_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0xc0);
+    let old = c::pos(w, id);
+    let rot = w.m(id).rotation;
+    if w.hero_on_moby(id) { w.mm(id).state = 2; }
+    c::dec_timer_pvar_i32(w, id, 0xbc);
+    let rest = c::pf(w, id, 0xa0);
+    let mut idle = false;
+    match w.m(id).state {
+        0 => {
+            let pvars = &mut w.mm(id).pvars;
+            crate::moby_update::services::pvar::set_u8(pvars, 0x28, 4);
+            crate::moby_update::services::pvar::set_i16(pvars, 0x3e, 5);
+            crate::moby_update::services::pvar::set_i32(pvars, 0x20, 0);
+            crate::moby_update::services::pvar::set_i16(pvars, 0x24, 0);
+            let z = w.m(id).position[2];
+            c::set_pf(w, id, 0xa0, z);
+            for o in [0xa8, 0xb4, 0xb8] {
+                let a = w.rng.rand_angle();
+                c::set_pf(w, id, o, a);
+            }
+            let k = DT * f32::from_bits(0x3e0e_fa35);
+            let r = w.rng.randf_sym(0.0, k);
+            c::set_pf(w, id, 0xb0, DT * std::f32::consts::FRAC_PI_2 + r);
+            w.mm(id).state = 1;
+            idle = true;
+        }
+        1 => idle = true,
+        2 => {
+            let max = DT + DT;
+            let v = (c::pf(w, id, 0xa4) - (DT * DT + DT * DT)).max(-max);
+            c::set_pf(w, id, 0xa4, v);
+            w.mm(id).position[2] += v;
+            if !w.hero_on_moby(id) { w.mm(id).state = 3; }
+            if c::pi32(w, id, 0xbc) < 1 {
+                w.play_sound(0, 0, id);
+                let t = w.rng.rand_range(0x28, 0x3c);
+                c::set_pi32(w, id, 0xbc, t);
+            }
+        }
+        3 => {
+            let dt2 = DT * DT;
+            let mut v = c::pf(w, id, 0xa4);
+            let d = rest - w.m(id).position[2];
+            let accel = v < 0.0 || (v * v) / (dt2 + dt2 + dt2 + dt2) < d;
+            if accel {
+                v = (v + dt2).min(DT + DT);
+            } else if 0.0 < d {
+                v = (v - (v * v) / (d + d)).max(0.0);
+            }
+            c::set_pf(w, id, 0xa4, v);
+            let z = w.m(id).position[2] + v;
+            w.mm(id).position[2] = z;
+            if rest <= z {
+                w.mm(id).position[2] = rest;
+                w.mm(id).state = 1;
+            }
+        }
+        _ => {}
+    }
+    if idle {
+        c::set_pf(w, id, 0xa4, 0.0);
+        let rate = c::pf(w, id, 0xb0);
+        super::bob(w, id, f32::from_bits(0x3dcc_cccd), rate, 0xa8, 0xac);
+        super::wobble(w, id, f32::from_bits(0x3d41_04fb), DT * f32::from_bits(0x3eb2_b8c2), DT * std::f32::consts::FRAC_PI_6, 0xb4, 0xb8);
+    }
+    let p = c::pos(w, id);
+    let delta = [p[0] - old[0], p[1] - old[1], p[2] - old[2], p[3]];
+    let rot_new = w.m(id).rotation;
+    crate::moby_update::triggers::carry_riders(&mut w.mm(id).pvars, 0x60, delta, rot, rot_new);
+}
+
+/// The fly-by camera record `k` armed (`0x2f5a50`: its pvar +0x38 = 1, +0x39 = 0): camera class 19 is not run by
+/// the port (G-HERO-027), logged.
+fn arm_flyby(w: &mut World, k: i32) {
+    let _ = k;
+    w.svc.unported("orxon 1421 / 1424: the fly-by camera's arming 0x2f5a50 (camera class 19, G-HERO-027)");
+}
+
+const SWING: f32 = f32::from_bits(0x3fb2_b8c2);
+
+/// Level10 `0x2e9648`: the bridge (module doc).
+pub fn bridge_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x14);
+    let on_foot = w.hero.mode == 0;
+    let latch = latched(w, id);
+    let lower = |w: &mut World| {
+        let y = c::add_rot(w.m(id).rotation[1], -SWING);
+        w.mm(id).rotation[1] = y;
+        w.mm(id).state = 3;
+    };
+    match w.m(id).state {
+        0 => {
+            w.mm(id).update_dist = 0xff;
+            if on_foot && !latch {
+                let y = w.m(id).rotation[1];
+                c::set_pf(w, id, 4, y);
+                w.mm(id).state = 1;
+            } else {
+                lower(w);
+            }
+        }
+        1 => {
+            if !(on_foot && !latch) {
+                lower(w);
+                return;
+            }
+            let inside = w.in_cuboid(w.hero_point(), c::pi32(w, id, 0xc));
+            if !inside && !story::planet_unlocked(w, 12) { return; }
+            if c::pi32(w, id, 0) < 1 || c::pi32(w, id, 0x10) < 1 { return; }
+            story::death_bits(w, id);
+            if w.in_cuboid(w.hero_point(), c::pi32(w, id, 0xc)) { arm_flyby(w, c::pi32(w, id, 0x10)); }
+            let t = w.ticks(0x5a);
+            c::set_pi32(w, id, 8, t);
+            w.mm(id).state = 2;
+        }
+        2 => {
+            let k = w.ticks(0x5a) as f32;
+            let y = c::add_rot(w.m(id).rotation[1], -f32::from_bits(0x3fb2_b8c2) / k);
+            w.mm(id).rotation[1] = y;
+            if c::dec_timer_pvar_i32(w, id, 8) != 0 { w.mm(id).state = 3; }
+        }
+        3 => {
+            if !on_foot || w.svc.save.collected.get(&w.m(id).spawn_id).is_some_and(|&b| b != 0) { return; }
+            if w.svc.save.death.contains(&(w.svc.level, w.m(id).spawn_id)) { return; }
+            let y = c::add_rot(w.m(id).rotation[1], SWING);
+            w.mm(id).rotation[1] = y;
+            w.mm(id).state = 0;
+        }
+        _ => {}
+    }
+}
+
+fn freeze(w: &mut World, id: MobyId, on: bool) {
+    let k = c::pi32(w, id, 0x1c);
+    if k < 1 { return; }
+    let Some(m) = link(w, k) else { return };
+    if on { w.mm(m).mode |= 2 } else { w.mm(m).mode &= !2 }
+}
+
+/// Level10 `0x2e9990`: the sliding block (module doc).
+pub fn block_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x20);
+    let on_foot = w.hero.mode == 0;
+    let latch = latched(w, id);
+    let back = |w: &World, k: f32| -> V {
+        let a = c::add_rot(w.m(id).rotation[2], std::f32::consts::PI);
+        let r = c::pv4(w, id, 0);
+        [r[0] + a.cos() * k, r[1] + a.sin() * k, r[2], r[3]]
+    };
+    match w.m(id).state {
+        0 => {
+            w.mm(id).update_dist = 0xff;
+            let p = c::pos(w, id);
+            c::set_pv4(w, id, 0, p);
+            if on_foot && !latch {
+                freeze(w, id, true);
+                w.mm(id).state = 1;
+                return;
+            }
+            let at = back(w, 1.5);
+            w.mm(id).state = 3;
+            c::set_pos(w, id, at);
+        }
+        1 => {
+            if on_foot && !latch {
+                if !story::planet_unlocked(w, 12) { return; }
+                freeze(w, id, false);
+                story::death_bits(w, id);
+                if 0 < c::pi32(w, id, 0x10) { arm_flyby(w, c::pi32(w, id, 0x10)); }
+                let t = w.ticks(0x5a);
+                c::set_pi32(w, id, 0x14, t);
+                w.mm(id).state = 2;
+                return;
+            }
+            let r = c::pv4(w, id, 0);
+            w.mm(id).state = 3;
+            c::set_pos(w, id, r);
+            freeze(w, id, false);
+        }
+        2 => {
+            let full = w.ticks(0x5a);
+            let k = 1.5 * (full - c::pi32(w, id, 0x14)) as f32 / full as f32;
+            let at = back(w, k);
+            c::set_pos(w, id, at);
+            if c::dec_timer_pvar_i32(w, id, 0x14) != 0 { w.mm(id).state = 3; }
+        }
+        3 => {
+            if !on_foot || w.svc.save.collected.get(&w.m(id).spawn_id).is_some_and(|&b| b != 0) { return; }
+            if w.svc.save.death.contains(&(w.svc.level, w.m(id).spawn_id)) { return; }
+            let r = c::pv4(w, id, 0);
+            w.mm(id).state = 0;
+            c::set_pos(w, id, r);
+        }
+        _ => {}
+    }
+}
+
+/// Level10 `0x2eacd8`: the scene thrusters (module doc).
+pub fn thrusters_update(w: &mut World, id: MobyId) {
+    match w.m(id).state {
+        0 => {
+            let m = w.mm(id);
+            m.state = 1;
+            m.update_dist = 0xff;
+        }
+        1 => {
+            if w.svc.game_mode != 2 { return; }
+            let Some(scene) = w.svc.cinematic.scene.clone() else { return };
+            let k = match scene.id {
+                3 => 1,
+                5 | 6 => 2,
+                7 => 3,
+                _ => return,
+            };
+            if let Some(a) = scene.actors.get(k) { crate::moby_update::classes::cutscene_fx::infobot_thrusters(w, a); }
+        }
+        _ => {}
+    }
+}

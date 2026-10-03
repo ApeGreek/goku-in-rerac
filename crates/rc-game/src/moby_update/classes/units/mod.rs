@@ -250,6 +250,8 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U357 | 1067, 1073 Orxon's energy barriers (10) and their strand field: the wiggling ribbons, the hum, switched off | level10 0x2da2c8, 0x2da690, 0x2dcc58 | [`orxon_curtain`] |
+//! | U359, U343, U355, U348, U344, U370, U371, U373 | 1100, 1033, 1031, 353, 1117, 1421, 1424, 1555 Orxon's cracked walls, lift, pressure plates, sliding gate, sinking platforms, bridge, sliding block and scene thrusters (10) | level10 0x2dd650, 0x295a38, 0x2d92b8, 0x2befe8 | [`orxon_small`] |
 //! | U352 | 939 Orxon's lava spouts (10) and their glowing rocks 938: thrown, bouncing, cooling, batted back, bursting | level10 0x2d8c00, 0x2d85c8 | [`orxon_lava`] |
 //! | U313 | 1766 Gaspar's lava raft (09): waiting and rocking, ridden along its path with its paddle wheel and wake, turned back from the far cuboids | level09 0x309c08 | [`gaspar_raft`] |
 //! | U308 | 1201 Gaspar's cannons (09): the mount, the stick aim, the two barrels, the seat camera and light, the crosshair; the bases 324 and the shells 1258 | level09 0x304c80, 0x2efe40, 0x307d68 | [`gaspar_cannon`] |
@@ -335,6 +337,8 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod orxon_curtain;
+pub mod orxon_small;
 pub mod orxon_lava;
 pub mod gaspar_raft;
 pub mod gaspar_cannon;
@@ -993,6 +997,17 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U357 1067", level: orxon_curtain::REFERENCE_LEVEL, func: orxon_curtain::UPDATE_FN, classes: &orxon_curtain::CLASSES, update: orxon_curtain::update, joints: &[] },
+    UnitPort { unit: "U357 1067 draw", level: orxon_curtain::REFERENCE_LEVEL, func: orxon_curtain::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U358 1073", level: orxon_curtain::REFERENCE_LEVEL, func: orxon_curtain::FIELD_FN, classes: &orxon_curtain::FIELD_CLASSES, update: orxon_curtain::field_update, joints: &[] },
+    UnitPort { unit: "U359 1100", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::WALL_FN, classes: &orxon_small::WALL_CLASSES, update: orxon_small::wall_update, joints: &[] },
+    UnitPort { unit: "U343 1033", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::LIFT_FN, classes: &orxon_small::LIFT_CLASSES, update: orxon_small::lift_update, joints: &[] },
+    UnitPort { unit: "U355 1031", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::PLATE_FN, classes: &orxon_small::PLATE_CLASSES, update: orxon_small::plate_update, joints: &[] },
+    UnitPort { unit: "U348 353", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::GATE_FN, classes: &orxon_small::GATE_CLASSES, update: orxon_small::gate_update, joints: &[] },
+    UnitPort { unit: "U344 1117", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::SINK_FN, classes: &orxon_small::SINK_CLASSES, update: orxon_small::sink_update, joints: &[] },
+    UnitPort { unit: "U370 1421", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::BRIDGE_FN, classes: &orxon_small::BRIDGE_CLASSES, update: orxon_small::bridge_update, joints: &[] },
+    UnitPort { unit: "U371 1424", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::BLOCK_FN, classes: &orxon_small::BLOCK_CLASSES, update: orxon_small::block_update, joints: &[] },
+    UnitPort { unit: "U373 1555", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::THRUSTERS_FN, classes: &orxon_small::THRUSTERS_CLASSES, update: orxon_small::thrusters_update, joints: &[] },
     UnitPort { unit: "U352 939", level: orxon_lava::REFERENCE_LEVEL, func: orxon_lava::UPDATE_FN, classes: &orxon_lava::CLASSES, update: orxon_lava::update, joints: &[] },
     UnitPort { unit: "U352 938", level: orxon_lava::REFERENCE_LEVEL, func: orxon_lava::ROCK_FN, classes: &orxon_lava::ROCK_CLASSES, update: orxon_lava::rock_update, joints: &[] },
     UnitPort { unit: "U313 1766", level: gaspar_raft::REFERENCE_LEVEL, func: gaspar_raft::UPDATE_FN, classes: &gaspar_raft::CLASSES, update: gaspar_raft::update, joints: &gaspar_raft::CLASSES },
@@ -1276,6 +1291,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((blarg_laser_gate::REFERENCE_LEVEL, blarg_laser_gate::DRAW_FN)) => blarg_laser_gate::fx_quads(table, svc, id),
         Some((blarg_gadgetbot::REFERENCE_LEVEL, blarg_gadgetbot::BUBBLE_DRAW_FN)) => blarg_gadgetbot::bubble_quads(table, svc, id),
         Some((blarg_wave_bot::REFERENCE_LEVEL, blarg_wave_bot::DRAW_FN)) => blarg_wave_bot::fx_quads(table, svc, id),
+        Some((orxon_curtain::REFERENCE_LEVEL, orxon_curtain::DRAW_FN)) => orxon_curtain::fx_quads(table, svc, id),
         Some((batalia_flame::REFERENCE_LEVEL, batalia_flame::DRAW_FN)) => batalia_flame::fx_quads(table, svc, id),
         Some((ship_fighter::REFERENCE_LEVEL, ship_fighter::TRAIL_FN)) | Some((ship_fighter::FLEET_LEVEL, ship_fighter::FLEET_TRAIL_FN)) => ship_fighter::trail_quads(table, svc, id),
         _ => None,
