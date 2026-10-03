@@ -112,7 +112,7 @@ fn item_rows(hero: &Hero, env: &ItemEnv, list: usize) -> Option<[[f32; 4]; 4]> {
 fn norm(a: [f32; 3]) -> [f32; 3] { super::guns::with_len(a, 1.0) }
 
 /// The rotation rows → quaternion (`fun_00214260`, the standard conversion [L]).
-fn quat_of(m: [[f32; 3]; 3]) -> [f32; 4] {
+pub(crate) fn quat_of(m: [[f32; 3]; 3]) -> [f32; 4] {
     let tr = m[0][0] + m[1][1] + m[2][2];
     if 0.0 < tr {
         let s = (tr + 1.0).sqrt() * 2.0;

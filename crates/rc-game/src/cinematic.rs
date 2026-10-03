@@ -93,6 +93,9 @@ pub enum CinematicCall {
     FocusRecord { record: usize, distance: f32, pivot: f32 },
     /// `0x306338(slot)` (level18): a class-18 slot's record +0x50 = 1 (the region leaves this tick) ([`focus_suppress`]).
     FocusSuppress(usize),
+    /// `0x3135b8(m)` (level14): the Swingshot camera, when current (class 7), looks along moby `m` (D+0x80 = 1, D+0x84 =
+    /// m: its yaw, `yaw`), its look height and height 2, distance 7 ([`swing_follow`]).
+    SwingFollow { yaw: f32 },
     /// [`CinematicCall::CameraScript`] unless the script camera is already up ([`camera_script_unless_script`]).
     CameraScriptUnlessScript { pos: [f32; 3], euler: [f32; 3], mode: u8, ticks: i32, collide: bool },
 }
@@ -280,6 +283,12 @@ pub fn follow_look_height(w: &mut World, h: f32, rate: f32, add: bool) { w.svc.c
 /// The store `0x16735c = moby` (0: `None`) from a class: the follow camera's scripted focus moby.
 pub fn focus_moby(w: &mut World, moby: Option<MobyId>) { w.svc.cinematic.calls.push(CinematicCall::FocusMoby(moby)); }
 
+/// `0x3135b8(m)` from a class ([`CinematicCall::SwingFollow`]): the moby's yaw as it stands after its update.
+pub fn swing_follow(w: &mut World, m: MobyId) {
+    let yaw = w.m(m).rotation[2];
+    w.svc.cinematic.calls.push(CinematicCall::SwingFollow { yaw });
+}
+
 /// The store `0x167360 = t` from a class ([`CinematicCall::FocusTicks`]).
 pub fn focus_ticks(w: &mut World, t: i32) { w.svc.cinematic.calls.push(CinematicCall::FocusTicks(t)); }
 
@@ -466,6 +475,15 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
                 if let Some(f) = cam.level_cams.slots.get_mut(record).and_then(|s| s.focus.as_mut()) {
                     f.distance = distance;
                     f.pivot_height = pivot;
+                }
+            }
+            CinematicCall::SwingFollow { yaw } => {
+                if cam.swing.active {
+                    let s = &mut cam.swing;
+                    s.follow_yaw = Some(yaw);
+                    s.look_h = 2.0;
+                    s.height = 2.0;
+                    s.dist = 7.0;
                 }
             }
             CinematicCall::FocusSuppress(record) => {

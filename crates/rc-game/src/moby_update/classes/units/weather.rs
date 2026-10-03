@@ -40,7 +40,7 @@ const BELOW: f32 = 5.0;
 /// The written words, kept by their L08 address.
 pub const WIND_X: u32 = 0x16_2360;
 pub const WIND_Y: u32 = 0x16_2364;
-const TIMER: u32 = 0x16_2370;
+pub const TIMER: u32 = 0x16_2370;
 const COUNT: u32 = 0x16_2374;
 /// dt (0x15ed6c / 0x15ed7c, NTSC).
 const DT: f32 = 1.0 / 60.0;

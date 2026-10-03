@@ -1419,6 +1419,8 @@ pub struct World<'a> {
     /// `0x167450` / `0x167460` / `0x167470`: the camera's forward, left and up rows (the previous tick's; level18's
     /// copy at 0x1679d0..).
     pub camera_rows: [[f32; 3]; 3],
+    /// The current camera's class (`[0x167280]+0x86`, the previous tick's camera update).
+    pub camera_class: i32,
     /// `0x16d140..`: the view the crate respawn's `FastBSphereCheck` uses (None: never out of view).
     pub view: Option<&'a BSphereView>,
     /// The game's one `rand` stream (shared with the particles and the hero).
@@ -1486,6 +1488,7 @@ impl<'a> World<'a> {
             camera: hero.pos,
             camera_yaw: 0.0,
             camera_rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            camera_class: 0,
             view: None,
             rng,
             coll: None,

@@ -71,6 +71,7 @@ mod tests {
             pos: f([-4.64, 0.0, 2.0]),
             rows: [f([c, 0.0, -s]), f([0.0, 1.0, 0.0]), f([s, 0.0, c])],
             euler: [Pf::ZERO; 4],
+            class: 0,
         };
         let t = view_transform(&v);
         assert!((crate::game_camera::game_eye(&t) - Vec3::new(-4.64, 0.0, 2.0)).length() < 1e-5);

@@ -116,6 +116,9 @@ pub struct SwingCamera {
     pub target: Option<usize>,
     /// D+0x30: the pitch turn's spring velocity (pulling, 0x25: the ramp 0..1).
     pub pitch_vel: f32,
+    /// D+0x80 = 1 with D+0x84's yaw: a class's moby to look along (Oltanis's flying cars 1417, `0x3135b8`); cleared
+    /// at the init and after every update.
+    pub follow_yaw: Option<f32>,
 }
 
 impl Camera {
@@ -134,6 +137,7 @@ impl Camera {
         let s = &mut self.swing;
         // D+0x80 = 0; D+0x8c; D+0x88 (12°), D+0x98, D+0x9c, D+0x84 (Ratchet's moby), D+0xa4 (0.5), D+0xb4 (0.05), D+0x00,
         // D+0x10..0x1e, D+0x34..0x3c: written, read by no class-7 code (the follow camera's init rewrites its own).
+        s.follow_yaw = None;
         s.look_h = if level == 0xe && swinging { 2.0 } else { 1.5 };
         s.dist = 4.64;
         s.height = 2.0;
@@ -183,6 +187,7 @@ impl Camera {
         let (p, pushed) = self.collision_push(inp, 0.5, self.swing.prev_pos, self.swing.pos);
         self.swing.pos = p;
         if pushed { self.swing.pushed = true; }
+        self.swing.follow_yaw = None;
         prev
     }
 
@@ -211,20 +216,27 @@ impl Camera {
         approach(h_t, DT * 4.0, &mut s.height);
         let look_t = if level == 0xe && st == ST_SWING { h_t + 0.25 } else { h_t - 0.5 };
         approach(look_t, DT * 8.0, &mut s.look_h);
-        // The yaw: toward Ratchet's yaw (0x13f3e8), or along the target group on levels 14 / 7 / 9 (D+0x80 = 1 would take
-        // Ratchet's moby's yaw instead: 0 at the init and after every update, no other writer).
+        // The yaw: toward Ratchet's yaw (0x13f3e8), or along the target group on levels 14 / 7 / 9; with D+0x80 = 1 (a
+        // class's store, [`SwingCamera::follow_yaw`]) the yaw of the moby D+0x84 instead where no group target leads
+        // (and while pulling).
         let hero_yaw = h.rot[2].to_f32();
+        let follow = s.follow_yaw;
         let spring = match st {
             ST_SWING => {
                 let mut tgt = hero_yaw;
                 if matches!(level, 0xe | 7 | 9) {
-                    if let Some(g) = self.world.swing_group.as_ref().filter(|g| h.swing.on.is_none() || g.group != -1) {
-                        if let Some(best) = next_target(g, h.swing.on, hero_yaw) { tgt = fsub(best, g.on_pos)[1].atan2(fsub(best, g.on_pos)[0]); }
+                    match self.world.swing_group.as_ref() {
+                        Some(g) if h.swing.on.is_none() || g.group != -1 => match next_target(g, h.swing.on, hero_yaw) {
+                            Some(best) => tgt = fsub(best, g.on_pos)[1].atan2(fsub(best, g.on_pos)[0]),
+                            None => tgt = follow.unwrap_or(hero_yaw),
+                        },
+                        Some(_) => {}
+                        None => tgt = follow.unwrap_or(hero_yaw),
                     }
                 }
                 Some((tgt, 0.00125))
             }
-            ST_PULL => Some((hero_yaw, f32::from_bits(0x3b65_6042))),
+            ST_PULL => Some((follow.unwrap_or(hero_yaw), f32::from_bits(0x3b65_6042))),
             _ => None,
         };
         if let Some((tgt, k)) = spring { s.yaw = angle_spring(s.yaw, tgt, k, 0.175, 0.0, &mut s.yaw_vel); }

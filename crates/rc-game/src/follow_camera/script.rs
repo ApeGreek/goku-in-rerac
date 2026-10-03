@@ -138,7 +138,7 @@ fn ease(t: f32) -> f32 { (1.0 - (t * PI).cos()) * 0.5 }
 fn rot_ease(a: f32, b: f32, t: f32) -> f32 { wrap(a + wrap(b - a) * ease(t)) }
 
 /// `0x26cc38(a, b, t)`: `a` at 0, `b` at 1, else `a + (b − a)·ease(t)`.
-fn cos_interp(a: f32, b: f32, t: f32) -> f32 {
+pub(crate) fn cos_interp(a: f32, b: f32, t: f32) -> f32 {
     if t == 0.0 { a } else if t == 1.0 { b } else { a + (b - a) * ease(t) }
 }
 

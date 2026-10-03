@@ -63,6 +63,22 @@ use crate::spline::{self, Cursor};
 pub const REFERENCE_LEVEL: u32 = 16;
 pub const UPDATE_FN: u32 = 0x2e_37a0;
 pub const CLASSES: [i16; 1] = [1401];
+/// Level14's copy, class 923 (`0x2fe2a0`; census U509, 2 placed): the same code but for three points ([`Copy`]).
+pub const L14_LEVEL: u32 = 14;
+pub const L14_FN: u32 = 0x2f_e2a0;
+pub const L14_CLASSES: [i16; 1] = [923];
+
+/// Where the copies differ: level16's checks its mine's hits too; level14's (`0x2fe2a0`) flies at 20 on level 16, else
+/// 25, or its own speed +0xf8 when not 0 (`0x2fea80`), and its first exhaust glows are 100000 (`0x2feca8`) where
+/// level16's are 99840.
+#[derive(Clone, Copy)]
+struct Copy {
+    mine_hits: bool,
+    own_speed: bool,
+    flame: f32,
+}
+const L16: Copy = Copy { mine_hits: true, own_speed: false, flame: 99840.0 };
+const L14: Copy = Copy { mine_hits: false, own_speed: true, flame: 100_000.0 };
 /// The mine the drone carries (0x3a5).
 pub const MINE: i16 = 933;
 
@@ -78,6 +94,8 @@ pub mod pv {
     pub const VEL: usize = 0xe4;
     pub const TURN: usize = 0xf0;
     pub const MINE: usize = 0xf4;
+    /// Level14's copy: its own speed (0: the level's).
+    pub const OWN_SPEED: usize = 0xf8;
     pub const MODE: usize = 0xfc;
     pub const SIZE: usize = 0x100;
 }
@@ -109,7 +127,15 @@ fn wrapped_on_same(w: &World, id: MobyId) -> bool {
 }
 
 /// Level16 0x2e37a0 (module doc).
-pub fn update(w: &mut World, id: MobyId) {
+pub fn update(w: &mut World, id: MobyId) { update_copy(w, id, L16) }
+
+/// Level14 0x2fe2a0: class 923 ([`Copy`]).
+pub fn update_l14(w: &mut World, id: MobyId) {
+    crate::moby_update::story::pvars(w, id, pv::SIZE);
+    update_copy(w, id, L14)
+}
+
+fn update_copy(w: &mut World, id: MobyId, v: Copy) {
     if w.m(id).pvars.len() < pv::SIZE { return; }
     let a = w.m(id).anim;
     if a.flags & 2 != 0 && a.seq_a == a.seq_b && a.seq_a == 1 {
@@ -122,7 +148,7 @@ pub fn update(w: &mut World, id: MobyId) {
         w.anim_blend(id, 1, 0, t);
     }
     let mut hit = w.get_hit(id, 0x21_0000, false).is_some();
-    if !hit {
+    if !hit && v.mine_hits {
         if let Some(m) = mine(w, id) { hit = w.get_hit(m, 0x21_0000, false).is_some(); }
     }
     if hit && w.m(id).state != 6 {
@@ -172,7 +198,7 @@ pub fn update(w: &mut World, id: MobyId) {
             let p = w.m(id).position;
             let ang = c::atan(h[0] - p[0], h[1] - p[1]);
             turn::spring_turn2_pvar(w, id, ang, f32::from_bits(0x3ba3_d70a), f32::from_bits(0x3e4c_cccd), 0.0, pv::TURN);
-            exhaust(w, id);
+            exhaust(w, id, v.flame);
         }
         2 => {
             let h = crate::moby_update::classes::units::hero_pos(w);
@@ -212,19 +238,19 @@ pub fn update(w: &mut World, id: MobyId) {
                     c::set_pi32(w, id, pv::SEG, 0);
                 }
             }
-            exhaust(w, id);
+            exhaust(w, id, v.flame);
         }
         4 => {
             if md == 0 { carry(w, id); }
-            if follow(w, id) {
+            if follow(w, id, v) {
                 w.mm(id).state = 3;
                 w.anim_blend(id, 3, 0, 5);
             }
-            exhaust(w, id);
+            exhaust(w, id, v.flame);
         }
         5 => {
-            if !follow(w, id) {
-                exhaust(w, id);
+            if !follow(w, id, v) {
+                exhaust(w, id, v.flame);
             } else {
                 {
                     let m = w.mm(id);
@@ -300,11 +326,17 @@ fn spring_to(w: &mut World, id: MobyId, t: [f32; 4]) {
 }
 
 /// Level16 0x2e3fa0, the path follow (module table): whether the path's end was reached.
-pub fn follow(w: &mut World, id: MobyId) -> bool {
+fn follow(w: &mut World, id: MobyId, v: Copy) -> bool {
+    let mut speed = SPEED;
+    if v.own_speed {
+        if w.svc.level == 16 { speed = 20.0; }
+        let own = c::pf(w, id, pv::OWN_SPEED);
+        if own != 0.0 { speed = own; }
+    }
     let i = if w.m(id).state == 5 { c::pi32(w, id, pv::PATH_B) } else { c::pi32(w, id, pv::PATH_A) };
     let pts = path(w, i).unwrap_or_default();
     let mut cur = Cursor { seg: c::pi32(w, id, pv::SEG), t: c::pf(w, id, pv::DIST) };
-    let (p, ended) = spline::advance(&pts, false, SPEED * DT, &mut cur);
+    let (p, ended) = spline::advance(&pts, false, speed * DT, &mut cur);
     c::set_pi32(w, id, pv::SEG, cur.seg);
     c::set_pf(w, id, pv::DIST, cur.t);
     let p = [p[0], p[1], p[2], 0.0];
@@ -337,7 +369,7 @@ fn glow(w: &mut World, jitter: f32, lo: f32, hi: f32, size: f32, p: [f32; 4], sp
 }
 
 /// Level16 0x2e4190, the exhaust (module table).
-pub fn exhaust(w: &mut World, id: MobyId) {
+pub fn exhaust(w: &mut World, id: MobyId, flame: f32) {
     use crate::particles::rec;
     let (pos, rows) = (w.m(id).position, w.m(id).rows);
     let at = |a: f32, b: f32| -> [f32; 4] { std::array::from_fn(|k| if k == 3 { pos[3] } else { pos[k] + rows[0][k] * a + rows[2][k] * b }) };
@@ -345,7 +377,7 @@ pub fn exhaust(w: &mut World, id: MobyId) {
     for _ in 0..2 {
         let k = w.rng.randi(16);
         let spin = if w.rng.randi(2) == 0 { k } else { -k };
-        if let Some(i) = glow(w, 0.2, 1.0, 0.9, 99840.0, p, spin, GLOW) {
+        if let Some(i) = glow(w, 0.2, 1.0, 0.9, flame, p, spin, GLOW) {
             let t = w.ticks(12);
             let r = &mut w.particles.as_deref_mut().unwrap().pool.recs[i];
             rec::set_i16(r, 0xa, t as i16);

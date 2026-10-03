@@ -201,6 +201,7 @@
 //! | — | 1475 Kalebo III's board missile (16; created by the board weapon, item 0x24; the Devastator missile's trail) | level16 0x2a3f38 (0x2a3e30 the spawn) | [`board_missile`] |
 //! | U509 | 933 Kalebo's floating mines (16): bob, spin, pulse; blown up by a hit or a touch, the placed ones back out of view | level16 0x2ddde0 | [`kalebo_mine`] |
 //! | U521 | 1401 Kalebo's mine drones (16): wait in their cuboid, fly a path carrying a new race mine 933, drop it, fly back | level16 0x2e37a0 (0x2de298 the mine) | [`kalebo_mine_drone`] |
+//! | U509 | 923 Oltanis's mine drones (14): level14's copy of 1401 | level14 0x2fe2a0 | [`kalebo_mine_drone`] |
 //! | U363 | 1075 Pokitaru's boats: the path, the propellers and wake, the boarders' moving area, the lift (11) | level11 0x309ac0 | [`pokitaru_boat`] |
 //! | U130 | 574 Kerwan's gun troopers (03), and the rocket 833 they fire | level03 0x2c6fd0, 0x2d43c8 | [`kerwan_trooper`] |
 //! | U280 | 452 Batalia's runners (08) | level08 0x2e2df0 | [`batalia_runner`] |
@@ -250,6 +251,24 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U504 | 712 Oltanis's ferries (14): carry Ratchet between docks on △ | level14 0x2f0538 | [`oltanis_ferry`] |
+//! | U502 | 685 Oltanis's ride cart (14): runs its paths under Ratchet with a moving wall | level14 0x2ee8d8 | [`oltanis_cart`] |
+//! | U497 | 557 Oltanis's pull-target gliders (14): flyers carrying a Swingshot target that slow under Ratchet | level14 0x2e7bd8 | [`oltanis_glider`] |
+//! | U501 | 684 Oltanis's arrival scene and lightning strikes (14) | level14 0x2ed280, 0x2edc18 | [`oltanis_lightning`] |
+//! | U498 | 610 Oltanis's wind tunnels (14): push Ratchet along their yaw, blow the weather and the motes | level14 0x2eaf88, 0x2eb810 | [`oltanis_wind`] |
+//! | U492 | 31 Oltanis's grenade drones (14) with their pieces 81 and grenades 1193 | level14 0x2b46e8, 0x2bac78, 0x300e00 | [`oltanis_drone`] |
+//! | U520 | 1417 Oltanis's flying cars (14): fly a path carrying a Swingshot target, sink under Ratchet's weight | level14 0x306ee0 | [`oltanis_car`] |
+//! | U506 | 908 Oltanis's fighters (14): 921's flight round a closed path | level14 0x2fc0f0 | [`oltanis_carrier`] |
+//! | U512 | 1224 Oltanis's lightning cuboids (14): branching bolts along the cuboid that hurt Ratchet | level14 0x3015d0, 0x301fa8 | [`oltanis_bolt`] |
+//! | U493 | 211 Oltanis's rail bots (14): ride a grind rail beside Ratchet and throw arcs ahead of him | level14 0x2d5f40 | [`oltanis_rail_bot`] |
+//! | U490 | 28 the zapper bots (14, 15) with their arcs, and the pieces 325 / 403 they leave | level14 0x2b17d8, 0x2de670, 0x2dfd10 | [`oltanis_zapper`] |
+//! | U514 | 1331 the arc slots' keeper (14, 15): three shared arcs the zappers 28 and turrets 211 throw | level14 0x3039e0, 0x3046f8 | [`oltanis_arcs`] |
+//! | U507 | 921 Oltanis's missile carriers and 922 their missiles (14) | level14 0x2fcbb0, 0x2fdbb8 | [`oltanis_carrier`] |
+//! | U496 | 386 Oltanis's rail arcs (14) | level14 0x2dee28 | [`oltanis_arc`] |
+//! | U519 | 1416 Oltanis's pressure pads, 1559 its skill point and thrusters, 1395 the stair builder (14) | level14 0x306b78, 0x3087c0, 0x305d28 | [`oltanis_small`] |
+//! | U499 | 643 Oltanis's floating mines, 1352 its risers (14) | level14 0x2ec810, 0x305408 | [`oltanis_small`] |
+//! | U494 | 250 Oltanis's hatches, 309 its leaning floats (14) | level14 0x2d96e0, 0x2de1f8 | [`oltanis_small`] |
+//! | U488 | 8 Oltanis's searchlight sentries (14): sweep a beam along a path, raise the pop-up turrets on finding Ratchet | level14 0x2ac618, 0x2aee28, 0x2ae260 | [`oltanis_sentry`] |
 //! | U480 | 1403 Gemlik's tracker, 1558 its scene thrusters (13) | level13 0x30bb70, 0x30bdf0 | [`gemlik_small`] |
 //! | U477 | 1270 Gemlik's tipping lift (13) | level13 0x30a6d8 | [`gemlik_lift`] |
 //! | U475 | 1262 Gemlik's stomper robots (13): the shockwave ring, the walk and swing, the knockback and death | level13 0x307e98, 0x3098d0 | [`gemlik_robot`] |
@@ -363,6 +382,21 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod oltanis_ferry;
+pub mod oltanis_cart;
+pub mod oltanis_glider;
+pub mod oltanis_lightning;
+pub mod oltanis_wind;
+pub mod oltanis_drone;
+pub mod oltanis_car;
+pub mod oltanis_bolt;
+pub mod oltanis_rail_bot;
+pub mod oltanis_zapper;
+pub mod oltanis_arcs;
+pub mod oltanis_carrier;
+pub mod oltanis_arc;
+pub mod oltanis_small;
+pub mod oltanis_sentry;
 pub mod gemlik_small;
 pub mod gemlik_robot;
 pub mod gemlik_relay;
@@ -961,6 +995,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "1475 board missile", level: board_missile::REFERENCE_LEVEL, func: board_missile::UPDATE_FN, classes: &board_missile::CLASSES, update: board_missile::update, joints: &[] },
     UnitPort { unit: "U509 933", level: kalebo_mine::REFERENCE_LEVEL, func: kalebo_mine::UPDATE_FN, classes: &kalebo_mine::CLASSES, update: kalebo_mine::update, joints: &[] },
     UnitPort { unit: "U521 1401", level: kalebo_mine_drone::REFERENCE_LEVEL, func: kalebo_mine_drone::UPDATE_FN, classes: &kalebo_mine_drone::CLASSES, update: kalebo_mine_drone::update, joints: &[] },
+    UnitPort { unit: "U509 923", level: kalebo_mine_drone::L14_LEVEL, func: kalebo_mine_drone::L14_FN, classes: &kalebo_mine_drone::L14_CLASSES, update: kalebo_mine_drone::update_l14, joints: &[] },
     // class port `classes::teleporter`).
     UnitPort { unit: "U85 1135 beam", level: 1, func: crate::moby_update::classes::teleporter::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U359 318", level: pokitaru_teleporter::REFERENCE_LEVEL, func: pokitaru_teleporter::UPDATE_FN, classes: &pokitaru_teleporter::CLASSES, update: pokitaru_teleporter::update, joints: &[] },
@@ -1031,8 +1066,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U411 1404", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::SCENE_FN, classes: &hoven_story::SCENE_CLASSES, update: hoven_story::scene_trigger_update, joints: &[] },
     UnitPort { unit: "U398 328", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::HYDRO_FN, classes: &hoven_story::HYDRO_CLASSES, update: hoven_story::hydro_update, joints: &hoven_story::HYDRO_CLASSES },
     UnitPort { unit: "U440 1353", level: gemlik_story::REFERENCE_LEVEL, func: gemlik_story::UPDATE_FN, classes: &gemlik_story::CLASSES, update: gemlik_story::update, joints: &[] },
-    UnitPort { unit: "U464 851", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::QWARK_FN, classes: &oltanis_story::QWARK_CLASSES, update: oltanis_story::qwark_update, joints: &[] },
-    UnitPort { unit: "U469 924", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::MERCHANT_FN, classes: &oltanis_story::MERCHANT_CLASSES, update: oltanis_story::merchant_update, joints: &[] },
+    UnitPort { unit: "U464 851", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::QWARK_FN, classes: &oltanis_story::QWARK_CLASSES, update: oltanis_story::qwark_update, joints: &oltanis_story::QWARK_CLASSES },
+    UnitPort { unit: "U469 924", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::MERCHANT_FN, classes: &oltanis_story::MERCHANT_CLASSES, update: oltanis_story::merchant_update, joints: &oltanis_story::MERCHANT_CLASSES },
     UnitPort { unit: "U474 1354", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::MORPH_FN, classes: &oltanis_story::MORPH_CLASSES, update: oltanis_story::morph_update, joints: &[] },
     UnitPort { unit: "U503 1388", level: quartu_story::REFERENCE_LEVEL, func: quartu_story::GRABBER_FN, classes: &quartu_story::GRABBER_CLASSES, update: quartu_story::grabber_update, joints: &[] },
     UnitPort { unit: "U511 1469", level: quartu_story::REFERENCE_LEVEL, func: quartu_story::HELP_FN, classes: &quartu_story::HELP_CLASSES, update: quartu_story::help_update, joints: &[] },
@@ -1047,6 +1082,43 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U504 712", level: oltanis_ferry::REFERENCE_LEVEL, func: oltanis_ferry::UPDATE_FN, classes: &oltanis_ferry::CLASSES, update: oltanis_ferry::update, joints: &[] },
+    UnitPort { unit: "U502 685", level: oltanis_cart::REFERENCE_LEVEL, func: oltanis_cart::UPDATE_FN, classes: &oltanis_cart::CLASSES, update: oltanis_cart::update, joints: &[] },
+    UnitPort { unit: "U497 557", level: oltanis_glider::REFERENCE_LEVEL, func: oltanis_glider::UPDATE_FN, classes: &oltanis_glider::CLASSES, update: oltanis_glider::update, joints: &oltanis_glider::CLASSES },
+    UnitPort { unit: "U501 684", level: oltanis_lightning::REFERENCE_LEVEL, func: oltanis_lightning::UPDATE_FN, classes: &oltanis_lightning::CLASSES, update: oltanis_lightning::update, joints: &[] },
+    UnitPort { unit: "U501 684 bolt", level: oltanis_lightning::REFERENCE_LEVEL, func: oltanis_lightning::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U498 610", level: oltanis_wind::REFERENCE_LEVEL, func: oltanis_wind::UPDATE_FN, classes: &oltanis_wind::CLASSES, update: oltanis_wind::update, joints: &[] },
+    UnitPort { unit: "U498 610 motes", level: oltanis_wind::REFERENCE_LEVEL, func: oltanis_wind::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U492 31", level: oltanis_drone::REFERENCE_LEVEL, func: oltanis_drone::UPDATE_FN, classes: &oltanis_drone::CLASSES, update: oltanis_drone::update, joints: &oltanis_drone::CLASSES },
+    UnitPort { unit: "U643 81", level: oltanis_drone::REFERENCE_LEVEL, func: oltanis_drone::PIECE_FN, classes: &oltanis_drone::PIECE_CLASSES, update: oltanis_drone::piece_update, joints: &[] },
+    UnitPort { unit: "U644 1193", level: oltanis_drone::REFERENCE_LEVEL, func: oltanis_drone::GRENADE_FN, classes: &oltanis_drone::GRENADE_CLASSES, update: oltanis_drone::grenade_update, joints: &[] },
+    UnitPort { unit: "U520 1417", level: oltanis_car::REFERENCE_LEVEL, func: oltanis_car::UPDATE_FN, classes: &oltanis_car::CLASSES, update: oltanis_car::update, joints: &oltanis_car::CLASSES },
+    UnitPort { unit: "U506 908", level: oltanis_carrier::REFERENCE_LEVEL, func: oltanis_carrier::FIGHTER_FN, classes: &oltanis_carrier::FIGHTER_CLASSES, update: oltanis_carrier::fighter_update, joints: &[] },
+    UnitPort { unit: "U512 1224", level: oltanis_bolt::REFERENCE_LEVEL, func: oltanis_bolt::UPDATE_FN, classes: &oltanis_bolt::CLASSES, update: oltanis_bolt::update, joints: &[] },
+    UnitPort { unit: "U512 1224 bolt", level: oltanis_bolt::REFERENCE_LEVEL, func: oltanis_bolt::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U493 211", level: oltanis_rail_bot::REFERENCE_LEVEL, func: oltanis_rail_bot::UPDATE_FN, classes: &oltanis_rail_bot::CLASSES, update: oltanis_rail_bot::update, joints: &oltanis_rail_bot::CLASSES },
+    UnitPort { unit: "U493 211 glows", level: oltanis_rail_bot::REFERENCE_LEVEL, func: oltanis_rail_bot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U490 28", level: oltanis_zapper::REFERENCE_LEVEL, func: oltanis_zapper::UPDATE_FN, classes: &oltanis_zapper::CLASSES, update: oltanis_zapper::update, joints: &oltanis_zapper::CLASSES },
+    UnitPort { unit: "U490 28 glows", level: oltanis_zapper::REFERENCE_LEVEL, func: oltanis_zapper::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U641 325 glow", level: oltanis_zapper::REFERENCE_LEVEL, func: oltanis_zapper::PIECE_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U641 325", level: oltanis_zapper::REFERENCE_LEVEL, func: oltanis_zapper::PIECE_FN, classes: &oltanis_zapper::PIECE_CLASSES, update: oltanis_zapper::piece_update, joints: &[] },
+    UnitPort { unit: "U642 403", level: oltanis_zapper::REFERENCE_LEVEL, func: oltanis_zapper::SPARK_PIECE_FN, classes: &oltanis_zapper::SPARK_PIECE_CLASSES, update: oltanis_zapper::spark_piece_update, joints: &[] },
+    UnitPort { unit: "U514 1331", level: oltanis_arcs::REFERENCE_LEVEL, func: oltanis_arcs::UPDATE_FN, classes: &oltanis_arcs::CLASSES, update: oltanis_arcs::update, joints: &[] },
+    UnitPort { unit: "U514 1331 arcs", level: oltanis_arcs::REFERENCE_LEVEL, func: oltanis_arcs::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U488 8", level: oltanis_sentry::REFERENCE_LEVEL, func: oltanis_sentry::UPDATE_FN, classes: &oltanis_sentry::CLASSES, update: oltanis_sentry::update, joints: &oltanis_sentry::CLASSES },
+    UnitPort { unit: "U488 8 cones", level: oltanis_sentry::REFERENCE_LEVEL, func: oltanis_sentry::MASTER_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U488 8 spot", level: oltanis_sentry::REFERENCE_LEVEL, func: oltanis_sentry::SPOT_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U507 921", level: oltanis_carrier::REFERENCE_LEVEL, func: oltanis_carrier::CARRIER_FN, classes: &oltanis_carrier::CARRIER_CLASSES, update: oltanis_carrier::carrier_update, joints: &[] },
+    UnitPort { unit: "U508 922", level: oltanis_carrier::REFERENCE_LEVEL, func: oltanis_carrier::MISSILE_FN, classes: &oltanis_carrier::MISSILE_CLASSES, update: oltanis_carrier::missile_update, joints: &[] },
+    UnitPort { unit: "U496 386", level: oltanis_arc::REFERENCE_LEVEL, func: oltanis_arc::UPDATE_FN, classes: &oltanis_arc::CLASSES, update: oltanis_arc::update, joints: &[] },
+    UnitPort { unit: "U496 386 ribbons", level: oltanis_arc::REFERENCE_LEVEL, func: oltanis_arc::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U519 1416", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::PAD_FN, classes: &oltanis_small::PAD_CLASSES, update: oltanis_small::pad_update, joints: &[] },
+    UnitPort { unit: "U523 1559", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::SKILL_FN, classes: &oltanis_small::SKILL_CLASSES, update: oltanis_small::skill_update, joints: &[] },
+    UnitPort { unit: "U517 1395", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::STAIRS_FN, classes: &oltanis_small::STAIRS_CLASSES, update: oltanis_small::stairs_update, joints: &[] },
+    UnitPort { unit: "U499 643", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::MINE_FN, classes: &oltanis_small::MINE_CLASSES, update: oltanis_small::mine_update, joints: &[] },
+    UnitPort { unit: "U515 1352", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::RISER_FN, classes: &oltanis_small::RISER_CLASSES, update: oltanis_small::riser_update, joints: &[] },
+    UnitPort { unit: "U494 250", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::HATCH_FN, classes: &oltanis_small::HATCH_CLASSES, update: oltanis_small::hatch_update, joints: &[] },
+    UnitPort { unit: "U495 309", level: oltanis_small::REFERENCE_LEVEL, func: oltanis_small::FLOAT_FN, classes: &oltanis_small::FLOAT_CLASSES, update: oltanis_small::float_update, joints: &[] },
     UnitPort { unit: "U480 1403", level: gemlik_small::REFERENCE_LEVEL, func: gemlik_small::TRACKER_FN, classes: &gemlik_small::TRACKER_CLASSES, update: gemlik_small::tracker_update, joints: &[] },
     UnitPort { unit: "U481 1558", level: gemlik_small::REFERENCE_LEVEL, func: gemlik_small::THRUSTERS_FN, classes: &gemlik_small::THRUSTERS_CLASSES, update: gemlik_small::thrusters_update, joints: &[] },
     UnitPort { unit: "U477 1270", level: gemlik_lift::REFERENCE_LEVEL, func: gemlik_lift::TIP_FN, classes: &gemlik_lift::TIP_CLASSES, update: gemlik_lift::tip_update, joints: &[] },
@@ -1113,6 +1185,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U308 324", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::BASE_FN, classes: &gaspar_cannon::BASE_CLASSES, update: empty::update, joints: &[] },
     UnitPort { unit: "U308 1258", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::SHELL_FN, classes: &gaspar_cannon::SHELL_CLASSES, update: gaspar_cannon::shell_update, joints: &[] },
     UnitPort { unit: "U305 1150", level: crate::moby_update::classes::path_platform::GASPAR_LEVEL, func: crate::moby_update::classes::path_platform::GASPAR_FN, classes: &crate::moby_update::classes::path_platform::GASPAR_CLASSES, update: crate::moby_update::classes::path_platform::gaspar_update, joints: &[] },
+    UnitPort { unit: "U487 903", level: crate::moby_update::classes::path_platform::OLTANIS_LEVEL, func: crate::moby_update::classes::path_platform::OLTANIS_FN, classes: &crate::moby_update::classes::path_platform::OLTANIS_CLASSES, update: crate::moby_update::classes::path_platform::oltanis_update, joints: &[] },
     UnitPort { unit: "U302 276", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::UPDATE_FN, classes: &gaspar_breakable::CLASSES, update: gaspar_breakable::update, joints: &[] },
     UnitPort { unit: "U302 320", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::CHUNK_FN, classes: &gaspar_breakable::CHUNK_CLASSES, update: gaspar_breakable::chunk_update, joints: &[] },
     UnitPort { unit: "U302 1300", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::LAST_FN, classes: &gaspar_breakable::LAST_CLASSES, update: empty::update, joints: &[] },
@@ -1263,6 +1336,12 @@ pub struct Globals {
     pub blarg_bubble: Option<std::sync::Arc<blarg_gadgetbot::Bubble>>,
     /// The Snagglebeast's tongue and its draws' inputs (`umbris_beast_fx`).
     pub umbris_beast: umbris_beast_fx::Fx,
+    /// Oltanis's and Quartu's three arc slots (`oltanis_arcs`, level14 0x162148.. / 0x1edd40..).
+    pub oltanis_arcs: oltanis_arcs::Arcs,
+    /// Oltanis's lightning strike (`oltanis_lightning`, level14 0x161cb4.. / 0x1dfd80..).
+    pub oltanis_lightning: oltanis_lightning::Lightning,
+    /// Oltanis's searchlight cones' colours and the draws' camera (`oltanis_sentry`, level14 0x1d80c8..).
+    pub oltanis_sentry: oltanis_sentry::Cone,
     /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
     /// during its cutaways): the points, to put back.
     pub parked_paths: std::collections::HashMap<usize, Vec<[u32; 4]>>,
@@ -1369,6 +1448,10 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((hoven_fall::REFERENCE_LEVEL, hoven_fall::DRAW_FN)) => hoven_fall::fx_quads(table, svc, id),
         Some((hoven_arc::REFERENCE_LEVEL, hoven_arc::DRAW_FN)) => hoven_arc::fx_quads(table, svc, id),
         Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::fx_quads(table, svc, id),
+        Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::PIECE_DRAW_FN)) => oltanis_zapper::piece_quads(table, svc, id),
+        Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::SPOT_FN)) => oltanis_sentry::spot_quads(table, svc, id),
+        Some((oltanis_bolt::REFERENCE_LEVEL, oltanis_bolt::DRAW_FN)) => oltanis_bolt::fx_quads(table, svc, id),
+        Some((oltanis_wind::REFERENCE_LEVEL, oltanis_wind::DRAW_FN)) => oltanis_wind::fx_quads(table, svc, id),
         Some((gemlik_robot::REFERENCE_LEVEL, gemlik_robot::DRAW_FN)) => gemlik_robot::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
         Some((kalebo_lift::REFERENCE_LEVEL, kalebo_lift::GLOW_FN)) => kalebo_lift::fx_quads(table, svc, id),
@@ -1412,6 +1495,12 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
         Some((blarg_glass::REFERENCE_LEVEL, f)) if blarg_glass::DRAW_FNS.contains(&f) => blarg_glass::fx_quad_groups(table, svc, f),
         Some((blarg_bot_pad::REFERENCE_LEVEL, blarg_bot_pad::DRAW_FN)) => blarg_bot_pad::fx_quad_groups(table, svc, id),
         Some((orxon_airlock::REFERENCE_LEVEL, orxon_airlock::DRAW_FN)) => orxon_airlock::fx_quad_groups(table, svc, id),
+        Some((oltanis_arc::REFERENCE_LEVEL, oltanis_arc::DRAW_FN)) => oltanis_arc::fx_quad_groups(table, svc, id),
+        Some((oltanis_arcs::REFERENCE_LEVEL, oltanis_arcs::DRAW_FN)) => oltanis_arcs::fx_quad_groups(table, svc, id),
+        Some((oltanis_lightning::REFERENCE_LEVEL, oltanis_lightning::DRAW_FN)) => oltanis_lightning::fx_quad_groups(table, svc, id),
+        Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::DRAW_FN)) => oltanis_zapper::fx_quad_groups(table, svc, id),
+        Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::MASTER_DRAW_FN)) => oltanis_sentry::fx_quad_groups(table, svc, id),
+        Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::fx_quad_groups(table, svc, id),
         Some((1, crate::shadows::BLOB_FN)) => {
             let quads = svc.blobs.1.iter().filter(|b| b.0 == id).map(|(_, b)| {
                 let (corners, st) = crate::shadows::blob_quad(b);
@@ -1460,6 +1549,15 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((batalia_flame::REFERENCE_LEVEL, batalia_flame::DRAW_FN)) => batalia_flame::frame(w, id),
         Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::frame(w, id),
         Some((gemlik_robot::REFERENCE_LEVEL, gemlik_robot::DRAW_FN)) => gemlik_robot::frame(w, id),
+        Some((oltanis_arc::REFERENCE_LEVEL, oltanis_arc::DRAW_FN)) => oltanis_arc::frame(w, id),
+        Some((oltanis_arcs::REFERENCE_LEVEL, oltanis_arcs::DRAW_FN)) => oltanis_arcs::frame(w, id),
+        Some((oltanis_lightning::REFERENCE_LEVEL, oltanis_lightning::DRAW_FN)) => oltanis_lightning::frame(w, id),
+        Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::DRAW_FN)) => oltanis_zapper::frame(w, id),
+        Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::MASTER_DRAW_FN | oltanis_sentry::SPOT_FN)) => oltanis_sentry::frame(w, id),
+        Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::frame(w, id),
+        Some((oltanis_bolt::REFERENCE_LEVEL, oltanis_bolt::DRAW_FN)) => oltanis_bolt::frame(w, id),
+        Some((oltanis_wind::REFERENCE_LEVEL, oltanis_wind::DRAW_FN)) => oltanis_wind::frame(w, id),
+        Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::PIECE_DRAW_FN)) => oltanis_zapper::piece_frame(w, id),
         Some((umbris_beast_fx::REFERENCE_LEVEL, f @ (umbris_beast_fx::BEAM_FN | umbris_beast_fx::GROUND_FN))) => umbris_beast_fx::frame(w, f, id),
         _ => {}
     }

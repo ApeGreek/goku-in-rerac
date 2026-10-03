@@ -29,6 +29,7 @@
 //! | | the target lost (kind 2 or outside the cuboid), the timer done, the animation wrapped in sequence 3 → wake timer ticks(300), → 3, sequence 2, speed 1 | [`update`] |
 //! | state 5 (entered by other code) | f = timer·+0x78: z = home − (0.7 − 0.7·f), yaw = home + (sweep − home)·f (sic); sequence 4 wrapped → sequence 0, speed 1; timer < ticks(30): collision off; done → 1, yaw home, timer ticks(60), raise 0, re-arm timer ticks(+0x94), mode & ~0x1000, z = home − 0.7 | [`update`] |
 //! | state 6 | `SpawnBeamExplosion(0, 0, 2, 1, 9, 1, 15, m, +0x40, pos, 5, 2, 4, sound 0, shake, debris 1, −1, 0)` (level14 0x2667d0), `DeleteMoby` | [`update`] (`fx::beam_explosion`) |
+//! | `0x2b44a8` / `0x2b4670` / `0x2b4500` | the sentries' group calls: raise the sunk ones; any raised (or none alive); sink the risen ones once the rest are down (state 5's entry: sequence 4, timer ticks(60) (gp−0x56f4), speed 1/(timer·0.08333) (gp−0x56f0), sweep = yaw) | [`raise_group`], [`any_raised`], [`lower_group`] |
 //!
 //! ## Coverage: the shot 681 (`0x2eccf0`, `0x2ece00`)
 //!
@@ -127,6 +128,58 @@ fn cut(w: &mut World, id: MobyId, seq: u8) {
 }
 
 fn wrapped_in(w: &World, id: MobyId, seq: u8) -> bool { w.m(id).anim.flags & 2 != 0 && w.m(id).anim.seq_a == seq }
+
+// ---------------------------------------------------------------------------------------------------
+// The group calls the searchlight sentries 8 make on their turret group (`super::oltanis_sentry`).
+
+fn group(w: &World, g: i32) -> Vec<MobyId> { crate::moby_update::scheduler::group_walk(w, g, crate::moby_update::scheduler::GroupWalk::Any) }
+fn alive(w: &World, m: MobyId) -> bool { (w.m(m).state as i8) >= 0 }
+
+/// `0x2b44a8(g)`: every turret of group `g` waiting sunk (state 1) told to rise (+0x88 = 1).
+pub fn raise_group(w: &mut World, g: i32) {
+    for m in group(w, g) {
+        if w.m(m).state == 1 && w.m(m).pvars.len() >= pv::SIZE { c::set_pi16(w, m, pv::RAISE, 1); }
+    }
+}
+
+/// `0x2b4670(g)`: no list, a live turret told to rise, or no live turret at all.
+pub fn any_raised(w: &World, g: i32) -> bool {
+    let list = group(w, g);
+    if list.is_empty() { return true; }
+    let mut live = 0;
+    for m in list {
+        if !alive(w, m) { continue; }
+        live += 1;
+        if w.m(m).pvars.len() >= pv::SIZE && c::pi16(w, m, pv::RAISE) != 0 { return true; }
+    }
+    live == 0
+}
+
+/// `0x2b4500(g)`: once every turret not woken (+0x8b = 0) is sunk or sinking (state 1 / 5), the risen ones (state 3)
+/// sink: sequence 4, state 5, the timer `ticks(60)` (gp−0x56f4) with its inverse, the animation speed 1/(timer·0.08333),
+/// the sweep = the yaw, +0x8b and the raise cleared. Returns whether they did (no list: false).
+pub fn lower_group(w: &mut World, g: i32) -> bool {
+    let list = group(w, g);
+    if list.is_empty() { return false; }
+    for &m in &list {
+        if w.m(m).pvars.len() < pv::SIZE { return false; }
+        if c::pu8(w, m, pv::WOKEN) == 0 && !matches!(w.m(m).state, 1 | 5) { return false; }
+    }
+    for m in list {
+        if w.m(m).state != 3 { continue; }
+        cut(w, m, 4);
+        w.mm(m).state = 5;
+        let t = w.ticks(k::RISE);
+        c::set_pi16(w, m, pv::TIMER, t as i16);
+        c::set_pf(w, m, pv::INV, 1.0 / t as f32);
+        w.mm(m).anim.speed = 1.0 / (t as i16 as f32 * k::RISE_RATE);
+        let yaw = w.m(m).rotation[2];
+        c::set_pf(w, m, pv::SWEEP, yaw);
+        c::set_pu8(w, m, pv::WOKEN, 0);
+        c::set_pi16(w, m, pv::RAISE, 0);
+    }
+    true
+}
 
 /// `0x2b4340` (module doc).
 pub fn hits(w: &mut World, id: MobyId) {

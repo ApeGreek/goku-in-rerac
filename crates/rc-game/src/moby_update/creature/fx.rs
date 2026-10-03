@@ -67,6 +67,44 @@ pub fn part23(w: &mut World, [jitter, lo, hi, size]: [f32; 4], p: V, spin: i32, 
     ok
 }
 
+/// `0x26cae0(out, lo, hi)` (level14 `0x260200`): two random angles, then a length `randf(lo, hi)`, as
+/// `polar(len, a, b)` (w 0).
+pub fn rand_vec_ab(w: &mut World, lo: f32, hi: f32) -> V {
+    let a = w.rng.rand_angle();
+    let b = w.rng.rand_angle();
+    let l = w.rng.randf(lo, hi);
+    let v = crate::targeting::polar(l, a, b);
+    [v[0], v[1], v[2], 0.0]
+}
+
+/// `PartType69Spawn(pos, vel, alpha, moby)` (level14 `0x27c5d8`, [`crate::particles::type69`]): the record's pool index.
+pub fn part69(w: &mut World, p: V, vel: V, alpha: i32, moby: Option<MobyId>) -> Option<usize> {
+    let Some(sys) = w.particles.as_deref_mut() else {
+        part_unported(w, 69);
+        return None;
+    };
+    *w.svc.fx.part_spawns.entry(69).or_default() += 1;
+    let i = crate::particles::type69::spawn(sys, w.rng, p, vel, alpha, moby.map_or(0, |m| m as u32 + 1));
+    if i.is_none() { w.svc.fx.part_failed += 1; }
+    i
+}
+
+/// [`part23`] returning the record's pool index for the caller's patch (`None`: no record, or no particle system).
+#[allow(clippy::too_many_arguments)]
+pub fn part23_rec(w: &mut World, [jitter, lo, hi, size]: [f32; 4], p: V, spin: i32, vel: V, rgba: u32) -> Option<usize> {
+    let Some(sys) = w.particles.as_deref_mut() else {
+        part_unported(w, 23);
+        return None;
+    };
+    *w.svc.fx.part_spawns.entry(23).or_default() += 1;
+    let i = crate::particles::type23::spawn(sys, w.rng, jitter, lo, hi, size, p, spin, vel, rgba);
+    if i.is_none() { w.svc.fx.part_failed += 1; }
+    i
+}
+
+/// The record `i` of the particle pool (after [`part23_rec`]).
+pub fn rec_mut<'a>(w: &'a mut World, i: usize) -> Option<&'a mut crate::particles::Record> { w.particles.as_deref_mut().and_then(|s| s.pool.recs.get_mut(i)) }
+
 /// One type-23 puff of [`jet_puffs`]: `PartType23Spawn(jitter, grow_lo, grow_hi, size, pos, spin, vel, rgba)` 0x282060
 /// with the callers' patch: timer +0x0a = `life`, byte 9 = 4 + 0x40, the rotation byte `randi(255)` when asked (drawn
 /// after the spawn, only with a record), phase 2 (+0x24) fading from +0x2a = `a0` over +0x2b = the timer's low byte.
@@ -144,6 +182,11 @@ fn spawn_part(w: &mut World, ty: u8, draws: impl FnOnce(&mut crate::rng::Rng), f
     let ok = f(p, w.rng).is_some();
     if !ok { w.svc.fx.part_failed += 1; }
     ok
+}
+
+/// `PartType19Spawn(pos, vel)` 0x281748 (the streak; `crate::particles::type19`): one `randi(6)` with a record.
+pub fn part19(w: &mut World, p: V, vel: V) -> bool {
+    spawn_part(w, 19, |r| { r.randi(6); }, |s, r| crate::particles::type19::spawn19(s, r, p, vel))
 }
 
 /// `PartType02Spawn` 0x27dc98 (the trail blob; `crate::particles::type02`): one `randf(0, 255)` with a record.

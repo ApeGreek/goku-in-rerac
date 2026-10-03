@@ -77,14 +77,46 @@ pub const GASPAR_FN: u32 = 0x30_33a0;
 pub const GASPAR_LEVEL: u32 = 9;
 pub const GASPAR_CLASSES: [i16; 2] = [1150, 1151];
 
+/// Oltanis's copy (level14 `0x2aba80`, class 903, census U487, 2 placed): the level01 platform with Gaspar's pause
+/// (within 2, more than 1 above Ratchet), but it springs onto its path point (0.005 / 0.2, velocity +0xd0) instead of
+/// snapping to it, and at rest springs onto the end it waits at (`0x2ac2b8`).
+pub const OLTANIS_FN: u32 = 0x2a_ba80;
+pub const OLTANIS_LEVEL: u32 = 14;
+pub const OLTANIS_CLASSES: [i16; 1] = [903];
+
+/// Which level's copy runs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Copy {
+    Novalis,
+    Gaspar,
+    Oltanis,
+}
+
 /// `PathPlatformUpdate` (0x2b9eb0).
-pub fn update(w: &mut World, id: MobyId) { run(w, id, false) }
+pub fn update(w: &mut World, id: MobyId) { run(w, id, Copy::Novalis) }
 
 /// Level09 `0x3033a0` ([`GASPAR_FN`]).
-pub fn gaspar_update(w: &mut World, id: MobyId) { run(w, id, true) }
+pub fn gaspar_update(w: &mut World, id: MobyId) { run(w, id, Copy::Gaspar) }
 
-fn run(w: &mut World, id: MobyId, gaspar: bool) {
+/// Level14 `0x2aba80` ([`OLTANIS_FN`]).
+pub fn oltanis_update(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < 0xe0 { w.mm(id).pvars.resize(0xe0, 0); }
+    run(w, id, Copy::Oltanis)
+}
+
+/// `Spring(t, 0.005, 0.2, 0, &pos.k, &vel.k)` toward `q` (level14: `0x2ac2b8` and the travel's placement).
+fn spring_to(w: &mut World, id: MobyId, q: [f32; 4]) {
+    for (k, &t) in q.iter().take(3).enumerate() {
+        let (mut x, mut v) = (crate::ps2v::Pf::f(w.m(id).position[k]), crate::ps2v::Pf::f(p::ff(&w.m(id).pvars, 0xd0 + 4 * k)));
+        crate::hero::physics::spring(crate::ps2v::Pf::f(t), crate::ps2v::Pf::b(0x3ba3_d70a), crate::ps2v::Pf::b(0x3e4c_cccd), crate::ps2v::Pf::ZERO, &mut x, &mut v);
+        w.mm(id).position[k] = x.to_f32();
+        p::set_ff(&mut w.mm(id).pvars, 0xd0 + 4 * k, v.to_f32());
+    }
+}
+
+fn run(w: &mut World, id: MobyId, v: Copy) {
     if w.m(id).pvars.len() < 0xd0 { return; }
+    let gaspar = v == Copy::Gaspar;
     let path = p::i32(&w.m(id).pvars, 0xb4);
     if path == -1 { return; }
     // 0x1b0930[path]: the live spline (other classes may edit the shared table).
@@ -168,8 +200,12 @@ fn run(w: &mut World, id: MobyId, gaspar: bool) {
             let ridden = p::i16(&w.m(id).pvars, 0xb8) != 0 && w.hero_on_moby(id);
             if ridden || dist3(hero, last) < dist3(hero, first) { depart(w, id, 1.0, gaspar); }
         }
-        2 => travel(w, id, &pts, hero, old, gaspar),
+        2 => travel(w, id, &pts, hero, old, v),
         _ => {}
+    }
+    if v == Copy::Oltanis && w.m(id).cmd != 2 {
+        let end = if 0.5 < p::ff(&w.m(id).pvars, 0xa4) { last } else { first };
+        spring_to(w, id, end);
     }
 
     // CarryRiders(pvar+0x60, pos − old, +0x40, +0x40).
@@ -200,7 +236,8 @@ fn depart(w: &mut World, id: MobyId, dir: f32, gaspar: bool) {
 
 /// State 2: pause for Ratchet below a descending platform, else ramp the step, advance `t`, arrive, and place
 /// the platform on the path (piecewise linear between the path points).
-fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32; 4], gaspar: bool) {
+fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32; 4], v: Copy) {
+    let gaspar = v == Copy::Gaspar;
     if !gaspar && p::i32(&w.m(id).pvars, 0xc8) == 0 && w.hero_on_moby(id) {
         // 0x13f544 = 4 (edge brake), 0x13f542 = 4 (jump lockout), through the hero-block writes.
         let f = w.hero_fields_mut();
@@ -209,7 +246,7 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
     }
     let pos = w.m(id).position;
     let mut pause = p::i16(&w.m(id).pvars, 0xba) != 0;
-    let (reach, under) = if gaspar { (2.0, 1.0) } else { (2.83, 0.9) };
+    let (reach, under) = if v == Copy::Novalis { (2.83, 0.9) } else { (2.0, 1.0) };
     if !pause && p::ff(&w.m(id).pvars, 0xbc) < 0.0 && dist_xy(pos, hero) < reach && (hero[2] - pos[2]).abs() < 4.0 && under < pos[2] - hero[2] {
         // Descending onto Ratchet: wait 30 ticks.
         let t = w.ticks(30);
@@ -255,17 +292,18 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
         p::set_i16(&mut m.pvars, 0xba, arrive_ticks as i16);
         arrived = true;
     }
-    let m = w.mm(id);
     let n1 = pts.len() as i32 - 1;
     let i = (n1 as f32 * t) as i32;
     let f = n1 as f32 * t - i as f32;
     let (iu, a) = (i as usize, pts[i.clamp(0, n1) as usize]);
-    m.position = if i == n1 {
+    let q = if i == n1 {
         a
     } else {
         let b = pts[iu + 1];
         [(b[0] - a[0]) * f + a[0], (b[1] - a[1]) * f + a[1], (b[2] - a[2]) * f + a[2], b[3]]
     };
+    if v == Copy::Oltanis { spring_to(w, id, q); } else { w.mm(id).position = q; }
+    let m = w.mm(id);
     p::set_ff(&mut m.pvars, 0xbc, m.position[2] - old[2]);
     // Arrived at a path end: the loop sound stops.
     if arrived { release_loop(w, id); }

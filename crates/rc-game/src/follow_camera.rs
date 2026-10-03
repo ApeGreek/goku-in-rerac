@@ -97,6 +97,8 @@ pub struct CameraView {
     pub euler: V4,
     /// 0x167450 / 0x167460 / 0x167470: forward, left, up.
     pub rows: [V4; 3],
+    /// The current camera's class (`[0x167280]+0x86`: [`Camera::current_class`]), as this update left it.
+    pub class: i32,
 }
 
 impl CameraView {
@@ -836,6 +838,7 @@ impl Camera {
         let (rows, pos) = self.blend.step(prev, rows, pos, crate::hero::physics::to_f32x3(inp.hero.plat_applied), &BlendHero::of(inp.hero));
         self.out.pos = pos;
         self.out.rows = rows;
+        self.out.class = self.current_class();
         let f = self.out.rows[0];
         // 0x2721f0: yaw = atan2(fwd.y, fwd.x); pitch / roll from the rows (see the module doc).
         let yaw = fast_arctan(f[0], f[1]);
