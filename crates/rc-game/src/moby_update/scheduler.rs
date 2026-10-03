@@ -388,6 +388,8 @@ impl Scheduler {
         // The last frame's draw callbacks (their state and rand parts), before any update: classes::draw_callbacks.
         classes::draw_callbacks::run_frame(w);
         w.svc.draw_callbacks.tick = w.counter + 1;
+        // The hits the last UpdateParts gave (type 58's fire: particles::type58).
+        part_hits(w);
         // The Hoverboard hero code's stores of the last hero update (classes::units::hoverboard).
         classes::units::hoverboard::apply(w);
         let (list, targets) = build_active_list(w.table, w.camera, &w.svc.groups);
@@ -546,5 +548,16 @@ pub fn add_visit_bits(s: &mut rc_formats::moby_spawn::SpawnSave, v: &crate::moby
         if l != level || id < 0 { continue; }
         let id = id as usize;
         if let Some(b) = s.killed.get_mut(id >> 3) { *b |= 1 << (id & 7); }
+    }
+}
+
+/// The hits the last `UpdateParts` gave Ratchet (`Particles::hits`: type 58's `0x26eaa8(damage, hero, owner, 1, pos,
+/// dir)`), as their hit records.
+fn part_hits(w: &mut World) {
+    let Some(hits) = w.particles.as_deref_mut().map(|p| std::mem::take(&mut p.hits)) else { return };
+    let Some(hero) = w.hero_moby else { return };
+    for h in hits {
+        let Some(owner) = (h.owner as usize).checked_sub(1).filter(|&o| o < w.table.mobys.len()) else { continue };
+        crate::moby_update::creature::attack::hit_moby(w, hero, owner, h.damage, 1, h.pos, h.dir);
     }
 }

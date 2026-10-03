@@ -250,6 +250,8 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U254 | 1046, 1049 the Snagglebeast's shockwave rings and spit globs (07), with its tongue, beam, shimmer and fire-line draws | level07 0x30e1f8, 0x30e458 | [`umbris_beast_fx`] |
+//! | U254 | 1106 Umbris' Snagglebeast (07): the arena walk between its platforms, the tongue grab, the stomp's rings, the spit, the beam and the fire sweep, the shimmer, the falls and the death | level07 0x314150 | [`umbris_beast`] |
 //! | U267 | 1059 Umbris' swamp beasts (07): cruising the swamp, swallowing Ratchet in the water, wading and biting, knocks | level07 0x30f5f0 | [`umbris_swamp`] |
 //! | U275 | 1126 Umbris' pop-up turrets and their shots 880 (07): the sweep, the bursts, down into the ground when hit | level07 0x31a250, 0x30b6a8 | [`umbris_turret`] |
 //! | U272 | 1110, 1112, 871 Umbris' floating mines (07): lone mines, the chain mines on their leader's path, the leader that revives them | level07 0x319040, 0x3196e0, 0x30b000 | [`umbris_mines`] |
@@ -318,6 +320,8 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod umbris_beast_fx;
+pub mod umbris_beast;
 pub mod umbris_swamp;
 pub mod umbris_turret;
 pub mod umbris_mines;
@@ -960,6 +964,14 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U254 1046", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::RING_FN, classes: &umbris_beast_fx::RING_CLASSES, update: umbris_beast_fx::ring_update, joints: &[] },
+    UnitPort { unit: "U254 1049", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::GLOB_FN, classes: &umbris_beast_fx::GLOB_CLASSES, update: umbris_beast_fx::glob_update, joints: &[] },
+    UnitPort { unit: "U254 1106 tongue", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::TONGUE_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U254 1106 beam", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::BEAM_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U254 1106 shimmer", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::SHIMMER_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U254 1106 fire line", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::GROUND_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U254 1046 ring", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::RING_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U254 1106", level: umbris_beast::REFERENCE_LEVEL, func: umbris_beast::UPDATE_FN, classes: &umbris_beast::CLASSES, update: umbris_beast::update, joints: &umbris_beast::CLASSES },
     UnitPort { unit: "U267 1059", level: umbris_swamp::REFERENCE_LEVEL, func: umbris_swamp::UPDATE_FN, classes: &umbris_swamp::CLASSES, update: umbris_swamp::update, joints: &umbris_swamp::CLASSES },
     UnitPort { unit: "U275 1126", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::UPDATE_FN, classes: &umbris_turret::CLASSES, update: umbris_turret::update, joints: &[] },
     UnitPort { unit: "U275 880", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::SHOT_FN, classes: &umbris_turret::SHOT_CLASSES, update: umbris_turret::shot_update, joints: &[] },
@@ -1070,6 +1082,8 @@ pub struct Globals {
     pub blarg_glass: Option<std::sync::Arc<blarg_glass::Meshes>>,
     /// Level 6's gadgetbot bubble mesh (`blarg_gadgetbot`; read from the overlay by the engine at the level load).
     pub blarg_bubble: Option<std::sync::Arc<blarg_gadgetbot::Bubble>>,
+    /// The Snagglebeast's tongue and its draws' inputs (`umbris_beast_fx`).
+    pub umbris_beast: umbris_beast_fx::Fx,
     /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
     /// during its cutaways): the points, to put back.
     pub parked_paths: std::collections::HashMap<usize, Vec<[u32; 4]>>,
@@ -1206,6 +1220,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
 pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Vec<FxQuads> {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::fx_quad_groups(svc),
+        Some((umbris_beast_fx::REFERENCE_LEVEL, f)) if umbris_beast_fx::DRAW_FNS.contains(&f) => umbris_beast_fx::quad_groups(table, svc, f, id),
         Some((energy_fan::REFERENCE_LEVEL, energy_fan::DRAW_FN)) => energy_fan::fx_quad_groups(table, svc, id),
         Some((blarg_glass::REFERENCE_LEVEL, f)) if blarg_glass::DRAW_FNS.contains(&f) => blarg_glass::fx_quad_groups(table, svc, f),
         Some((blarg_bot_pad::REFERENCE_LEVEL, blarg_bot_pad::DRAW_FN)) => blarg_bot_pad::fx_quad_groups(table, svc, id),
@@ -1253,6 +1268,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((pokitaru_jet::REFERENCE_LEVEL, pokitaru_jet_hud::HUD_FN)) => pokitaru_jet_hud::hud_frame(w, id),
         Some((fleet_ship::REFERENCE_LEVEL, fleet_ship_hud::HUD_FN)) => fleet_ship_hud::hud_frame(w, id),
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::frame(w, id),
+        Some((umbris_beast_fx::REFERENCE_LEVEL, f @ (umbris_beast_fx::BEAM_FN | umbris_beast_fx::GROUND_FN))) => umbris_beast_fx::frame(w, f, id),
         _ => {}
     }
 }

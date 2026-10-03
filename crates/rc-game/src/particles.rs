@@ -95,6 +95,7 @@ pub mod type52;
 pub mod type53;
 pub mod type56;
 pub mod type57;
+pub mod type58;
 pub mod type59;
 pub mod type60;
 pub mod type61;
@@ -423,6 +424,9 @@ pub struct Particles {
     pub grid: Option<std::sync::Arc<rc_formats::level::HeightGrid>>,
     /// The weather globals the weather emitter 1400 writes and types 0 / 73 read.
     pub weather: Weather,
+    /// The hits the updates give (type 58's emitter: `0x26eaa8` from inside `UpdateParts`), delivered by the moby
+    /// loop's next tick (`moby_update::scheduler`; G-PRT-008).
+    pub hits: Vec<type58::Hit>,
 }
 
 /// The weather globals (level 08's 1400 update `0x307cf0` writes them each tick; levels without weather leave them 0).
@@ -492,6 +496,7 @@ impl Particles {
         table[53] = Some(type53::update as UpdateFn);
         table[56] = Some(type56::update as UpdateFn);
         table[57] = Some(type57::update as UpdateFn);
+        table[58] = Some(type58::update as UpdateFn);
         table[59] = Some(type59::update as UpdateFn);
         table[60] = Some(type60::update as UpdateFn);
         table[55] = Some(type19::update55 as UpdateFn);
@@ -512,7 +517,7 @@ impl Particles {
         table[78] = Some(type78::update as UpdateFn);
         table[79] = Some(type79::update79 as UpdateFn);
         table[80] = Some(type79::update80 as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3], moby_frames: Default::default(), joint_frames: Default::default(), pvar_points: Default::default(), descs74: Vec::new(), gravity: [0.0, 0.0, -1.0], grid: None, weather: Weather::default() }
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3], moby_frames: Default::default(), joint_frames: Default::default(), pvar_points: Default::default(), descs74: Vec::new(), gravity: [0.0, 0.0, -1.0], grid: None, weather: Weather::default(), hits: Vec::new() }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -705,11 +710,11 @@ mod tests {
     #[test]
     fn update_parts_kills_unported_types_and_counts_them() {
         let mut s = Particles::new(None, Vec::new());
-        s.create_part(58);
+        s.create_part(40);
         s.create_part(63);
         s.update_parts(&mut Rng::new());
         assert_eq!(s.pool.count, 0);
-        assert_eq!(s.stats.unported_kills[58], 1);
+        assert_eq!(s.stats.unported_kills[40], 1);
         assert_eq!(s.stats.unported_kills[63], 1);
         assert!(s.table[25].is_some() && s.table[47].is_some() && s.table[60].is_some());
     }

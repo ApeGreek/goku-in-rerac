@@ -11,7 +11,9 @@
 //! 503 / 504 / 506–510 are in no class table; `classes::crate_`, G-CLS-009), and level04 0x2c6858 (Eudora's crank
 //! followers 432 ↔ 1052, `units::eudora_crank_follower`), two swaps (0x2c690c, 0x2c6a84). No other overlay writes a
 //! moby's +0xa6 outside `InitMobyInstance` (the other `sh 0xa6` stores of L01 `ElevatorUpdate` / L07 0x2fb830 are into
-//! pvar records).
+//! pvar records). The scan's pairing misses one bare store: level07's parked ship 529 (`0x2fbdb8`) writes +0xa6 =
+//! 0x215 alone each tick (no +0x22, no animation reset): a class word for its draw, ported in place by
+//! `units::umbris_small` (no row here: nothing of the swap's animation or table side runs).
 //!
 //! The swap of level04 0x2c690c (the same at 0x2c6a84), what it writes and what the port does:
 //!
