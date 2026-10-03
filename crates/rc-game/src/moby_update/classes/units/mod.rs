@@ -250,6 +250,10 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U286 | 671 Batalia's wreck flames (08): the swaying fire sheet, embers, sparks, the wandering light | level08 0x2f70a0, 0x2f5e58 | [`batalia_flame`] |
+//! | U276, U278, U279 | 444, 462, 463 Batalia's gunships (08): intro loops, the attack runs at the turret, missiles, pods knocked off; their parts 441–451, 464, 465 (falling, smoke, splash) | level08 0x2e24e8, 0x2e8cd0, 0x2e9b70, 0x2e16c0 | [`batalia_gunship`] |
+//! | U273 | 435 Batalia's bombers (crash through the walls) and the gunships' missiles (climb, then dive at the turret) | level08 0x2dd3c0 | [`batalia_bomber`] |
+//! | U275 | 440 Batalia's anti-aircraft turret (08): the seat, the stick, the shells, the waves of gunships and their missiles, the radar HUD, the end with the host | level08 0x2e0328 | [`batalia_turret`] |
 //! | U295 | 424 Batalia's ferries (08): the barge between three docks, the prompt, the ride with Ratchet held on its deck, the bob and the propeller | level08 0x2dbdb0 | [`batalia_ferry`] |
 //! | U292 | 253 Batalia's tanks, their treads 331 and shells 425 (08): the wall break, the crank gate, the patrol, the turret, the bouncing shells, the wreck | level08 0x2d42d8, 0x2da3c0, 0x2dc9a8 | [`batalia_tank`] |
 //! | U294 | 333 Batalia's grenadiers and their grenades 248 (08): the spots they hide in, the pop-up, the lob, the bounce, the knock-back, the smoke burst | level08 0x2dabf0, 0x2d23f0 | [`batalia_grenadier`] |
@@ -258,7 +262,7 @@
 //! | U254 | 1046, 1049 the Snagglebeast's shockwave rings and spit globs (07), with its tongue, beam, shimmer and fire-line draws | level07 0x30e1f8, 0x30e458 | [`umbris_beast_fx`] |
 //! | U254 | 1106 Umbris' Snagglebeast (07): the arena walk between its platforms, the tongue grab, the stomp's rings, the spit, the beam and the fire sweep, the shimmer, the falls and the death | level07 0x314150 | [`umbris_beast`] |
 //! | U267 | 1059 Umbris' swamp beasts (07): cruising the swamp, swallowing Ratchet in the water, wading and biting, knocks | level07 0x30f5f0 | [`umbris_swamp`] |
-//! | U275 | 1126 Umbris' pop-up turrets and their shots 880 (07): the sweep, the bursts, down into the ground when hit | level07 0x31a250, 0x30b6a8 | [`umbris_turret`] |
+//! | U258 | 1126 Umbris' pop-up turrets and their shots 880 (07): the sweep, the bursts, down into the ground when hit | level07 0x31a250, 0x30b6a8 | [`umbris_turret`] |
 //! | U272 | 1110, 1112, 871 Umbris' floating mines (07): lone mines, the chain mines on their leader's path, the leader that revives them | level07 0x319040, 0x3196e0, 0x30b000 | [`umbris_mines`] |
 //! | U258 | 529, 1789, 1552, 1133, 1142, 1113–1116 Umbris' small classes (07): the parked ship, scene jets and dust, the swinging part, the ammo drop, the beast's walls | level07 0x2fbdb8, 0x31f900, 0x31eba8, 0x31b3f0, 0x31d2e0, 0x319f48 | [`umbris_small`] |
 //! | U254 | 38, 1474 Umbris' path lifts (07): the ride from end to end, Ratchet held, the pause over him, the vanish and return | level07 0x2cd2b0, 0x2cdb28 | [`umbris_lift`] |
@@ -325,6 +329,10 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod batalia_flame;
+pub mod batalia_gunship;
+pub mod batalia_bomber;
+pub mod batalia_turret;
 pub mod batalia_ferry;
 pub mod batalia_tank;
 pub mod batalia_grenadier;
@@ -974,6 +982,15 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U286 671", level: batalia_flame::REFERENCE_LEVEL, func: batalia_flame::UPDATE_FN, classes: &batalia_flame::CLASSES, update: batalia_flame::update, joints: &[] },
+    UnitPort { unit: "U286 671 draw", level: batalia_flame::REFERENCE_LEVEL, func: batalia_flame::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U276 444", level: batalia_gunship::REFERENCE_LEVEL, func: batalia_gunship::BIG_FN, classes: &batalia_gunship::BIG_CLASSES, update: batalia_gunship::update, joints: &batalia_gunship::JOINT_CLASSES },
+    UnitPort { unit: "U278 462", level: batalia_gunship::REFERENCE_LEVEL, func: batalia_gunship::MID_FN, classes: &batalia_gunship::MID_CLASSES, update: batalia_gunship::update, joints: &batalia_gunship::JOINT_CLASSES },
+    UnitPort { unit: "U279 463", level: batalia_gunship::REFERENCE_LEVEL, func: batalia_gunship::SMALL_FN, classes: &batalia_gunship::SMALL_CLASSES, update: batalia_gunship::update, joints: &batalia_gunship::JOINT_CLASSES },
+    UnitPort { unit: "U276 parts", level: batalia_gunship::REFERENCE_LEVEL, func: batalia_gunship::PART_FN, classes: &batalia_gunship::PART_CLASSES, update: batalia_gunship::part_update, joints: &[] },
+    UnitPort { unit: "U273 435", level: batalia_bomber::REFERENCE_LEVEL, func: batalia_bomber::UPDATE_FN, classes: &batalia_bomber::CLASSES, update: batalia_bomber::update, joints: &[] },
+    UnitPort { unit: "U275 440", level: batalia_turret::REFERENCE_LEVEL, func: batalia_turret::UPDATE_FN, classes: &batalia_turret::CLASSES, update: batalia_turret::update, joints: &[] },
+    UnitPort { unit: "U275 440 hud", level: batalia_turret::REFERENCE_LEVEL, func: batalia_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U295 424", level: batalia_ferry::REFERENCE_LEVEL, func: batalia_ferry::UPDATE_FN, classes: &batalia_ferry::CLASSES, update: batalia_ferry::update, joints: &batalia_ferry::CLASSES },
     UnitPort { unit: "U292 253", level: batalia_tank::REFERENCE_LEVEL, func: batalia_tank::UPDATE_FN, classes: &batalia_tank::CLASSES, update: batalia_tank::update, joints: &batalia_tank::CLASSES },
     UnitPort { unit: "U292 331", level: batalia_tank::REFERENCE_LEVEL, func: batalia_tank::TREAD_FN, classes: &batalia_tank::TREAD_CLASSES, update: veldin_tank::tread_update, joints: &batalia_tank::TREAD_CLASSES },
@@ -997,8 +1014,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U254 1046 ring", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::RING_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U254 1106", level: umbris_beast::REFERENCE_LEVEL, func: umbris_beast::UPDATE_FN, classes: &umbris_beast::CLASSES, update: umbris_beast::update, joints: &umbris_beast::CLASSES },
     UnitPort { unit: "U267 1059", level: umbris_swamp::REFERENCE_LEVEL, func: umbris_swamp::UPDATE_FN, classes: &umbris_swamp::CLASSES, update: umbris_swamp::update, joints: &umbris_swamp::CLASSES },
-    UnitPort { unit: "U275 1126", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::UPDATE_FN, classes: &umbris_turret::CLASSES, update: umbris_turret::update, joints: &[] },
-    UnitPort { unit: "U275 880", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::SHOT_FN, classes: &umbris_turret::SHOT_CLASSES, update: umbris_turret::shot_update, joints: &[] },
+    UnitPort { unit: "U258 1126", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::UPDATE_FN, classes: &umbris_turret::CLASSES, update: umbris_turret::update, joints: &[] },
+    UnitPort { unit: "U258 880", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::SHOT_FN, classes: &umbris_turret::SHOT_CLASSES, update: umbris_turret::shot_update, joints: &[] },
     UnitPort { unit: "U272 1110", level: umbris_mines::REFERENCE_LEVEL, func: umbris_mines::LONE_FN, classes: &umbris_mines::LONE_CLASSES, update: umbris_mines::lone_update, joints: &[] },
     UnitPort { unit: "U273 1112", level: umbris_mines::REFERENCE_LEVEL, func: umbris_mines::CHAIN_FN, classes: &umbris_mines::CHAIN_CLASSES, update: umbris_mines::chain_update, joints: &[] },
     UnitPort { unit: "U260 871", level: umbris_mines::REFERENCE_LEVEL, func: umbris_mines::LEADER_FN, classes: &umbris_mines::LEADER_CLASSES, update: umbris_mines::leader_update, joints: &[] },
@@ -1234,6 +1251,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((blarg_laser_gate::REFERENCE_LEVEL, blarg_laser_gate::DRAW_FN)) => blarg_laser_gate::fx_quads(table, svc, id),
         Some((blarg_gadgetbot::REFERENCE_LEVEL, blarg_gadgetbot::BUBBLE_DRAW_FN)) => blarg_gadgetbot::bubble_quads(table, svc, id),
         Some((blarg_wave_bot::REFERENCE_LEVEL, blarg_wave_bot::DRAW_FN)) => blarg_wave_bot::fx_quads(table, svc, id),
+        Some((batalia_flame::REFERENCE_LEVEL, batalia_flame::DRAW_FN)) => batalia_flame::fx_quads(table, svc, id),
         Some((ship_fighter::REFERENCE_LEVEL, ship_fighter::TRAIL_FN)) | Some((ship_fighter::FLEET_LEVEL, ship_fighter::FLEET_TRAIL_FN)) => ship_fighter::trail_quads(table, svc, id),
         _ => None,
     }
@@ -1292,6 +1310,8 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((pokitaru_jet::REFERENCE_LEVEL, pokitaru_jet_hud::HUD_FN)) => pokitaru_jet_hud::hud_frame(w, id),
         Some((fleet_ship::REFERENCE_LEVEL, fleet_ship_hud::HUD_FN)) => fleet_ship_hud::hud_frame(w, id),
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::frame(w, id),
+        Some((batalia_turret::REFERENCE_LEVEL, batalia_turret::HUD_FN)) => batalia_turret::hud_frame(w, id),
+        Some((batalia_flame::REFERENCE_LEVEL, batalia_flame::DRAW_FN)) => batalia_flame::frame(w, id),
         Some((umbris_beast_fx::REFERENCE_LEVEL, f @ (umbris_beast_fx::BEAM_FN | umbris_beast_fx::GROUND_FN))) => umbris_beast_fx::frame(w, f, id),
         _ => {}
     }

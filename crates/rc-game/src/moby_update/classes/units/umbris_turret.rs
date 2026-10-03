@@ -1,4 +1,4 @@
-//! **Umbris' pop-up turrets, class 1126** (level07 `0x31a250`, 6 placed; census U275) and **their shots 880**
+//! **Umbris' pop-up turrets, class 1126** (level07 `0x31a250`, 6 placed; census U258) and **their shots 880**
 //! (`0x30b6a8`, made by the spawner `0x30b538`). The names are descriptive [L]. A turret sweeps back and forth between
 //! the bearings of two marker mobys (+0x70 / +0x74; a full turn without the second) at +0x78°/s, firing along its
 //! heading every 6 ticks (12 or 18 when Ratchet is far or it is out of view) in bursts: +0x94 shots then +0x98 ticks

@@ -45,6 +45,7 @@
 //! | state 1 | `NpcTalkUpdate` → `PlaceAfterScene(2.7)`; node 2: the checkpoint at cuboid +0x48, → 2, the turret +0x50: +0xbc = 1 and `SetState(0x32, 1)` (`0x2e1698`); node played 3: the item movie 1 (`0x2a1880`), → 5; node played 4: the death sequence (`0x222c50` = `0x2319b0`), node played := −1 | [`water_worker_update`] (`cinematic::item_movie`, `HeroCall::Death`) |
 //! | state 5 | `SetMissionDone(+0xb0)`, `GiveItem(27, 1)`, `memcard_Save`, `DeleteMoby` | [`water_worker_update`] |
 //! | tail | the look-at (records +0x60 / +0xe0, glance +0x160, s32 +0x174 / +0x178, yaw 0.7 / 0.3, k 0.03 when seen) | [`talking_npc::look_at_layout`] |
+//! | `0x306b30(host, k)` | the turret 440's call at the battle's end: → 1, auto (+0x08) = 1, the node (+0x36) 4 (the turret lost, k 0) or 3 (won, k 1); k −1 → the death sequence | [`host_talk`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::classes::talking_npc::{look_at_layout, LookLayout};
@@ -257,4 +258,13 @@ pub fn water_worker_update(w: &mut World, id: MobyId) {
         _ => {}
     }
     look_at_layout(w, id, &WORKER_LOOK);
+}
+
+/// `0x306b30(host, k)` (the 1283 table): the turret 440 hands the battle's end to the host, node 3 (won) or 4 (lost).
+pub fn host_talk(w: &mut World, host: MobyId, won: bool) {
+    w.mm(host).state = 1;
+    if w.m(host).pvars.len() < 0x38 { return; }
+    let pv = &mut w.mm(host).pvars;
+    p::set_u8(pv, talk::AUTO, 1);
+    p::set_i16(pv, talk::NODE, if won { 3 } else { 4 });
 }

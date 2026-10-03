@@ -525,15 +525,18 @@ fn draw(
             (SeaKind::Pool(pm), SeaData::Pool(d)) => {
                 // 1903 / 1919's callbacks `0x31db50` / `0x31e930` (rc_game::water::sea::pool_ref): L0 (with the shimmer's
                 // two FIX passes while its alpha is up) and L2 behind B's camera gate, L1's two scrolls always.
-                let (pr, tex) = (&run.pool, gs::pool_ref::FX.map(|t| t as usize));
+                let (pr, tex) = (&run.pool, pm.fx.map(|t| t as usize));
                 let full = gs::pool_drawn(pm, &m.pvars, &p.svc.volumes, cam);
                 let mut passes: Vec<(Tex, Blend, PrimBuf)> = Vec::new();
                 if full {
-                    passes.push((Tex::Fx(tex[0], false), Blend::Mix, strip_prims(&d.layers[0], pr.l0[0], None)));
+                    // L0: `ALPHA 0x44`, or (1649) `FIX << 32 | 0x64` drawn as the mix with As = FIX.
+                    passes.push((Tex::Fx(tex[0], d.l0_fix.is_some()), Blend::Mix, strip_prims(&d.layers[0], pr.l0[0], d.l0_fix)));
                     if pr.alpha != 0 {
-                        let fix = gs::pool_fix(d.fix_base, pr.alpha);
-                        passes.push((Tex::Fx(tex[1], true), Blend::Add, strip_prims(&d.layers[0], pr.l0[1], Some(fix))));
-                        passes.push((Tex::Fx(tex[1], true), Blend::Sub, strip_prims(&d.layers[0], pr.l0[2], Some(fix))));
+                        for k in 0..2 {
+                            let fix = gs::pool_fix(d.fix[k], pr.alpha);
+                            let blend = if pm.shimmer[k].0 { Blend::Add } else { Blend::Sub };
+                            passes.push((Tex::Fx(tex[1], true), blend, strip_prims(&d.layers[0], pr.l0[1 + k], Some(fix))));
+                        }
                     }
                 }
                 for k in 0..2 { passes.push((Tex::Fx(tex[2], false), Blend::Add, strip_prims(&d.layers[1], pr.l1[k], None))); }
