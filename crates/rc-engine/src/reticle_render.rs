@@ -52,7 +52,7 @@ fn draw(
             for (fx, q) in reticle_quads(r, c) {
                 let mut prims = PrimBuf::default();
                 prims.quad(q, RETICLE_ST, [r.style.rgba; 4]);
-                groups.push(FxGroup { fx, additive: r.style.additive, prims });
+                groups.push(FxGroup { fx, additive: r.style.additive, subtract: false, prims });
             }
         }
     }

@@ -212,5 +212,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         let (rows, at) = frame_k(m.rotation, m.position, k);
         svc.units.blarg_gates.quads(rows, at, (a, COLOUR_B), 0.25, s_off, &mut quads);
     }
-    Some(FxQuads { fx: super::blarg_barrier::FX, additive: true, quads })
+    Some(FxQuads { fx: super::blarg_barrier::FX, additive: true, subtract: false, quads })
 }

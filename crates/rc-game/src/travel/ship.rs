@@ -257,7 +257,7 @@ pub fn shadow_quads(m: &Moby, ship: usize, ground: Option<f32>, cam: [f32; 3], v
         let r = rotate(&m.rows, [x, y, 0.0]);
         [r[0] + c[0], r[1] + c[1], z]
     });
-    Some(FxQuads { fx: FX_SHADOW, additive: false, quads: vec![FxQuad { corners, st: SHADOW_ST, rgba: [rgba; 4] }] })
+    Some(FxQuads { fx: FX_SHADOW, additive: false, subtract: false, quads: vec![FxQuad { corners, st: SHADOW_ST, rgba: [rgba; 4] }] })
 }
 
 /// `RegisterDrawCallback(0x2a2ab8, ship)`: the flames (their rand runs in the frame's callbacks, [`flames_frame`]).
@@ -290,7 +290,7 @@ pub fn flame_quads(m: &Moby, rows: &[[f32; 4]; 4], ship: usize, extra: &[i32]) -
         let rgba = intensity << 24 | colour;
         quads.push(FxQuad { corners, st: FLAME_ST, rgba: [rgba; 4] });
     }
-    FxQuads { fx: FX_FLAME, additive: true, quads }
+    FxQuads { fx: FX_FLAME, additive: true, subtract: false, quads }
 }
 
 /// The trail ring (0x13e0f0 / 0x13e2f0) with its head (0x13e080) and count (0x13e084).
@@ -366,7 +366,7 @@ pub fn trail_quads(t: &Trail, ship: usize, flight: bool) -> FxQuads {
             quads.push(FxQuad { corners, st: TRAIL_ST, rgba });
         }
     }
-    FxQuads { fx: if flight { FX_TRAIL_FLIGHT } else { FX_TRAIL }, additive: true, quads }
+    FxQuads { fx: if flight { FX_TRAIL_FLIGHT } else { FX_TRAIL }, additive: true, subtract: false, quads }
 }
 
 /// The exhaust `fun_0022f5b0(z, moby)` (0x2a3eb8): six type-2 puffs at the ship's vents (module docs).

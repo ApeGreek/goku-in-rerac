@@ -410,7 +410,7 @@ fn draw(
                 let st = q.map(|i| [cone.uv[i][0], cone.uv[i][1] + scroll]);
                 b.quad(p, st, q.map(|i| cone.rgba[i]));
             }
-            crate::fx_draw::FxGroup { fx: CONE_FX, additive: false, prims: b }
+            crate::fx_draw::FxGroup { fx: CONE_FX, additive: false, subtract: false, prims: b }
         };
         if let (Some((_, pos, rows)), Some(scroll)) = (d.vendor, d.cone) {
             groups.push(quads(&l.cone, &|v| vendor::to_world(&rows, pos, v), scroll));
@@ -439,7 +439,7 @@ fn draw(
             let rgba = (((1.0 - t) * 128.0) as i32 as u32) << 24 | 0x80_8080;
             let mut pb = crate::fx_draw::PrimBuf::default();
             pb.quad(corners.map(turn), [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], [rgba; 4]);
-            groups.push(crate::fx_draw::FxGroup { fx: SCAN_FX, additive: false, prims: pb });
+            groups.push(crate::fx_draw::FxGroup { fx: SCAN_FX, additive: false, subtract: false, prims: pb });
         }
     }
     let fog = fog.map(|f| f.uniform).unwrap_or_else(|| crate::game_camera::TfragFog::new(&lv.fog));

@@ -265,7 +265,7 @@ pub fn lob_quads(table: &crate::moby_runtime::MobyTable, _svc: &crate::moby_upda
     let rgba = crate::hud::tween_color((s + 1.0) * 0.5, 0x8000_20f0, 0x8000_f0f0);
     let off = [[1.0, 1.0], [1.0, -1.0], [-1.0, 1.0], [-1.0, -1.0]];
     let corners = off.map(|o| [at[0] + o[0], at[1] + o[1], at[2] + 0.1]);
-    Some(FxQuads { fx: 0xd, additive: false, quads: vec![FxQuad { corners, st: [[1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [0.0, 1.0]], rgba: [rgba; 4] }] })
+    Some(FxQuads { fx: 0xd, additive: false, subtract: false, quads: vec![FxQuad { corners, st: [[1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [0.0, 1.0]], rgba: [rgba; 4] }] })
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -488,7 +488,7 @@ fn band_quads(b: &Band, pos: c::V, r: f32, ph: f32, fade: f32) -> FxQuads {
             });
         }
     }
-    FxQuads { fx: 0xe, additive: true, quads }
+    FxQuads { fx: 0xe, additive: true, subtract: false, quads }
 }
 
 /// `0x2dba20`: the ring's bands ([`band_quads`]: radius +0x24, phase `+0x24·0.1` (gp−0x4f8c), fade `(+0x28 −

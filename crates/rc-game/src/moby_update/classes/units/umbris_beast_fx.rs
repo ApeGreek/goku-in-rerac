@@ -290,7 +290,7 @@ pub fn ring_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQua
         band += 0.1;
         grey = (grey.wrapping_sub(0xb)) & 0xff;
     }
-    Some(FxQuads { fx: tex, additive: true, quads })
+    Some(FxQuads { fx: tex, additive: true, subtract: false, quads })
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -777,7 +777,7 @@ pub fn tongue_quads(svc: &Services) -> Option<FxQuads> {
             tt = t1;
         }
     }
-    Some(FxQuads { fx: 0x15, additive: true, quads })
+    Some(FxQuads { fx: 0x15, additive: true, subtract: false, quads })
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -874,7 +874,7 @@ pub fn ground_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQ
     let side = c::set_len3(cross([cam[0], cam[1], cam[2], 0.0], seg), 0.25);
     let v = |q: V| [q[0], q[1], q[2]];
     let quad = FxQuad { corners: [v(jp), v(c::add(jp, side)), v(far), v(c::add(far, side))], st: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], rgba: [0x8080_8080; 4] };
-    Some(FxQuads { fx: 0x3b, additive: true, quads: vec![quad] })
+    Some(FxQuads { fx: 0x3b, additive: true, subtract: false, quads: vec![quad] })
 }
 
 /// `0x3131b0` / `0x312e70` (module doc).
@@ -913,7 +913,7 @@ pub fn beam_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<Vec<F
             prev = e;
             x += step;
         }
-        out.push(FxQuads { fx: 0x3d, additive: true, quads });
+        out.push(FxQuads { fx: 0x3d, additive: true, subtract: false, quads });
     }
     Some(out)
 }
@@ -954,7 +954,7 @@ pub fn shimmer_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<Fx
         }
         a += std::f32::consts::FRAC_PI_8;
     }
-    Some(FxQuads { fx: 0x3c, additive: true, quads })
+    Some(FxQuads { fx: 0x3c, additive: true, subtract: false, quads })
 }
 
 /// The draw rows' quads (`units::fx_quad_groups`).

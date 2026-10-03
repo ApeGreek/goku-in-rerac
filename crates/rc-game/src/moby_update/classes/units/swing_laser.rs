@@ -198,7 +198,7 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         std::array::from_fn(|k| e3[k] - b[k]),
         std::array::from_fn(|k| e3[k] + b[k]),
     ];
-    Some(FxQuads { fx: FX, additive: true, quads: vec![FxQuad { corners, st: ST, rgba: [BEAM_RGBA; 4] }] })
+    Some(FxQuads { fx: FX, additive: true, subtract: false, quads: vec![FxQuad { corners, st: ST, rgba: [BEAM_RGBA; 4] }] })
 }
 
 #[cfg(test)]

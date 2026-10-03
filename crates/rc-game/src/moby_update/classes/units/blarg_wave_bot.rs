@@ -249,7 +249,7 @@ pub fn fx_quads(table: &MobyTable, _svc: &Services, id: MobyId) -> Option<FxQuad
         up[3][2] += 0.25;
         quads.push(FxQuad { corners: up, st, rgba });
     }
-    Some(FxQuads { fx: FX, additive: false, quads })
+    Some(FxQuads { fx: FX, additive: false, subtract: false, quads })
 }
 
 /// States 5 / 0xc (module doc).

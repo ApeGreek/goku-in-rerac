@@ -165,11 +165,11 @@ pub fn fx_quad_groups(_table: &MobyTable, svc: &Services, f: u32) -> Vec<FxQuads
         let (pitch, yaw) = (f32::from_bits(svc.units.word(CAM_PITCH_KEY)), f32::from_bits(svc.units.word(CAM_YAW_KEY)));
         let off = [SCROLL_K * yaw, SCROLL_K * pitch];
         vec![
-            FxQuads { fx: FX_GLASS, additive: false, quads: quads(svc, i, off, GLASS_RGBA, cam) },
-            FxQuads { fx: FX_SHINE, additive: false, quads: quads(svc, i, [0.0; 2], SHINE_RGBA, cam) },
+            FxQuads { fx: FX_GLASS, additive: false, subtract: false, quads: quads(svc, i, off, GLASS_RGBA, cam) },
+            FxQuads { fx: FX_SHINE, additive: false, subtract: false, quads: quads(svc, i, [0.0; 2], SHINE_RGBA, cam) },
         ]
     } else {
-        vec![FxQuads { fx: FX_GLASS, additive: false, quads: quads(svc, i, [0.0; 2], GLASS_RGBA, cam) }]
+        vec![FxQuads { fx: FX_GLASS, additive: false, subtract: false, quads: quads(svc, i, [0.0; 2], GLASS_RGBA, cam) }]
     }
 }
 

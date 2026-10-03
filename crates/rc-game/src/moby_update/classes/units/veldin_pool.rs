@@ -196,5 +196,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         let st = q.iter().map(|&(_, s)| mesh.st.get(s as usize).map(|s| [s[0] + scroll, s[1]])).collect::<Option<Vec<_>>>()?;
         Some(FxQuad { corners: corners.try_into().ok()?, st: st.try_into().ok()?, rgba: [RGBA; 4] })
     }).collect();
-    Some(FxQuads { fx: FX, additive: false, quads })
+    Some(FxQuads { fx: FX, additive: false, subtract: false, quads })
 }

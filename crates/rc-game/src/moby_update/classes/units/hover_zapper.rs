@@ -415,5 +415,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         }
         quads.push(FxQuad { corners: vs.map(world), st: ARC_ST, rgba: ARC_RGBA });
     }
-    Some(FxQuads { fx: ARC_FX, additive: true, quads })
+    Some(FxQuads { fx: ARC_FX, additive: true, subtract: false, quads })
 }

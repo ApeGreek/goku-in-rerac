@@ -170,5 +170,5 @@ fn glow(w: &mut World, id: MobyId) {
 pub fn fx_quads(table: &MobyTable, _svc: &Services, id: MobyId) -> Option<FxQuads> {
     let m = table.mobys.get(id).filter(|m| m.pvars.len() >= QUAD + 48)?;
     let corners = std::array::from_fn(|k| std::array::from_fn(|j| p::ff(&m.pvars, QUAD + 12 * k + 4 * j)));
-    Some(FxQuads { fx: 0xb, additive: true, quads: vec![FxQuad { corners, st: ST, rgba: [0x2020_20ff; 4] }] })
+    Some(FxQuads { fx: 0xb, additive: true, subtract: false, quads: vec![FxQuad { corners, st: ST, rgba: [0x2020_20ff; 4] }] })
 }

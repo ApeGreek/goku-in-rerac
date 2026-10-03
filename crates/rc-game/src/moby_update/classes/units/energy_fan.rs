@@ -164,6 +164,6 @@ pub fn fx_quad_groups(table: &MobyTable, _svc: &Services, id: MobyId) -> Vec<FxQ
         let at = frame(p::ff(pv, RINGS + 4 * r), m.rotation, m.position);
         FxQuad { corners: std::array::from_fn(|q| at(RING[q])), st: RING_ST, rgba: [RING_RGBA; 4] }
     }).collect();
-    vec![FxQuads { fx: BLADE_FX, additive: false, quads: blades }, FxQuads { fx: RING_FX, additive: false, quads: rings }]
+    vec![FxQuads { fx: BLADE_FX, additive: false, subtract: false, quads: blades }, FxQuads { fx: RING_FX, additive: false, subtract: false, quads: rings }]
 }
 

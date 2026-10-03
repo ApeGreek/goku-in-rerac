@@ -1361,7 +1361,7 @@ pub fn beam_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         t += step;
         at = add(at, dir);
     }
-    Some(super::FxQuads { fx: 0x34, additive: true, quads: out })
+    Some(super::FxQuads { fx: 0x34, additive: true, subtract: false, quads: out })
 }
 
 fn cross(a: [f32; 4], b: [f32; 4]) -> [f32; 4] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0], 0.0] }

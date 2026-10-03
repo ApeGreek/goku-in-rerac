@@ -202,7 +202,7 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
             quads.push(FxQuad { corners: [at(0.0, -HALF), at(0.0, HALF), at(1.0, -HALF), at(1.0, HALF)], st: ST, rgba: [BEAM_RGBA; 4] });
         }
     }
-    Some(FxQuads { fx: FX, additive: true, quads })
+    Some(FxQuads { fx: FX, additive: true, subtract: false, quads })
 }
 
 /// Level16 0x2e36e8: the wall (module doc).

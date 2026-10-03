@@ -200,5 +200,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId, layer_b: bool) ->
         quads.push(FxQuad { corners, st, rgba });
         for v in local.iter_mut() { v[0] += step; }
     }
-    Some(FxQuads { fx: if layer_b { FX_B } else { FX_A }, additive: false, quads })
+    Some(FxQuads { fx: if layer_b { FX_B } else { FX_A }, additive: false, subtract: false, quads })
 }

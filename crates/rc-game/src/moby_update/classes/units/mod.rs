@@ -250,6 +250,7 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U369 | 1378 Orxon's air curtains: no air on their front (the O2 Mask's cue), their six-layer shimmer | level10 0x2e9028, 0x2e91b8 | [`orxon_airlock`] |
 //! | U363 | 1229 Orxon's gun drones (10): the rise, the patrol and the shots at Ratchet or Clank's bots, the muzzle flash, the flight away; their shots 819 | level10 0x2e4a88, 0x2cc2e8 | [`orxon_drone`] |
 //! | U349 | 702 Orxon's flame vents (10): the on / off bursts of flame lines (particle type 40) and the roar | level10 0x2c7a20 | [`orxon_flame`] |
 //! | U347 | 351, 1301 Clank's teleport pads on Orxon (10): the jump between partners, the sparkles and rings, the camera's settle | level10 0x2be858 | [`orxon_pads`] |
@@ -341,6 +342,7 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod orxon_airlock;
 pub mod orxon_drone;
 pub mod orxon_flame;
 pub mod orxon_pads;
@@ -1005,6 +1007,9 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U369 1378", level: orxon_airlock::REFERENCE_LEVEL, func: orxon_airlock::UPDATE_FN, classes: &orxon_airlock::CLASSES, update: orxon_airlock::update, joints: &[] },
+    // Draw callback only (1378's shimmer: `Callback::UnitQuads`, six groups).
+    UnitPort { unit: "U369 1378 shimmer", level: orxon_airlock::REFERENCE_LEVEL, func: orxon_airlock::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U363 1229", level: orxon_drone::REFERENCE_LEVEL, func: orxon_drone::UPDATE_FN, classes: &orxon_drone::CLASSES, update: orxon_drone::update, joints: &orxon_drone::CLASSES },
     UnitPort { unit: "U363 819", level: orxon_drone::REFERENCE_LEVEL, func: orxon_drone::SHOT_FN, classes: &orxon_drone::SHOT_CLASSES, update: orxon_drone::shot_update, joints: &[] },
     UnitPort { unit: "U349 702", level: orxon_flame::REFERENCE_LEVEL, func: orxon_flame::UPDATE_FN, classes: &orxon_flame::CLASSES, update: orxon_flame::update, joints: &[] },
@@ -1277,6 +1282,8 @@ pub struct FxQuad {
 pub struct FxQuads {
     pub fx: usize,
     pub additive: bool,
+    /// The colour taken off the frame (`(Cd − Cs)·FIX`, FIX 0x80: the vertex alpha 0x80); over `additive`.
+    pub subtract: bool,
     pub quads: Vec<FxQuad>,
 }
 
@@ -1327,12 +1334,13 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
         Some((energy_fan::REFERENCE_LEVEL, energy_fan::DRAW_FN)) => energy_fan::fx_quad_groups(table, svc, id),
         Some((blarg_glass::REFERENCE_LEVEL, f)) if blarg_glass::DRAW_FNS.contains(&f) => blarg_glass::fx_quad_groups(table, svc, f),
         Some((blarg_bot_pad::REFERENCE_LEVEL, blarg_bot_pad::DRAW_FN)) => blarg_bot_pad::fx_quad_groups(table, svc, id),
+        Some((orxon_airlock::REFERENCE_LEVEL, orxon_airlock::DRAW_FN)) => orxon_airlock::fx_quad_groups(table, svc, id),
         Some((1, crate::shadows::BLOB_FN)) => {
             let quads = svc.blobs.1.iter().filter(|b| b.0 == id).map(|(_, b)| {
                 let (corners, st) = crate::shadows::blob_quad(b);
                 FxQuad { corners, st, rgba: [0x4080_8080; 4] }
             }).collect();
-            vec![FxQuads { fx: 0, additive: false, quads }]
+            vec![FxQuads { fx: 0, additive: false, subtract: false, quads }]
         }
         Some((super::burning_wreck::REFERENCE_LEVEL, super::burning_wreck::DRAW_FN)) => super::burning_wreck::fx_quads(table, svc, id).into_iter().collect(),
         Some((veldin_finale_fx::REFERENCE_LEVEL, f)) if [veldin_finale_fx::FLASH_FN, veldin_finale_fx::GLOW_FN, veldin_finale_fx::BEAM_FN, veldin_finale_fx::MORPH_FN].contains(&f) => veldin_finale_fx::fx_quad_groups(svc, f),

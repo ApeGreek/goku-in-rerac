@@ -48,7 +48,7 @@ fn draw(
             let g = rc_game::hero::physics::to_f32x3(p.game.hero.gravity_dir);
             for q in rc_game::hero::tesla::beam_quads(t, eye, g) {
                 // One group per texture, in the callback's order.
-                if groups.last().is_none_or(|l| l.fx != q.fx) { groups.push(FxGroup { fx: q.fx, additive: true, prims: PrimBuf::default() }); }
+                if groups.last().is_none_or(|l| l.fx != q.fx) { groups.push(FxGroup { fx: q.fx, additive: true, subtract: false, prims: PrimBuf::default() }); }
                 groups.last_mut().unwrap().prims.quad(q.corners, q.st, q.rgba);
             }
         }

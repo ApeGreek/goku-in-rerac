@@ -784,10 +784,10 @@ fn glows(w: &mut World, k: usize, cam: [f32; 4], g: [f32; 4]) -> Vec<FxQuads> {
     let c2 = glow_quad(tip, cam, g, size2, j, 0xffff_ffff);
     let d = glow_quad(tip, cam, g, size2 * 3.0, [0.0; 4], 0x607f_4040);
     vec![
-        FxQuads { fx: 0xb, additive: false, quads: vec![a] },
-        FxQuads { fx: 0xb, additive: true, quads: vec![b] },
-        FxQuads { fx: 0xb, additive: false, quads: vec![c2] },
-        FxQuads { fx: 0xb, additive: true, quads: vec![d] },
+        FxQuads { fx: 0xb, additive: false, subtract: false, quads: vec![a] },
+        FxQuads { fx: 0xb, additive: true, subtract: false, quads: vec![b] },
+        FxQuads { fx: 0xb, additive: false, subtract: false, quads: vec![c2] },
+        FxQuads { fx: 0xb, additive: true, subtract: false, quads: vec![d] },
     ]
 }
 
@@ -840,7 +840,7 @@ fn ribbon(s: &Slot, fr: &[[f32; 4]; 4], strand: &[[f32; 4]; 20], cam: [f32; 4], 
         // corners, which were made with the old width: `prev` stays as drawn).
     }
     vec![
-        FxQuads { fx: fx_a.max(0) as usize, additive: true, quads: qa },
-        FxQuads { fx: fx_b.max(0) as usize, additive: true, quads: qb },
+        FxQuads { fx: fx_a.max(0) as usize, additive: true, subtract: false, quads: qa },
+        FxQuads { fx: fx_b.max(0) as usize, additive: true, subtract: false, quads: qb },
     ]
 }

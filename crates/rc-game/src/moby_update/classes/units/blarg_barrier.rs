@@ -275,5 +275,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         let (rows, at) = beam_frame(m.rotation, m.position, k);
         b.quads(rows, at, COLOURS, S_STEP, s_off, &mut quads);
     }
-    Some(FxQuads { fx: FX, additive: true, quads })
+    Some(FxQuads { fx: FX, additive: true, subtract: false, quads })
 }

@@ -257,7 +257,7 @@ fn draw_fx(
         if let Some(c) = d.planet {
             let mut b = PrimBuf::default();
             b.quad(c, rc_game::travel::ship::SHADOW_ST, [0x8080_8080; 4]);
-            planet.push(FxGroup { fx: PLANET_FX, additive: false, prims: b });
+            planet.push(FxGroup { fx: PLANET_FX, additive: false, subtract: false, prims: b });
         }
         if let Some(p) = play.as_deref() {
             let tr = &p.svc.travel;
@@ -265,7 +265,7 @@ fn draw_fx(
                 let g = rc_game::travel::ship::trail_quads(&tr.trail, rc_game::travel::ship_index(tr.ship), true);
                 let mut b = PrimBuf::default();
                 for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
-                groups.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
+                groups.push(FxGroup { fx: g.fx, additive: g.additive, subtract: g.subtract, prims: b });
             }
             if let (Some((o_class, m)), Some(t)) = (d.glass, level.0.water.fx.ship_glass.as_ref()) {
                 if let Some(g) = t.of(o_class) {

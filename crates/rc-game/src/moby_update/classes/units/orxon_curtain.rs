@@ -251,7 +251,7 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
             }
         }
     }
-    Some(FxQuads { fx: 0xe, additive: true, quads })
+    Some(FxQuads { fx: 0xe, additive: true, subtract: false, quads })
 }
 
 fn barrier_of(w: &World, id: MobyId) -> Option<MobyId> {

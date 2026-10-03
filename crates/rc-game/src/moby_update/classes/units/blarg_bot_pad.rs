@@ -190,5 +190,5 @@ pub fn fx_quad_groups(table: &MobyTable, _svc: &Services, id: MobyId) -> Vec<FxQ
     });
     let rgba = ((((1.0 - rise) * 128.0) as i32 as u32) << 24) | 0x0080_8080;
     let square = FxQuad { corners, st: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], rgba: [rgba; 4] };
-    vec![FxQuads { fx: ARROW_FX, additive: false, quads: arrow }, FxQuads { fx: SQUARE_FX, additive: false, quads: vec![square] }]
+    vec![FxQuads { fx: ARROW_FX, additive: false, subtract: false, quads: arrow }, FxQuads { fx: SQUARE_FX, additive: false, subtract: false, quads: vec![square] }]
 }

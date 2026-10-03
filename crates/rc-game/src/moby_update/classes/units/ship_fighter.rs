@@ -457,7 +457,7 @@ pub fn trail_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upd
             }
         }
     }
-    Some(super::FxQuads { fx: 0x13, additive: true, quads })
+    Some(super::FxQuads { fx: 0x13, additive: true, subtract: false, quads })
 }
 
 /// Level11 `0x31a758(g)`: the group's fighters (`class`) on an attack run.

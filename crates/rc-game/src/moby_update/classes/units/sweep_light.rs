@@ -128,7 +128,7 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
             quads.push(FxQuad { corners, st: ST, rgba });
         }
     }
-    Some(FxQuads { fx: FX, additive: true, quads })
+    Some(FxQuads { fx: FX, additive: true, subtract: false, quads })
 }
 
 #[cfg(test)]

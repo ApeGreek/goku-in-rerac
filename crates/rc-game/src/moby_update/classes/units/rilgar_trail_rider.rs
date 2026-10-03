@@ -238,7 +238,7 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
             }
         }
     }
-    Some(FxQuads { fx: TRAIL_FX, additive: true, quads })
+    Some(FxQuads { fx: TRAIL_FX, additive: true, subtract: false, quads })
 }
 
 /// `0x2d6f48`: the group's joint glows (module doc; draw only).

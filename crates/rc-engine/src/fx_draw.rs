@@ -246,6 +246,8 @@ impl PrimBuf {
 pub struct FxGroup {
     pub fx: usize,
     pub additive: bool,
+    /// [`FxPrimParams::subtract`] (over `additive`).
+    pub subtract: bool,
     pub prims: PrimBuf,
 }
 
@@ -290,7 +292,7 @@ impl FxSlots {
             let show = !g.prims.is_empty() && img.is_some();
             if show {
                 let img = img.expect("checked");
-                let params = FxPrimParams::blend(g.additive);
+                let params = if g.subtract { FxPrimParams::subtract() } else { FxPrimParams::blend(g.additive) };
                 match &mut self.slots[k] {
                     Some((_, mesh, mat, _)) => {
                         if let Some(mut m) = a.meshes.get_mut(&*mesh) { g.prims.write(&mut m); }
@@ -603,7 +605,7 @@ pub fn nanotech_prims(t: &NanotechTables, g: &rc_game::moby_update::classes::pic
     for (a, b) in [(0usize, 0x94usize), (146, 146 + 0x6d), (254, 254 + 0x24)] {
         sphere.strip((a..b.min(t.verts.len())).map(|i| (xform(&basis, p, t.verts[i]), t.st[i], t.rgba[i])));
     }
-    out.push(FxGroup { fx: t.sphere_fx as usize, additive: t.sphere_additive, prims: sphere });
+    out.push(FxGroup { fx: t.sphere_fx as usize, additive: t.sphere_additive, subtract: false, prims: sphere });
     // 2. The halo ring, pulsing with the bob.
     let pulse = g.bob / t.bob_amp;
     let a = ((pulse * 64.0 + 128.0) as i32).wrapping_add(t.halo_alpha_add) as u32;
@@ -616,7 +618,7 @@ pub fn nanotech_prims(t: &NanotechTables, g: &rc_game::moby_update::classes::pic
         });
         halo.quad(pts, [[0.5, 0.5], [0.5, 0.5], [0.5, 1.0], [0.5, 1.0]], [c, c, 0, 0]);
     }
-    out.push(FxGroup { fx: HALO_FX, additive: true, prims: halo });
+    out.push(FxGroup { fx: HALO_FX, additive: true, subtract: false, prims: halo });
     // 3. The crate glass's sheen, while on the crate.
     let mut glass = PrimBuf::default();
     if g.on_crate {
@@ -632,7 +634,7 @@ pub fn nanotech_prims(t: &NanotechTables, g: &rc_game::moby_update::classes::pic
             glass.quad(pts, st, [GLASS_RGBA; 4]);
         }
     }
-    out.push(FxGroup { fx: t.glass_fx as usize, additive: false, prims: glass });
+    out.push(FxGroup { fx: t.glass_fx as usize, additive: false, subtract: false, prims: glass });
     out
 }
 
@@ -662,7 +664,7 @@ pub fn vendor_glow_points(rows: &[[f32; 3]; 3], pos: [f32; 3], glow: u32, cam: [
         let p = xform(rows, pos, [a.cos() * 1.1, a.sin() * 1.1, 0.59]);
         glow_quad(&mut b, f32::from_bits(0x3e08_7fcc), 0.0, p, rgba, cam);
     }
-    FxGroup { fx: GLOW_FX, additive: true, prims: b }
+    FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b }
 }
 
 /// `M·(x, y, z, w)`: rows 0..2 the axes, row 3 the point (`0x221608`).
@@ -722,7 +724,7 @@ pub fn ship_glass_prims(g: &ShipGlass, m: &[[f32; 4]; 4], cam: [f32; 3], live: b
         let k = q.map(|i| i as usize);
         prims.quad(k.map(|i| world[i]), k.map(|i| st[i]), [g.rgba; 4]);
     }
-    FxGroup { fx: SHIP_GLASS_FX, additive: false, prims }
+    FxGroup { fx: SHIP_GLASS_FX, additive: false, subtract: false, prims }
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -812,7 +814,7 @@ fn draw_list1(
                         if quads.is_empty() { continue; }
                         let mut b = PrimBuf::default();
                         for q in quads { glow_quad(&mut b, q.size, q.pull, q.point, q.rgba, cam); }
-                        out.push(FxGroup { fx: GLOW_FX, additive: true, prims: b });
+                        out.push(FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b });
                     }
                     // A census unit port's quads (the laser fences 838, …).
                     Callback::UnitQuads(i) => {
@@ -820,7 +822,7 @@ fn draw_list1(
                             if g.quads.is_empty() { continue; }
                             let mut b = PrimBuf::default();
                             for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
-                            out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
+                            out.push(FxGroup { fx: g.fx, additive: g.additive, subtract: g.subtract, prims: b });
                         }
                     }
                     // The ship's shadow (`0x2a2130`), flames (`0x2a2ab8`) and trail (`0x2a2d28`): rc_game::travel::ship's quads.
@@ -837,7 +839,7 @@ fn draw_list1(
                         let Some(g) = g.filter(|g| !g.quads.is_empty()) else { continue };
                         let mut b = PrimBuf::default();
                         for q in g.quads { b.quad(q.corners, q.st, q.rgba); }
-                        out.push(FxGroup { fx: g.fx, additive: g.additive, prims: b });
+                        out.push(FxGroup { fx: g.fx, additive: g.additive, subtract: g.subtract, prims: b });
                     }
                     // Drawn by crate::water_render / crate::sea_render; the Walloper's arcs by crate::walloper_render; the
                     // range static by crate::visibomb_view.
@@ -847,14 +849,14 @@ fn draw_list1(
                         if s.quads.is_empty() { continue; }
                         let mut b = PrimBuf::default();
                         for (q, rgba) in &s.quads { b.quad(*q, rc_game::moby_update::classes::buried_bolts::SCAN_ST, [*rgba; 4]); }
-                        out.push(FxGroup { fx: rc_game::moby_update::classes::buried_bolts::SCAN_FX, additive: true, prims: b });
+                        out.push(FxGroup { fx: rc_game::moby_update::classes::buried_bolts::SCAN_FX, additive: true, subtract: false, prims: b });
                     }
                     // The disguise's glow quads (`0x229440` body 3: `0x2781d0(0.2, 0.08, point, 0x141634)`).
                     Callback::DisguiseGlow => {
                         let Some((pts, rgba)) = cbs.disguise else { continue };
                         let mut b = PrimBuf::default();
                         for pt in pts { glow_quad(&mut b, 0.2, 0.08, pt, rgba, cam); }
-                        out.push(FxGroup { fx: GLOW_FX, additive: true, prims: b });
+                        out.push(FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b });
                     }
                     // The Trespasser lock's minigame is 2-D: crate::scene_render draws it.
                     Callback::TrespasserRings => {}

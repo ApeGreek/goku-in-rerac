@@ -49,7 +49,7 @@ fn draw(
             let g = rc_game::hero::physics::to_f32x3(p.game.hero.gravity_dir);
             let dim = p.svc.draw_callbacks.walloper_dim.unwrap_or(true);
             for q in rc_game::hero::walloper::draw_quads(w, eye, g, dim) {
-                if groups.last().is_none_or(|l| l.fx != q.fx) { groups.push(FxGroup { fx: q.fx, additive: true, prims: PrimBuf::default() }); }
+                if groups.last().is_none_or(|l| l.fx != q.fx) { groups.push(FxGroup { fx: q.fx, additive: true, subtract: false, prims: PrimBuf::default() }); }
                 groups.last_mut().unwrap().prims.quad(q.corners, q.st, q.rgba);
             }
         }

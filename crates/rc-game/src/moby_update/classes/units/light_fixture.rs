@@ -208,7 +208,7 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
     let colour = crate::moby_update::services::pvar::u32(&m.pvars, 0x68);
     let corners = CORNERS.map(|[y, z]| std::array::from_fn(|k| (f[1][k] * y + f[2][k] * z) * size + f[3][k]));
     let rgba = alpha << 24 | colour;
-    Some(FxQuads { fx: FX, additive: true, quads: vec![FxQuad { corners, st: ST, rgba: [rgba; 4] }] })
+    Some(FxQuads { fx: FX, additive: true, subtract: false, quads: vec![FxQuad { corners, st: ST, rgba: [rgba; 4] }] })
 }
 
 #[cfg(test)]

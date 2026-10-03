@@ -388,7 +388,7 @@ pub fn beam_quads(table: &crate::moby_runtime::MobyTable, _svc: &crate::moby_upd
     let rgba = crate::hud::tween_color(s, 0x0000_00ff, 0x8000_ffff);
     let at = |v: usize| { let q = crate::moby_update::services::pvar::v4f(&m.pvars, pv::BEAM + 0x10 * v); [q[0], q[1], q[2]] };
     let quad = super::FxQuad { corners: [at(0), at(1), at(2), at(3)], st: [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]], rgba: [rgba; 4] };
-    Some(super::FxQuads { fx: 6, additive: true, quads: vec![quad] })
+    Some(super::FxQuads { fx: 6, additive: true, subtract: false, quads: vec![quad] })
 }
 
 /// `0x2fca98` (draw only): each member of the registering hopper's group of class 1906 in states 1..5: glow quads

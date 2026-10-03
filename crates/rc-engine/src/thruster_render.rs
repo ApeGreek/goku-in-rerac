@@ -162,9 +162,9 @@ pub fn flame_prims(t: &FlameTables, st: &[[f32; 2]], d: &FlameDraw, cam: [f32; 3
         mesh.strip((a..(a + n).min(g.mesh.len())).map(|i| (g.mesh[i], st[i], t.rgba[i])));
     }
     vec![
-        FxGroup { fx: QUAD_FX, additive: true, prims: quads },
-        FxGroup { fx: GLOW_FX, additive: true, prims: glow },
-        FxGroup { fx: MESH_FX, additive: true, prims: mesh },
+        FxGroup { fx: QUAD_FX, additive: true, subtract: false, prims: quads },
+        FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: glow },
+        FxGroup { fx: MESH_FX, additive: true, subtract: false, prims: mesh },
     ]
 }
 

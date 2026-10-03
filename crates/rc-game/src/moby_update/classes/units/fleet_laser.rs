@@ -240,5 +240,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         [e[0] - b[0], e[1] - b[1], e[2] - b[2]],
         [e[0] + b[0], e[1] + b[1], e[2] + b[2]],
     ];
-    Some(FxQuads { fx: FX, additive: true, quads: vec![FxQuad { corners, st: ST, rgba: [BEAM_RGBA; 4] }] })
+    Some(FxQuads { fx: FX, additive: true, subtract: false, quads: vec![FxQuad { corners, st: ST, rgba: [BEAM_RGBA; 4] }] })
 }

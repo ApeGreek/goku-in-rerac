@@ -48,18 +48,18 @@ fn draw(
         let r = &p.game.hero.weapons.reactive;
         let id = p.game.hero.items.slot.id;
         if id == rc_game::hero::suck_cannon::SUCK_CANNON && r.suck.vortex.drawn == Some(last) {
-            let mut g = FxGroup { fx: rc_game::hero::suck_vortex::FX, additive: true, prims: PrimBuf::default() };
+            let mut g = FxGroup { fx: rc_game::hero::suck_vortex::FX, additive: true, subtract: false, prims: PrimBuf::default() };
             for q in r.suck.vortex.quads(p.game.camera.out.pos_f32()) { g.prims.quad(q.corners, q.st, q.rgba); }
             vortex.push(g);
         }
         if id == rc_game::hero::taunter::TAUNTER && r.taunter.rings.drawn == Some(last) {
-            let mut g = FxGroup { fx: rc_game::hero::taunter::RING_FX, additive: true, prims: PrimBuf::default() };
+            let mut g = FxGroup { fx: rc_game::hero::taunter::RING_FX, additive: true, subtract: false, prims: PrimBuf::default() };
             for (c, st, rgba) in r.taunter.rings.quads() { g.prims.quad(c, st, rgba); }
             rings.push(g);
         }
         if id == rc_game::hero::morph_ray::MORPH && r.morph.beam.drawn == Some(last) {
             for (fx, c, st, rgba) in r.morph.beam.quads(p.game.camera.out.pos_f32()) {
-                if morph.last().is_none_or(|g| g.fx != fx) { morph.push(FxGroup { fx, additive: true, prims: PrimBuf::default() }); }
+                if morph.last().is_none_or(|g| g.fx != fx) { morph.push(FxGroup { fx, additive: true, subtract: false, prims: PrimBuf::default() }); }
                 morph.last_mut().unwrap().prims.quad(c, st, rgba);
             }
         }

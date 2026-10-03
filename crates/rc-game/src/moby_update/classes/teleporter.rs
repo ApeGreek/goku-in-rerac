@@ -389,5 +389,5 @@ pub fn beam_quads_at(table: &MobyTable, id: MobyId, off: usize) -> Option<FxQuad
             FxQuad { corners, st: BEAM_ST, rgba: [BEAM_RGBA; 4] }
         })
         .collect();
-    Some(FxQuads { fx: BEAM_FX, additive: true, quads })
+    Some(FxQuads { fx: BEAM_FX, additive: true, subtract: false, quads })
 }

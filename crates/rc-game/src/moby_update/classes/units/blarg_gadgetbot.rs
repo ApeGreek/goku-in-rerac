@@ -1259,7 +1259,7 @@ pub fn bubble_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQ
         let st = q.map(|(v, s)| if near { env[v as usize] } else { mesh.st.get(s as usize).copied().unwrap_or_default() });
         quads.push(FxQuad { corners, st, rgba: [BUBBLE_RGBA; 4] });
     }
-    Some(FxQuads { fx: BUBBLE_FX, additive: false, quads })
+    Some(FxQuads { fx: BUBBLE_FX, additive: false, subtract: false, quads })
 }
 
 /// Level06 `0x2d8c20`: the marker 303 under a bot pulses with it while it sleeps (its owner +0xb8 in state < 2:

@@ -169,5 +169,5 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         }
         z += step;
     }
-    Some(FxQuads { fx: GLOW_FX, additive: true, quads })
+    Some(FxQuads { fx: GLOW_FX, additive: true, subtract: false, quads })
 }

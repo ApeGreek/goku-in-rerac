@@ -253,7 +253,7 @@ fn piece_glow(w: &mut World, id: MobyId) {
     let t = flat(FLASH_QUAD, false);
     let quads = vec![quad(t, [1.0, 4.0, 4.0], f, p, 0x00ff_ffff | a), quad(t, [1.0, 7.0, 7.0], f, p, 0x0010_50ff | a)];
     let piece = w.svc.units.veldin_finale.piece;
-    register(w, id, piece, GLOW_FN, vec![FxQuads { fx: 0xb, additive: true, quads }]);
+    register(w, id, piece, GLOW_FN, vec![FxQuads { fx: 0xb, additive: true, subtract: false, quads }]);
 }
 
 /// `0x2f9eb8` (module table).
@@ -267,7 +267,7 @@ fn piece_beam(w: &mut World, id: MobyId) {
     let t = flat(FLASH_QUAD, true);
     let quads = [(2.0, 0xffff_ffff), (2.5, 0x7f10_50ff), (3.0, 0x7f10_50ff)].map(|(k, rgba)| quad(t, [len, 1.0, k], frame, p, rgba)).to_vec();
     let piece = w.svc.units.veldin_finale.piece;
-    register(w, id, piece, BEAM_FN, vec![FxQuads { fx: 0xb, additive: true, quads }]);
+    register(w, id, piece, BEAM_FN, vec![FxQuads { fx: 0xb, additive: true, subtract: false, quads }]);
 }
 
 /// `0x2f9780` (module table).
@@ -280,7 +280,7 @@ fn flash(w: &mut World, id: MobyId, actor0: Option<MobyId>) {
     let s = w.svc.units.veldin_finale.flash;
     let t = flat(FLASH_QUAD, false);
     let quads = [(1.0, 0x7f7f_7f7f), (0.75, 0xffff_ffff), (0.5, 0xffff_ffff)].map(|(k, rgba)| quad(t, [s * k; 3], f, p, rgba)).to_vec();
-    register(w, id, actor0, FLASH_FN, vec![FxQuads { fx: 0xb, additive: true, quads }]);
+    register(w, id, actor0, FLASH_FN, vec![FxQuads { fx: 0xb, additive: true, subtract: false, quads }]);
 }
 
 /// `0x2f9a98` for actor `a` (module table).
@@ -362,7 +362,7 @@ fn morph_beam(w: &mut World, id: MobyId, a: &SceneActorState) {
         let q = FxQuad { corners, st, rgba };
         match groups.last_mut() {
             Some(g) if g.fx == fx => g.quads.push(q),
-            _ => groups.push(FxQuads { fx, additive: true, quads: vec![q] }),
+            _ => groups.push(FxQuads { fx, additive: true, subtract: false, quads: vec![q] }),
         }
     }
     w.svc.units.veldin_finale.morph = beam;
