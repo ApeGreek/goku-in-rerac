@@ -11,7 +11,8 @@
 //! +0x1c = the half-width, +0x2c = 1, velocity +0x30 = vel, +0x3c = floor.
 //!
 //! **Update**: the floor +0x3c above end 1, or end 1 outside [0, 512] in x or y → killed. Else d = vel +
-//! the weather's camera step (0x160250: the camera's move this tick, written by 1400); end 2 += d, end 1 += d. Unless
+//! the weather's camera step (0x160250: the camera's move this tick, written by 1400); end 2 += d, end 1 += d (xyz: the
+//! w lanes hold the half-width +0x1c and the width factor +0x2c). Unless
 //! the kind is 2, when end 2 crossed into another height-grid cell: floor = the weather floor (0x160260) or, when that
 //! is not above the grid's height at end 2, that height (`0x278020`); end 2 below it → killed. vel.z −= 9.8·dt²; +0x3c
 //! = floor (the old one when no new cell) + the camera step's z. No RNG.
@@ -66,10 +67,11 @@ pub fn update(sys: &mut Particles, i: usize, _rng: &mut Rng) {
     }
     let (ox, oy) = (rec::ff(r, 0x20), rec::ff(r, 0x24));
     let v = rec::v4(r, 0x30);
-    let d: [f32; 4] = std::array::from_fn(|k| v[k] + wind[k]);
+    // xyz only: the ends' w lanes are the half-width (+0x1c) and the width factor (+0x2c), the velocity's the floor.
+    let d: [f32; 3] = std::array::from_fn(|k| v[k] + wind[k]);
     for o in [0x20, 0x10] {
-        let q = rec::v4(r, o);
-        rec::set_v4(r, o, std::array::from_fn(|k| q[k] + d[k]));
+        let q = rec::v3(r, o);
+        rec::set_v3(r, o, std::array::from_fn(|k| q[k] + d[k]));
     }
     if rec::i16(r, 10) != 2 {
         let e2 = rec::v3(r, 0x20);

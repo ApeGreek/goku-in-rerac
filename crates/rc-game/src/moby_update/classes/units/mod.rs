@@ -250,6 +250,11 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U295 | 424 Batalia's ferries (08): the barge between three docks, the prompt, the ride with Ratchet held on its deck, the bob and the propeller | level08 0x2dbdb0 | [`batalia_ferry`] |
+//! | U292 | 253 Batalia's tanks, their treads 331 and shells 425 (08): the wall break, the crank gate, the patrol, the turret, the bouncing shells, the wreck | level08 0x2d42d8, 0x2da3c0, 0x2dc9a8 | [`batalia_tank`] |
+//! | U294 | 333 Batalia's grenadiers and their grenades 248 (08): the spots they hide in, the pop-up, the lob, the bounce, the knock-back, the smoke burst | level08 0x2dabf0, 0x2d23f0 | [`batalia_grenadier`] |
+//! | U305 | 468 / 469, 1553, 1629, 1641 Batalia's small classes (08): the crank-turned bridges, the scene's thrusters, the falling streaks, the steam puffs | level08 0x2ea4c0, 0x3084d8, 0x3085f0, 0x308c90 | [`batalia_small`] |
+//! | U317 | 1400 the weather emitter (08, 12, 14): the rain or snow around the camera, the splashes, the wind | level08 0x307cf0, level12 0x308be0, level14 0x306390 | [`weather`] |
 //! | U254 | 1046, 1049 the Snagglebeast's shockwave rings and spit globs (07), with its tongue, beam, shimmer and fire-line draws | level07 0x30e1f8, 0x30e458 | [`umbris_beast_fx`] |
 //! | U254 | 1106 Umbris' Snagglebeast (07): the arena walk between its platforms, the tongue grab, the stomp's rings, the spit, the beam and the fire sweep, the shimmer, the falls and the death | level07 0x314150 | [`umbris_beast`] |
 //! | U267 | 1059 Umbris' swamp beasts (07): cruising the swamp, swallowing Ratchet in the water, wading and biting, knocks | level07 0x30f5f0 | [`umbris_swamp`] |
@@ -320,6 +325,11 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod batalia_ferry;
+pub mod batalia_tank;
+pub mod batalia_grenadier;
+pub mod batalia_small;
+pub mod weather;
 pub mod umbris_beast_fx;
 pub mod umbris_beast;
 pub mod umbris_swamp;
@@ -935,9 +945,9 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U201 919", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::BOUNCER_FN, classes: &rilgar_story::BOUNCER_CLASSES, update: rilgar_story::bouncer_update, joints: &rilgar_story::BOUNCER_CLASSES },
     UnitPort { unit: "U203 925", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::SALESMAN_FN, classes: &rilgar_story::SALESMAN_CLASSES, update: rilgar_story::salesman_update, joints: &rilgar_story::SALESMAN_CLASSES },
     UnitPort { unit: "U233 1105", level: blarg_story::REFERENCE_LEVEL, func: blarg_story::SCIENTIST_FN, classes: &blarg_story::SCIENTIST_CLASSES, update: blarg_story::scientist_update, joints: &blarg_story::SCIENTIST_CLASSES },
-    UnitPort { unit: "U297 1130", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::COMMANDO_FN, classes: &batalia_story::COMMANDO_CLASSES, update: batalia_story::commando_update, joints: &[] },
-    UnitPort { unit: "U298 1144", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::DESERTER_FN, classes: &batalia_story::DESERTER_CLASSES, update: batalia_story::deserter_update, joints: &[] },
-    UnitPort { unit: "U299 1283", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::WORKER_FN, classes: &batalia_story::WORKER_CLASSES, update: batalia_story::water_worker_update, joints: &[] },
+    UnitPort { unit: "U297 1130", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::COMMANDO_FN, classes: &batalia_story::COMMANDO_CLASSES, update: batalia_story::commando_update, joints: &batalia_story::COMMANDO_CLASSES },
+    UnitPort { unit: "U298 1144", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::DESERTER_FN, classes: &batalia_story::DESERTER_CLASSES, update: batalia_story::deserter_update, joints: &batalia_story::DESERTER_CLASSES },
+    UnitPort { unit: "U299 1283", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::WORKER_FN, classes: &batalia_story::WORKER_CLASSES, update: batalia_story::water_worker_update, joints: &batalia_story::WORKER_CLASSES },
     UnitPort { unit: "U321 1290", level: gaspar_story::REFERENCE_LEVEL, func: gaspar_story::UPDATE_FN, classes: &gaspar_story::CLASSES, update: gaspar_story::update, joints: &[] },
     UnitPort { unit: "U329 18", level: orxon_story::REFERENCE_LEVEL, func: orxon_story::MAGNEBOOTS_FN, classes: &orxon_story::MAGNEBOOTS_CLASSES, update: orxon_story::magneboots_update, joints: &[] },
     UnitPort { unit: "U350 1326", level: orxon_story::REFERENCE_LEVEL, func: orxon_story::NANOTECH_FN, classes: &orxon_story::NANOTECH_CLASSES, update: orxon_story::nanotech_update, joints: &[] },
@@ -964,6 +974,20 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U295 424", level: batalia_ferry::REFERENCE_LEVEL, func: batalia_ferry::UPDATE_FN, classes: &batalia_ferry::CLASSES, update: batalia_ferry::update, joints: &batalia_ferry::CLASSES },
+    UnitPort { unit: "U292 253", level: batalia_tank::REFERENCE_LEVEL, func: batalia_tank::UPDATE_FN, classes: &batalia_tank::CLASSES, update: batalia_tank::update, joints: &batalia_tank::CLASSES },
+    UnitPort { unit: "U292 331", level: batalia_tank::REFERENCE_LEVEL, func: batalia_tank::TREAD_FN, classes: &batalia_tank::TREAD_CLASSES, update: veldin_tank::tread_update, joints: &batalia_tank::TREAD_CLASSES },
+    UnitPort { unit: "U292 425", level: batalia_tank::REFERENCE_LEVEL, func: batalia_tank::SHELL_FN, classes: &batalia_tank::SHELL_CLASSES, update: batalia_tank::shell_update, joints: &batalia_tank::SHELL_CLASSES },
+    UnitPort { unit: "U294 333", level: batalia_grenadier::REFERENCE_LEVEL, func: batalia_grenadier::UPDATE_FN, classes: &batalia_grenadier::CLASSES, update: batalia_grenadier::update, joints: &batalia_grenadier::CLASSES },
+    UnitPort { unit: "U294 248", level: batalia_grenadier::REFERENCE_LEVEL, func: batalia_grenadier::SHOT_FN, classes: &batalia_grenadier::SHOT_CLASSES, update: batalia_grenadier::shot_update, joints: &batalia_grenadier::SHOT_CLASSES },
+    UnitPort { unit: "U305 468", level: batalia_small::REFERENCE_LEVEL, func: batalia_small::BRIDGE_FN, classes: &batalia_small::BRIDGE_CLASSES, update: batalia_small::bridge_update, joints: &[] },
+    UnitPort { unit: "U318 1553", level: batalia_small::REFERENCE_LEVEL, func: batalia_small::SCENE_FX_FN, classes: &batalia_small::SCENE_FX_CLASSES, update: batalia_small::scene_fx_update, joints: &[] },
+    UnitPort { unit: "U319 1629", level: batalia_small::REFERENCE_LEVEL, func: batalia_small::STREAKS_FN, classes: &batalia_small::STREAKS_CLASSES, update: batalia_small::streaks_update, joints: &[] },
+    UnitPort { unit: "U319 1629", level: batalia_small::OLTANIS_LEVEL, func: batalia_small::OLTANIS_STREAKS_FN, classes: &batalia_small::STREAKS_CLASSES, update: batalia_small::streaks_update, joints: &[] },
+    UnitPort { unit: "U320 1641", level: batalia_small::REFERENCE_LEVEL, func: batalia_small::STEAM_FN, classes: &batalia_small::STEAM_CLASSES, update: batalia_small::steam_update, joints: &[] },
+    UnitPort { unit: "U317 1400", level: weather::REFERENCE_LEVEL, func: weather::UPDATE_FN, classes: &weather::CLASSES, update: weather::update, joints: &[] },
+    UnitPort { unit: "U433 1400", level: weather::HOVEN_LEVEL, func: weather::HOVEN_FN, classes: &weather::CLASSES, update: weather::update, joints: &[] },
+    UnitPort { unit: "U433 1400", level: weather::OLTANIS_LEVEL, func: weather::OLTANIS_FN, classes: &weather::CLASSES, update: weather::update, joints: &[] },
     UnitPort { unit: "U254 1046", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::RING_FN, classes: &umbris_beast_fx::RING_CLASSES, update: umbris_beast_fx::ring_update, joints: &[] },
     UnitPort { unit: "U254 1049", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::GLOB_FN, classes: &umbris_beast_fx::GLOB_CLASSES, update: umbris_beast_fx::glob_update, joints: &[] },
     UnitPort { unit: "U254 1106 tongue", level: umbris_beast_fx::REFERENCE_LEVEL, func: umbris_beast_fx::TONGUE_FN, classes: &[], update: empty::update, joints: &[] },

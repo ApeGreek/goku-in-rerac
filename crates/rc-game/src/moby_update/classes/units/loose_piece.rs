@@ -20,6 +20,7 @@
 //! | | v.z −= 10.8·dt²; position += v + Δ; z < 5 → `DeleteMoby` (0x2636c0) | [`update`] |
 //! | | no sound, particle, light, save flag; no effect on other mobys | n/a |
 //! | states 2.. | nothing | [`update`] |
+//! | `0x2db990(piece, mover, v, offset, life)` | the mover's start (Batalia's tanks breaking a wall, `batalia_tank`): state 1, +0x30 = v, +0x10 = the offset, +0x00 = `ticks(life)`, spins `randf(±4π/3·dt)` ×3 (+0x08 left as it is) | [`fling`] |
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::creature::{add, add_rot, dot3, pi32, pv4, scale, set_pi32, set_pv4, sub};
@@ -43,6 +44,21 @@ fn rows_mul(r: &[[f32; 4]; 4], v: V) -> V { std::array::from_fn(|l| if l == 3 { 
 /// The anchor's world point (module doc).
 fn anchor(w: &World, id: MobyId, list: i32) -> V {
     if list < 1 { add(rows_mul(&w.m(id).rows, pv4(w, id, 0x10)), w.m(id).position) } else { w.joint_point(id, list as usize) }
+}
+
+/// `0x2db990(piece, mover, v, offset, life)` (module doc).
+pub fn fling(w: &mut World, id: MobyId, v: [f32; 4], offset: [f32; 4], life: i32) {
+    if w.m(id).pvars.len() < 0x40 { w.mm(id).pvars.resize(0x40, 0); }
+    w.mm(id).state = 1;
+    set_pv4(w, id, 0x30, v);
+    set_pv4(w, id, 0x10, offset);
+    let t = w.ticks(life);
+    set_pi32(w, id, 0, t);
+    let s = crate::moby_update::creature::DT * 4.188_790_3;
+    for k in 0..3 {
+        let r = w.rng.randf(-s, s);
+        crate::moby_update::creature::set_pf(w, id, 0x20 + 4 * k, r);
+    }
 }
 
 /// Level08 0x2dba40 (module doc).
