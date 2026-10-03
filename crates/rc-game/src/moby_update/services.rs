@@ -1700,6 +1700,11 @@ impl<'a> World<'a> {
         sphere_mobys_in(self.table, self.svc, self.classes, r, centre, flags, ignore, tmpl).len()
     }
 
+    /// [`Self::sphere_mobys`] returning the mobys listed, in order.
+    pub fn sphere_mobys_list(&mut self, r: Pf, centre: V4, flags: u32, ignore: Option<MobyId>, tmpl: Option<&HitTemplate>) -> Vec<MobyId> {
+        sphere_mobys_in(self.table, self.svc, self.classes, r, centre, flags, ignore, tmpl)
+    }
+
     pub fn class_scale(&self, o_class: i16) -> Pf {
         self.classes.info(o_class).map(|c| pf(c.scale)).unwrap_or(Pf::ZERO)
     }

@@ -246,6 +246,33 @@ fn feather(w: &mut World, id: MobyId, pos: c::V, size: f32) {
     spawn_feather(w, id, p, v);
 }
 
+/// Level16 `0x2c44f0(chicken, pos)` (the level's chicken code; Kalebo's chicken pad 1923,
+/// `units::kalebo_chicken_pad`): the chicken moved to `pos` (all four lanes); the sphere `coll_sphere(0.2, pos + 0.3z, 0,
+/// chicken)` clear → health 1, sequence 2 (`MobyAnimBlend(m, 2, 0, 1)`) unless it is already on it, mode `| 0x1000 &
+/// 0xffbe` (targetable, shown), state 4 (sprint), the class collision, state timer `ticks(180)`; blocked → three
+/// feathers and class sound 1.
+pub fn respawn_at(w: &mut World, id: MobyId, pos: c::V) {
+    w.mm(id).position = pos;
+    let probe = [pos[0], pos[1], pos[2] + 0.3, pos[3]];
+    if w.coll_sphere(crate::moby_update::services::pv(probe), crate::moby_update::services::pf(0.2), 0, Some(id)).is_none() {
+        c::set_pf(w, id, HEALTH, 1.0);
+        if w.m(id).anim.seq_b != 2 { w.anim_blend(id, 2, 0, 1); }
+        let coll = super::units::class_collision(w, w.m(id).o_class);
+        let t = w.ticks(180);
+        let m = w.mm(id);
+        m.mode = (m.mode | 0x1000) & 0xffbe;
+        m.state = 4;
+        m.has_collision = coll;
+        c::set_pi16(w, id, TIMER, t as i16);
+    } else {
+        for _ in 0..3 { feather(w, id, pos, 1.0); }
+        w.play_sound(1, 0, id);
+    }
+}
+
+/// Level16 `0x2c4710(chicken)`: the chicken is hidden after a burst (state 6), free to be sent again.
+pub fn available(w: &World, id: MobyId) -> bool { w.m(id).state == 6 }
+
 /// `0x2e2cc0(chicken, pos, vel)`: a feather (class 428; module doc).
 pub fn spawn_feather(w: &mut World, _parent: MobyId, pos: c::V, vel: c::V) -> Option<MobyId> {
     let f = w.create_moby(FEATHER)?;

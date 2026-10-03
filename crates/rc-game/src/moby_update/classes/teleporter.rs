@@ -35,8 +35,8 @@
 //! | 0x3094f0 | the beam: 32 quads of a cylinder of radius P[13] around the pad (corners `(cos a·r, sin a·r, 1 ∓ h)`, a = (i + {0, 1})·2π/32 − π, in the pad's frame: rows and position), h = 0.1 + clamp(2·(1.15 − r), 0, 1) below r = 1.15, else 0.1; FX texture 0x13 (gp−0x4c38), ALPHA 0x48 (additive, gp−0x4c48..−0x4c3c = 0, 2, 0, 1; FIX 0x80), RGBA 0x60408080 (gp−0x4c34) on every corner, ST (0.5, 0) / (0.5, 1) (0x201630); z base 1.0 (gp−0x4c30) | [`beam_quads`] (drawn by `rc-engine` fx_draw) |
 //! | 0x3094f0 | below r = 1.15 and the pad not in state 7 / 8: 0x1413f5 = (r < 0.65) (Ratchet hidden while the beam is narrow) | [`update`] (taken where the update registers the callback: the draw reads the radius and state the update leaves, and the hero reads 0x1413f5 on his next update either way) |
 //!
-//! Who enters state 7 (the arms opening with the class sound 1, then the beam): no class on the disc stores 7 into a
-//! pad (the group commands to the pads' groups are all 1, the pads' own); ported for completeness.
+//! Who enters state 7 (the arms opening with the class sound 1, then the beam): Kalebo's chicken pad 1923
+//! (`units::kalebo_chicken_pad`, level16 `0x2e0de0`), which sends chickens through pad #1192; no other class does.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the angle wrap tests `!(s < π)` as the game's `c.lt.s` does.
 

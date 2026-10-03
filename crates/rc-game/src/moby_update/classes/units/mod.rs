@@ -135,6 +135,17 @@
 //! | U390 | 1180 the button-turned piece (11): turns 60° when its button is pressed | level11 0x30f2a8 | [`pokitaru_turner`] |
 //! | U388 | 1178 Pokitaru's tilting platforms (11): tip under Ratchet's weight and carry him | level11 0x30eb90 | [`pokitaru_tilt`] |
 //! | U384 | 1156 Pokitaru's unfolding machine (11): 18 pieces that fold out in a cutaway when its button is pressed | level11 0x30c788, 0x30d1b0 | [`pokitaru_unfold`] |
+//! | U559, U560 | 1439, 1441 Kalebo's pass-through gates (16): pulse, click and set their command byte when Ratchet passes | level16 0x2e5010, 0x2e5258 | [`kalebo_gates`] |
+//! | U561 | 1442 Kalebo's rail switches (16): turned on by a lean while grinding past, or a hit | level16 0x2e54a0 | [`kalebo_rail_switch`] |
+//! | U569 | 1891 Kalebo's spinning sign (16) | level16 0x2e88d0 | [`kalebo_spinner`] |
+//! | U565 | 1561 Kalebo's grind skill point (16): skill point 0x13d421 | level16 0x2e7208 | [`kalebo_grind_skill`] |
+//! | U570 | 1923 Kalebo's chicken pad (16): sends hidden chickens through teleporter pad #1192 | level16 0x2e8970 | [`kalebo_chicken_pad`] |
+//! | U568 | 1826 Kalebo's lifts (16): call or ride to the other end; the glow column `0x2e84e8` | level16 0x2e7f80, 0x2e84e8 | [`kalebo_lift`] |
+//! | U567 | 1812 the jets in Kalebo's first scene (16) | level16 0x2e7e00 | [`kalebo_scene_jet`] |
+//! | U552 | 654 Kalebo's arena triggers (16): barriers, the script camera, the enemies, the spline wall | level16 0x2d5ef8 | [`kalebo_arena`] |
+//! | U558 | 1410 Kalebo's cars (16): ride between three stations on △ | level16 0x2e43e0 | [`kalebo_car`] |
+//! | U545 | 541 Kalebo's arena troopers (16): grenadiers, sweepers and flamers on their paths, woken by 654; their glow `0x2cef60` | level16 0x2cddb8, 0x2cef60 | [`kalebo_trooper`] |
+//! | — | 281 the troopers' grenades (16; created by code: `0x2c6268`) | level16 0x2c5eb0 | [`kalebo_grenade`] |
 //! | U180 | 810 Rilgar's rocking floats (05) | level05 0x30bdd8 | [`rilgar_rocker`] |
 //! | U195 | 895 Rilgar's flaps (05) | level05 0x3166a0 | [`rilgar_flap`] |
 //! | U283 | 467 / 472 Batalia's linked lifts (08) | level08 0x2ea398 | [`batalia_lift`] |
@@ -375,6 +386,17 @@ pub mod pokitaru_button;
 pub mod pokitaru_turner;
 pub mod pokitaru_tilt;
 pub mod pokitaru_unfold;
+pub mod kalebo_gates;
+pub mod kalebo_rail_switch;
+pub mod kalebo_spinner;
+pub mod kalebo_grind_skill;
+pub mod kalebo_chicken_pad;
+pub mod kalebo_lift;
+pub mod kalebo_scene_jet;
+pub mod kalebo_arena;
+pub mod kalebo_car;
+pub mod kalebo_trooper;
+pub mod kalebo_grenade;
 pub mod rilgar_rocker;
 pub mod rilgar_flap;
 pub mod batalia_lift;
@@ -660,6 +682,20 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U390 1180", level: pokitaru_turner::REFERENCE_LEVEL, func: pokitaru_turner::UPDATE_FN, classes: &pokitaru_turner::CLASSES, update: pokitaru_turner::update, joints: &[] },
     UnitPort { unit: "U388 1178", level: pokitaru_tilt::REFERENCE_LEVEL, func: pokitaru_tilt::UPDATE_FN, classes: &pokitaru_tilt::CLASSES, update: pokitaru_tilt::update, joints: &[] },
     UnitPort { unit: "U384 1156", level: pokitaru_unfold::REFERENCE_LEVEL, func: pokitaru_unfold::UPDATE_FN, classes: &pokitaru_unfold::CLASSES, update: pokitaru_unfold::update, joints: &[] },
+    UnitPort { unit: "U559 1439", level: kalebo_gates::REFERENCE_LEVEL, func: kalebo_gates::UPDATE_FN, classes: &kalebo_gates::CLASSES, update: kalebo_gates::update, joints: &[] },
+    UnitPort { unit: "U561 1442", level: kalebo_rail_switch::REFERENCE_LEVEL, func: kalebo_rail_switch::UPDATE_FN, classes: &kalebo_rail_switch::CLASSES, update: kalebo_rail_switch::update, joints: &[] },
+    UnitPort { unit: "U569 1891", level: kalebo_spinner::REFERENCE_LEVEL, func: kalebo_spinner::UPDATE_FN, classes: &kalebo_spinner::CLASSES, update: kalebo_spinner::update, joints: &[] },
+    UnitPort { unit: "U565 1561", level: kalebo_grind_skill::REFERENCE_LEVEL, func: kalebo_grind_skill::UPDATE_FN, classes: &kalebo_grind_skill::CLASSES, update: kalebo_grind_skill::update, joints: &[] },
+    UnitPort { unit: "U570 1923", level: kalebo_chicken_pad::REFERENCE_LEVEL, func: kalebo_chicken_pad::UPDATE_FN, classes: &kalebo_chicken_pad::CLASSES, update: kalebo_chicken_pad::update, joints: &[] },
+    UnitPort { unit: "U568 1826", level: kalebo_lift::REFERENCE_LEVEL, func: kalebo_lift::UPDATE_FN, classes: &kalebo_lift::CLASSES, update: kalebo_lift::update, joints: &[] },
+    UnitPort { unit: "U567 1812", level: kalebo_scene_jet::REFERENCE_LEVEL, func: kalebo_scene_jet::UPDATE_FN, classes: &kalebo_scene_jet::CLASSES, update: kalebo_scene_jet::update, joints: &[] },
+    UnitPort { unit: "U552 654", level: kalebo_arena::REFERENCE_LEVEL, func: kalebo_arena::UPDATE_FN, classes: &kalebo_arena::CLASSES, update: kalebo_arena::update, joints: &[] },
+    UnitPort { unit: "U558 1410", level: kalebo_car::REFERENCE_LEVEL, func: kalebo_car::UPDATE_FN, classes: &kalebo_car::CLASSES, update: kalebo_car::update, joints: &[] },
+    UnitPort { unit: "U560 1441", level: kalebo_gates::REFERENCE_LEVEL, func: kalebo_gates::UPDATE_FN_1441, classes: &kalebo_gates::CLASSES_1441, update: kalebo_gates::update_1441, joints: &[] },
+    UnitPort { unit: "U568 1826 glow", level: kalebo_lift::REFERENCE_LEVEL, func: kalebo_lift::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U545 541", level: kalebo_trooper::REFERENCE_LEVEL, func: kalebo_trooper::UPDATE_FN, classes: &kalebo_trooper::CLASSES, update: kalebo_trooper::update, joints: &kalebo_trooper::JOINTS },
+    UnitPort { unit: "U545 541 glow", level: kalebo_trooper::REFERENCE_LEVEL, func: kalebo_trooper::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U545 281 grenade", level: kalebo_grenade::REFERENCE_LEVEL, func: kalebo_grenade::UPDATE_FN, classes: &kalebo_grenade::CLASSES, update: kalebo_grenade::update, joints: &[] },
     UnitPort { unit: "U180 810", level: rilgar_rocker::REFERENCE_LEVEL, func: rilgar_rocker::UPDATE_FN, classes: &rilgar_rocker::CLASSES, update: rilgar_rocker::update, joints: &[] },
     UnitPort { unit: "U195 895", level: rilgar_flap::REFERENCE_LEVEL, func: rilgar_flap::UPDATE_FN, classes: &rilgar_flap::CLASSES, update: rilgar_flap::update, joints: &[] },
     UnitPort { unit: "U283 467", level: batalia_lift::REFERENCE_LEVEL, func: batalia_lift::UPDATE_FN, classes: &batalia_lift::CLASSES, update: batalia_lift::update, joints: &[] },
@@ -1005,6 +1041,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((pokitaru_teleporter::REFERENCE_LEVEL, pokitaru_teleporter::BEAM_FN)) => pokitaru_teleporter::beam_quads(table, svc, id),
         Some((laser_fence::REFERENCE_LEVEL, laser_fence::UPDATE_FN)) => laser_fence::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
+        Some((kalebo_lift::REFERENCE_LEVEL, kalebo_lift::GLOW_FN)) => kalebo_lift::fx_quads(table, svc, id),
         Some((quartu_drone::REFERENCE_LEVEL, quartu_drone::UPDATE_FN)) => quartu_drone::fx_quads(table, svc, id),
         Some((swing_laser::REFERENCE_LEVEL, swing_laser::UPDATE_FN)) => swing_laser::fx_quads(table, svc, id),
         Some((kalebo_barrier::REFERENCE_LEVEL, kalebo_barrier::UPDATE_FN)) => kalebo_barrier::fx_quads(table, svc, id),
@@ -1059,6 +1096,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::EYE_FN)) => veldin_beamer::glow_quads(table, svc, id),
         Some((veldin_finale_fx::REFERENCE_LEVEL, veldin_finale_fx::SEAT_FN)) => veldin_finale_fx::glow_quads(table, svc),
         Some((super::mouse::REFERENCE_LEVEL, super::mouse::GLOW_FN)) => super::mouse::glow_quads(table, id),
+        Some((kalebo_trooper::REFERENCE_LEVEL, kalebo_trooper::GLOW_FN)) => kalebo_trooper::glow_quads(table, svc, id),
         _ => Vec::new(),
     }
 }

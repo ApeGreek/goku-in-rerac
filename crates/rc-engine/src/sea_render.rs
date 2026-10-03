@@ -312,7 +312,7 @@ pub fn mesh_prims(set: &gs::MeshSet, pass: &gs::MeshPass, counter: u64, cam: [f3
     let f = gs::flow_offset(counter);
     for m in &set.meshes {
         if let (Some(v), Some(sp)) = (view, m.sphere) {
-            if v.culled(256.0, sp) { continue; }
+            if v.culled(set.far, sp) { continue; }
         }
         for (s, normals) in m.strips.iter().zip(&m.normals) {
             b.strip(s.pos.iter().zip(&s.st).enumerate().map(|(i, (p, st))| {
@@ -542,7 +542,7 @@ fn draw(
                     groups.push(Group { tex: t, effect: Some(b), fog: level_fog, bias: bias + j as f32 * 0.25, prims });
                 }
             }
-            (SeaKind::TwoTex(_) | SeaKind::EnvOverlay, SeaData::Meshes(set)) => {
+            (SeaKind::TwoTex(_) | SeaKind::EnvOverlay | SeaKind::Reflect(_), SeaData::Meshes(set)) => {
                 mesh_set_groups(&mut groups, set, counter, cam, &view, bias, level_fog, None, run.scroll[0], &mut |a| anim(a, st, &mut images));
             }
             _ => {}

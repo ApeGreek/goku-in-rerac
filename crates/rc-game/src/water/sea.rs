@@ -13,6 +13,7 @@
 //! | 9 | 293 (12) | level12 `0x2e7208` | 47 two-texture strips `0x2e71b0` → `0x2bc210` |
 //! | 10 | 1418 (14) | level14 `0x307a80` | 19 two-texture strips `0x307a28` → `0x2ab3e8` (the same module) |
 //! | 11 | 1848 (01) | level01 `0x30f208` | the reflective overlay `0x30f0e0` ([`env_overlay_ref`]) |
+//! | 14–18 | 1943, 1947, 1948, 1952, 1953 (16) | level16 `0x2e8e80`, `0x2e93b0`, `0x2e98e0`, `0x2e9df0`, `0x2ea128` | Kalebo's reflections ([`reflect_ref`]) |
 //! | 12, 13 | 1903, 1919 (11) | level11 `0x31e2f0`, `0x31f150` | Pokitaru's pool overlays `0x31db50`, `0x31e930` (two copies of one module: [`pool_ref`]) |
 //!
 //! **The liquid meshes (G-REN-026, 2026-10-01).** The callbacks that draw static strip meshes share two engine emitters
@@ -113,6 +114,8 @@ pub enum SeaKind {
     EnvOverlay,
     /// Pokitaru's pool overlays 1903 / 1919 (level11, two copies of one module: [`pool_ref`]).
     Pool(&'static pool_ref::Module),
+    /// Kalebo's reflections 1943, 1947, 1948, 1952, 1953 (level16: [`reflect_ref`]).
+    Reflect(&'static reflect_ref::Port),
 }
 
 /// A two-texture strip class: its mesh table (reference level labels), its two FX textures, the GS state packet the
@@ -148,7 +151,7 @@ const fn grid(state: u32, scale: f32, fix: u8, list: DrawList, variant: GridVari
 pub const OCEAN: usize = 6;
 pub const HOVEN: usize = 7;
 
-pub const PORTS: [SeaPort; 14] = [
+pub const PORTS: [SeaPort; 19] = [
     // level03 0x2dc9b0: 0x291198(2/3, 0x1dc1a0, 0x20); callback 0x2dc990 via 0x1f2d48 (list 1).
     SeaPort { name: "994 liquid", level: 3, func: 0x2d_c9b0, classes: &[994], kind: grid(0x1d_c1a0, TWO_THIRDS, 0x20, DrawList::AfterMobys, GridVariant::Plain) },
     // level05 0x316110: 0x2ce110(1.0, 0x211b20) (FIX 0x80); callback 0x316070 via 0x228110 (after the ties).
@@ -175,7 +178,11 @@ pub const PORTS: [SeaPort; 14] = [
     // level01 0x30f208: the UV scroll 0x162110 / 0x162114 and RegisterDrawCallback(0x30f0e0) (list 1).
     SeaPort { name: "1848 env overlay", level: env_overlay_ref::LEVEL, func: env_overlay_ref::UPDATE_FN, classes: &[1848], kind: SeaKind::EnvOverlay },
     SeaPort { name: "1903 pool overlay", level: pool_ref::LEVEL, func: pool_ref::A.update, classes: &[1903], kind: SeaKind::Pool(&pool_ref::A) },
-    SeaPort { name: "1919 pool overlay", level: pool_ref::LEVEL, func: pool_ref::B.update, classes: &[1919], kind: SeaKind::Pool(&pool_ref::B) },
+    SeaPort { name: "1919 pool overlay", level: pool_ref::LEVEL, func: pool_ref::B.update, classes: &[1919], kind: SeaKind::Pool(&pool_ref::B) },    SeaPort { name: "1943 reflection", level: reflect_ref::LEVEL, func: reflect_ref::R1943.update, classes: &[1943], kind: SeaKind::Reflect(&reflect_ref::R1943) },
+    SeaPort { name: "1947 reflection", level: reflect_ref::LEVEL, func: reflect_ref::R1947.update, classes: &[1947], kind: SeaKind::Reflect(&reflect_ref::R1947) },
+    SeaPort { name: "1948 reflection", level: reflect_ref::LEVEL, func: reflect_ref::R1948.update, classes: &[1948], kind: SeaKind::Reflect(&reflect_ref::R1948) },
+    SeaPort { name: "1952 reflection", level: reflect_ref::LEVEL, func: reflect_ref::R1952.update, classes: &[1952], kind: SeaKind::Reflect(&reflect_ref::R1952) },
+    SeaPort { name: "1953 reflection", level: reflect_ref::LEVEL, func: reflect_ref::R1953.update, classes: &[1953], kind: SeaKind::Reflect(&reflect_ref::R1953) },
 ];
 
 pub const ARIDIA: usize = 8;
@@ -194,6 +201,43 @@ pub mod env_overlay_ref {
     pub const MESHES: usize = 5;
     pub const FX: u16 = 0x28;
     pub const FIX: u8 = 0x20;
+}
+
+/// Kalebo's reflections (level16; the name is descriptive [L]): five classes, each a set of static meshes drawn like
+/// Novalis' 1848 ([`env_overlay_ref`]) through `DrawEnvOverlayMesh` (level16 `0x1fc700`, clip on) with FX 0x29 at FIX
+/// 0x40 (ALPHA 0x4000000064, CLAMP repeat, TEX1 bilinear) and the reflection map of 1848's `0x30ef18` without its scroll
+/// (level16 `0x2e8b98` and its four byte-identical copies: the normal's sign cancels in the reflection, so
+/// [`env_map_st`] with no scroll is the same map).
+///
+/// | address | what | port |
+/// |---|---|---|
+/// | update state 0 | the culled sets: each mesh's sphere ([`bound_sphere`]) into the level's table; 1947, 1948, 1953 also update and draw distance 0xff; → 1 | [`reflect_update`] (the spheres at load) |
+/// | update state 1 | `RegisterDrawCallback(draw, m)` (list 1) | [`reflect_update`] |
+/// | draw | the GS state, `DrawSpriteHelper_A`; per mesh (culled sets: `FastBSphereCheck(512, sphere)` not −1) the ST and the draw | rc-engine `sea_render` (`mesh_set_groups`) |
+pub mod reflect_ref {
+    pub const LEVEL: u32 = 16;
+    pub const FX: u16 = 0x29;
+    pub const FIX: u8 = 0x40;
+    pub const FAR: f32 = 512.0;
+    /// One class: its update and draw, the count / position / normal / colour pointer tables, the mesh count, the
+    /// sphere check, the distances at init.
+    #[derive(Debug, PartialEq)]
+    pub struct Port {
+        pub update: u32,
+        pub draw: u32,
+        pub counts: u32,
+        pub positions: u32,
+        pub normals: u32,
+        pub colours: u32,
+        pub meshes: usize,
+        pub culled: bool,
+        pub far_dists: bool,
+    }
+    pub const R1943: Port = Port { update: 0x2e_8e80, draw: 0x2e_8d40, counts: 0x16_1ef0, positions: 0x16_1f00, normals: 0x16_1f20, colours: 0x16_1f30, meshes: 3, culled: true, far_dists: false };
+    pub const R1947: Port = Port { update: 0x2e_93b0, draw: 0x2e_9270, counts: 0x16_1f40, positions: 0x16_1f60, normals: 0x16_1f70, colours: 0x16_1f78, meshes: 1, culled: true, far_dists: true };
+    pub const R1948: Port = Port { update: 0x2e_98e0, draw: 0x2e_97a0, counts: 0x16_1f90, positions: 0x16_1f98, normals: 0x16_1fa8, colours: 0x16_1fb0, meshes: 2, culled: true, far_dists: true };
+    pub const R1952: Port = Port { update: 0x2e_9df0, draw: 0x2e_9ce0, counts: 0x16_1fb8, positions: 0x16_1fc8, normals: 0x16_1fe8, colours: 0x16_1ff8, meshes: 3, culled: false, far_dists: false };
+    pub const R1953: Port = Port { update: 0x2e_a128, draw: 0x2e_9fe8, counts: 0x16_2008, positions: 0x16_2018, normals: 0x16_2038, colours: 0x16_2048, meshes: 3, culled: true, far_dists: true };
 }
 
 /// Pokitaru's pool overlays (level11; the names are descriptive [L]): two copies of one module, 1903 (`0x31e2f0`, draw
@@ -418,6 +462,8 @@ pub struct MeshSet {
     pub passes: Vec<MeshPass>,
     /// In a grid port's extras: drawn before the grid's blocks (the lava flows: `0x21e8c0` precedes `0x2c1920`).
     pub before_grid: bool,
+    /// The `FastBSphereCheck` distance of the meshes' spheres (256; Kalebo's reflections 512).
+    pub far: f32,
 }
 
 /// Class 1848's per-vertex ST (`0x30ef18`): `e = unit(p − cam)` (0x167240), `n' = unit(−n)`, `r = unit(e − 2(n'·e)n')`,
@@ -606,6 +652,13 @@ pub fn load<'t>(ov: &Overlay, target: &'t LevelOverlay, rel_of: &dyn Fn(u32) -> 
                     }
                 }
             }
+            SeaKind::Reflect(r) => match reflect_set(ov, &rel, r) {
+                Ok(set) => SeaData::Meshes(Box::new(set)),
+                Err(e) => {
+                    eprintln!("sea: {}: {e}", p.name);
+                    continue;
+                }
+            },
             SeaKind::Pool(m) => match load_pool(ov, &rel, m) {
                 Ok(d) => SeaData::Pool(Box::new(d)),
                 Err(e) => {
@@ -640,12 +693,14 @@ fn gaspar_extras(ov: &Overlay, rel: &Relocation) -> Result<Vec<MeshSet>, rc_form
         colour: MeshColour::Flow,
         passes: vec![MeshPass { tex: anim, st: MeshSt::Flow { k: 1.0, add: 0.0 }, fix: fix[0] }, MeshPass { tex: anim, st: MeshSt::Flow { k: 2.0, add: 0.5 }, fix: fix[1] }],
         before_grid: true,
+        far: 256.0,
     };
     let grid = MeshSet {
         meshes: fs::parse_mesh_records(ov, label(rel, g::GRID_MESHES)?, g::GRID_MESH_COUNT, false)?,
         colour: MeshColour::Const(0x0075_7c8e),
         passes: vec![MeshPass { tex: MeshTex::Grid, st: MeshSt::Stored { scale: 0.5 }, fix: 0 }],
         before_grid: false,
+        far: 256.0,
     };
     Ok(vec![flows, grid])
 }
@@ -668,6 +723,7 @@ fn two_tex_set(ov: &Overlay, rel: &Relocation, t: &TwoTexPort) -> Result<MeshSet
             MeshPass { tex: MeshTex::Fx(t.fx[1]), st: MeshSt::SphereMap, fix: fix[1] },
         ],
         before_grid: false,
+        far: 256.0,
     })
 }
 
@@ -679,7 +735,43 @@ fn env_overlay_set(ov: &Overlay, rel: &Relocation) -> Result<MeshSet, rc_formats
         colour: MeshColour::Stored,
         passes: vec![MeshPass { tex: MeshTex::Fx(e::FX), st: MeshSt::EnvMap, fix: e::FIX }],
         before_grid: false,
+        far: 256.0,
     })
+}
+
+/// A reflection class's meshes ([`reflect_ref`]): FX 0x29 with the reflection map (no scroll), the stored colours, FIX
+/// 0x40; with `culled`, each mesh's sphere as the first update computes it ([`bound_sphere`]), checked at 512.
+fn reflect_set(ov: &Overlay, rel: &Relocation, r: &reflect_ref::Port) -> Result<MeshSet, rc_formats::FormatError> {
+    let mut meshes = fs::parse_pointer_meshes(ov, label(rel, r.counts)?, label(rel, r.positions)?, label(rel, r.normals)?, label(rel, r.colours)?, r.meshes)?;
+    if r.culled {
+        for m in &mut meshes { m.sphere = m.strips.first().map(|s| bound_sphere(&s.pos)); }
+    }
+    Ok(MeshSet {
+        meshes,
+        colour: MeshColour::Stored,
+        passes: vec![MeshPass { tex: MeshTex::Fx(reflect_ref::FX), st: MeshSt::EnvMap, fix: reflect_ref::FIX }],
+        before_grid: false,
+        far: reflect_ref::FAR,
+    })
+}
+
+/// The reflections' sphere of a mesh (their first update, e.g. level16 `0x2e8e80`): the centre of the box of the
+/// positions (from ±1024), the radius the farthest position (`vec_distance`).
+pub fn bound_sphere(pos: &[[f32; 3]]) -> [f32; 4] {
+    let (mut lo, mut hi) = ([1024.0f32; 3], [-1024.0f32; 3]);
+    for p in pos {
+        for k in 0..3 {
+            if hi[k] < p[k] { hi[k] = p[k]; }
+            if p[k] < lo[k] { lo[k] = p[k]; }
+        }
+    }
+    let c: [f32; 3] = std::array::from_fn(|k| (hi[k] + lo[k]) * 0.5);
+    let mut r = 0.0f32;
+    for p in pos {
+        let d = ((p[0] - c[0]) * (p[0] - c[0]) + (p[1] - c[1]) * (p[1] - c[1]) + (p[2] - c[2]) * (p[2] - c[2])).sqrt();
+        if r < d { r = d; }
+    }
+    [c[0], c[1], c[2], r]
 }
 
 fn load_hoven(ov: &Overlay, rel: &Relocation) -> Result<HovenData, rc_formats::FormatError> {
@@ -745,6 +837,24 @@ pub fn update(w: &mut World, id: MobyId, port: u8) {
         SeaKind::TwoTex(t) => two_tex_update(w, id, port, &t),
         SeaKind::EnvOverlay => env_overlay_update(w, id, port),
         SeaKind::Pool(m) => pool_update(w, id, port, m),
+        SeaKind::Reflect(r) => reflect_update(w, id, port, r),
+    }
+}
+
+/// Kalebo's reflections ([`reflect_ref`]).
+fn reflect_update(w: &mut World, id: MobyId, port: usize, r: &reflect_ref::Port) {
+    match w.m(id).state {
+        0 => {
+            w.svc.water.sea.run[port].inited = true;
+            let m = w.mm(id);
+            if r.far_dists {
+                m.update_dist = 0xff;
+                m.draw_dist = 0xff;
+            }
+            m.state = 1;
+        }
+        1 => register(w, id, port, DrawList::AfterMobys),
+        _ => {}
     }
 }
 

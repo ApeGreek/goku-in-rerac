@@ -63,10 +63,11 @@
 //! (`0x25df98` = `0x270830`: `crate::hero::pyrocitor::launch_speed`), 2 glow puffs (1 when shorter than 4) and 2
 //! flames of type 12 a tick, each `rand_vec(0, (3 − 2·len/range)·dt)` + the launch step, at `randf(0, 1)` of the step;
 //! every 4th tick the third is kept (the first of seven free slots); the smoke timer (s16 +0x1c) → `randf(10, 30)`
-//! ticks, a type-25 spark from `start` along `step·randf(0.5, 0.1) + rand_vec(0, 2·dt)`. [`emit`].
+//! ticks, a type-25 spark from `start` along `step·randf(0.5, 0.1) + rand_vec(0, 2·dt)`. `creature::flame::emit` (shared
+//! with Kalebo's 541: level16's copy `0x25eab8` is the same code and numbers).
 //! **The hits** `0x2651d0(flames, m, tmpl)`: each kept record still a type-12 particle and alive hits a sphere of
 //! `size / 210000 / 4` at its position (`coll_sphere_mobys(…, 0, m, tmpl)`), dropped below life 5; others dropped.
-//! [`flame_hits`]. **The clear** `0x264e40` [`init`].
+//! (`creature::flame::hits`). **The clear** `0x264e40` (`creature::flame::clear`).
 //!
 //! **The reaction table** (level02 0x1fb6ac): the default wrappers: no Suck Cannon reaction.
 //!
@@ -76,8 +77,8 @@
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
-use crate::moby_update::creature::{self as c, damage, flash, fx, ground, knock, target, turn, walker};
-use crate::moby_update::services::{pf, pv as v4, HitTemplate, World};
+use crate::moby_update::creature::{self as c, damage, flame, flash, fx, ground, knock, target, turn, walker};
+use crate::moby_update::services::{pv as v4, HitTemplate, World};
 use crate::ps2v::Pf;
 
 pub const REFERENCE_LEVEL: u32 = 2;
@@ -128,10 +129,6 @@ pub mod st {
 
 /// The flame's range (gp−0x5180).
 pub const RANGE: f32 = 4.0;
-/// The emitter's numbers (level02 0x1600d0: gp−0x6b2c / −0x6b28 glow puffs / flames, −0x6b24 / −0x6b20 the spread).
-const GLOWS: i32 = 2;
-const FLAMES: i32 = 2;
-const SPREAD: [f32; 2] = [1.0, 3.0];
 
 fn state(w: &World, id: MobyId) -> u8 { w.m(id).state }
 fn set_state(w: &mut World, id: MobyId, s: u8) { w.mm(id).state = s; }
@@ -245,8 +242,7 @@ fn init(w: &mut World, id: MobyId) {
     c::set_pf(w, id, pv::D, 3.0);
     c::set_pf(w, id, pv::J + 0xc, 2.0);
     c::set_pv4(w, id, pv::MOVE, [0.0; 4]);
-    for k in 0..7 { c::set_pi32(w, id, pv::FLAMES + 4 * k, 0); }
-    c::set_pi16(w, id, pv::SMOKE_T, 0);
+    flame::clear(w, id, pv::FLAMES);
     match c::pi32(w, id, pv::MODE) {
         1 => { c::blend_to(w, id, 0, 0, 0); set_state(w, id, st::STANDING); }
         2 => { c::blend_to(w, id, 2, 0, 0); set_state(w, id, st::ASLEEP); }
@@ -349,100 +345,6 @@ fn template(w: &World, id: MobyId, dir: c::V) -> HitTemplate {
     HitTemplate { dir: v4(dir), attacker: Some(id), flags: 0x1_0001, b18: 5, b19: 1, h1a: w.m(id).o_class as u16, damage: Pf::ONE, w20: 1 }
 }
 
-/// `0x264e70(range, flames, start, dir)`: the emitter (module doc).
-pub fn emit(w: &mut World, id: MobyId, range: f32, start: c::V, dir: c::V) {
-    let keep = w.counter & 3 == 0;
-    let reach = c::set_len3(dir, range + 0.75);
-    let end = c::add(reach, start);
-    let len = match w.coll_line(v4(start), v4(end), 2, None) {
-        Some(o) => {
-            let d = c::dist3(start, [o.point[0], o.point[1], o.point[2], 0.0]) - 0.75;
-            if 0.0 <= d { d } else { 0.0 }
-        }
-        None => range,
-    };
-    let speed = crate::hero::pyrocitor::launch_speed(len);
-    let step = c::set_len3(reach, speed);
-    let glows = if len < 4.0 { 1 } else { GLOWS };
-    let spread = ((SPREAD[0] - SPREAD[1]) * (len / range) + SPREAD[1]) * c::DT;
-    for i in 0..FLAMES + glows {
-        let r = w.rng.rand_vec(0.0, spread);
-        let vel = [r[0] + step[0], r[1] + step[1], r[2] + step[2], step[3]];
-        let k = w.rng.randf(0.0, 1.0);
-        let p = c::add(c::scale(step, k), start);
-        let flags = if i < glows { 1 } else { 0 };
-        let rec = part12(w, len, p, vel, flags);
-        if i == 2 && keep {
-            if let Some(r) = rec {
-                let slot = (0..7).find(|&s| c::pi32(w, id, pv::FLAMES + 4 * s) == 0);
-                if let Some(s) = slot { c::set_pi32(w, id, pv::FLAMES + 4 * s, r as i32 + 1); }
-            }
-        }
-    }
-    if c::dec_timer_pvar_s16(w, id, pv::SMOKE_T) != 0 {
-        let f = w.rng.randf(10.0, 30.0);
-        let t = w.svc.timing.scale(Pf::f(f)).to_i32();
-        c::set_pi16(w, id, pv::SMOKE_T, t as i16);
-        let r = w.rng.rand_vec(0.0, c::DT + c::DT);
-        let k = w.rng.randf(0.5, 0.1);
-        let v = [step[0] * k + r[0], step[1] * k + r[1], step[2] * k + r[2], 0.0];
-        part25(w, start, v);
-    }
-}
-
-/// `PartType12Spawn(len, pos, vel, flags)` (its draws only with a free record). The record index.
-fn part12(w: &mut World, len: f32, p: c::V, vel: c::V, flags: u8) -> Option<usize> {
-    *w.svc.fx.part_spawns.entry(12).or_default() += 1;
-    match w.particles.as_deref_mut() {
-        Some(sys) => {
-            if 0x800 <= sys.pool.hint { w.svc.fx.part_failed += 1; return None; }
-            let d = crate::particles::type12::Draws::draw(w.rng, flags);
-            let r = crate::particles::type12::spawn(sys, len, p, vel, flags, 0, &d).map(|x| x.0);
-            if r.is_none() { w.svc.fx.part_failed += 1; }
-            r
-        }
-        None => {
-            crate::particles::type12::Draws::draw(w.rng, flags);
-            None
-        }
-    }
-}
-
-/// `PartType25Spawn(pos, vel, 0)` (its size draw `randf(5000, 30000)` only with a free record).
-fn part25(w: &mut World, p: c::V, vel: c::V) {
-    *w.svc.fx.part_spawns.entry(25).or_default() += 1;
-    match w.particles.as_deref_mut() {
-        Some(sys) => {
-            if 0x800 <= sys.pool.hint { w.svc.fx.part_failed += 1; return; }
-            let size = w.rng.randf(5000.0, 30000.0);
-            if crate::particles::type25::spawn(sys, p, vel, false, size).is_none() { w.svc.fx.part_failed += 1; }
-        }
-        None => { w.rng.randf(5000.0, 30000.0); }
-    }
-}
-
-/// `0x2651d0(flames, m, tmpl)`: the kept flames' hits (module doc).
-pub fn flame_hits(w: &mut World, id: MobyId, t: &HitTemplate) {
-    for s in 0..7 {
-        let o = pv::FLAMES + 4 * s;
-        let v = c::pi32(w, id, o);
-        if v == 0 { continue; }
-        let i = (v - 1) as usize;
-        let rec = w.particles.as_deref().and_then(|p| p.pool.recs.get(i).copied());
-        let Some(r) = rec else { c::set_pi32(w, id, o, 0); continue };
-        if r[0] != 12 || (r[1] as i8) < 0 {
-            c::set_pi32(w, id, o, 0);
-            continue;
-        }
-        let f = |k: usize| f32::from_le_bytes([r[k], r[k + 1], r[k + 2], r[k + 3]]);
-        let size = f(0xc);
-        let centre = [f(0x10), f(0x14), f(0x18), f(0x1c)];
-        w.sphere_mobys(pf(size / 210_000.0 * 0.25), v4(centre), 0, Some(id), Some(t));
-        let life = i16::from_le_bytes([r[0xa], r[0xb]]);
-        if life < 5 { c::set_pi32(w, id, o, 0); }
-    }
-}
-
 /// State 0xc: the flame (module doc).
 fn flame(w: &mut World, id: MobyId) {
     w.mm(id).anim.speed = 0.5;
@@ -451,11 +353,11 @@ fn flame(w: &mut World, id: MobyId) {
     let a = c::atan(j[0] - p[0], j[1] - p[1]);
     let (ca, sa) = c::cs(a);
     let mut dir = [ca, sa, -0.1, 0.0];
-    emit(w, id, RANGE, j, dir);
+    flame::emit(w, id, pv::FLAMES, RANGE, j, dir);
     dir[3] = f32::from_bits(0x45af_df66);
     dir[2] = 1.0;
     let t = template(w, id, dir);
-    flame_hits(w, id, &t);
+    flame::hits(w, id, pv::FLAMES, &t);
     if !wrapped(w, id) { return; }
     w.mm(id).anim.speed = 1.0;
     set_state(w, id, st::PAUSE);

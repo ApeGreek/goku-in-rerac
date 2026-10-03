@@ -23,8 +23,8 @@ fn water_data(level: u32) -> LevelWaterData { crate::common::water_data(level).u
 /// The sea ports each level has (port indices into `PORTS`): the liquid grids on 03, 05, 07, 08, 09, 14, the ocean 1111
 /// on 11 and 16 (the same code), the Hoven liquid on 12; 07's 460 and 09's 317 run one function (port 2). The liquid
 /// mesh users (batch 5, `MeshSet`): 8 = Aridia's 854, 9 = Hoven's 293 strips, 10 = level 14's 1418, 11 = Novalis' 1848;
-/// 12 / 13 = Pokitaru's pool overlays 1903 / 1919.
-const EXPECTED: [(u32, &[usize]); 11] = [(1, &[11]), (2, &[8]), (3, &[0]), (5, &[1]), (7, &[2, 3]), (8, &[4]), (9, &[2]), (11, &[6, 12, 13]), (12, &[7, 9]), (14, &[5, 10]), (16, &[6])];
+/// 12 / 13 = Pokitaru's pool overlays 1903 / 1919; 14–18 = Kalebo's reflections 1943, 1947, 1948, 1952, 1953.
+const EXPECTED: [(u32, &[usize]); 11] = [(1, &[11]), (2, &[8]), (3, &[0]), (5, &[1]), (7, &[2, 3]), (8, &[4]), (9, &[2]), (11, &[6, 12, 13]), (12, &[7, 9]), (14, &[5, 10]), (16, &[6, 14, 15, 16, 17, 18])];
 
 #[test]
 fn sea_inventory_all_levels() {
