@@ -143,9 +143,19 @@
 //! | U568 | 1826 Kalebo's lifts (16): call or ride to the other end; the glow column `0x2e84e8` | level16 0x2e7f80, 0x2e84e8 | [`kalebo_lift`] |
 //! | U567 | 1812 the jets in Kalebo's first scene (16) | level16 0x2e7e00 | [`kalebo_scene_jet`] |
 //! | U552 | 654 Kalebo's arena triggers (16): barriers, the script camera, the enemies, the spline wall | level16 0x2d5ef8 | [`kalebo_arena`] |
-//! | U558 | 1410 Kalebo's cars (16): ride between three stations on △ | level16 0x2e43e0 | [`kalebo_car`] |
+//! | U558, U215 | 1410 Kalebo's cars (16), 998 Rilgar's cars (05): ride between stations on △ (one code per level) | level16 0x2e43e0, level05 0x318c78 | [`hover_car`] |
 //! | U545 | 541 Kalebo's arena troopers (16): grenadiers, sweepers and flamers on their paths, woken by 654; their glow `0x2cef60` | level16 0x2cddb8, 0x2cef60 | [`kalebo_trooper`] |
 //! | — | 281 the troopers' grenades (16; created by code: `0x2c6268`) | level16 0x2c5eb0 | [`kalebo_grenade`] |
+//! | U216, U214, U220 | 1099 the scene-hidden prop, 984 the bobbing marker, 1550 the scene FX driver (05) | level05 0x319c28, 0x318b98, 0x31d5c8 | [`rilgar_small`] |
+//! | U198 | 841 Rilgar's sewer fog switch (05): the level fog, the underwater tint, the water level | level05 0x30e1f8 | [`rilgar_fog_switch`] |
+//! | U210 | 920 / 447 the watching bystanders (05, 07, 13): the head look-at, the scene big head | level05 0x317aa0 | [`rilgar_watcher`] |
+//! | U201 | 846 Rilgar's breakable posts (05): a burst of loose pieces and sparkles | level05 0x30f5c8 | [`rilgar_breakable`] |
+//! | U204 | 877 Rilgar's lift pads (05): called, or a cutaway ride with the spline wall | level05 0x3156d0 | [`rilgar_lift_pad`] |
+//! | U184 | 79 Rilgar's trail riders (05): banked spline loops, ribbon trails `0x2d7920`, joint glows `0x2d6f48` | level05 0x2d7140 | [`rilgar_trail_rider`] |
+//! | U183 | 35 Rilgar's sea beasts (05): the swimmers and the lurker that takes Ratchet | level05 0x2d1688 | [`rilgar_sea_beast`] |
+//! | U200 | 844 Rilgar's rising rocks (05): the rumble, the rise, the float, the fall, bubbles and dust | level05 0x30e7f8 | [`rilgar_rising_rock`] |
+//! | U190 | 625 Rilgar's flame tanks (05): path driving, the turret's flames and their hits, the treads | level05 0x304320 | [`rilgar_flame_tank`] |
+//! | U189 | 623 Rilgar's biters (05): the arena graph, the weaving chase, the wind-up sparks and bite, knockback and death | level05 0x301f48 | [`rilgar_biter`] |
 //! | U180 | 810 Rilgar's rocking floats (05) | level05 0x30bdd8 | [`rilgar_rocker`] |
 //! | U195 | 895 Rilgar's flaps (05) | level05 0x3166a0 | [`rilgar_flap`] |
 //! | U283 | 467 / 472 Batalia's linked lifts (08) | level08 0x2ea398 | [`batalia_lift`] |
@@ -394,9 +404,19 @@ pub mod kalebo_chicken_pad;
 pub mod kalebo_lift;
 pub mod kalebo_scene_jet;
 pub mod kalebo_arena;
-pub mod kalebo_car;
+pub mod hover_car;
 pub mod kalebo_trooper;
 pub mod kalebo_grenade;
+pub mod rilgar_small;
+pub mod rilgar_fog_switch;
+pub mod rilgar_watcher;
+pub mod rilgar_breakable;
+pub mod rilgar_lift_pad;
+pub mod rilgar_trail_rider;
+pub mod rilgar_sea_beast;
+pub mod rilgar_rising_rock;
+pub mod rilgar_flame_tank;
+pub mod rilgar_biter;
 pub mod rilgar_rocker;
 pub mod rilgar_flap;
 pub mod batalia_lift;
@@ -690,12 +710,27 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U568 1826", level: kalebo_lift::REFERENCE_LEVEL, func: kalebo_lift::UPDATE_FN, classes: &kalebo_lift::CLASSES, update: kalebo_lift::update, joints: &[] },
     UnitPort { unit: "U567 1812", level: kalebo_scene_jet::REFERENCE_LEVEL, func: kalebo_scene_jet::UPDATE_FN, classes: &kalebo_scene_jet::CLASSES, update: kalebo_scene_jet::update, joints: &[] },
     UnitPort { unit: "U552 654", level: kalebo_arena::REFERENCE_LEVEL, func: kalebo_arena::UPDATE_FN, classes: &kalebo_arena::CLASSES, update: kalebo_arena::update, joints: &[] },
-    UnitPort { unit: "U558 1410", level: kalebo_car::REFERENCE_LEVEL, func: kalebo_car::UPDATE_FN, classes: &kalebo_car::CLASSES, update: kalebo_car::update, joints: &[] },
+    UnitPort { unit: "U558 1410", level: hover_car::KALEBO.level, func: hover_car::KALEBO.update, classes: &hover_car::KALEBO_CLASSES, update: hover_car::update_kalebo, joints: &[] },
+    UnitPort { unit: "U215 998", level: hover_car::RILGAR.level, func: hover_car::RILGAR.update, classes: &hover_car::RILGAR_CLASSES, update: hover_car::update_rilgar, joints: &[] },
     UnitPort { unit: "U560 1441", level: kalebo_gates::REFERENCE_LEVEL, func: kalebo_gates::UPDATE_FN_1441, classes: &kalebo_gates::CLASSES_1441, update: kalebo_gates::update_1441, joints: &[] },
     UnitPort { unit: "U568 1826 glow", level: kalebo_lift::REFERENCE_LEVEL, func: kalebo_lift::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U545 541", level: kalebo_trooper::REFERENCE_LEVEL, func: kalebo_trooper::UPDATE_FN, classes: &kalebo_trooper::CLASSES, update: kalebo_trooper::update, joints: &kalebo_trooper::JOINTS },
     UnitPort { unit: "U545 541 glow", level: kalebo_trooper::REFERENCE_LEVEL, func: kalebo_trooper::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U545 281 grenade", level: kalebo_grenade::REFERENCE_LEVEL, func: kalebo_grenade::UPDATE_FN, classes: &kalebo_grenade::CLASSES, update: kalebo_grenade::update, joints: &[] },
+    UnitPort { unit: "U216 1099", level: rilgar_small::REFERENCE_LEVEL, func: rilgar_small::HIDDEN_FN, classes: &rilgar_small::HIDDEN_CLASSES, update: rilgar_small::hidden_update, joints: &[] },
+    UnitPort { unit: "U214 984", level: rilgar_small::REFERENCE_LEVEL, func: rilgar_small::BOB_FN, classes: &rilgar_small::BOB_CLASSES, update: rilgar_small::bob_update, joints: &[] },
+    UnitPort { unit: "U220 1550", level: rilgar_small::REFERENCE_LEVEL, func: rilgar_small::SCENE_FX_FN, classes: &rilgar_small::SCENE_FX_CLASSES, update: rilgar_small::scene_fx_update, joints: &[] },
+    UnitPort { unit: "U198 841", level: rilgar_fog_switch::REFERENCE_LEVEL, func: rilgar_fog_switch::UPDATE_FN, classes: &rilgar_fog_switch::CLASSES, update: rilgar_fog_switch::update, joints: &[] },
+    UnitPort { unit: "U210 920", level: rilgar_watcher::REFERENCE_LEVEL, func: rilgar_watcher::UPDATE_FN, classes: &rilgar_watcher::CLASSES, update: rilgar_watcher::update, joints: &rilgar_watcher::CLASSES },
+    UnitPort { unit: "U201 846", level: rilgar_breakable::REFERENCE_LEVEL, func: rilgar_breakable::UPDATE_FN, classes: &rilgar_breakable::CLASSES, update: rilgar_breakable::update, joints: &[] },
+    UnitPort { unit: "U204 877", level: rilgar_lift_pad::REFERENCE_LEVEL, func: rilgar_lift_pad::UPDATE_FN, classes: &rilgar_lift_pad::CLASSES, update: rilgar_lift_pad::update, joints: &[] },
+    UnitPort { unit: "U184 79", level: rilgar_trail_rider::REFERENCE_LEVEL, func: rilgar_trail_rider::UPDATE_FN, classes: &rilgar_trail_rider::CLASSES, update: rilgar_trail_rider::update, joints: &rilgar_trail_rider::CLASSES },
+    UnitPort { unit: "U184 79 trails", level: rilgar_trail_rider::REFERENCE_LEVEL, func: rilgar_trail_rider::TRAIL_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U184 79 glows", level: rilgar_trail_rider::REFERENCE_LEVEL, func: rilgar_trail_rider::GLOW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U183 35", level: rilgar_sea_beast::REFERENCE_LEVEL, func: rilgar_sea_beast::UPDATE_FN, classes: &rilgar_sea_beast::CLASSES, update: rilgar_sea_beast::update, joints: &[] },
+    UnitPort { unit: "U200 844", level: rilgar_rising_rock::REFERENCE_LEVEL, func: rilgar_rising_rock::UPDATE_FN, classes: &rilgar_rising_rock::CLASSES, update: rilgar_rising_rock::update, joints: &[] },
+    UnitPort { unit: "U190 625", level: rilgar_flame_tank::REFERENCE_LEVEL, func: rilgar_flame_tank::UPDATE_FN, classes: &rilgar_flame_tank::CLASSES, update: rilgar_flame_tank::update, joints: &rilgar_flame_tank::CLASSES },
+    UnitPort { unit: "U189 623", level: rilgar_biter::REFERENCE_LEVEL, func: rilgar_biter::UPDATE_FN, classes: &rilgar_biter::CLASSES, update: rilgar_biter::update, joints: &rilgar_biter::CLASSES },
     UnitPort { unit: "U180 810", level: rilgar_rocker::REFERENCE_LEVEL, func: rilgar_rocker::UPDATE_FN, classes: &rilgar_rocker::CLASSES, update: rilgar_rocker::update, joints: &[] },
     UnitPort { unit: "U195 895", level: rilgar_flap::REFERENCE_LEVEL, func: rilgar_flap::UPDATE_FN, classes: &rilgar_flap::CLASSES, update: rilgar_flap::update, joints: &[] },
     UnitPort { unit: "U283 467", level: batalia_lift::REFERENCE_LEVEL, func: batalia_lift::UPDATE_FN, classes: &batalia_lift::CLASSES, update: batalia_lift::update, joints: &[] },
@@ -854,9 +889,9 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U145 909", level: kerwan_story::REFERENCE_LEVEL, func: kerwan_story::AL_FN, classes: &kerwan_story::AL_CLASSES, update: kerwan_story::al_update, joints: &kerwan_story::AL_CLASSES },
     UnitPort { unit: "U169 1120", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::SUCK_FN, classes: &eudora_story::SUCK_CLASSES, update: eudora_story::suck_cannon_update, joints: &[] },
     UnitPort { unit: "U170 1190", level: eudora_story::REFERENCE_LEVEL, func: eudora_story::INFORMANT_FN, classes: &eudora_story::INFORMANT_CLASSES, update: eudora_story::informant_update, joints: &[] },
-    UnitPort { unit: "U200 918", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::GIRL_FN, classes: &rilgar_story::GIRL_CLASSES, update: rilgar_story::race_girl_update, joints: &[] },
-    UnitPort { unit: "U201 919", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::BOUNCER_FN, classes: &rilgar_story::BOUNCER_CLASSES, update: rilgar_story::bouncer_update, joints: &[] },
-    UnitPort { unit: "U203 925", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::SALESMAN_FN, classes: &rilgar_story::SALESMAN_CLASSES, update: rilgar_story::salesman_update, joints: &[] },
+    UnitPort { unit: "U200 918", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::GIRL_FN, classes: &rilgar_story::GIRL_CLASSES, update: rilgar_story::race_girl_update, joints: &rilgar_story::GIRL_CLASSES },
+    UnitPort { unit: "U201 919", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::BOUNCER_FN, classes: &rilgar_story::BOUNCER_CLASSES, update: rilgar_story::bouncer_update, joints: &rilgar_story::BOUNCER_CLASSES },
+    UnitPort { unit: "U203 925", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::SALESMAN_FN, classes: &rilgar_story::SALESMAN_CLASSES, update: rilgar_story::salesman_update, joints: &rilgar_story::SALESMAN_CLASSES },
     UnitPort { unit: "U233 1105", level: blarg_story::REFERENCE_LEVEL, func: blarg_story::SCIENTIST_FN, classes: &blarg_story::SCIENTIST_CLASSES, update: blarg_story::scientist_update, joints: &[] },
     UnitPort { unit: "U297 1130", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::COMMANDO_FN, classes: &batalia_story::COMMANDO_CLASSES, update: batalia_story::commando_update, joints: &[] },
     UnitPort { unit: "U298 1144", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::DESERTER_FN, classes: &batalia_story::DESERTER_CLASSES, update: batalia_story::deserter_update, joints: &[] },
@@ -1042,6 +1077,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((laser_fence::REFERENCE_LEVEL, laser_fence::UPDATE_FN)) => laser_fence::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
         Some((kalebo_lift::REFERENCE_LEVEL, kalebo_lift::GLOW_FN)) => kalebo_lift::fx_quads(table, svc, id),
+        Some((rilgar_trail_rider::REFERENCE_LEVEL, rilgar_trail_rider::TRAIL_FN)) => rilgar_trail_rider::fx_quads(table, svc, id),
         Some((quartu_drone::REFERENCE_LEVEL, quartu_drone::UPDATE_FN)) => quartu_drone::fx_quads(table, svc, id),
         Some((swing_laser::REFERENCE_LEVEL, swing_laser::UPDATE_FN)) => swing_laser::fx_quads(table, svc, id),
         Some((kalebo_barrier::REFERENCE_LEVEL, kalebo_barrier::UPDATE_FN)) => kalebo_barrier::fx_quads(table, svc, id),
@@ -1097,6 +1133,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((veldin_finale_fx::REFERENCE_LEVEL, veldin_finale_fx::SEAT_FN)) => veldin_finale_fx::glow_quads(table, svc),
         Some((super::mouse::REFERENCE_LEVEL, super::mouse::GLOW_FN)) => super::mouse::glow_quads(table, id),
         Some((kalebo_trooper::REFERENCE_LEVEL, kalebo_trooper::GLOW_FN)) => kalebo_trooper::glow_quads(table, svc, id),
+        Some((rilgar_trail_rider::REFERENCE_LEVEL, rilgar_trail_rider::GLOW_FN)) => rilgar_trail_rider::glow_quads(table, svc, id),
         _ => Vec::new(),
     }
 }

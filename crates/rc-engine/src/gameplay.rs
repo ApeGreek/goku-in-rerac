@@ -1138,6 +1138,8 @@ fn setup(
     svc.creatures.react.tables = level_reactions().clone();
     // The level's water (rc_game::water::world: the ripple managers' tables, the module, the underwater look).
     if let Some(d) = lv.water.data.clone() { svc.water = rc_game::water::world::WaterWorld::new(d); }
+    // The level fog globals 0x15f444.. as the moby code reads them (crate::fog_state keeps the copy current).
+    svc.water.fog = Some(lv.fog.globals());
     // Level 18's pool meshes (rc_game units::veldin_pool, read with the draw-callback tables).
     svc.units.veldin_pools = lv.water.fx.veldin_pools.clone();
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }

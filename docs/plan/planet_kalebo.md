@@ -17,7 +17,7 @@ The census of 2026-10-03 left sixteen placed classes without a port; this page t
 | 1826 | 2 | lifts: call or ride to the other end of a cuboid; a column of glowing rings while moving | **ported** (`units::kalebo_lift`) |
 | 1812 | 1 | the jets of actor 3 in the first scene | **ported** (`units::kalebo_scene_jet`) |
 | 654 | 4 | arena triggers: barriers, the script camera's slide, the enemies, the spline wall, the arena flags 114.. | **ported** (`units::kalebo_arena`) |
-| 1410 | 2 | the cars: ride between three stations on △, the spline wall rewritten round the car | **ported** (`units::kalebo_car`) |
+| 1410 | 2 | the cars: ride between three stations on △, the spline wall rewritten round the car | **ported** (`units::hover_car`, shared with Rilgar's 998) |
 | 541 | 29 | the arena troopers: grenadiers (281), sweepers and flamers on their paths, lives, their glow | **ported** (`units::kalebo_trooper`, `units::kalebo_grenade`) |
 
 ## Shared-system changes in this pass

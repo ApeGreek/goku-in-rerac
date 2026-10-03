@@ -132,6 +132,18 @@ pub fn part02(w: &mut World, a: &crate::particles::type02::Spawn) -> bool {
     spawn_part(w, 2, |r| { r.randf(0.0, 255.0); }, |p, r| crate::particles::type02::spawn(p, r, a))
 }
 
+/// [`part02`] keeping the record index (the classes that hit-test their own puffs). None without particles.
+pub fn part02_rec(w: &mut World, a: &crate::particles::type02::Spawn) -> Option<usize> {
+    *w.svc.fx.part_spawns.entry(2).or_default() += 1;
+    let Some(p) = w.particles.as_deref_mut() else {
+        w.rng.randf(0.0, 255.0);
+        return None;
+    };
+    let r = crate::particles::type02::spawn(p, w.rng, a);
+    if r.is_none() { w.svc.fx.part_failed += 1; }
+    r
+}
+
 /// `PartType04Spawn` 0x27e538 (the smoke / fire puff; `crate::particles::type04`): one raw `rand()` with a record.
 pub fn part04(w: &mut World, a: &crate::particles::type04::Spawn) -> bool {
     spawn_part(w, 4, |r| { r.rand(); }, |p, r| crate::particles::type04::spawn(p, r, a))

@@ -14,6 +14,7 @@
 //! | [`line_of_sight`] | `LineOfSightTest` 0x276fe8 | straight to the target when no wall is in the way (±r), else the graph point nearest the target that both ends reach |
 //! | [`graph_init`] | level11 `0x2873b0` (copies on 05, 06, 10; none on 01) | a graph's visibility masks: the point pairs no wall separates |
 //! | [`push_out`] | level11 `0x287548` (level00 `0x261d78`, copies on 05, 06, 08, 10, 13, 16, 18) | a point pushed `r` away from the walls of a path it comes within `r` of |
+//! | [`push_out_dist`] | level05 `0x304058` | the same, returning the nearest wall line's distance too |
 
 use super::{dist2, V};
 use crate::moby_update::services::World;
@@ -163,18 +164,24 @@ pub fn graph_init(w: &mut World, walls: &[usize], graph: usize) {
 /// carried on to the next edge: within `r` of the edge's line (xy) and over the segment → `r` from the line on the
 /// point's side; beyond either end and within `r` of the edge's first point → `r` from that point. `None` when no edge
 /// moved it (the game leaves `out`).
-pub fn push_out(w: &World, r: f32, path: usize, p: V) -> Option<V> {
+pub fn push_out(w: &World, r: f32, path: usize, p: V) -> Option<V> { push_out_dist(w, r, path, p).1 }
+
+/// [`push_out`] with the nearest wall line's distance (xy, the smallest `|cross|` over the wall edges, 512 without
+/// one): level05 `0x304058(r, path, &p, &out)` (Rilgar's 623 holds off its wall checks for 5 ticks beyond 2).
+pub fn push_out_dist(w: &World, r: f32, path: usize, p: V) -> (f32, Option<V>) {
     let s = pts(w, path);
     let mut cur = p;
     let mut found = false;
+    let mut near = 512.0f32;
     for i in 0..s.len().saturating_sub(1) {
         let (a, b) = (f(s[i]), f(s[i + 1]));
         if a[3] == 0.0 && b[3] == 0.0 { continue; }
         let d = [cur[0] - a[0], cur[1] - a[1], 0.0, 0.0];
         let seg = [b[0] - a[0], b[1] - a[1], 0.0, 0.0];
         let u = super::set_len3(seg, 1.0);
-        let cross_z = d[0] * u[1] - d[1] * u[0];
-        if r < cross_z.abs() { continue; }
+        let cross_z = (d[0] * u[1] - d[1] * u[0]).abs();
+        if cross_z < near { near = cross_z; }
+        if r < cross_z { continue; }
         let len = super::len3(seg);
         let proj = super::dot3(d, u);
         let q = if len < proj || proj < 0.0 {
@@ -187,5 +194,5 @@ pub fn push_out(w: &World, r: f32, path: usize, p: V) -> Option<V> {
         cur = [q[0], q[1], p[2], p[3]];
         found = true;
     }
-    found.then_some(cur)
+    (near, found.then_some(cur))
 }

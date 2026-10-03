@@ -99,6 +99,8 @@ pub struct FogState {
     visibomb: crate::visibomb_view::FogSwap,
     /// The tick of the last `WaterWorld::underwater_store` applied.
     store_tick: Option<u64>,
+    /// The tick of the last `WaterWorld::fog_store` applied.
+    fog_store_tick: Option<u64>,
 }
 
 impl FogState {
@@ -117,6 +119,7 @@ impl FogState {
             last_t: 0.0,
             visibomb: Default::default(),
             store_tick: None,
+            fog_store_tick: None,
         }
     }
 
@@ -189,7 +192,7 @@ fn update_fog_state(
     mut game_fog: ResMut<GameFog>,
     tie: Option<ResMut<crate::tie_lod::TieLodState>>,
     water: Option<Res<crate::water_render::WaterState>>,
-    play: Option<Res<crate::gameplay::Play>>,
+    mut play: Option<ResMut<crate::gameplay::Play>>,
     cams: MainCamera,
 ) {
     let Some(mut state) = state else { return };
@@ -217,6 +220,13 @@ fn update_fog_state(
                 rc_game::water::world::UnderwaterStore::Off => false,
                 rc_game::water::world::UnderwaterStore::HeroGroup => play.as_deref().is_some_and(|p| p.game.hero.group == 0x11),
             };
+        }
+    }
+    // The classes' stores into the level fog globals (Rilgar's 841), each applied once, before the fog zones.
+    if let Some((tick, g)) = play.as_deref().and_then(|p| p.svc.water.fog_store) {
+        if state.fog_store_tick != Some(tick) {
+            state.fog_store_tick = Some(tick);
+            state.level = g;
         }
     }
     if let Some(forced) = state.force_underwater {
@@ -268,6 +278,10 @@ fn update_fog_state(
             state.last_zone = zone;
             state.last_t = hit.map_or(0.0, |(_, t)| t);
         }
+    }
+    // The moby code's copy of 0x15f444.. as the camera update leaves it (a store the next tick makes reads it).
+    if let Some(p) = play.as_deref_mut() {
+        if p.svc.water.fog != Some(state.level) { p.svc.water.fog = Some(state.level); }
     }
 
     // 3. The tint reads the flag as this frame's camera update left it.

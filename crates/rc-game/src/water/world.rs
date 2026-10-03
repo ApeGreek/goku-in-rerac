@@ -186,9 +186,22 @@ pub struct WaterWorld {
     /// on ([`UnderwaterStore`]); the engine's camera-side flag (`rc-engine` `fog_state`) applies each store once,
     /// before its test.
     pub underwater_store: Option<(u64, UnderwaterStore)>,
+    /// The level fog globals 0x15f444..0x15f454 as the moby code reads them: the engine's copy (`rc-engine` `fog_state`
+    /// mirrors it every frame after its fog zones; set at the level load from the level settings), with this tick's
+    /// class stores on top. None: no engine (tests).
+    pub fog: Option<FogGlobals>,
+    /// The last class store into 0x15f444..0x15f454 ([`WaterWorld::store_fog`]), with the tick counter it was made on;
+    /// the engine applies each store once, before its fog zones.
+    pub fog_store: Option<(u64, FogGlobals)>,
 }
 
 impl WaterWorld {
+    /// A class's store into the level fog globals 0x15f444..0x15f454 on tick `tick` (Rilgar's 841).
+    pub fn store_fog(&mut self, tick: u64, g: FogGlobals) {
+        self.fog = Some(g);
+        self.fog_store = Some((tick, g));
+    }
+
     /// The water of a level with `data`.
     pub fn new(data: LevelWaterData) -> WaterWorld {
         let (look, records) = (data.look, data.patch_records().map(<[_]>::to_vec).unwrap_or_default());
