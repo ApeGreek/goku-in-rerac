@@ -192,7 +192,7 @@ fn reflect(v: V, n: V) -> V {
 }
 
 /// `FUN_00222420(a, target, step)`: `a` turned toward `target` by at most `step`.
-fn approach_angle(a: f32, target: f32, step: f32) -> f32 {
+pub(crate) fn approach_angle(a: f32, target: f32, step: f32) -> f32 {
     let d = c::sub_rot(target, a);
     let s = if d <= 0.0 { -step } else { step };
     let s = s.clamp(-d.abs(), d.abs());

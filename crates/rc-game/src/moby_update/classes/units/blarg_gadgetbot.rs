@@ -64,6 +64,10 @@ pub const REFERENCE_LEVEL: u32 = 6;
 pub const UPDATE_FN: u32 = 0x2f_0040;
 pub const DRAW_FN: u32 = 0x2f_37d0;
 pub const CLASSES: [i16; 1] = [857];
+/// Level 10's copy (`0x2d4078`, census U351, 31 placed; its glow `0x2d7808`): the same code and callees (checked
+/// function by function); the code identity of the class tables does not pair them, so it has its own row.
+pub const ORXON_LEVEL: u32 = 10;
+pub const ORXON_FN: u32 = 0x2d_4078;
 pub const BUBBLE_FN: u32 = 0x2d_85a0;
 pub const BUBBLE_DRAW_FN: u32 = 0x2d_8738;
 pub const BUBBLE_CLASSES: [i16; 1] = [302];

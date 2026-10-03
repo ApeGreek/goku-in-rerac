@@ -250,6 +250,7 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U352 | 939 Orxon's lava spouts (10) and their glowing rocks 938: thrown, bouncing, cooling, batted back, bursting | level10 0x2d8c00, 0x2d85c8 | [`orxon_lava`] |
 //! | U313 | 1766 Gaspar's lava raft (09): waiting and rocking, ridden along its path with its paddle wheel and wake, turned back from the far cuboids | level09 0x309c08 | [`gaspar_raft`] |
 //! | U308 | 1201 Gaspar's cannons (09): the mount, the stick aim, the two barrels, the seat camera and light, the crosshair; the bases 324 and the shells 1258 | level09 0x304c80, 0x2efe40, 0x307d68 | [`gaspar_cannon`] |
 //! | U305 | 1150, 1151 Gaspar's path platforms (09): the path platform 726 with the riding state and sounds | level09 0x3033a0 | [`crate::moby_update::classes::path_platform`] |
@@ -334,6 +335,7 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod orxon_lava;
 pub mod gaspar_raft;
 pub mod gaspar_cannon;
 pub mod gaspar_breakable;
@@ -991,6 +993,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U352 939", level: orxon_lava::REFERENCE_LEVEL, func: orxon_lava::UPDATE_FN, classes: &orxon_lava::CLASSES, update: orxon_lava::update, joints: &[] },
+    UnitPort { unit: "U352 938", level: orxon_lava::REFERENCE_LEVEL, func: orxon_lava::ROCK_FN, classes: &orxon_lava::ROCK_CLASSES, update: orxon_lava::rock_update, joints: &[] },
     UnitPort { unit: "U313 1766", level: gaspar_raft::REFERENCE_LEVEL, func: gaspar_raft::UPDATE_FN, classes: &gaspar_raft::CLASSES, update: gaspar_raft::update, joints: &gaspar_raft::CLASSES },
     UnitPort { unit: "U308 1201", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::UPDATE_FN, classes: &gaspar_cannon::CLASSES, update: gaspar_cannon::update, joints: &gaspar_cannon::CLASSES },
     UnitPort { unit: "U308 324", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::BASE_FN, classes: &gaspar_cannon::BASE_CLASSES, update: empty::update, joints: &[] },
@@ -1048,6 +1052,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U254 38", level: umbris_lift::REFERENCE_LEVEL, func: umbris_lift::UPDATE_FN, classes: &umbris_lift::CLASSES, update: umbris_lift::update, joints: &[] },
     UnitPort { unit: "U255 1474", level: umbris_lift::REFERENCE_LEVEL, func: umbris_lift::GATED_FN, classes: &umbris_lift::GATED_CLASSES, update: umbris_lift::gated_update, joints: &[] },
     UnitPort { unit: "U224 857", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::UPDATE_FN, classes: &blarg_gadgetbot::CLASSES, update: blarg_gadgetbot::update, joints: &blarg_gadgetbot::CLASSES },
+    UnitPort { unit: "U351 857", level: blarg_gadgetbot::ORXON_LEVEL, func: blarg_gadgetbot::ORXON_FN, classes: &blarg_gadgetbot::CLASSES, update: blarg_gadgetbot::update, joints: &blarg_gadgetbot::CLASSES },
     UnitPort { unit: "U224 857 glow", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U224 302", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::BUBBLE_FN, classes: &blarg_gadgetbot::BUBBLE_CLASSES, update: blarg_gadgetbot::bubble_update, joints: &[] },
     UnitPort { unit: "U224 302 bubble", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::BUBBLE_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
