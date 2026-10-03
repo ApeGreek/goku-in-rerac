@@ -1115,6 +1115,9 @@ pub struct HeroFields {
     pub ammo_picked: [i32; rc_formats::save_game::ITEM_COUNT],
     /// `0x1413ff = 1`: the hand item hidden (the gold bolt's pickup; `SetState` clears it on foot).
     pub hide_hand: bool,
+    /// A class's screen marker this tick (`FUN_0020fb60`, `crate::targeting::Markers`: Gaspar's cannon 1201's
+    /// crosshair), with the tick it was registered in.
+    pub marker: Option<(u64, crate::targeting::Marker)>,
     /// 0x13f640: the water level (the water managers of levels 05 / 12 set it near their water).
     pub water_level: f32,
     /// 0x13f52e (s16): the dive lock (level 05's water plane 982 holds it at 5).
@@ -1246,6 +1249,7 @@ impl HeroFields {
             ammo: h.weapons.ammo,
             ammo_picked: [0; rc_formats::save_game::ITEM_COUNT],
             hide_hand: false,
+            marker: None,
             water_level: f32::from_bits(h.water_level.0),
             dive_lock: h.swim.dive_lock,
             swing_help_clear: false,
@@ -1327,6 +1331,7 @@ impl HeroFields {
         if let Some(pose) = self.set_entry_pose { h.bodies.entry_pose = Some(pose); }
         if let Some(t) = self.invulnerable { h.f510 = t; }
         if let Some(v) = self.back_request { h.back_slot.slot.request = v; }
+        if let Some((t, m)) = self.marker { h.weapons.markers.register(t, m); }
         if let Some(v) = self.head_request { h.head_slot.request = v; }
         if let Some(v) = self.clank_hidden { h.back_slot.clank_hidden = v; }
         if let Some(v) = self.no_vel_clamp { h.no_vel_clamp = v; }

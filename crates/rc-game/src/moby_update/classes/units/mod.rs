@@ -250,6 +250,11 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U313 | 1766 Gaspar's lava raft (09): waiting and rocking, ridden along its path with its paddle wheel and wake, turned back from the far cuboids | level09 0x309c08 | [`gaspar_raft`] |
+//! | U308 | 1201 Gaspar's cannons (09): the mount, the stick aim, the two barrels, the seat camera and light, the crosshair; the bases 324 and the shells 1258 | level09 0x304c80, 0x2efe40, 0x307d68 | [`gaspar_cannon`] |
+//! | U305 | 1150, 1151 Gaspar's path platforms (09): the path platform 726 with the riding state and sounds | level09 0x3033a0 | [`crate::moby_update::classes::path_platform`] |
+//! | U302, U310 | 276, 1298, 1299 Gaspar's staged breakable rocks (09): each hit the next stage, the spray, chunks 320 / 321, the empty last stage 1300; the ring rocks 1285–1288 and their story flag | level09 0x2edc30, 0x2ef9b0, 0x309828 | [`gaspar_breakable`] |
+//! | U301 | 263–267 Gaspar's meteor shower (09): the controller, the drifting rocks, the falling meteors and their bursts, debris; the dust puffs 417 | level09 0x2eb970, 0x2f0040 | [`gaspar_meteors`] |
 //! | U286 | 671 Batalia's wreck flames (08): the swaying fire sheet, embers, sparks, the wandering light | level08 0x2f70a0, 0x2f5e58 | [`batalia_flame`] |
 //! | U276, U278, U279 | 444, 462, 463 Batalia's gunships (08): intro loops, the attack runs at the turret, missiles, pods knocked off; their parts 441–451, 464, 465 (falling, smoke, splash) | level08 0x2e24e8, 0x2e8cd0, 0x2e9b70, 0x2e16c0 | [`batalia_gunship`] |
 //! | U273 | 435 Batalia's bombers (crash through the walls) and the gunships' missiles (climb, then dive at the turret) | level08 0x2dd3c0 | [`batalia_bomber`] |
@@ -329,6 +334,10 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod gaspar_raft;
+pub mod gaspar_cannon;
+pub mod gaspar_breakable;
+pub mod gaspar_meteors;
 pub mod batalia_flame;
 pub mod batalia_gunship;
 pub mod batalia_bomber;
@@ -982,6 +991,17 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U313 1766", level: gaspar_raft::REFERENCE_LEVEL, func: gaspar_raft::UPDATE_FN, classes: &gaspar_raft::CLASSES, update: gaspar_raft::update, joints: &gaspar_raft::CLASSES },
+    UnitPort { unit: "U308 1201", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::UPDATE_FN, classes: &gaspar_cannon::CLASSES, update: gaspar_cannon::update, joints: &gaspar_cannon::CLASSES },
+    UnitPort { unit: "U308 324", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::BASE_FN, classes: &gaspar_cannon::BASE_CLASSES, update: empty::update, joints: &[] },
+    UnitPort { unit: "U308 1258", level: gaspar_cannon::REFERENCE_LEVEL, func: gaspar_cannon::SHELL_FN, classes: &gaspar_cannon::SHELL_CLASSES, update: gaspar_cannon::shell_update, joints: &[] },
+    UnitPort { unit: "U305 1150", level: crate::moby_update::classes::path_platform::GASPAR_LEVEL, func: crate::moby_update::classes::path_platform::GASPAR_FN, classes: &crate::moby_update::classes::path_platform::GASPAR_CLASSES, update: crate::moby_update::classes::path_platform::gaspar_update, joints: &[] },
+    UnitPort { unit: "U302 276", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::UPDATE_FN, classes: &gaspar_breakable::CLASSES, update: gaspar_breakable::update, joints: &[] },
+    UnitPort { unit: "U302 320", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::CHUNK_FN, classes: &gaspar_breakable::CHUNK_CLASSES, update: gaspar_breakable::chunk_update, joints: &[] },
+    UnitPort { unit: "U302 1300", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::LAST_FN, classes: &gaspar_breakable::LAST_CLASSES, update: empty::update, joints: &[] },
+    UnitPort { unit: "U310 1285", level: gaspar_breakable::REFERENCE_LEVEL, func: gaspar_breakable::RING_FN, classes: &gaspar_breakable::RING_CLASSES, update: gaspar_breakable::ring_update, joints: &[] },
+    UnitPort { unit: "U301 263", level: gaspar_meteors::REFERENCE_LEVEL, func: gaspar_meteors::UPDATE_FN, classes: &gaspar_meteors::CLASSES, update: gaspar_meteors::update, joints: &[] },
+    UnitPort { unit: "U301 417", level: gaspar_meteors::REFERENCE_LEVEL, func: gaspar_meteors::DUST_FN, classes: &gaspar_meteors::DUST_CLASSES, update: gaspar_meteors::dust_update, joints: &[] },
     UnitPort { unit: "U286 671", level: batalia_flame::REFERENCE_LEVEL, func: batalia_flame::UPDATE_FN, classes: &batalia_flame::CLASSES, update: batalia_flame::update, joints: &[] },
     UnitPort { unit: "U286 671 draw", level: batalia_flame::REFERENCE_LEVEL, func: batalia_flame::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U276 444", level: batalia_gunship::REFERENCE_LEVEL, func: batalia_gunship::BIG_FN, classes: &batalia_gunship::BIG_CLASSES, update: batalia_gunship::update, joints: &batalia_gunship::JOINT_CLASSES },

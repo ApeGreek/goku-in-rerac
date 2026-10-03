@@ -69,8 +69,21 @@ const BLOCK: usize = 0x60;
 fn dist3(a: [f32; 3], b: [f32; 4]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() }
 fn dist_xy(a: [f32; 4], b: [f32; 3]) -> f32 { ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt() }
 
+/// Gaspar's copy (level09 `0x3033a0`, classes 1150 / 1151, 5 placed): the same platform without the appear
+/// cuboid; ridden away (pvar+0xc8 = 0) it puts Ratchet in the riding state (`SetState(0x72, 1)`, back to 0 on
+/// arrival) instead of the edge brake; leaving t = 0 plays sound 1 and every arrival sound 2; it pauses for Ratchet
+/// below within 2 (xy) and more than 1 under it.
+pub const GASPAR_FN: u32 = 0x30_33a0;
+pub const GASPAR_LEVEL: u32 = 9;
+pub const GASPAR_CLASSES: [i16; 2] = [1150, 1151];
+
 /// `PathPlatformUpdate` (0x2b9eb0).
-pub fn update(w: &mut World, id: MobyId) {
+pub fn update(w: &mut World, id: MobyId) { run(w, id, false) }
+
+/// Level09 `0x3033a0` ([`GASPAR_FN`]).
+pub fn gaspar_update(w: &mut World, id: MobyId) { run(w, id, true) }
+
+fn run(w: &mut World, id: MobyId, gaspar: bool) {
     if w.m(id).pvars.len() < 0xd0 { return; }
     let path = p::i32(&w.m(id).pvars, 0xb4);
     if path == -1 { return; }
@@ -83,7 +96,7 @@ pub fn update(w: &mut World, id: MobyId) {
 
     // Appear cuboid (pvar+0xcc): hidden until Ratchet is inside. The game tests twice; the second test has the
     // same inputs and always agrees.
-    let appear = p::i32(&w.m(id).pvars, 0xcc);
+    let appear = if gaspar { -1 } else { p::i32(&w.m(id).pvars, 0xcc) };
     if appear != -1 {
         if !w.in_cuboid(hero, appear) {
             let m = w.mm(id);
@@ -148,14 +161,14 @@ pub fn update(w: &mut World, id: MobyId) {
         // Waiting at t = 1: go when called from the first end or ridden.
         0 if active => {
             let ridden = p::i16(&w.m(id).pvars, 0xb8) != 0 && w.hero_on_moby(id);
-            if ridden || dist3(hero, first) < dist3(hero, last) { depart(w, id, -1.0); }
+            if ridden || dist3(hero, first) < dist3(hero, last) { depart(w, id, -1.0, gaspar); }
         }
         // Waiting at t = 0.
         1 if active => {
             let ridden = p::i16(&w.m(id).pvars, 0xb8) != 0 && w.hero_on_moby(id);
-            if ridden || dist3(hero, last) < dist3(hero, first) { depart(w, id, 1.0); }
+            if ridden || dist3(hero, last) < dist3(hero, first) { depart(w, id, 1.0, gaspar); }
         }
-        2 => travel(w, id, &pts, hero, old),
+        2 => travel(w, id, &pts, hero, old, gaspar),
         _ => {}
     }
 
@@ -170,8 +183,13 @@ pub fn update(w: &mut World, id: MobyId) {
     }
 }
 
-/// Start moving: state 2, full step `dir / scale(travel·60)`, re-arm cleared.
-fn depart(w: &mut World, id: MobyId, dir: f32) {
+/// Start moving: state 2, full step `dir / scale(travel·60)`, re-arm cleared. Gaspar: the riding state when ridden
+/// away, and sound 1 leaving t = 0.
+fn depart(w: &mut World, id: MobyId, dir: f32, gaspar: bool) {
+    if gaspar {
+        if p::i32(&w.m(id).pvars, 0xc8) == 0 && w.hero_on_moby(id) { crate::cinematic::hero_state(w, 0x72, true); }
+        if 0.0 < dir { w.play_sound(1, 0, id); }
+    }
     let scale = fl(w.svc.timing.timer_scale);
     let m = w.mm(id);
     m.cmd = 2;
@@ -182,8 +200,8 @@ fn depart(w: &mut World, id: MobyId, dir: f32) {
 
 /// State 2: pause for Ratchet below a descending platform, else ramp the step, advance `t`, arrive, and place
 /// the platform on the path (piecewise linear between the path points).
-fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32; 4]) {
-    if p::i32(&w.m(id).pvars, 0xc8) == 0 && w.hero_on_moby(id) {
+fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32; 4], gaspar: bool) {
+    if !gaspar && p::i32(&w.m(id).pvars, 0xc8) == 0 && w.hero_on_moby(id) {
         // 0x13f544 = 4 (edge brake), 0x13f542 = 4 (jump lockout), through the hero-block writes.
         let f = w.hero_fields_mut();
         f.edge_brake = 4;
@@ -191,7 +209,8 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
     }
     let pos = w.m(id).position;
     let mut pause = p::i16(&w.m(id).pvars, 0xba) != 0;
-    if !pause && p::ff(&w.m(id).pvars, 0xbc) < 0.0 && dist_xy(pos, hero) < 2.83 && (hero[2] - pos[2]).abs() < 4.0 && 0.9 < pos[2] - hero[2] {
+    let (reach, under) = if gaspar { (2.0, 1.0) } else { (2.83, 0.9) };
+    if !pause && p::ff(&w.m(id).pvars, 0xbc) < 0.0 && dist_xy(pos, hero) < reach && (hero[2] - pos[2]).abs() < 4.0 && under < pos[2] - hero[2] {
         // Descending onto Ratchet: wait 30 ticks.
         let t = w.ticks(30);
         p::set_i16(&mut w.mm(id).pvars, 0xba, t as i16);
@@ -210,6 +229,7 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
     }
     let arrive_ticks = w.ticks(15);
     let mut arrived = false;
+    let ridden = gaspar && p::i32(&w.m(id).pvars, 0xc8) == 0 && w.hero_on_moby(id);
     let m = w.mm(id);
     let full = p::ff(&m.pvars, 0xac);
     let mut step = p::ff(&m.pvars, 0xa8) + full * fl(DT);
@@ -218,6 +238,9 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
     let mut t = p::ff(&m.pvars, 0xa4) + step;
     p::set_ff(&mut m.pvars, 0xa4, t);
     if (t - 0.5).abs() > 0.5 {
+        // Gaspar: the riding state ends, the arrival sound 2.
+        if ridden { crate::cinematic::hero_state(w, 0, true); }
+        let m = w.mm(id);
         if 0.0 < full {
             m.cmd = 0;
             t = 1.0;
@@ -226,10 +249,13 @@ fn travel(w: &mut World, id: MobyId, pts: &[[f32; 4]], hero: [f32; 3], old: [f32
             t = 0.0;
         }
         p::set_ff(&mut m.pvars, 0xa4, t);
+        if gaspar { w.play_sound(2, 0, id); }
+        let m = w.mm(id);
         p::set_ff(&mut m.pvars, 0xa8, 0.0);
         p::set_i16(&mut m.pvars, 0xba, arrive_ticks as i16);
         arrived = true;
     }
+    let m = w.mm(id);
     let n1 = pts.len() as i32 - 1;
     let i = (n1 as f32 * t) as i32;
     let f = n1 as f32 * t - i as f32;
