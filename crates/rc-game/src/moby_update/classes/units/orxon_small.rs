@@ -36,6 +36,12 @@
 //!   0xfe / 0xfd): it turns its back (yaw + π) toward it (`SpringTurn` 90°·dt², 180°·dt², 45°·dt), and within 2.5°
 //!   fires Gaspar's cannon shell (`0x2e68b8` = the same code, `gaspar_cannon::shell`) from 1.5 out at 40·dt, life
 //!   `ticks(30)`, that target done; none left → 3 and pvar 5's moby woken. 3: the targets deleted, the death bits.
+//! * **1047, the generator core** (`0x2d9eb8`, U356; 1 placed, a target of 1346): already latched → its rubble
+//!   (classes 1122 and 1921 at its point, z 59: `0x2dd848` / `0x2eb8c0`, both with empty updates) and deleted. A hit
+//!   (0x40000): a beam explosion (4, 2, 100000, scale 3, light 15; 5 / 3 / 4, 1 debris, shake), the sound 0 of class
+//!   0x99, 30 burning bits (`SpawnDebrisMoby`: class 0x70e, from (−1, ±3, ±3) in its frame out at `randf(5, 10)·dt`),
+//!   a second explosion at its rows·(2.86, 1.57, 1.83) (the rows only: no position added, as the game does [L]), the
+//!   rubble, both death bits, deleted.
 //!
 //! | address | what | port |
 //! |---|---|---|
@@ -47,6 +53,7 @@
 //! | `0x2e9648` / `0x2e9990` | 1421 / 1424 | [`bridge_update`] / [`block_update`] |
 //! | `0x2eacd8` | 1555 | [`thrusters_update`] |
 //! | `0x2e8ab0` | 1346 | [`turret_update`] |
+//! | `0x2d9eb8` | 1047 | [`core_update`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{self as c, V, DT};
@@ -72,6 +79,9 @@ pub const BLOCK_CLASSES: [i16; 1] = [1424];
 pub const THRUSTERS_CLASSES: [i16; 1] = [1555];
 pub const TURRET_FN: u32 = 0x2e_8ab0;
 pub const TURRET_CLASSES: [i16; 1] = [1346];
+pub const CORE_FN: u32 = 0x2d_9eb8;
+pub const CORE_CLASSES: [i16; 1] = [1047];
+pub const RUBBLE_CLASSES: [i16; 2] = [1122, 1921];
 
 /// The spawn's collected byte (`0x1bbb04[uid]`) or its persistent death bit.
 fn latched(w: &World, id: MobyId) -> bool {
@@ -540,4 +550,57 @@ pub fn turret_update(w: &mut World, id: MobyId) {
         }
         _ => {}
     }
+}
+
+/// `0x2dd848` / `0x2eb8c0`: a rubble piece at `m`'s point, z 59.
+fn rubble(w: &mut World, id: MobyId, class: i16) {
+    let Some(n) = w.create_moby(class) else { return };
+    let (p, rz, l, a) = (w.m(id).position, w.m(id).rotation[2], w.m(id).light, w.m(id).ambient);
+    let m = w.mm(n);
+    m.update_dist = 0xff;
+    m.draw_dist = 0xff;
+    m.visible = 1;
+    m.rotation = [0.0, 0.0, rz, m.rotation[3]];
+    m.light = l;
+    m.ambient = a;
+    m.position = [p[0], p[1], 59.0, p[3]];
+    w.build_matrix(n);
+}
+
+/// Level10 `0x2d9eb8`: the generator core (module doc).
+pub fn core_update(w: &mut World, id: MobyId) {
+    use crate::moby_update::creature::fx::{beam_explosion, Beam};
+    const B: Beam = Beam { damage_r: 0.0, damage: 0.0, flash: 4.0, flash2: 2.0, flash_dist: 100_000.0, scale: 3.0, light: 15.0, streaks: 5, sparks: 3, puffs: 4, debris: 1, sound: -1, shake: true };
+    if latched(w, id) {
+        rubble(w, id, RUBBLE_CLASSES[0]);
+        rubble(w, id, RUBBLE_CLASSES[1]);
+        w.delete_moby(id);
+        return;
+    }
+    if w.get_hit(id, 0x4_0000, false).is_none() { return; }
+    let pos = c::pos(w, id);
+    beam_explosion(w, &B, Some(id), pos);
+    w.play_sound_as(0, 0, id, 0x99);
+    let r = w.m(id).rows;
+    let mul = |v: [f32; 3]| -> V { std::array::from_fn(|i| if i == 3 { 0.0 } else { r[0][i] * v[0] + r[1][i] * v[1] + r[2][i] * v[2] }) };
+    for _ in 0..30 {
+        let y = w.rng.randf(-3.0, 3.0);
+        let z = w.rng.randf(-3.0, 3.0);
+        let o = mul([-1.0, y, z]);
+        let s = w.rng.randf(5.0, 10.0);
+        let v = c::set_len3(o, s * DT);
+        let at = c::add(o, pos);
+        let _ = w.rng.randi(1);
+        let scale = w.rng.randf(0.5, 1.0);
+        let life = w.rng.rand_range(0x3c, 0x78);
+        let g = w.rng.randf(2.0, 3.0);
+        let keep = (w.rng.randi(4) == 0) as i32;
+        crate::moby_update::classes::gunship::spawn_ember(w, scale, g, 1.0, 3.0, at, v, 0x70e, life, keep);
+    }
+    let o2 = mul([f32::from_bits(0x4037_0a3d), f32::from_bits(0x3fc8_f5c3), f32::from_bits(0x3fea_5e35)]);
+    beam_explosion(w, &B, Some(id), o2);
+    rubble(w, id, RUBBLE_CLASSES[0]);
+    rubble(w, id, RUBBLE_CLASSES[1]);
+    story::death_bits(w, id);
+    w.delete_moby(id);
 }

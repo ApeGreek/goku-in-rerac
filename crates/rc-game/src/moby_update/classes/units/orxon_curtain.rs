@@ -24,6 +24,19 @@
 //! 0x7fc04070 and 0x00ff0000), its alpha ·fade² (fade 1 within 48 of the camera, to 0 at 80); switched off: white at
 //! alpha `timer·255/scale(27)`.
 //!
+//! **The generators 794** (`0x2c9c70`, U350; 6 placed, one per barrier): pvars +0x00 / +0x04 the barrier's width
+//! and height, +0x08 flags, +0x0c the fade ticks, +0x10 the barrier (a moby index), +0x14 its class, +0x16 the
+//! state to give it (2: off), +0x17 a state to wait for, five watched mobys at +0x18 (index, class, a state), +0x40
+//! the fade timer, +0x44 the barrier's alpha, +0x48 the zap radius, +0x4c the height margin, +0x50 the zap damage.
+//! Start: the barrier's class and alpha, the positions / rotations copied by flags 0x10 / 0x40 / 0x20 / 0x80, the
+//! watched classes, the scale `max(w, h)·class`. On (1): while any watched moby lives (its class, not deleted, its
+//! death bit clear, not in its state) — and the mission not done — nothing; then the barrier gets its state, the
+//! fade starts (→ 2). Fading (2): the barrier's alpha by the timer (unless flag 2), → 3 when the barrier reaches
+//! +0x17 (unless flag 4) or the timer runs out (unless flag 8). 3: the barrier deleted (unless flag 1), then itself.
+//! In 1 and 2 (unless flag 0x100) the zap (`0x2c9958`): every moby within the barrier's sphere is taken onto its
+//! plane (clamped to its edges once beyond them by the radius / the margin) and hit there (`0x26eaa8`: damage
+//! +0x50, flags 0x10001) when a sphere of the zap radius there lists it.
+//!
 //! Read from the level10 decomp; the tables from the overlay (0x1d9ff0 ST, 0x1da010 the thickness offsets) and gp
 //! (−0x4f70.. ALPHA 0, 2, 0, 1; −0x4f70.. colours). [L] The view check's distance argument is not visible in the decomp
 //! (one argument): 80 here; the fade is computed by the update (the camera of the same tick).
@@ -33,6 +46,7 @@
 //! | `0x2da2c8` | the barrier | [`update`] |
 //! | `0x2da690` | its draw | [`fx_quads`] (`Callback::UnitQuads`) |
 //! | `0x2dcc58` | the field | [`field_update`] |
+//! | `0x2c9c70` / `0x2c9958` | the generator / its zap | [`generator_update`] / `zap` |
 
 use super::{FxQuad, FxQuads};
 use crate::moby_runtime::{MobyId, MobyTable};
@@ -47,6 +61,8 @@ pub const DRAW_FN: u32 = 0x2d_a690;
 pub const FIELD_FN: u32 = 0x2d_cc58;
 pub const CLASSES: [i16; 1] = [1067];
 pub const FIELD_CLASSES: [i16; 1] = [1073];
+pub const GENERATOR_FN: u32 = 0x2c_9c70;
+pub const GENERATOR_CLASSES: [i16; 1] = [794];
 
 const FIELD_LEN: usize = 0x12de4;
 const POS: usize = 0x0;
@@ -236,4 +252,124 @@ pub fn fx_quads(table: &MobyTable, svc: &Services, id: MobyId) -> Option<FxQuads
         }
     }
     Some(FxQuads { fx: 0xe, additive: true, quads })
+}
+
+fn barrier_of(w: &World, id: MobyId) -> Option<MobyId> {
+    usize::try_from(c::pi32(w, id, 0x10)).ok().filter(|&m| m < w.table.mobys.len())
+}
+
+/// Level10 `0x2c9c70`: the generator (module doc).
+pub fn generator_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x54);
+    let barrier = barrier_of(w, id);
+    let flags = c::pi32(w, id, 8) as u32;
+    let mission = w.m(id).mission;
+    let state = w.m(id).state;
+    let mut alive = 0;
+    if (mission == 0xff || !story::mission_done(w, mission as i32)) && state != 0 {
+        for k in 0..5 {
+            let o = 0x18 + 8 * k;
+            let Some(m) = usize::try_from(c::pi32(w, id, o)).ok().filter(|&m| m < w.table.mobys.len()) else { continue };
+            let mo = w.m(m);
+            if mo.o_class != c::pi16(w, id, o + 4) || matches!(mo.state, 0xfe | 0xfd) { continue; }
+            if w.svc.save.death.contains(&(w.svc.level, mo.spawn_id)) { continue; }
+            let want = w.m(id).pvars[o + 6] as i8;
+            if want == -1 || mo.state as i8 != want { alive += 1; }
+        }
+    }
+    match state {
+        0 => {
+            if let Some(b) = barrier {
+                let cl = w.m(b).o_class;
+                c::set_pi16(w, id, 0x14, cl);
+                let a = w.m(b).alpha as f32;
+                c::set_pf(w, id, 0x44, a);
+                if flags & 0x10 != 0 {
+                    let p = w.m(id).position;
+                    w.mm(b).position = p;
+                } else if flags & 0x40 != 0 {
+                    let p = w.m(b).position;
+                    w.mm(id).position = p;
+                }
+                if flags & 0x20 != 0 {
+                    let r = w.m(b).rotation;
+                    w.mm(id).rotation = r;
+                } else if flags & 0x80 != 0 {
+                    let r = w.m(id).rotation;
+                    w.mm(b).rotation = r;
+                }
+            }
+            for k in 0..5 {
+                let o = 0x18 + 8 * k;
+                if let Some(m) = usize::try_from(c::pi32(w, id, o)).ok().filter(|&m| m < w.table.mobys.len()) {
+                    let cl = w.m(m).o_class;
+                    c::set_pi16(w, id, o + 4, cl);
+                }
+            }
+            let big = c::pf(w, id, 0).max(c::pf(w, id, 4));
+            w.mm(id).scale = big * super::class_scale(w, w.m(id).o_class);
+            w.mm(id).state = 1;
+        }
+        1 => {
+            if alive == 0 {
+                let to = w.m(id).pvars[0x16];
+                if let Some(b) = barrier {
+                    if to != 0xff { w.mm(b).state = to; }
+                }
+                let t = c::pi32(w, id, 0xc);
+                c::set_pi32(w, id, 0x40, t);
+                w.mm(id).state = 2;
+            }
+            zap(w, id, flags);
+        }
+        2 => {
+            if let Some(b) = barrier {
+                if flags & 2 == 0 {
+                    let a = (c::pf(w, id, 0x44) * c::pi32(w, id, 0x40) as f32) / c::pi32(w, id, 0xc).max(1) as f32;
+                    w.mm(b).alpha = a as i32 as u8;
+                }
+            }
+            let until = w.m(id).pvars[0x17];
+            if flags & 4 == 0 {
+                if let Some(b) = barrier {
+                    if until != 0xff && w.m(b).state == until { w.mm(id).state = 3; }
+                }
+            }
+            if flags & 8 == 0 && c::dec_timer_pvar_i32(w, id, 0x40) != 0 { w.mm(id).state = 3; }
+            zap(w, id, flags);
+        }
+        3 => {
+            if let Some(b) = barrier {
+                if flags & 1 == 0 { w.delete_moby(b); }
+            }
+            w.delete_moby(id);
+        }
+        _ => {}
+    }
+}
+
+/// `0x2c9958`: the zap (module doc).
+fn zap(w: &mut World, id: MobyId, flags: u32) {
+    use crate::moby_update::services::{pf, pv, sphere_mobys_in};
+    if flags & 0x100 != 0 { return; }
+    let rows = crate::moby_update::services::euler_rows(pv(w.m(id).rotation));
+    let r: [[f32; 4]; 4] = rows.map(|row| row.map(|x| f32::from_bits(x.0)));
+    let (wd, ht) = (c::pf(w, id, 0), c::pf(w, id, 4));
+    let big = wd.max(ht);
+    let pos = c::pos(w, id);
+    let world = |v: [f32; 3]| -> [f32; 4] { [r[0][0] * v[0] + r[1][0] * v[1] + r[2][0] * v[2] + pos[0], r[0][1] * v[0] + r[1][1] * v[1] + r[2][1] * v[2] + pos[1], r[0][2] * v[0] + r[1][2] * v[1] + r[2][2] * v[2] + pos[2], pos[3]] };
+    let centre = world([0.0, 0.0, big * 0.5]);
+    let list = sphere_mobys_in(w.table, w.svc, w.classes, pf(big * 0.5), pv(centre), 0x10, Some(id), None);
+    let (rad, margin, dmg) = (c::pf(w, id, 0x48), c::pf(w, id, 0x4c), c::pf(w, id, 0x50));
+    for q in list {
+        if matches!(w.m(q).state, 0xfe | 0xfd) { continue; }
+        let d = c::sub(w.m(q).position, pos);
+        let mut l = [r[0][0] * d[0] + r[0][1] * d[1] + r[0][2] * d[2], 0.0, r[2][0] * d[0] + r[2][1] * d[1] + r[2][2] * d[2]];
+        let (hx, hz) = (wd * 0.5, ht * 0.5);
+        if l[0] < -(hx + rad) { l[0] = -hx } else if hx + rad < l[0] { l[0] = hx }
+        if l[2] < -(hz + margin) { l[2] = -hz } else if hz + margin < l[2] { l[2] = hz }
+        let p = world(l);
+        let near = sphere_mobys_in(w.table, w.svc, w.classes, pf(rad), pv(p), 0x10, Some(id), None);
+        if near.contains(&q) { crate::moby_update::creature::attack::hit_moby(w, q, id, dmg, 0x1_0001, p, [0.0; 4]); }
+    }
 }
