@@ -554,6 +554,14 @@ pub fn add_visit_bits(s: &mut rc_formats::moby_spawn::SpawnSave, v: &crate::moby
 /// The hits the last `UpdateParts` gave Ratchet (`Particles::hits`: type 58's `0x26eaa8(damage, hero, owner, 1, pos,
 /// dir)`), as their hit records.
 fn part_hits(w: &mut World) {
+    // Type 40's fresh flame lines: `CollLine_Fix(a, b, 0, owner, {dir, owner, 0x10001, 1.0})` against the mobys.
+    let lines = w.particles.as_deref_mut().map(|p| std::mem::take(&mut p.lines)).unwrap_or_default();
+    for l in lines {
+        use crate::moby_update::services::{pf, pv, HitTemplate};
+        let owner = (l.owner as usize).checked_sub(1).filter(|&o| o < w.table.mobys.len());
+        let t = HitTemplate { dir: pv(l.dir), attacker: owner, flags: 0x1_0001, damage: pf(1.0), w20: 1, ..Default::default() };
+        crate::moby_update::services::line_hit_in(w.table, w.svc, w.classes, w.coll, pv(l.a), pv(l.b), 0, owner, &t);
+    }
     let Some(hits) = w.particles.as_deref_mut().map(|p| std::mem::take(&mut p.hits)) else { return };
     let Some(hero) = w.hero_moby else { return };
     for h in hits {

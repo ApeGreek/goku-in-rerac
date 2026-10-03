@@ -250,6 +250,7 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U349 | 702 Orxon's flame vents (10): the on / off bursts of flame lines (particle type 40) and the roar | level10 0x2c7a20 | [`orxon_flame`] |
 //! | U347 | 351, 1301 Clank's teleport pads on Orxon (10): the jump between partners, the sparkles and rings, the camera's settle | level10 0x2be858 | [`orxon_pads`] |
 //! | U353 | 947 Orxon's live wires (10): the charge along the path with its light and buzz, the sparks 1090 that hurt | level10 0x2d8d30, 0x2dd3d8 | [`orxon_wire`] |
 //! | U357 | 1067, 1073, 794 Orxon's energy barriers (10), their strand field and their generators: the wiggling ribbons, the hum, switched off | level10 0x2da2c8, 0x2da690, 0x2dcc58 | [`orxon_curtain`] |
@@ -339,6 +340,7 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod orxon_flame;
 pub mod orxon_pads;
 pub mod orxon_wire;
 pub mod orxon_curtain;
@@ -1001,6 +1003,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U349 702", level: orxon_flame::REFERENCE_LEVEL, func: orxon_flame::UPDATE_FN, classes: &orxon_flame::CLASSES, update: orxon_flame::update, joints: &[] },
     UnitPort { unit: "U347 351", level: orxon_pads::REFERENCE_LEVEL, func: orxon_pads::UPDATE_FN, classes: &orxon_pads::CLASSES, update: orxon_pads::update, joints: &[] },
     UnitPort { unit: "U353 947", level: orxon_wire::REFERENCE_LEVEL, func: orxon_wire::UPDATE_FN, classes: &orxon_wire::CLASSES, update: orxon_wire::update, joints: &[] },
     UnitPort { unit: "U353 1090", level: orxon_wire::REFERENCE_LEVEL, func: orxon_wire::SPARK_FN, classes: &orxon_wire::SPARK_CLASSES, update: orxon_wire::spark_update, joints: &[] },
