@@ -59,6 +59,9 @@ pub const SHELL_FN: u32 = 0x30_7d68;
 pub const CLASSES: [i16; 1] = [1201];
 pub const BASE_CLASSES: [i16; 1] = [324];
 pub const SHELL_CLASSES: [i16; 1] = [1258];
+/// Level 10's copy of the shell (`0x2e6a78`, spawner `0x2e68b8`; the same code: Orxon's turret 1346 fires it).
+pub const ORXON_LEVEL: u32 = 10;
+pub const ORXON_SHELL_FN: u32 = 0x2e_6a78;
 
 const BASE: i16 = 0x144;
 const SHELL: i16 = 0x4ea;
@@ -335,7 +338,7 @@ fn fire(w: &mut World, id: MobyId, j: usize) {
 }
 
 /// `0x307ba8(m, p, v, life)`: a shell.
-fn shell(w: &mut World, owner: MobyId, p: V, v: V, life: i32) {
+pub fn shell(w: &mut World, owner: MobyId, p: V, v: V, life: i32) {
     let Some(m) = w.create_moby(SHELL) else { return };
     story::pvars(w, m, spo::LEN);
     c::set_pi32(w, m, spo::OWNER, owner as i32 + 1);

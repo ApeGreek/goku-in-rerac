@@ -14,7 +14,7 @@
 //! | keep a point r from the path walls | level00 `0x261d78` (cluster 49a176c9f6de: 00, 05, 06 `0x270d00`, 08, 10, 11, 13, 16, 18) | one source; not on 01 | [`push_from_walls`] |
 //! | the point nearest a distance | level03 `0x264558` (03, 04, 14), level05 `0x2a0260` (05, 08, 12, 16), level01 `0x28b510` (the flyer driver's) | the same source three times (identical decompiles; `fabs`'s `%lo` differs); the level-01 copy was already ported as the flyer's `nearest` | [`nearest_at_distance`] (the flyer calls it) |
 //! | a segment crosses a path wall | level00 `0x261b48` (00, 08, 13, 16, 18), level02 `0x263710` (02, 03 `0x24ffb0`, 04, 09, 12, 14, 15, 17), level01 `0x276820` `ClampToPath` | the same source: identical decompiles apart from the table address; `ClampToPath` is ported (`World::clamp_to_path`), only its found flag was dropped | `World::clamp_to_path_hit` |
-//! | the point at a distance along equal segments | level01 `0x277260` (level10 `0x2554e0`) | one source; its only consumer is class 947 (level 10, 2 instances, unported) | not ported (no consumer yet) |
+//! | the point at a distance along equal segments | level01 `0x277260` (level10 `0x2554e0`) | one source; consumers class 947 and its sparks 1090 (level 10: `classes::units::orxon_wire`) | [`at_distance`] |
 //! | the next path point toward a target | level15 `0x265b38` (cluster dc2339668382: 09 `0x294cb0`, 13 `0x282010`, 15) | one source (the census's "nearest points to a pair"); consumer 193 (09, 15: `classes::units::pack_biter`) | [`toward`] |
 //!
 //! Standard `f32` (the game's VU0 macro code; no result depends on its last bit). The rotation wraps use the
@@ -167,6 +167,24 @@ pub fn toward(pts: &[Point], me: [f32; 4], target: [f32; 4]) -> [f32; 4] {
     if b == -1 { return target; }
     let i = if a == b { a } else if a < b { a + 1 } else { a - 1 };
     pt(pts, i.max(0) as usize)
+}
+
+/// `0x277260(d, seg, path, &node, &rem, &out)`: the point `d` along a path of equal segments of length `seg`: node =
+/// `trunc(d / seg)`; inside the path the point `rem = d − node·seg` past point `node` toward the next (`VecNormalize`);
+/// before the start point 0, past the end the last point (rem 0). Returns (node, rem, point).
+pub fn at_distance(pts: &[Point], d: f32, seg: f32) -> (i32, f32, [f32; 4]) {
+    let n = pts.len() as i32;
+    let node = (d / seg) as i32;
+    if node < n - 1 && -1 < node {
+        let rem = d - node as f32 * seg;
+        let (a, b) = (pt(pts, node as usize), pt(pts, node as usize + 1));
+        let v = [b[0] - a[0], b[1] - a[1], b[2] - a[2], b[3] - a[3]];
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let k = if l == 0.0 { 0.0 } else { rem / l };
+        return (node, rem, [v[0] * k + a[0], v[1] * k + a[1], v[2] * k + a[2], v[3] * k + a[3]]);
+    }
+    let node = if node < n - 1 { 0 } else { n - 1 };
+    (node, 0.0, pt(pts, node.max(0) as usize))
 }
 
 #[cfg(test)]

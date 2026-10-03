@@ -250,6 +250,7 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U353 | 947 Orxon's live wires (10): the charge along the path with its light and buzz, the sparks 1090 that hurt | level10 0x2d8d30, 0x2dd3d8 | [`orxon_wire`] |
 //! | U357 | 1067, 1073 Orxon's energy barriers (10) and their strand field: the wiggling ribbons, the hum, switched off | level10 0x2da2c8, 0x2da690, 0x2dcc58 | [`orxon_curtain`] |
 //! | U359, U343, U355, U348, U344, U370, U371, U373 | 1100, 1033, 1031, 353, 1117, 1421, 1424, 1555 Orxon's cracked walls, lift, pressure plates, sliding gate, sinking platforms, bridge, sliding block and scene thrusters (10) | level10 0x2dd650, 0x295a38, 0x2d92b8, 0x2befe8 | [`orxon_small`] |
 //! | U352 | 939 Orxon's lava spouts (10) and their glowing rocks 938: thrown, bouncing, cooling, batted back, bursting | level10 0x2d8c00, 0x2d85c8 | [`orxon_lava`] |
@@ -337,6 +338,7 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod orxon_wire;
 pub mod orxon_curtain;
 pub mod orxon_small;
 pub mod orxon_lava;
@@ -997,6 +999,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U353 947", level: orxon_wire::REFERENCE_LEVEL, func: orxon_wire::UPDATE_FN, classes: &orxon_wire::CLASSES, update: orxon_wire::update, joints: &[] },
+    UnitPort { unit: "U353 1090", level: orxon_wire::REFERENCE_LEVEL, func: orxon_wire::SPARK_FN, classes: &orxon_wire::SPARK_CLASSES, update: orxon_wire::spark_update, joints: &[] },
     UnitPort { unit: "U357 1067", level: orxon_curtain::REFERENCE_LEVEL, func: orxon_curtain::UPDATE_FN, classes: &orxon_curtain::CLASSES, update: orxon_curtain::update, joints: &[] },
     UnitPort { unit: "U357 1067 draw", level: orxon_curtain::REFERENCE_LEVEL, func: orxon_curtain::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U358 1073", level: orxon_curtain::REFERENCE_LEVEL, func: orxon_curtain::FIELD_FN, classes: &orxon_curtain::FIELD_CLASSES, update: orxon_curtain::field_update, joints: &[] },
@@ -1004,6 +1008,8 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U343 1033", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::LIFT_FN, classes: &orxon_small::LIFT_CLASSES, update: orxon_small::lift_update, joints: &[] },
     UnitPort { unit: "U355 1031", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::PLATE_FN, classes: &orxon_small::PLATE_CLASSES, update: orxon_small::plate_update, joints: &[] },
     UnitPort { unit: "U348 353", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::GATE_FN, classes: &orxon_small::GATE_CLASSES, update: orxon_small::gate_update, joints: &[] },
+    UnitPort { unit: "U368 1346", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::TURRET_FN, classes: &orxon_small::TURRET_CLASSES, update: orxon_small::turret_update, joints: &[] },
+    UnitPort { unit: "U308 1258 (10)", level: gaspar_cannon::ORXON_LEVEL, func: gaspar_cannon::ORXON_SHELL_FN, classes: &gaspar_cannon::SHELL_CLASSES, update: gaspar_cannon::shell_update, joints: &[] },
     UnitPort { unit: "U344 1117", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::SINK_FN, classes: &orxon_small::SINK_CLASSES, update: orxon_small::sink_update, joints: &[] },
     UnitPort { unit: "U370 1421", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::BRIDGE_FN, classes: &orxon_small::BRIDGE_CLASSES, update: orxon_small::bridge_update, joints: &[] },
     UnitPort { unit: "U371 1424", level: orxon_small::REFERENCE_LEVEL, func: orxon_small::BLOCK_FN, classes: &orxon_small::BLOCK_CLASSES, update: orxon_small::block_update, joints: &[] },

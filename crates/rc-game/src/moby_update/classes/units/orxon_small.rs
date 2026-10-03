@@ -30,6 +30,12 @@
 //!   reset latch puts them back (3 → 0).
 //! * **1555, the scene thrusters** (`0x2eacd8`, U373): in a scene (game mode 2) 3 / 5 / 6 / 7 the infobot thrusters
 //!   of actor 1 / 2 / 2 / 3 (`0x278450`).
+//! * **1346, the guard turret** (`0x2e8ab0`, U368; 1 placed): pvar 0 a moby told to act (+0xbc = 1) once the turret
+//!   acts, pvars 1–3 its targets, +0x10 the turn speed, pvar 5 a moby put in state 1 when the targets are gone. Its
+//!   latch set → 3; else waiting (1) until another class sets 2. Firing (2): the first target still alive (not
+//!   0xfe / 0xfd): it turns its back (yaw + π) toward it (`SpringTurn` 90°·dt², 180°·dt², 45°·dt), and within 2.5°
+//!   fires Gaspar's cannon shell (`0x2e68b8` = the same code, `gaspar_cannon::shell`) from 1.5 out at 40·dt, life
+//!   `ticks(30)`, that target done; none left → 3 and pvar 5's moby woken. 3: the targets deleted, the death bits.
 //!
 //! | address | what | port |
 //! |---|---|---|
@@ -40,6 +46,7 @@
 //! | `0x295c20` | 1117 | [`sink_update`] |
 //! | `0x2e9648` / `0x2e9990` | 1421 / 1424 | [`bridge_update`] / [`block_update`] |
 //! | `0x2eacd8` | 1555 | [`thrusters_update`] |
+//! | `0x2e8ab0` | 1346 | [`turret_update`] |
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{self as c, V, DT};
@@ -63,6 +70,8 @@ pub const SINK_CLASSES: [i16; 1] = [1117];
 pub const BRIDGE_CLASSES: [i16; 1] = [1421];
 pub const BLOCK_CLASSES: [i16; 1] = [1424];
 pub const THRUSTERS_CLASSES: [i16; 1] = [1555];
+pub const TURRET_FN: u32 = 0x2e_8ab0;
+pub const TURRET_CLASSES: [i16; 1] = [1346];
 
 /// The spawn's collected byte (`0x1bbb04[uid]`) or its persistent death bit.
 fn latched(w: &World, id: MobyId) -> bool {
@@ -456,6 +465,78 @@ pub fn thrusters_update(w: &mut World, id: MobyId) {
                 _ => return,
             };
             if let Some(a) = scene.actors.get(k) { crate::moby_update::classes::cutscene_fx::infobot_thrusters(w, a); }
+        }
+        _ => {}
+    }
+}
+
+/// A pvar's moby while it is alive (not deleted: state 0xfe / 0xfd).
+fn alive_link(w: &World, id: MobyId, o: usize) -> Option<MobyId> {
+    link(w, c::pi32(w, id, o)).filter(|&m| !matches!(w.m(m).state, 0xfe | 0xfd))
+}
+
+/// Level10 `0x2e8ab0`: the guard turret (module doc).
+pub fn turret_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x1c);
+    match w.m(id).state {
+        0 => {
+            if latched(w, id) {
+                w.mm(id).state = 3;
+                return;
+            }
+            if c::pi32(w, id, 4) == -1 {
+                w.delete_moby(id);
+                return;
+            }
+            c::set_pf(w, id, 0x10, 0.0);
+            w.mm(id).state = 1;
+        }
+        2 => {
+            if latched(w, id) {
+                w.mm(id).state = 3;
+                return;
+            }
+            let target = [4, 8, 0xc].into_iter().find_map(|o| alive_link(w, id, o).map(|m| (o, m)));
+            match target {
+                None => {
+                    w.mm(id).state = 3;
+                    if let Some(m) = link(w, c::pi32(w, id, 0x14)) {
+                        w.mm(m).state = 1;
+                        c::set_pi32(w, id, 0x14, -1);
+                    }
+                }
+                Some((o, t)) => {
+                    let pi = std::f32::consts::PI;
+                    let yaw = c::add_rot(w.m(id).rotation[2], pi);
+                    let p = c::pos(w, id);
+                    let tp = w.m(t).position;
+                    let bearing = c::atan(tp[0] - p[0], tp[1] - p[1]);
+                    let mut v = c::pf(w, id, 0x10);
+                    let yaw = crate::moby_update::classes::flyer::spring_turn(yaw, bearing, DT * DT * std::f32::consts::FRAC_PI_2, DT * DT * pi, DT * std::f32::consts::FRAC_PI_4, &mut v);
+                    c::set_pf(w, id, 0x10, v);
+                    w.mm(id).rotation[2] = yaw;
+                    if c::diff_rots(yaw, bearing) < f32::from_bits(0x3d32_b8c2) {
+                        let m = [p[0] + yaw.cos() * 1.5, p[1] + yaw.sin() * 1.5, p[2], p[3]];
+                        let a = c::atan(tp[0] - m[0], tp[1] - m[1]);
+                        let dxy = ((tp[0] - m[0]).powi(2) + (tp[1] - m[1]).powi(2)).sqrt();
+                        let e = c::atan(dxy, tp[2] - m[2]);
+                        let vel = crate::moby_update::creature::fx::polar(DT * 40.0, a, e);
+                        let life = w.ticks(0x1e);
+                        super::gaspar_cannon::shell(w, id, m, [vel[0], vel[1], vel[2], 0.0], life);
+                        c::set_pi32(w, id, o, -1);
+                    }
+                    let z = c::add_rot(w.m(id).rotation[2], pi);
+                    w.mm(id).rotation[2] = z;
+                }
+            }
+            if let Some(m) = link(w, c::pi32(w, id, 0)) {
+                w.mm(m).cmd = 1;
+                c::set_pi32(w, id, 0, -1);
+            }
+        }
+        3 => {
+            if let Some(m) = alive_link(w, id, 4).or_else(|| alive_link(w, id, 8)) { w.delete_moby(m); }
+            story::death_bits(w, id);
         }
         _ => {}
     }
