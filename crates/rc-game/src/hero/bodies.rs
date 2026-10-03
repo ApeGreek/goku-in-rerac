@@ -79,7 +79,7 @@
 //! | +14 | mode 1, body shown: joint list 7's point → 0x1410d0; `0x229400`: the hero's draw callback `0x229440` | NOT ported (G-REN-005: the red dot glow quad) |
 //! | +15 | mode 1: the glow phase 0x140978 (170°/s, 700°/s while the flash 0x14164c runs) and its colours by 0x14164e, tweened into the glow moby's +0x90 and 0x141650 | ported ([`after_update`]) |
 //! | +16 | mode 1: the rotor moby 0x47a created / placed at joint list 5 (rows: the joint's × Rz(−yaw)), its light = the body's; in 0x4f its sequence 1 (blend 10), else 0 (blend 17) | ported ([`after_update`]) |
-//! | +17 | mode 1: a command 0x141610 (the command menu): `PlayClassSound(cmd + 16, 0, hero)`, 0x14164e = cmd, 0x14164c = 57 | ported ([`Bodies::command`]; the menu that sets it: NOT ported, G-UI-018) |
+//! | +17 | mode 1: a command 0x141610 (the command menu): `PlayClassSound(cmd + 16, 0, hero)`, 0x14164e = cmd, 0x14164c = 57 | ported ([`Bodies::command`]; the menu that sets it: `menus::quick_select`'s command page) |
 //! | +18 | `0x25c4f8`: the map fog writer | ported by the engine (it reads the hero position) |
 //! | +19 | mode 2: cheat 0x15edb3 → record 28's scale = 0x15ee18 ·1.4 | ported (`update` tail, `crate::cheats`) |
 //! | +20 | mode 2: `0x2278c0`, `0x2061f0` (the pilot: Ratchet shown when the body is, sequence 0x81 over 10 ticks, his generic advance) | ported ([`glow`], [`after_update`]) |
@@ -96,7 +96,7 @@
 //! | hit intake `0x231580` | body 2: flag bit 2 accepted, the damage taken from the energy; flag 4 or no energy → 0x5d + `0x2a9be0` + knockback (7, 3.5)·dt on the ground | ported (`damage::hit_intake`, [`giant::beam_end`]) |
 //! | HUD `0x24e418` | body 2: no health; body 1: the orbs' count = 0x1415fc | ported (`crate::hud`) |
 //! | HUD `0x24f9c0` | body 2: Giant Clank's energy bar (slot 0x10, data 0x140980, max 200; draw `0x24f248`) | ported by `crate::hud` (derived each tick from `Hero::mode` and [`Bodies::energy`]: `update_weapon_request`, `draw_giant`) |
-//! | transitions prologue | △ in body 1: the command menu `0x238b18` / `0x238b80` / `0x238f88` instead of the quick select | NOT ported (G-UI-018; the gadgetbots that obey it: class 857, G-CLS-001) |
+//! | transitions prologue | △ in body 1: the command menu `0x238b18` / `0x238b80` / `0x238f88` instead of the quick select | ported (`menus::quick_select` [`Commands`](crate::menus::quick_select::Commands); the gadgetbots that obey it: `units::blarg_gadgetbot`) |
 //! | checkpoint `0x29ac10` / `0x29adc8` | the body and 0x14161c saved; the reload switches back into the body (the first moby of class 0x57 / 0x1a3) | ported (`checkpoint::record`, the engine's respawn) |
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
 

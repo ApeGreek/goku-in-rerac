@@ -1037,6 +1037,9 @@ pub struct Globals {
     pub veldin_pools: Option<std::sync::Arc<veldin_pool::Meshes>>,
     /// Blarg's laser gates' shared beams (level06 0x1db0f0 / 0x1db870 / 0x161e40: `blarg_laser_gate`).
     pub blarg_gates: blarg_barrier::Beams,
+    /// The gadgetbots' listener count (level06 0x17ec84: +1 for each bot in earshot of Clank's command menu each tick;
+    /// the menu arms only when it is not 0; no reset found in the level code [L]): `blarg_gadgetbot`, `menus::quick_select`.
+    pub bot_listeners: i32,
     /// Level 6's glass meshes (`blarg_glass`; read from the overlay by the engine at the level load).
     pub blarg_glass: Option<std::sync::Arc<blarg_glass::Meshes>>,
     /// Level 6's gadgetbot bubble mesh (`blarg_gadgetbot`; read from the overlay by the engine at the level load).

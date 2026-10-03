@@ -568,12 +568,15 @@ fn menu_frame(
         Mode::Gameplay => {
             let inp = MenuInput::from_pad(&play.game.pad, true);
             // 0x15f594: a context-prompt owner blocks the ring (the vendor's △ is not also a ring open).
-            // 0x1413f4: the ring opens only on foot or in the disguise (Clank's △ is his command menu: G-UI-018).
+            // 0x1413f4: the ring opens on foot or in the disguise; Clank's △ opens his command menu (the same slot).
             let gate = HeroGate { early_exit: sess.hp < 1, held_item: held_item(&gs.global), f594: play.svc.interact.prompt.owner, b13f4: play.game.hero.mode, ..Default::default() };
             if let Some(qs) = rt.qs.as_mut() {
+                let listeners = play.svc.units.bot_listeners;
                 let h = qs.hero(&inp, &gate, &mut gs.global, sess);
-                let u = qs.update(&inp, &gate, &mut gs.global, sess, vsync);
+                let u = qs.update(&inp, &gate, &mut gs.global, sess, vsync, listeners);
                 if u.lock_pad { play.game.pad.lock = 2; }
+                // Clank's command menu: 0x141610 for the gadgetbots and HeroUpdateAlt (next tick).
+                if let Some(c) = u.command { play.game.hero.bodies.command = c; }
                 // 0x242930: the ring's △ also keeps health and bolts up (`HudShowHealth` + the bolt counter, ScaleTicks(180)).
                 if h.show_health_bolts { feed.calls.push(rc_game::hud::Call::ShowHealthBolts(rc_game::hud::scale_ticks(180))); }
                 if trace || h.request.is_some() || u.closed || h.opened {
@@ -583,7 +586,7 @@ fn menu_frame(
                         println!("menus: frame {frame}: quick select closed, selection {} → hand request {:?} (0x141408 = {}; the hand swap FUN_002307e0 runs in hero/items.rs)", qs.sel, u.request, sess.temp_hand);
                     }
                 }
-                qs.draw(&rt.assets, &gs.global, play.game.counter, &mut rt.draws);
+                qs.draw(&rt.assets, &gs.global, play.game.counter, listeners, &mut rt.draws);
             }
             // 0x2abfb0: once the map page has found the level's map (0x184694), move record 9 ("the map was used")
             // is bumped every mode-0 frame (the Novalis director's map hint waits for it).

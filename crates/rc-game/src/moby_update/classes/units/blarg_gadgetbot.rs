@@ -26,7 +26,7 @@
 //!
 //! | address | what | port |
 //! |---|---|---|
-//! | top | d = xy distance to Ratchet (0x13f3d0), dz = \|z − his ground point z (0x13f5f8)\|; state ≠ 1: the hits (`0x2f3640`); within 16 and 1.5 in height in states 2..7: the command (0x17ec84 += 1 is the menu's count of listeners: not modelled, the menu is G-UI-018) | [`update`], [`command`] |
+//! | top | d = xy distance to Ratchet (0x13f3d0), dz = \|z − his ground point z (0x13f5f8)\|; state ≠ 1: the hits (`0x2f3640`); within 16 and 1.5 in height in states 2..7: the listener count 0x17ec84 + 1 (`Globals::bot_listeners`, the command menu's gate), the command | [`update`], [`command`] |
 //! | top | the cheat 0x15edb3: the head manipulator on list 0 (`AttachManipulator`), its scale `Approach`ed to 1 (state 1) or 2.3 by 0.1 a tick; off: detached | [`head`] (`manip`) |
 //! | 0 | head 1; z = `GroundHeight(0.5)`; the marker 303 (`0x2d8b98`: drawn, owned by the bot); positions; its mission done (0x14c050) → deleted; the bubble 302 (`0x2d8510`: update / draw distance 0x60, targetable); home and anchor; wander steps 2·dt / 150°·dt; the walker (radius 300, step-up 0.51, ledges +0x300, top 3.1·dt, acc 0.02, brake 0.3, arrive 0.2, no gravity, ticks(4)); the arena count; glow phase `rand_angle`; → 1, collision off | [`init`] (`walker`) |
 //! | 1 | the bubble whole (state < 2): bot and bubble shown and targetable with Clank (0x1413f4; the bubble's collision on), hidden for Ratchet; the glow; else each arena's graph (`0x270b68`) and the arena it sees (`0x270900`); radius 300 (375 with the cheat); shown, targetable, collision on → 3 | [`wake`] (`region::graph_init`, `region::visible_nodes`) |
@@ -270,6 +270,7 @@ pub fn update(w: &mut World, id: MobyId) {
 /// The command 0x141610 (module doc): only bots in states 2..7.
 fn command(w: &mut World, id: MobyId) {
     if !(2..=7).contains(&w.m(id).state) { return; }
+    w.svc.units.bot_listeners += 1;
     let state_now = w.m(id).state;
     match w.hero.bodies.command {
         1 if state_now != 3 => {

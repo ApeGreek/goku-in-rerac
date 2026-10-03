@@ -30,13 +30,15 @@ census of 2026-10-03 left these placed classes without a port; this page tracks 
 - **`attack::swept_lines`**: hits along the lines between last tick's and this tick's segment (1068's swing).
 - **`fx::part02_rec`**: a type-2 spawn that keeps its record.
 - **`react::Wrappers::release_seq`** and `refuse()`: the reaction tables' refusal blend (827's table).
+- **Clank's command menu** (G-UI-018): the quick-select ring's command page (`menus::quick_select::Commands`), △ in
+  body 1; it writes `Bodies::command` for the bots.
 - **`projectile::part26_joint`**: the type-26 glow on a joint list (857's merge).
 - The overlay meshes read at load: `LevelFx::blarg_glass` (1062 / 1083) and `LevelFx::blarg_bubble` (302).
 
 ## Notes
 
-- The gadgetbot command menu (0x238b18.., G-UI-018) is not ported, so the bots only follow; attacking and going to a pad
-  need its commands (`Bodies::command`, wired in the bots). Its listener count 0x17ec84 is not modelled.
+- The gadgetbots' listener count (0x17ec84, `Globals::bot_listeners`) gates Clank's command menu; no reset of it was
+  found in the level code, so once a bot has been in earshot the menu stays armed for the level [L].
 - 302's draw blends at a fixed alpha 0x20 in the game; the port draws it as an alpha blend at 0x20 (the texture's
   alpha also counts) [L].
 - 1051's camera type 0x12 release in its state 0xf is not modelled; the 20000-range voice streams are not extracted.

@@ -7,6 +7,16 @@
 //! game keeps running (mode 0). The float steps (stick length, angle, sector, hysteresis, slot positions,
 //! pulse) run on the PS2 FPU model ([`Pf`]) in the game's order.
 //!
+//! **Clank's command menu** (△ in body 1, HUD slot 3; level copies of L00 `0x238b18` / `0x238b80` / `0x238f88`, on
+//! Blarg `0x248040` / `0x2480a8` / `0x2484b0`): the same ring on the page table 0x15f740 ([`Commands`]): four
+//! entries (icon 30035, frame +0x04, neighbours, the command +0x18), each command's label (0x15f7e0..). Its update
+//! differs: the pad locked every tick, the stick's sector without hysteresis or empty-slot skip, the d-pad from any
+//! state, no △ test while picking, and it arms only while gadgetbots listen (the bots' count, level06 0x17ec84:
+//! `Globals::bot_listeners`); on △'s release it writes the command 0x141610 ([`QsEvents::command`]: 1 follow, 2 wait,
+//! 3 attack, 4 to a pad, 0 none). Its draw: corner frame 1, the icons on a circle of four (greyed, frame + 4, while no
+//! bot listens), the cursor, the label in 0x80e0c0a0 with its shadow up-left. Never armed, the release reads the
+//! entry before the table (sel −2: the item word of the ring's entry 6) [L: the game's].
+//!
 //! Disc data comes from the overlay: the gp constants 0x15f718..0x15f7cc, the neighbour table through the
 //! page-table pointer `*0x15f738` (level 01: 0x17df40), the d-pad defaults 0x17e098, and the item
 //! definitions (icon +0x38, name +0x46, gold name +0x48) at `ItemTables::item_defs_addr`.
@@ -197,6 +207,49 @@ pub struct HeroGate {
     pub held_item: i32,
 }
 
+/// Clank's command page (module doc): page-table pointer 0x15f740 (`gp−0x74c0`), the d-pad defaults 0x98 past the
+/// table (left, right, up, down; the same offset on every Clank level), the labels' message ids 0x15f7e0..0x15f7ec,
+/// colours 0x15f7d4 / 0x15f7d8 and y offset 0x15f7dc.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Commands {
+    pub entries: [Entry; CMD_SLOTS],
+    pub defaults: [i32; 4],
+    pub msgs: [i32; CMD_SLOTS],
+    pub label_rgba: (u32, u32),
+    pub label_dy: i32,
+}
+
+/// Entries on the command page (`0x15fa90`, set by its init).
+pub const CMD_SLOTS: usize = 4;
+pub const CMD_PAGE: u32 = 0x15f740;
+const CMD_DEFAULTS: u32 = 0x98;
+const CMD_MSGS: u32 = 0x15f7e0;
+const CMD_LABEL_RGBA: u32 = 0x15f7d4;
+const CMD_LABEL_DY: u32 = 0x15f7dc;
+
+impl Commands {
+    /// None when the overlay has no command page (a level without Clank).
+    pub fn load(ov: &Overlay) -> Option<Commands> {
+        let t = ov.u32(ov.at(CMD_PAGE))?;
+        if t == 0 { return None; }
+        let e = |k: u32, o: u32| ov.i32(t + k * ENTRY + o);
+        let mut entries = [Entry::default(); CMD_SLOTS];
+        for (k, en) in entries.iter_mut().enumerate() {
+            let k = k as u32;
+            *en = Entry { icon: e(k, 0)?, f4: e(k, 4)?, left: e(k, 8)?, right: e(k, 0xc)?, up: e(k, 0x10)?, down: e(k, 0x14)?, item: e(k, 0x18)? };
+        }
+        let d = |k: u32| ov.i32(t + CMD_DEFAULTS + 4 * k);
+        let m = |k: u32| ov.i32(ov.at(CMD_MSGS) + 4 * k);
+        Some(Commands {
+            entries,
+            defaults: [d(0)?, d(1)?, d(2)?, d(3)?],
+            msgs: [m(0)?, m(1)?, m(2)?, m(3)?],
+            label_rgba: (ov.u32(ov.at(CMD_LABEL_RGBA))?, ov.u32(ov.at(CMD_LABEL_RGBA) + 4)?),
+            label_dy: ov.i32(ov.at(CMD_LABEL_DY))?,
+        })
+    }
+}
+
 /// What a tick did besides the state.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct QsEvents {
@@ -212,6 +265,8 @@ pub struct QsEvents {
     pub drone: bool,
     /// PAD+0x1cc = 2 for the next `ProcessPadInput`.
     pub lock_pad: bool,
+    /// The command menu's write of 0x141610 (`Bodies::command`) this tick.
+    pub command: Option<i32>,
 }
 
 /// The ring: slot-3 fields and the hero-block timers.
@@ -236,6 +291,9 @@ pub struct QuickSelect {
     pub text_fade: u8,
     /// 0x15fa98 / 0x15fa9c / 0x15fa94: +0x78, sel and the VSync counter at the last close.
     pub last_close: Option<(i32, i32, u32)>,
+    /// Clank's command page (None on a level without one) and whether the open ring is it.
+    pub commands: Option<Commands>,
+    pub command_page: bool,
 }
 
 /// `FastDecTimer__FRs` (0x220ea8): non-zero when the timer is 0 or reaches 0 now.
@@ -278,11 +336,15 @@ impl QuickSelect {
             fade: 0,
             text_fade: 0,
             last_close: None,
+            commands: None,
+            command_page: false,
         }
     }
 
     pub fn load(ov: &Overlay, items: &ItemTables) -> Option<QuickSelect> {
-        Some(QuickSelect::new(QsConsts::load(ov)?, QsTables::load(ov)?, QsItems::load(ov, items)?))
+        let mut q = QuickSelect::new(QsConsts::load(ov)?, QsTables::load(ov)?, QsItems::load(ov, items)?);
+        q.commands = Commands::load(ov);
+        Some(q)
     }
 
     /// Box top-left (X0, Y0): the slot-3 anchor with its bits 4 (left edge, vertical centre) resolved by
@@ -318,16 +380,25 @@ impl QuickSelect {
         let mut ev = QsEvents::default();
         if gate.early_exit { return ev; }
         let tri = button::TRIANGLE;
-        let allow = gate.swap_state != 2
+        let base = gate.swap_state != 2
             && gate.f594 == 0
             && (gate.b13fc == 0 || gate.b13f4 == 1 || gate.s3f502 != 0)
-            && (gate.b13f7 == 0 || gate.b13f4 == 1 || gate.s3f502 != 0)
-            && (gate.b13f4 == 0 || gate.b13f4 == 3);
-        if (inp.pressed & tri != 0 || inp.pressed_u & tri != 0) && allow {
+            && (gate.b13f7 == 0 || gate.b13f4 == 1 || gate.s3f502 != 0);
+        let allow = base && (gate.b13f4 == 0 || gate.b13f4 == 3);
+        let pressed = inp.pressed & tri != 0 || inp.pressed_u & tri != 0;
+        // Body 1: `HudShow(3, …)` with the command menu (no lock timer, no health / bolts).
+        if pressed && base && gate.b13f4 == 1 && self.commands.is_some() && !(self.open && self.command_page) {
+            self.open = true;
+            self.command_page = true;
+            self.init_commands();
+            ev.opened = true;
+        }
+        if pressed && allow {
             self.lock_timer = scale_ticks(if self.double_timer != 0 { 27 } else { 15 }) as i16;
-            if !self.open {
+            if !self.open || self.command_page {
                 // HudShow with arguments differing from the slot's last request (the empty element) → applied.
                 self.open = true;
+                self.command_page = false;
                 self.init(g);
                 ev.opened = true;
             }
@@ -353,10 +424,18 @@ impl QuickSelect {
         ev
     }
 
-    /// `QuickSelectUpdate` 0x24d238 (only while the ring is open). `vsync` = `0x15f3f8`.
-    pub fn update(&mut self, inp: &MenuInput, gate: &HeroGate, g: &mut Global, s: &mut SessionState, vsync: u32) -> QsEvents {
+    /// The command menu's init (L00 `0x238b18`): 4 entries, the page 0, the box, cursor −2, `ticks(30)` to arm.
+    fn init_commands(&mut self) {
+        self.sel = -2;
+        self.arm = scale_ticks(30);
+    }
+
+    /// `QuickSelectUpdate` 0x24d238 (only while the ring is open), or the command menu's ([`Self::update_commands`]).
+    /// `vsync` = `0x15f3f8`; `listeners` = the gadgetbots' count (`Globals::bot_listeners`).
+    pub fn update(&mut self, inp: &MenuInput, gate: &HeroGate, g: &mut Global, s: &mut SessionState, vsync: u32, listeners: i32) -> QsEvents {
         let mut ev = QsEvents::default();
         if !self.open { return ev; }
+        if self.command_page { return self.update_commands(inp, vsync, listeners); }
         let n = SLOTS as i32;
         if fast_dec_timer(&mut self.lock_timer) { ev.lock_pad = true; }
         let (x, y) = (inp.stick_x, inp.stick_y);
@@ -460,6 +539,68 @@ impl QuickSelect {
         ev
     }
 
+    /// The command menu's update (L00 `0x238b80`, module doc).
+    fn update_commands(&mut self, inp: &MenuInput, vsync: u32, listeners: i32) -> QsEvents {
+        let mut ev = QsEvents { lock_pad: true, ..Default::default() };
+        let Some(cmd) = self.commands.clone() else { return ev };
+        let n = CMD_SLOTS as i32;
+        let (x, y) = (inp.stick_x, inp.stick_y);
+        let len = len2(x, y);
+        let (mut nx, mut ny) = (x, y);
+        if !len.is_zero() {
+            nx = nx / len;
+            ny = ny / len;
+        }
+        let angle = fast_arctan(nx, ny);
+        if self.arm >> 24 == 0 && listeners != 0 && (inp.pressed_u & 0xf000 != 0 || len < F0_5 || { self.arm -= 1; self.arm == -1 }) {
+            self.sel = -1;
+            self.arm = 0x0100_00ff;
+        }
+        let start = self.sel;
+        if (self.arm >> 24) as u8 == 1 {
+            if F0_9 < len {
+                let nf = Pf::from_i32(n);
+                self.sel = ((((((angle + PI) + PI) + HALF_PI) + PI / nf) * (nf / TWO_PI)).to_i32()) % n;
+            }
+            let p = inp.pressed_u;
+            if p & 0xf000 != 0 {
+                let e = &cmd.entries;
+                let step = |sel: i32, bit: u32, def: i32, f: fn(&Entry) -> i32| -> i32 {
+                    if p & bit == 0 { return sel; }
+                    if sel == -1 { return def; }
+                    usize::try_from(sel).ok().and_then(|i| e.get(i)).map_or(sel, f)
+                };
+                let [dl, dr, du, dd] = cmd.defaults;
+                let mut sel = step(self.sel, button::UP, du, |e| e.up);
+                sel = step(sel, button::DOWN, dd, |e| e.down);
+                sel = step(sel, button::LEFT, dl, |e| e.left);
+                sel = step(sel, button::RIGHT, dr, |e| e.right);
+                self.sel = sel;
+            }
+        }
+        if self.sel == start {
+            if (self.text_fade as i32) < self.consts.steps { self.text_fade += 1; }
+        } else {
+            self.text_fade = 0;
+        }
+        if inp.held_u & button::TRIANGLE == 0 {
+            ev.command = Some(match self.sel {
+                -1 => 0,
+                -2 => self.entries[SLOTS - 2].item,
+                k => usize::try_from(k).ok().and_then(|i| cmd.entries.get(i)).map_or(0, |e| e.item),
+            });
+            if self.fade == 0 {
+                self.close(vsync, &mut ev);
+                return ev;
+            }
+            self.fade -= 1;
+        } else if (self.fade as i32) < self.consts.steps {
+            self.fade += 1;
+        }
+        if self.fade == 0 { self.close(vsync, &mut ev); }
+        ev
+    }
+
     fn close(&mut self, vsync: u32, ev: &mut QsEvents) {
         self.last_close = Some((self.arm, self.sel, vsync));
         self.open = false;
@@ -467,9 +608,12 @@ impl QuickSelect {
     }
 
     /// Slot i's centre (px, py) (the draw's loop).
-    pub fn slot_pos(&self, i: usize) -> (i32, i32) {
+    pub fn slot_pos(&self, i: usize) -> (i32, i32) { self.ring_pos(i, SLOTS) }
+
+    /// Slot i's centre on a ring of `n`.
+    fn ring_pos(&self, i: usize, n: usize) -> (i32, i32) {
         let (x0, y0) = self.origin();
-        let n = Pf::from_i32(SLOTS as i32);
+        let n = Pf::from_i32(n as i32);
         let i = Pf::from_i32(i as i32);
         let th = fast_add_rotations(((i + i) * PI) / n - PI, HALF_PI);
         let px = x0 + self.consts.centre.0 + (self.consts.radius * fast_cos(th) * self.consts.x_scale).to_i32();
@@ -478,8 +622,12 @@ impl QuickSelect {
     }
 
     /// `QuickSelectDraw` 0x24d938. `tick` = the game tick 0x15f5cc (cursor pulse).
-    pub fn draw(&self, a: &MenuAssets, g: &Global, tick: u64, out: &mut Vec<MenuDraw>) {
+    pub fn draw(&self, a: &MenuAssets, g: &Global, tick: u64, listeners: i32, out: &mut Vec<MenuDraw>) {
         if !self.open { return; }
+        if self.command_page {
+            self.draw_commands(a, tick, listeners, out);
+            return;
+        }
         let c = &self.consts;
         let steps = Pf::from_i32(c.steps);
         let clamp01 = |v: Pf| if Pf::ONE < v { Pf::ONE } else if v < Pf::ZERO { Pf::ZERO } else { v };
@@ -554,6 +702,58 @@ impl QuickSelect {
                 centre(out, cx, y, col, name);
             }
         }
+    }
+}
+
+impl QuickSelect {
+    /// The command menu's draw (L00 `0x238f88`, module doc).
+    fn draw_commands(&self, a: &MenuAssets, tick: u64, listeners: i32, out: &mut Vec<MenuDraw>) {
+        let Some(cmd) = self.commands.as_ref() else { return };
+        let c = &self.consts;
+        let steps = Pf::from_i32(c.steps);
+        let clamp01 = |v: Pf| if Pf::ONE < v { Pf::ONE } else if v < Pf::ZERO { Pf::ZERO } else { v };
+        let s = clamp01(Pf::from_i32(self.fade as i32) / steps);
+        let f = clamp01(Pf::from_i32(self.text_fade as i32) / steps);
+        let per = c.period.max(1);
+        let t = Pf::from_i32((tick % per as u64) as i32);
+        let pulse = crate::hero::physics::fast_sin((t / Pf::from_i32(per)) * PULSE_2PI - PULSE_PI);
+        let s128 = s * F128;
+        let alpha = s128.to_i32();
+        let cursor_alpha = (s128 * (pulse * F0_125 + F0_875)).to_i32();
+        let (x0, y0) = self.origin();
+        let (w, h) = c.size;
+        let (hw, hh) = (w / 2, h / 2);
+        let ring = a.frame(RING_ICON, 1);
+        sprite(out, ring, x0, y0, hw, hh, alpha);
+        sprite(out, ring, x0 + w, y0 + h, -hw, -hh, alpha);
+        sprite(out, ring, x0 + w, y0, -hw, hh, alpha);
+        sprite(out, ring, x0, y0 + h, hw, -hh, alpha);
+        for (i, e) in cmd.entries.iter().enumerate() {
+            let (px, py) = self.ring_pos(i, CMD_SLOTS);
+            if self.sel == i as i32 && e.icon != 0 {
+                sprite(out, a.frame(CURSOR_ICON, 0), px - 19, py - 19, 38, 38, cursor_alpha);
+            }
+            if e.icon == 0 { continue; }
+            let (fr, al) = if listeners == 0 {
+                (a.frame(e.icon as u16, e.f4 + 4), alpha)
+            } else {
+                let al = if i as i32 != self.sel { (Pf::from_i32(alpha) * c.dim).to_i32() } else { alpha };
+                (a.frame(e.icon as u16, e.f4), al)
+            };
+            let (tw, th) = a.frame_size(fr);
+            sprite(out, fr, px - (tw >> 1), py - (th >> 1), tw, th, al);
+        }
+        let Ok(si) = usize::try_from(self.sel) else { return };
+        if cmd.entries.get(si).is_none_or(|e| e.icon == 0) { return; }
+        let label = a.msg(cmd.msgs[si]);
+        if label.is_empty() { return; }
+        let sf = (f * s).to_f32();
+        let col = tween(sf, cmd.label_rgba.0, cmd.label_rgba.1);
+        let shadow = tween(sf, 0, 0x8000_0000);
+        let (cx, y) = (x0 + c.centre.0, y0 + cmd.label_dy + c.centre.1);
+        let wd = a.width(Font::Regular, label);
+        text(out, Font::Regular, cx - 1 - (wd >> 1), y - 1, shadow, label);
+        text(out, Font::Regular, cx - (wd >> 1), y, col, label);
     }
 }
 
@@ -647,7 +847,7 @@ mod tests {
         let inp = pad.step(p);
         let gate = HeroGate::default();
         let h = q.hero(&inp, &gate, g, s);
-        let u = q.update(&inp, &gate, g, s, 0);
+        let u = q.update(&inp, &gate, g, s, 0, 0);
         if u.lock_pad { pad.0.lock = 2; }
         (h, u)
     }
@@ -667,7 +867,7 @@ mod tests {
         let (s, c) = deg.to_radians().sin_cos();
         let inp = MenuInput { held_u: button::TRIANGLE, stick_x: Pf::f(c), stick_y: Pf::f(s), stick_active: true, ..Default::default() };
         let (mut g, mut st) = (global([10, 11, 12, 13, 14, 15, 16, 17]), SessionState::default());
-        q.update(&inp, &HeroGate::default(), &mut g, &mut st, 0);
+        q.update(&inp, &HeroGate::default(), &mut g, &mut st, 0, 0);
         q.sel
     }
 
@@ -706,7 +906,7 @@ mod tests {
     fn dpad(q: &mut QuickSelect, bits: u32) -> i32 {
         let inp = MenuInput { held_u: button::TRIANGLE, pressed_u: bits, ..Default::default() };
         let (mut g, mut st) = (global([10, 11, 12, 13, 14, 15, 16, 17]), SessionState::default());
-        q.update(&inp, &HeroGate::default(), &mut g, &mut st, 0);
+        q.update(&inp, &HeroGate::default(), &mut g, &mut st, 0, 0);
         q.sel
     }
 
@@ -780,7 +980,7 @@ mod tests {
             for p in seq {
                 let inp = pad.step(p);
                 let h = q.hero(&inp, &gate, &mut g, &mut s);
-                q.update(&inp, &gate, &mut g, &mut s, 0);
+                q.update(&inp, &gate, &mut g, &mut s, 0, 0);
                 if h.request.is_some() { req = h.request; }
             }
             req
@@ -822,7 +1022,7 @@ mod tests {
         let mut g = global([10, 11, 12, 13, 14, 15, 16, 17]);
         g.ammo[10] = 12;
         let mut out = vec![];
-        q.draw(&a, &g, 0, &mut out);
+        q.draw(&a, &g, 0, 0, &mut out);
         let sprites: Vec<_> = out.iter().filter_map(|d| match d { MenuDraw::Hud(crate::hud::Draw::Sprite { x, y, w, h, alpha, .. }) => Some((*x, *y, *w, *h, *alpha)), _ => None }).collect();
         assert_eq!(&sprites[..4], &[(20, 108, 105, 100, 128), (230, 308, -105, -100, 128), (230, 108, -105, 100, 128), (20, 308, 105, -100, 128)]);
         // Cursor on slot 0 (t = 0: sin(−π) ≈ 0 → 0.875·128 = 112), then the 8 icons (unselected at alpha 64).
