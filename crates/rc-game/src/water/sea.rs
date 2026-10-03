@@ -13,6 +13,7 @@
 //! | 9 | 293 (12) | level12 `0x2e7208` | 47 two-texture strips `0x2e71b0` → `0x2bc210` |
 //! | 10 | 1418 (14) | level14 `0x307a80` | 19 two-texture strips `0x307a28` → `0x2ab3e8` (the same module) |
 //! | 11 | 1848 (01) | level01 `0x30f208` | the reflective overlay `0x30f0e0` ([`env_overlay_ref`]) |
+//! | 12, 13 | 1903, 1919 (11) | level11 `0x31e2f0`, `0x31f150` | Pokitaru's pool overlays `0x31db50`, `0x31e930` (two copies of one module: [`pool_ref`]) |
 //!
 //! **The liquid meshes (G-REN-026, 2026-10-01).** The callbacks that draw static strip meshes share two engine emitters
 //! (level01 `0x21fda8`: one pass; `0x21fa98`: the strip twice, the second in GS context 2 with a second ST set), each
@@ -110,6 +111,8 @@ pub enum SeaKind {
     /// Class 1848's reflective overlay (level01 `0x30f208` / `0x30f0e0`): five static meshes with a sphere-mapped,
     /// scrolled FX 40 at FIX 0x20.
     EnvOverlay,
+    /// Pokitaru's pool overlays 1903 / 1919 (level11, two copies of one module: [`pool_ref`]).
+    Pool(&'static pool_ref::Module),
 }
 
 /// A two-texture strip class: its mesh table (reference level labels), its two FX textures, the GS state packet the
@@ -145,7 +148,7 @@ const fn grid(state: u32, scale: f32, fix: u8, list: DrawList, variant: GridVari
 pub const OCEAN: usize = 6;
 pub const HOVEN: usize = 7;
 
-pub const PORTS: [SeaPort; 12] = [
+pub const PORTS: [SeaPort; 14] = [
     // level03 0x2dc9b0: 0x291198(2/3, 0x1dc1a0, 0x20); callback 0x2dc990 via 0x1f2d48 (list 1).
     SeaPort { name: "994 liquid", level: 3, func: 0x2d_c9b0, classes: &[994], kind: grid(0x1d_c1a0, TWO_THIRDS, 0x20, DrawList::AfterMobys, GridVariant::Plain) },
     // level05 0x316110: 0x2ce110(1.0, 0x211b20) (FIX 0x80); callback 0x316070 via 0x228110 (after the ties).
@@ -171,6 +174,8 @@ pub const PORTS: [SeaPort; 12] = [
     SeaPort { name: "1418 Oltanis strips", level: 14, func: 0x30_7a80, classes: &[1418], kind: SeaKind::TwoTex(TwoTexPort { table: 0x1f_5f80, count: 0x13, fx: [0x2e, 0x2f], packet: 0x1c_ba20, gate: None }) },
     // level01 0x30f208: the UV scroll 0x162110 / 0x162114 and RegisterDrawCallback(0x30f0e0) (list 1).
     SeaPort { name: "1848 env overlay", level: env_overlay_ref::LEVEL, func: env_overlay_ref::UPDATE_FN, classes: &[1848], kind: SeaKind::EnvOverlay },
+    SeaPort { name: "1903 pool overlay", level: pool_ref::LEVEL, func: pool_ref::A.update, classes: &[1903], kind: SeaKind::Pool(&pool_ref::A) },
+    SeaPort { name: "1919 pool overlay", level: pool_ref::LEVEL, func: pool_ref::B.update, classes: &[1919], kind: SeaKind::Pool(&pool_ref::B) },
 ];
 
 pub const ARIDIA: usize = 8;
@@ -189,6 +194,132 @@ pub mod env_overlay_ref {
     pub const MESHES: usize = 5;
     pub const FX: u16 = 0x28;
     pub const FIX: u8 = 0x20;
+}
+
+/// Pokitaru's pool overlays (level11; the names are descriptive [L]): two copies of one module, 1903 (`0x31e2f0`, draw
+/// `0x31db50`) by the pool at (454, 560) and 1919 (`0x31f150`, draw `0x31e930`) by the one at (421, 557). Each draws
+/// three layers of static strips through `DrawEnvOverlayMesh` (`0x21fda8`, clip on) with the stored ST plus a scroll
+/// (`0x2739c0`, per lane) and the stored colours, as the module's first init rescales them (`0x31dd10` / `0x31eb70`, the
+/// code of level12's `0x30bba0`: [`hoven_rescale`]): L0 by (0.7, 1, 0.9, 0.5), L1 by (0.25, 0.25, 0.25, 0.7), L2 by
+/// (0.5, 0.5, 0.5, 1).
+///
+/// | address (A / B) | what | port |
+/// |---|---|---|
+/// | update state 0 | the init once per level (the `$gp` flag): the rescale; → 1; L0's three scrolls and the wobble's phases 0; L1's scrolls (0, 0.4·k); L2's (0, 0) | [`pool_update`] (the rescale at load) |
+/// | update state 1 | camera z (0x1677c0) ≥ 170, `FastBSphereCheck(1000, centre)` in view and camera z > 180: d = \|centre − camera\|; d ≤ far → L0 scroll 0 and 2 by their speeds · dt (`0x31e048`, wrapped by 1 past ±1), scroll 1 the wobble (`0x31df00`: phases += (0.52, 0.62)·dt wrapped by 2 past ±1, scroll = 0.06·sin(π·phase)); the shimmer's alpha: 255 nearer than `near`, `trunc((1 − (d − near)/20)·255)` before `far`, else 0; then L2's scroll and L1's two (`0x31e208`, `0x31e120`); `RegisterDrawCallback(draw)` | [`pool_update`] |
+/// | draw | TEX1 bilinear, CLAMP repeat, TEST 0x513f1, `DrawSpriteHelper_A`; B only: the camera below z 255 and in none of the cuboids pvar 0..2 → L0 and L2 not drawn; L0 with FX 0x2c, ALPHA 0x44 (scroll 0); alpha ≠ 0: FX 0x29, FIX = (base·alpha) >> 8, ALPHA 0x68 (scroll 1) and 0x62 (scroll 2); L1 with FX 0x2a, ALPHA 0x48, scrolls 0 and 1; L2 with FX 0x2b, ALPHA 0x48 | rc-engine `sea_render` ([`pool_drawn`]) |
+pub mod pool_ref {
+    pub const LEVEL: u32 = 11;
+    /// One layer's tables: ST, position and colour pointer tables, the vertex counts, the strip count.
+    pub type Layer = (u32, u32, u32, u32, usize);
+    /// One copy of the module (level11 labels).
+    #[derive(Debug, PartialEq)]
+    pub struct Module {
+        pub update: u32,
+        pub draw: u32,
+        pub layers: [Layer; 3],
+        /// The centre (x, y, z, sphere radius).
+        pub centre: u32,
+        /// The shimmer's FIX base word.
+        pub fix_base: u32,
+        /// The scroll speeds (s, t): L0's three, L1's two, L2's one.
+        pub l0_speed: u32,
+        pub l1_speed: u32,
+        pub l2_speed: u32,
+        /// The shimmer's full and zero distances.
+        pub near: f32,
+        pub far: f32,
+        /// The draw's camera gate on L0 / L2 (B).
+        pub gated: bool,
+    }
+    pub const A: Module = Module {
+        update: 0x31_e2f0,
+        draw: 0x31_db50,
+        layers: [(0x16_2550, 0x16_2540, 0x16_2570, 0x16_2530, 4), (0x1f_f6f0, 0x1f_f6d0, 0x1f_f730, 0x1f_9a78, 8), (0x1f_99e8, 0x1f_99b8, 0x1f_9a48, 0x1f_4978, 11)],
+        centre: 0x16_24e8,
+        fix_base: 0x16_24fc,
+        l0_speed: 0x1f_14d0,
+        l1_speed: 0x16_2508,
+        l2_speed: 0x16_2520,
+        near: 15.0,
+        far: 35.0,
+        gated: false,
+    };
+    pub const B: Module = Module {
+        update: 0x31_f150,
+        draw: 0x31_e930,
+        layers: [(0x21_5190, 0x21_5148, 0x21_5220, 0x20_7900, 17), (0x20_7888, 0x20_7860, 0x20_78d8, 0x20_0728, 9), (0x21_7710, 0x21_76f8, 0x21_7740, 0x21_5268, 5)],
+        centre: 0x16_25b8,
+        fix_base: 0x16_25cc,
+        l0_speed: 0x20_0710,
+        l1_speed: 0x16_25d8,
+        l2_speed: 0x16_25f0,
+        near: 80.0,
+        far: 100.0,
+        gated: true,
+    };
+    /// The colour rescales of the first init, by layer.
+    pub const RESCALE: [[f32; 4]; 3] = [[0.7, 1.0, 0.9, 0.5], [0.25, 0.25, 0.25, 0.7], [0.5, 0.5, 0.5, 1.0]];
+    /// The layers' FX textures: L0, the shimmer, L1, L2.
+    pub const FX: [u16; 4] = [0x2c, 0x29, 0x2a, 0x2b];
+    /// The update's camera heights.
+    pub const MIN_CAM_Z: f32 = 170.0;
+    pub const DRAW_CAM_Z: f32 = 180.0;
+    /// B's gate height.
+    pub const GATE_Z: f32 = 255.0;
+    /// `FastBSphereCheck(1000, centre)`.
+    pub const VIEW_FAR: f32 = 1000.0;
+    /// The wobble (`0x31df00(0.52, 0.62, 0.06)`).
+    pub const WOBBLE: [f32; 3] = [f32::from_bits(0x3f05_1eb8), f32::from_bits(0x3f1e_b852), f32::from_bits(0x3d75_c28f)];
+}
+
+/// A pool overlay on the loaded level: the three layers (colours rescaled) and the module's words.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PoolData {
+    pub layers: [Vec<StripMesh>; 3],
+    pub centre: [f32; 4],
+    pub fix_base: u8,
+    pub l0_speed: [[f32; 2]; 3],
+    pub l1_speed: [[f32; 2]; 2],
+    pub l2_speed: [f32; 2],
+}
+
+/// A pool overlay's run-time globals (A: 0x1ff750, 0x162598, 0x1625a8, 0x1625b0, 0x162590; B: 0x217758, 0x162618,
+/// 0x162628, 0x162630, 0x162610).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PoolRun {
+    pub l0: [[f32; 2]; 3],
+    pub l1: [[f32; 2]; 2],
+    pub l2: [f32; 2],
+    pub phase: [f32; 2],
+    pub alpha: u8,
+}
+
+/// The pool draw's gate on L0 and L2 (module B): the camera above z 255, or in one of the cuboids pvar 0..2.
+pub fn pool_drawn(m: &pool_ref::Module, pvars: &[u8], volumes: &rc_formats::volumes::Volumes, camera: [f32; 3]) -> bool {
+    !m.gated || pool_ref::GATE_Z < camera[2] || (0..3).any(|k| pvars.len() >= 4 * k + 4 && crate::moby_update::triggers::point_in_cuboid(volumes, camera, pvar::i32(pvars, 4 * k)))
+}
+
+/// The shimmer's FIX: `(base·alpha) >> 8`.
+pub fn pool_fix(base: u8, alpha: u8) -> u8 { ((base as i32 * alpha as i32) >> 8) as u8 }
+
+fn load_pool(ov: &Overlay, rel: &Relocation, m: &pool_ref::Module) -> Result<PoolData, rc_formats::FormatError> {
+    let at = |l: u32| rel.data(l).ok_or_else(|| rc_formats::FormatError::Invalid(format!("label {l:#x} not found")));
+    let f = |l: u32| -> Result<f32, rc_formats::FormatError> { ov.f32(at(l)?) };
+    let pair = |l: u32, k: u32| -> Result<[f32; 2], rc_formats::FormatError> { Ok([f(l + 8 * k)?, f(l + 8 * k + 4)?]) };
+    let mut layers: [Vec<StripMesh>; 3] = Default::default();
+    for (k, l) in m.layers.iter().enumerate() {
+        layers[k] = fs::parse_strip_meshes(ov, at(l.0)?, at(l.1)?, at(l.2)?, at(l.3)?, l.4)?;
+        hoven_rescale(&mut layers[k], pool_ref::RESCALE[k]);
+    }
+    Ok(PoolData {
+        layers,
+        centre: [f(m.centre)?, f(m.centre + 4)?, f(m.centre + 8)?, f(m.centre + 12)?],
+        fix_base: ov.u32(at(m.fix_base)?)? as u8,
+        l0_speed: [pair(m.l0_speed, 0)?, pair(m.l0_speed, 1)?, pair(m.l0_speed, 2)?],
+        l1_speed: [pair(m.l1_speed, 0)?, pair(m.l1_speed, 1)?],
+        l2_speed: pair(m.l2_speed, 0)?,
+    })
 }
 
 /// Level 9's extras in 317's draw callback `0x2ef750` (the reference level's labels; module doc).
@@ -376,6 +507,7 @@ pub enum SeaData {
     Hoven(Box<HovenData>),
     GridSet(Box<GridSetData>),
     Meshes(Box<MeshSet>),
+    Pool(Box<PoolData>),
 }
 
 /// A port present on the loaded level (its update has a copy in the level's overlay) and its data.
@@ -474,6 +606,13 @@ pub fn load<'t>(ov: &Overlay, target: &'t LevelOverlay, rel_of: &dyn Fn(u32) -> 
                     }
                 }
             }
+            SeaKind::Pool(m) => match load_pool(ov, &rel, m) {
+                Ok(d) => SeaData::Pool(Box::new(d)),
+                Err(e) => {
+                    eprintln!("sea: {}: {e}", p.name);
+                    continue;
+                }
+            },
             SeaKind::Hoven => match load_hoven(ov, &rel) {
                 Ok(h) => SeaData::Hoven(Box::new(h)),
                 Err(e) => {
@@ -578,6 +717,8 @@ pub struct SeaRun {
     pub prev_cam: [f32; 3],
     pub sea_z: f32,
     pub base_z: f32,
+    /// The pool overlays' scrolls and shimmer ([`PoolRun`]).
+    pub pool: PoolRun,
 }
 
 /// The sea ports' state (in `WaterWorld`), by port index.
@@ -603,6 +744,55 @@ pub fn update(w: &mut World, id: MobyId, port: u8) {
         SeaKind::GridSet => grid_set_update(w, id, port),
         SeaKind::TwoTex(t) => two_tex_update(w, id, port, &t),
         SeaKind::EnvOverlay => env_overlay_update(w, id, port),
+        SeaKind::Pool(m) => pool_update(w, id, port, m),
+    }
+}
+
+/// 1903 / 1919 (level11 `0x31e2f0` / `0x31f150`; [`pool_ref`]).
+fn pool_update(w: &mut World, id: MobyId, port: usize, m: &pool_ref::Module) {
+    let Some(SeaData::Pool(d)) = data(&w.svc.water, port) else { return };
+    let (centre, l0s, l1s, l2s) = (d.centre, d.l0_speed, d.l1_speed, d.l2_speed);
+    match w.m(id).state {
+        0 => {
+            w.mm(id).state = 1;
+            let r = &mut w.svc.water.sea.run[port];
+            r.inited = true;
+            r.pool = PoolRun { l1: [[0.0, 0.0], [0.0, 0.4]], ..PoolRun::default() };
+        }
+        1 => {
+            let c = fv(w.camera);
+            let cam = [c[0], c[1], c[2]];
+            if cam[2] < pool_ref::MIN_CAM_Z { return; }
+            if !crate::moby_update::creature::fx::in_view(w, pool_ref::VIEW_FAR, centre, centre[3]) || cam[2] <= pool_ref::DRAW_CAM_Z { return; }
+            let v = [centre[0] - cam[0], centre[1] - cam[1], centre[2] - cam[2]];
+            let dist = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            let r = &mut w.svc.water.sea.run[port].pool;
+            let step = |x: &mut [f32; 2], sp: [f32; 2]| for k in 0..2 { x[k] = wrap(x[k] + sp[k] * DT); };
+            if dist <= m.far {
+                step(&mut r.l0[0], l0s[0]);
+                let [a, b, amp] = pool_ref::WOBBLE;
+                for (k, rate) in [a, b].into_iter().enumerate() {
+                    let mut x = r.phase[k] + rate * DT;
+                    if 1.0 < x { x -= 2.0; }
+                    if x < -1.0 { x += 2.0; }
+                    r.phase[k] = x;
+                }
+                r.l0[1] = r.phase.map(|x| (x * std::f32::consts::PI).sin() * amp);
+                step(&mut r.l0[2], l0s[2]);
+                r.alpha = if dist < m.near {
+                    0xff
+                } else if dist < m.far {
+                    ((1.0 - (dist - m.near) / 20.0) * 255.0) as i32 as u8
+                } else {
+                    0
+                };
+            }
+            step(&mut r.l2, l2s);
+            step(&mut r.l1[0], l1s[0]);
+            step(&mut r.l1[1], l1s[1]);
+            register(w, id, port, DrawList::AfterMobys);
+        }
+        _ => {}
     }
 }
 

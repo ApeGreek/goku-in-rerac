@@ -341,6 +341,7 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn water(&self) -> Option<&dyn rc_game::hero::swim::WaterQuery> { Some(&self.water) }
     fn hit_message(&self, table: &MobyTable, target: MobyId) -> Option<rc_game::moby_update::services::HitRecord> { self.world.hit_message(table, target) }
     fn take_hero_writes(&mut self) -> Option<rc_game::moby_update::services::HeroFields> { self.world.take_hero_writes() }
+    fn spline(&self, i: usize) -> Option<Vec<[f32; 4]>> { self.world.spline(i) }
     fn take_camera_shakes(&mut self) -> Vec<rc_game::follow_camera::ShakeRequest> { self.world.take_camera_shakes() }
     fn take_cinematic(&mut self) -> Vec<rc_game::cinematic::CinematicCall> { self.world.take_cinematic() }
     fn run_list(&self, table: &MobyTable, camera: [rc_game::ps2v::Pf; 4]) -> Option<Vec<MobyId>> { self.world.run_list(table, camera) }

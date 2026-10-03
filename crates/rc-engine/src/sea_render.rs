@@ -184,11 +184,26 @@ enum Tex {
     Anim(GridAnim),
 }
 
+/// A display-blend effect's GS equation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Blend {
+    /// ALPHA 0x44: `(Cs − Cd)·As + Cd`.
+    Mix,
+    /// ALPHA 0x48 (or 0x68 with As = FIX): `Cs·As + Cd`.
+    Add,
+    /// ALPHA 0x62 with As = FIX: `Cd − Cs·FIX`.
+    Sub,
+}
+
+impl Blend {
+    fn of(additive: bool) -> Blend { if additive { Blend::Add } else { Blend::Mix } }
+}
+
 /// One draw of this tick.
 struct Group {
     tex: Tex,
-    /// `None`: an opaque world surface; `Some(additive)`: a display-blend effect.
-    effect: Option<bool>,
+    /// `None`: an opaque world surface; `Some(blend)`: a display-blend effect.
+    effect: Option<Blend>,
     fog: TfragFog,
     bias: f32,
     prims: PrimBuf,
@@ -352,7 +367,7 @@ fn mesh_set_groups(groups: &mut Vec<Group>, set: &gs::MeshSet, counter: u64, cam
         };
         let opaque = fix >= 0x80 || (matches!(pass.tex, gs::MeshTex::Grid) && fix >= 0x61);
         let prims = mesh_prims(set, pass, counter, cam, Some(view), if opaque { 0x80 } else { fix }, scroll);
-        groups.push(Group { tex, effect: (!opaque).then_some(false), fog, bias: bias + j as f32 * 0.25, prims });
+        groups.push(Group { tex, effect: (!opaque).then_some(Blend::Mix), fog, bias: bias + j as f32 * 0.25, prims });
     }
 }
 
@@ -474,7 +489,7 @@ fn draw(
                 let lf = LevelFog { color: r.fog_rgb, near_dist: r.fog[0], far_dist: r.fog[1], near_intensity: r.fog[2], far_intensity: r.fog[3] };
                 let opaque = run.fix >= 0x61;
                 let prims = grid_prims(&g.grid, &g.module, gp.scale, run.z, if opaque { 0x80 } else { run.fix }, cam);
-                groups.push(Group { tex: Tex::Anim(ga), effect: (!opaque).then_some(false), fog: TfragFog::new(&lf), bias, prims });
+                groups.push(Group { tex: Tex::Anim(ga), effect: (!opaque).then_some(Blend::Mix), fog: TfragFog::new(&lf), bias, prims });
                 // Level 9's lava meshes (317's callback `0x2ef750`): the flows before the grid, the grid-textured ones
                 // after it with its image, fog and FIX.
                 for (j, set) in g.extras.iter().enumerate() {
@@ -485,7 +500,7 @@ fn draw(
             (SeaKind::Ocean, SeaData::Ocean(t)) => {
                 if m.pvars.len() < 0x30 { continue; }
                 for (j, (fxi, additive, prims)) in ocean_groups(&m.pvars, run, t, cam, rows).into_iter().enumerate() {
-                    groups.push(Group { tex: Tex::Fx(fxi, false), effect: Some(additive), fog: level_fog, bias: bias + j as f32 * 0.25, prims });
+                    groups.push(Group { tex: Tex::Fx(fxi, false), effect: Some(Blend::of(additive)), fog: level_fog, bias: bias + j as f32 * 0.25, prims });
                 }
             }
             (SeaKind::Hoven, SeaData::Hoven(h)) => {
@@ -493,7 +508,7 @@ fn draw(
                     groups.push(Group { tex: Tex::Fx(HOVEN_G1_FX, false), effect: None, fog: level_fog, bias, prims: strip_prims(&h.groups[0], run.g1_scroll, None) });
                 }
                 groups.push(Group { tex: Tex::Fx(HOVEN_FX[0], false), effect: None, fog: level_fog, bias: bias + 1.0, prims: strip_prims(&h.groups[1], run.scroll[0], None) });
-                groups.push(Group { tex: Tex::Fx(HOVEN_FX[1], true), effect: Some(true), fog: level_fog, bias: bias + 2.0, prims: strip_prims(&h.groups[1], run.scroll[1], Some(h.fix2)) });
+                groups.push(Group { tex: Tex::Fx(HOVEN_FX[1], true), effect: Some(Blend::Add), fog: level_fog, bias: bias + 2.0, prims: strip_prims(&h.groups[1], run.scroll[1], Some(h.fix2)) });
             }
             (SeaKind::GridSet, SeaData::GridSet(g)) => {
                 // 854's callback `0x2ea048`: the shared image and fog (`0x2a4818`), the gated records, the fog restore.
@@ -505,7 +520,27 @@ fn draw(
                     grid_prims_into(&mut prims, r, &g.module, gs::aridia_ref::SCALE, r.origin[2], if opaque { 0x80 } else { g.fix }, cam);
                 }
                 let lf = LevelFog { color: g.fog_rgb, near_dist: g.fog[0], far_dist: g.fog[1], near_intensity: g.fog[2], far_intensity: g.fog[3] };
-                groups.push(Group { tex: Tex::Anim(g.anim), effect: (!opaque).then_some(false), fog: TfragFog::new(&lf), bias, prims });
+                groups.push(Group { tex: Tex::Anim(g.anim), effect: (!opaque).then_some(Blend::Mix), fog: TfragFog::new(&lf), bias, prims });
+            }
+            (SeaKind::Pool(pm), SeaData::Pool(d)) => {
+                // 1903 / 1919's callbacks `0x31db50` / `0x31e930` (rc_game::water::sea::pool_ref): L0 (with the shimmer's
+                // two FIX passes while its alpha is up) and L2 behind B's camera gate, L1's two scrolls always.
+                let (pr, tex) = (&run.pool, gs::pool_ref::FX.map(|t| t as usize));
+                let full = gs::pool_drawn(pm, &m.pvars, &p.svc.volumes, cam);
+                let mut passes: Vec<(Tex, Blend, PrimBuf)> = Vec::new();
+                if full {
+                    passes.push((Tex::Fx(tex[0], false), Blend::Mix, strip_prims(&d.layers[0], pr.l0[0], None)));
+                    if pr.alpha != 0 {
+                        let fix = gs::pool_fix(d.fix_base, pr.alpha);
+                        passes.push((Tex::Fx(tex[1], true), Blend::Add, strip_prims(&d.layers[0], pr.l0[1], Some(fix))));
+                        passes.push((Tex::Fx(tex[1], true), Blend::Sub, strip_prims(&d.layers[0], pr.l0[2], Some(fix))));
+                    }
+                }
+                for k in 0..2 { passes.push((Tex::Fx(tex[2], false), Blend::Add, strip_prims(&d.layers[1], pr.l1[k], None))); }
+                if full { passes.push((Tex::Fx(tex[3], false), Blend::Add, strip_prims(&d.layers[2], pr.l2, None))); }
+                for (j, (t, b, prims)) in passes.into_iter().enumerate() {
+                    groups.push(Group { tex: t, effect: Some(b), fog: level_fog, bias: bias + j as f32 * 0.25, prims });
+                }
             }
             (SeaKind::TwoTex(_) | SeaKind::EnvOverlay, SeaData::Meshes(set)) => {
                 mesh_set_groups(&mut groups, set, counter, cam, &view, bias, level_fog, None, run.scroll[0], &mut |a| anim(a, st, &mut images));
@@ -525,7 +560,7 @@ fn draw(
             hide(&mut vis, &mut st.slots[k]);
             continue;
         };
-        let params = match g.effect { None => FxPrimParams::opaque(), Some(add) => FxPrimParams::blend(add) };
+        let params = match g.effect { None => FxPrimParams::opaque(), Some(Blend::Sub) => FxPrimParams::subtract(), Some(b) => FxPrimParams::blend(b == Blend::Add) };
         let effect = g.effect.is_some();
         if let Some((e, mesh, mat, shown)) = &mut st.slots[k] {
             if let Some(mut mm) = meshes.get_mut(&*mesh) { g.prims.write(&mut mm); }

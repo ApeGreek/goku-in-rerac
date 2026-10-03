@@ -264,6 +264,48 @@ impl Env<'_> {
     }
 }
 
+/// `FUN_00276cb8(r, spline, p, out)` (level01; `FUN_00249e58` calls it with the capsule radius 0x13f584, the spline
+/// 0x14162a and Ratchet's position): `p` kept `r` away from the spline's segments in the plane across the gravity
+/// direction `up`. Segment by segment (both points' w = 0: skipped), from the point as the earlier segments left it:
+/// with `d` = `p − a`, `e` = `b − a` (both flattened across `up`) and `n` = `e`'s direction, a point within `r` of the
+/// line (`|(d × n)·up|`) is pushed to `r` from it when its foot `t = d·n` lies on the segment, or else to `r` from
+/// `a` when within `r` of `a` (the game's: never from `b`). A push returns the point at its old height along `up`;
+/// None: no push. Native `f32` (the VU vector ops).
+pub fn spline_wall(r: f32, pts: &[[f32; 4]], p: [f32; 3], up: [f32; 3]) -> Option<[f32; 3]> {
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let add = |a: [f32; 3], b: [f32; 3]| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+    let len = |a: [f32; 3]| dot(a, a).sqrt();
+    // FastVecNormalize(l, out, v): v's direction, length l.
+    let norm = |l: f32, v: [f32; 3]| { let k = l / len(v); [v[0] * k, v[1] * k, v[2] * k] };
+    let flat = |v: [f32; 3]| sub(v, norm(dot(v, up), up));
+    let h0 = dot(p, up);
+    let mut p = p;
+    let mut hit = false;
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        if a[3] == 0.0 && b[3] == 0.0 { continue; }
+        let a3 = [a[0], a[1], a[2]];
+        let d = flat(sub(p, a3));
+        let e = flat(sub([b[0], b[1], b[2]], a3));
+        let n = norm(1.0, e);
+        let c = [d[1] * n[2] - d[2] * n[1], d[2] * n[0] - d[0] * n[2], d[0] * n[1] - d[1] * n[0]];
+        if dot(c, up).abs() > r { continue; }
+        let t = dot(d, n);
+        if len(e) < t || t < 0.0 {
+            if len(d) < r {
+                hit = true;
+                p = add(norm(r, d), a3);
+            }
+        } else {
+            hit = true;
+            let along = norm(t, n);
+            p = add(add(norm(r, sub(d, along)), along), a3);
+        }
+    }
+    hit.then(|| add(p, norm(h0 - dot(p, up), up)))
+}
+
 /// The walk/run speed table at 0x17c238: rows `{down, up, speed, stick}` (anim thresholds in u/s, speed
 /// in u/s, stick threshold).
 pub const SPEED_TABLE: [[Pf; 4]; 2] = [
@@ -682,6 +724,15 @@ impl Hero {
     fn capsule_try(&mut self, env: &Env) -> bool {
         if self.no_vel_clamp != 0 { return true; }
         let old = self.pos;
+        // The spline wall 0x14162a (`FUN_00249e58`): off the spline a class named this tick, then cleared.
+        if self.wall_spline != 0 {
+            let pts = env.world.and_then(|w| w.spline(self.wall_spline as u16 as usize));
+            if let Some(p) = pts.and_then(|pts| spline_wall(self.cap_radius.to_f32(), pts, to_f32x3(self.pos), to_f32x3(self.gravity_dir))) {
+                self.pos = [Pf::f(p[0]), Pf::f(p[1]), Pf::f(p[2]), self.pos[3]];
+                self.f546 = 4;
+            }
+            self.wall_spline = 0;
+        }
         let mut off = V0;
         if self.group != 0x11 {
             if self.group == super::hoverboard::GROUP {

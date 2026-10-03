@@ -129,6 +129,12 @@
 //! | U172 | 584 Eudora's grabbable blocks (04): a carrier with a ledge record | level04 0x2d3580 | [`eudora_ledge_block`] |
 //! | U174 | 642 Eudora's drifting speck (04): sinks on the level wind, grows in, fades, starts again | level04 0x2d7e90 | [`eudora_drifter`] |
 //! | U179 | 1549 Eudora's cutscene FX driver (04): the infobot's thrusters in scenes 0 / 1 | level04 0x2e53a0 | [`eudora_scene_fx`] |
+//! | U375 | 361 Pokitaru's spline wall (11): names the ring the hero's capsule pass keeps Ratchet inside (`Hero::wall_spline`) | level11 0x2f3350 | [`pokitaru_wall`] |
+//! | U401 | 1350 Pokitaru's skill-point watcher (11): skill point 0x13d41b once its group is gone | level11 0x31aa80 | [`pokitaru_skill`] |
+//! | U389 | 1179 the Thruster-Pack floor buttons (11, 15): stomped down for good, saved on Pokitaru, with their help hints | level11 0x30ee00 | [`pokitaru_button`] |
+//! | U390 | 1180 the button-turned piece (11): turns 60° when its button is pressed | level11 0x30f2a8 | [`pokitaru_turner`] |
+//! | U388 | 1178 Pokitaru's tilting platforms (11): tip under Ratchet's weight and carry him | level11 0x30eb90 | [`pokitaru_tilt`] |
+//! | U384 | 1156 Pokitaru's unfolding machine (11): 18 pieces that fold out in a cutaway when its button is pressed | level11 0x30c788, 0x30d1b0 | [`pokitaru_unfold`] |
 //! | U180 | 810 Rilgar's rocking floats (05) | level05 0x30bdd8 | [`rilgar_rocker`] |
 //! | U195 | 895 Rilgar's flaps (05) | level05 0x3166a0 | [`rilgar_flap`] |
 //! | U283 | 467 / 472 Batalia's linked lifts (08) | level08 0x2ea398 | [`batalia_lift`] |
@@ -363,6 +369,12 @@ pub mod eudora_logger;
 pub mod eudora_walker;
 pub mod eudora_flock;
 pub mod eudora_scene_fx;
+pub mod pokitaru_wall;
+pub mod pokitaru_skill;
+pub mod pokitaru_button;
+pub mod pokitaru_turner;
+pub mod pokitaru_tilt;
+pub mod pokitaru_unfold;
 pub mod rilgar_rocker;
 pub mod rilgar_flap;
 pub mod batalia_lift;
@@ -642,6 +654,12 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U172 584", level: eudora_ledge_block::REFERENCE_LEVEL, func: eudora_ledge_block::UPDATE_FN, classes: &eudora_ledge_block::CLASSES, update: eudora_ledge_block::update, joints: &[] },
     UnitPort { unit: "U174 642", level: eudora_drifter::REFERENCE_LEVEL, func: eudora_drifter::UPDATE_FN, classes: &eudora_drifter::CLASSES, update: eudora_drifter::update, joints: &[] },
     UnitPort { unit: "U179 1549", level: eudora_scene_fx::REFERENCE_LEVEL, func: eudora_scene_fx::UPDATE_FN, classes: &eudora_scene_fx::CLASSES, update: eudora_scene_fx::update, joints: &[] },
+    UnitPort { unit: "U375 361", level: pokitaru_wall::REFERENCE_LEVEL, func: pokitaru_wall::UPDATE_FN, classes: &pokitaru_wall::CLASSES, update: pokitaru_wall::update, joints: &[] },
+    UnitPort { unit: "U401 1350", level: pokitaru_skill::REFERENCE_LEVEL, func: pokitaru_skill::UPDATE_FN, classes: &pokitaru_skill::CLASSES, update: pokitaru_skill::update, joints: &[] },
+    UnitPort { unit: "U389 1179", level: pokitaru_button::REFERENCE_LEVEL, func: pokitaru_button::UPDATE_FN, classes: &pokitaru_button::CLASSES, update: pokitaru_button::update, joints: &[] },
+    UnitPort { unit: "U390 1180", level: pokitaru_turner::REFERENCE_LEVEL, func: pokitaru_turner::UPDATE_FN, classes: &pokitaru_turner::CLASSES, update: pokitaru_turner::update, joints: &[] },
+    UnitPort { unit: "U388 1178", level: pokitaru_tilt::REFERENCE_LEVEL, func: pokitaru_tilt::UPDATE_FN, classes: &pokitaru_tilt::CLASSES, update: pokitaru_tilt::update, joints: &[] },
+    UnitPort { unit: "U384 1156", level: pokitaru_unfold::REFERENCE_LEVEL, func: pokitaru_unfold::UPDATE_FN, classes: &pokitaru_unfold::CLASSES, update: pokitaru_unfold::update, joints: &[] },
     UnitPort { unit: "U180 810", level: rilgar_rocker::REFERENCE_LEVEL, func: rilgar_rocker::UPDATE_FN, classes: &rilgar_rocker::CLASSES, update: rilgar_rocker::update, joints: &[] },
     UnitPort { unit: "U195 895", level: rilgar_flap::REFERENCE_LEVEL, func: rilgar_flap::UPDATE_FN, classes: &rilgar_flap::CLASSES, update: rilgar_flap::update, joints: &[] },
     UnitPort { unit: "U283 467", level: batalia_lift::REFERENCE_LEVEL, func: batalia_lift::UPDATE_FN, classes: &batalia_lift::CLASSES, update: batalia_lift::update, joints: &[] },

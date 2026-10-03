@@ -1084,6 +1084,7 @@ impl Services {
 /// | `ammo` / `ammo_picked` | 0x13d428 / 0x13de08 (game state, Ratchet's mirror) | ammo pickups `0x2db028` (`AddAmmo` 0x2494d8) |
 /// | `fall_voice_clear` | 0x141602 (u16 = 0xffff) | level 08's liquid 327 `0x2da0f0` when Ratchet falls in (`crate::water::sea`) |
 /// | `speed` / `jump_lock` / `current_dist` | 0x13f4e4 / 0x13f528 / 0x141608 | the water current 613 `0x2f3120` (`units::water_current`; also `platform`, `momentum`) |
+/// | `wall_spline` | 0x14162a (s16) | Pokitaru's spline wall 361 `0x2f3350` (`units::pokitaru_wall`) |
 ///
 /// Other class stores into the block, for the classes that are not ported yet (add a field here when one is):
 /// the camera / focus objects 0x13fda0; talking NPCs 0x13f3d0
@@ -1171,6 +1172,8 @@ pub struct HeroFields {
     /// A class's store of 0x141400 (`Gadgets::hydro_full`: the Hydrodisplacer holds water): Veldin's pools 1402 give a
     /// full gadget back at their first update.
     pub hydro_full: Option<bool>,
+    /// A class's store of 0x14162a (`Hero::wall_spline`: the spline the capsule pass keeps Ratchet off): Pokitaru's 361.
+    pub wall_spline: Option<i16>,
 }
 
 /// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
@@ -1265,6 +1268,7 @@ impl HeroFields {
             rail_reach: None,
             rail_radius: [None; 8],
             hydro_full: None,
+            wall_spline: None,
         }
     }
 
@@ -1328,6 +1332,7 @@ impl HeroFields {
         if let Some(v) = self.no_vel_clamp { h.no_vel_clamp = v; }
         if let Some(v) = self.rail_reach { h.f51a = v; }
         if let Some(v) = self.hydro_full { h.gadgets.hydro_full = v; }
+        if let Some(v) = self.wall_spline { h.wall_spline = v; }
         if let Some(b) = self.board { h.board.moby = Some(b); }
         h.board.boost_timer += self.board_boost;
         if let Some(p) = self.pose {
@@ -2179,6 +2184,9 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     }
     fn hit_message(&self, table: &MobyTable, target: MobyId) -> Option<HitRecord> { self.svc.borrow().hits.current(table, target).copied() }
     fn take_hero_writes(&mut self) -> Option<HeroFields> { self.svc.borrow_mut().take_hero_writes() }
+    fn spline(&self, i: usize) -> Option<Vec<[f32; 4]>> {
+        self.svc.borrow().splines.get(i).map(|v| v.iter().map(|p| p.map(f32::from_bits)).collect())
+    }
     fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { std::mem::take(&mut self.svc.borrow_mut().camera_shakes) }
     fn take_cinematic(&mut self) -> Vec<crate::cinematic::CinematicCall> { crate::cinematic::take_calls(&mut self.svc.borrow_mut()) }
     fn game_mode(&self) -> i32 { self.svc.borrow().game_mode }

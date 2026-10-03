@@ -116,6 +116,9 @@ pub trait MobySystem {
     /// The hero-block fields the moby loop's class updates wrote this tick (`moby_update::services::HeroFields`;
     /// None: none), applied to the hero right after the moby loop.
     fn take_hero_writes(&mut self) -> Option<crate::moby_update::services::HeroFields> { None }
+    /// The points of the level's spline `i` (`0x1b0930[i]`; None: none), for the hero's spline wall
+    /// (`Hero::wall_spline`).
+    fn spline(&self, _i: usize) -> Option<Vec<[f32; 4]>> { None }
     /// The camera shake requests the moby loop's class updates made this tick (`World::shake_camera`), in order;
     /// the tick stores them into the camera's shake records right after the moby loop.
     fn take_camera_shakes(&mut self) -> Vec<crate::follow_camera::ShakeRequest> { Vec::new() }
@@ -282,6 +285,9 @@ impl Game {
         carriers.ground = self.hero.ground_moby.and_then(|g| self.mobys.mobys.get(g).map(|m| (g, m.o_class, [m.position[0], m.position[1], m.position[2]], m.rotation[2])));
         // The Hoverboard's board, its paths, racers and pickups (hero::hoverboard).
         carriers.board = self.hero.board.moby.and_then(|b| hooks.world.as_deref().and_then(|w| w.board_world(&self.mobys, b)));
+        // The spline a class named for the capsule pass's spline wall (Pokitaru's 361: hero::physics::spline_wall).
+        let wall = self.hero.wall_spline as u16 as usize;
+        carriers.wall = (wall != 0).then(|| hooks.world.as_deref().and_then(|w| w.spline(wall)).map(|p| (wall, p))).flatten();
         // The weapon's target (0x13fda0) where the moby loop left it (SetState 0x23 aims at it).
         crate::hero::weapons::refresh_aim(&mut self.hero, &self.mobys);
         let hero_tick = {

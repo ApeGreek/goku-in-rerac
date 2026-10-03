@@ -92,8 +92,9 @@ pub const LIST2_BIAS: f32 = 3.0e6;
 /// Static uniform of one draw group.
 #[derive(Clone, Copy, Debug, Default, ShaderType)]
 pub struct FxPrimParams {
-    /// x = 1: ALPHA 0x48 (additive `Cs·As + Cd`), 0: ALPHA 0x44 (`(Cs − Cd)·As + Cd`). w = 1: an opaque world surface
-    /// ([`FxPrimParams::opaque`]; the pipeline key).
+    /// x = 1: ALPHA 0x48 (additive `Cs·As + Cd`), 0: ALPHA 0x44 (`(Cs − Cd)·As + Cd`). y = 1: the subtractive
+    /// `Cd − Cs·As` (ALPHA 0x62 with As = FIX: [`FxPrimParams::subtract`]; a pipeline key). w = 1: an opaque world
+    /// surface ([`FxPrimParams::opaque`]; the pipeline key).
     pub misc: Vec4,
 }
 
@@ -105,17 +106,22 @@ impl FxPrimParams {
     /// like the world shaders), not as an effect (crate::sea_render).
     pub fn opaque() -> Self { FxPrimParams { misc: Vec4::new(0.0, 0.0, 0.0, 1.0) } }
 
+    /// ALPHA 0x62 (`(0 − Cs)·FIX + Cd`) with As = FIX through the vertex alpha: the colour taken off the frame.
+    pub fn subtract() -> Self { FxPrimParams { misc: Vec4::new(0.0, 1.0, 0.0, 0.0) } }
+
     fn is_opaque(&self) -> bool { self.misc.w > 0.5 }
+    fn is_subtract(&self) -> bool { self.misc.y > 0.5 }
 }
 
 /// The pipeline key: an effect (display blend, no Z) or an opaque world surface.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FxPrimKey {
     opaque: bool,
+    subtract: bool,
 }
 
 impl From<&FxPrimMaterial> for FxPrimKey {
-    fn from(m: &FxPrimMaterial) -> Self { FxPrimKey { opaque: m.params.is_opaque() } }
+    fn from(m: &FxPrimMaterial) -> Self { FxPrimKey { opaque: m.params.is_opaque(), subtract: m.params.is_subtract() } }
 }
 
 /// One draw group of a callback: an FX texture, the fog, one of the two ALPHA equations, its Transparent3d order.
@@ -156,6 +162,7 @@ impl Material for FxPrimMaterial {
             // TEST_1 0x53001 / 0x51001 (ATST NEVER, AFAIL FB_ONLY: colour, never Z; ZTST GEQUAL).
             crate::gs_state::GsPass::BlendNoZ.specialize(descriptor);
             crate::display_blend::specialize(descriptor);
+            if key.bind_group_data.subtract { crate::display_blend::specialize_subtract(descriptor); }
         }
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),

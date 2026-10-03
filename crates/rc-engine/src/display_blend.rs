@@ -74,6 +74,19 @@ pub fn specialize(descriptor: &mut RenderPipelineDescriptor) {
     }
 }
 
+/// An effect pipeline's blend made subtractive (after [`specialize`]): `Cd − Cs·As` on the display bytes (the shader
+/// outputs `(Cs·As, 0)` as for 0x48), alpha kept; the GS's `(0 − Cs)·FIX + Cd` (ALPHA 0x62), clamped at 0.
+pub fn specialize_subtract(descriptor: &mut RenderPipelineDescriptor) {
+    if let Some(f) = descriptor.fragment.as_mut() {
+        for t in f.targets.iter_mut().flatten() {
+            t.blend = Some(BlendState {
+                color: BlendComponent { src_factor: BlendFactor::One, dst_factor: BlendFactor::One, operation: BlendOperation::ReverseSubtract },
+                alpha: BlendComponent { src_factor: BlendFactor::Zero, dst_factor: BlendFactor::One, operation: BlendOperation::Add },
+            });
+        }
+    }
+}
+
 /// Marks an entity whose draws are effect draws (their pipelines went through [`specialize`]).
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct DisplayEffect;

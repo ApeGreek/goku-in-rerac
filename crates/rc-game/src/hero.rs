@@ -249,6 +249,9 @@ pub struct Hero {
     pub lockout: i32,
     /// 0x13f51c: skip the velocity clamp.
     pub no_vel_clamp: i32,
+    /// 0x14162a (s16): the spline the next capsule pass keeps Ratchet off (0: none). A class sets it during the moby
+    /// loop (Pokitaru's 361); the pass pushes him away from the spline and clears it ([`physics`], `spline_wall`).
+    pub wall_spline: i16,
     /// 0x13f542 (s16): jump lockout (SetState of a jump undoes itself while set).
     pub jump_lockout: i16,
     /// 0x13f70c (s16): landing-into-run blend running.
@@ -517,7 +520,7 @@ impl Hero {
             plat_applied: v, momentum: v, eff_len: z, eff_len_xy: z, fwd_speed: z, slope_ratio: z, stick_world: v,
             target_yaw: z, yaw_vel: z, yaw_residual: z, target_speed: z, speed: z, timer: 0, substate_timer: 0,
             seq_timer: 0, ledge: 0, f500: 0, f502: 0, f508: 0, f510: 0, f518: 0, f51a: 0, f520: 0, f524: 0, f530: 0,
-            f534: 0, f536: 0, f53e: 0, f546: 0, lockout: 0, no_vel_clamp: 0, f532: 0, f540: 0, edge_brake: 0,
+            f534: 0, f536: 0, f53e: 0, f546: 0, lockout: 0, no_vel_clamp: 0, wall_spline: 0, f532: 0, f540: 0, edge_brake: 0,
             contact_normal: v, contact_point: v,
             cap_top: Pf::b(0x3f4c_cccd), cap_bottom: Pf::b(0x3f33_3333), cap_top_target: Pf::b(0x3f4c_cccd),
             cap_bottom_target: Pf::b(0x3f33_3333), cap_radius_target: Pf::b(0x3ee6_6666), cap_radius: Pf::b(0x3ee6_6666),

@@ -64,7 +64,8 @@ fn fragment(in: FxVertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(srgb_to_linear(rgb), 1.0);
 #else
     let cs = round(rgb * 255.0);
-    if (params.misc.x > 0.5) {
+    // 0x48 adds Cs·As; the subtractive pass (misc.y, a reverse-subtract blend) takes the same term off.
+    if (params.misc.x > 0.5 || params.misc.y > 0.5) {
         return gs_add(cs, a);
     }
     return gs_mix(cs, a);

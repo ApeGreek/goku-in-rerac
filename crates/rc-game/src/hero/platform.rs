@@ -111,6 +111,12 @@ pub trait HeroWorld {
     }
     /// The Hoverboard's view of the world (the board 0x13fbbc's pvars, paths, racers and pickups; None: no board).
     fn board(&self) -> Option<&super::hoverboard::BoardWorld> { None }
+    /// The points (x, y, z, w) of the level's spline `i` (`0x1b0930[i]`), for the capsule pass's spline wall
+    /// (`Hero::wall_spline`); None: not known.
+    fn spline(&self, i: usize) -> Option<&[[f32; 4]]> {
+        let _ = i;
+        None
+    }
 }
 
 /// The carriers of a moby table as the moby loop left it (built once per tick, before the hero update).
@@ -134,6 +140,9 @@ pub struct Carriers {
     record_flags: Vec<(usize, u16)>,
     /// The Hoverboard's world ([`HeroWorld::board`]; the caller sets it, `Carriers::collect` leaves none).
     pub board: Option<super::hoverboard::BoardWorld>,
+    /// The spline `Hero::wall_spline` names, with its index ([`HeroWorld::spline`]; the caller sets it, `Carriers::collect`
+    /// leaves none).
+    pub wall: Option<(usize, Vec<[f32; 4]>)>,
 }
 
 impl Carriers {
@@ -152,7 +161,7 @@ impl Carriers {
         let hero_slot = table.mobys.get(hero_moby).map_or(0, |m| m.class_slot);
         let ledge_mobys = table.mobys.iter().enumerate().filter(|(_, m)| triggers::record_ledge_flag(m)).map(|(i, _)| i).collect();
         let record_flags = table.mobys.iter().enumerate().filter_map(|(i, m)| Some((i, triggers::record_flags(m)?)).filter(|(_, f)| *f != 0)).collect();
-        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new(), ground: None, record_flags, board: None }
+        Carriers { list, hero_slot, ledge_mobys, grind: Default::default(), targets: Default::default(), melee: Vec::new(), ground: None, record_flags, board: None, wall: None }
     }
 }
 
@@ -167,6 +176,7 @@ impl HeroWorld for Carriers {
     fn moby_pose(&self, id: usize) -> Option<(i16, [f32; 3], f32)> { self.ground.filter(|g| g.0 == id).map(|g| (g.1, g.2, g.3)) }
     fn moby_record_flags(&self, id: usize) -> u16 { self.record_flags.iter().find(|(i, _)| *i == id).map_or(0, |(_, f)| *f) }
     fn board(&self) -> Option<&super::hoverboard::BoardWorld> { self.board.as_ref() }
+    fn spline(&self, i: usize) -> Option<&[[f32; 4]]> { self.wall.as_ref().filter(|w| w.0 == i).map(|w| w.1.as_slice()) }
 }
 
 /// The carry fields of the hero block.
