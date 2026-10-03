@@ -1142,6 +1142,7 @@ fn setup(
     svc.water.fog = Some(lv.fog.globals());
     // Level 18's pool meshes (rc_game units::veldin_pool, read with the draw-callback tables).
     svc.units.veldin_pools = lv.water.fx.veldin_pools.clone();
+    svc.units.wave_meshes = lv.water.fx.wave_meshes.clone();
     svc.units.blarg_glass = lv.water.fx.blarg_glass.clone();
     svc.units.blarg_bubble = lv.water.fx.blarg_bubble.clone();
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }

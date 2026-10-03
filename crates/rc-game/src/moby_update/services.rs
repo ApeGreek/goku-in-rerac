@@ -1835,10 +1835,12 @@ impl<'a> World<'a> {
             joints.into_iter().filter(|(m, _)| *m < self.table.mobys.len()).map(|(m, l)| ((m, l), self.joint_matrix(m, l as usize))).collect();
         let pvp: std::collections::HashMap<usize, [[f32; 3]; 3]> =
             frames.keys().map(|&m| (m, [0xd0, 0x1f0, 0xe0].map(|o| pvar_block_point(self.table, m, o)))).collect();
+        let heads: std::collections::HashMap<usize, [f32; 3]> = frames.keys().map(|&m| (m, pvar_block_point(self.table, m, 0))).collect();
         if let Some(p) = self.particles.as_deref_mut() {
             p.moby_frames = frames;
             p.joint_frames = jf;
             p.pvar_points = pvp;
+            p.pvar_heads = heads;
         }
     }
 

@@ -354,6 +354,8 @@ pub struct LevelFx {
     pub blarg_glass: Option<std::sync::Arc<rc_game::moby_update::classes::units::blarg_glass::Meshes>>,
     /// Level 6's gadgetbot bubble mesh (`rc_game` `units::blarg_gadgetbot`).
     pub blarg_bubble: Option<std::sync::Arc<rc_game::moby_update::classes::units::blarg_gadgetbot::Bubble>>,
+    /// Quartu's and the Fleet's water strips (`rc_game` `units::wave_mesh`).
+    pub wave_meshes: Option<std::sync::Arc<rc_game::moby_update::classes::units::wave_mesh::Meshes>>,
 }
 
 impl LevelFx {
@@ -372,7 +374,9 @@ impl LevelFx {
         if level == rc_game::moby_update::classes::units::blarg_glass::REFERENCE_LEVEL && blarg_glass.is_none() { eprintln!("fx: the glass meshes of level 6 did not read"); }
         let blarg_bubble = rc_game::moby_update::classes::units::blarg_gadgetbot::Bubble::parse(ov, level);
         if level == rc_game::moby_update::classes::units::blarg_gadgetbot::REFERENCE_LEVEL && blarg_bubble.is_none() { eprintln!("fx: the gadgetbot bubble mesh of level 6 did not read"); }
-        LevelFx { nanotech, ship_glass, veldin_pools, blarg_glass, blarg_bubble }
+        let wave_meshes = rc_game::moby_update::classes::units::wave_mesh::Meshes::parse(ov, level);
+        if rc_game::moby_update::classes::units::wave_mesh::DEFS.iter().any(|d| d.level == level) && wave_meshes.is_none() { eprintln!("fx: the water strips of level {level} did not read"); }
+        LevelFx { nanotech, ship_glass, veldin_pools, blarg_glass, blarg_bubble, wave_meshes }
     }
 }
 

@@ -269,6 +269,10 @@
 //! | U499 | 643 Oltanis's floating mines, 1352 its risers (14) | level14 0x2ec810, 0x305408 | [`oltanis_small`] |
 //! | U494 | 250 Oltanis's hatches, 309 its leaning floats (14) | level14 0x2d96e0, 0x2de1f8 | [`oltanis_small`] |
 //! | U488 | 8 Oltanis's searchlight sentries (14): sweep a beam along a path, raise the pop-up turrets on finding Ratchet | level14 0x2ac618, 0x2aee28, 0x2ae260 | [`oltanis_sentry`] |
+//! | U551, U560 | 1394 Quartu's bomb droppers and their bombs 1257, 1560 its scene thrusters (15) | level15 0x2eabd8, 0x2e7f68, 0x2edb20 | [`quartu_small`] |
+//! | U552 | 1408, 1409, 1565, 1567 Quartu's and 1405, 1406, 1407 the Fleet's rippling water meshes (15, 17) | level15 0x2eb0a0.., level17 0x2f08e0.. | [`wave_mesh`] |
+//! | U535 | 78 the energy barriers (15, 17): a shimmering wall with drifting motes, shut down by a link or the mission | level15 0x2a2bf0, 0x2a3138 | [`barrier_field`] |
+//! | U546 | 655 the electrified water (15, 17): shocks Ratchet in it, sparks along its lines, switched off for a countdown | level15 0x2d6810, 0x2d8710, 0x2d77c0 | [`water_shock`] |
 //! | U480 | 1403 Gemlik's tracker, 1558 its scene thrusters (13) | level13 0x30bb70, 0x30bdf0 | [`gemlik_small`] |
 //! | U477 | 1270 Gemlik's tipping lift (13) | level13 0x30a6d8 | [`gemlik_lift`] |
 //! | U475 | 1262 Gemlik's stomper robots (13): the shockwave ring, the walk and swing, the knockback and death | level13 0x307e98, 0x3098d0 | [`gemlik_robot`] |
@@ -397,6 +401,10 @@ pub mod oltanis_carrier;
 pub mod oltanis_arc;
 pub mod oltanis_small;
 pub mod oltanis_sentry;
+pub mod quartu_small;
+pub mod wave_mesh;
+pub mod barrier_field;
+pub mod water_shock;
 pub mod gemlik_small;
 pub mod gemlik_robot;
 pub mod gemlik_relay;
@@ -1038,7 +1046,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "Giant Clank 0x593", level: giant_shockwave::REFERENCE_LEVEL, func: giant_shockwave::UPDATE_FN, classes: &giant_shockwave::CLASSES, update: giant_shockwave::update, joints: &[] },
     UnitPort { unit: "Giant Clank 0x100", level: giant_missile::REFERENCE_LEVEL, func: giant_missile::UPDATE_FN, classes: &giant_missile::CLASSES, update: giant_missile::update, joints: &[] },
     UnitPort { unit: "Giant Clank 0x5f3", level: giant_beam::REFERENCE_LEVEL, func: giant_beam::UPDATE_FN, classes: &giant_beam::CLASSES, update: giant_beam::update, joints: &[] },
-    UnitPort { unit: "U499 1446", level: quartu_giant_mission::REFERENCE_LEVEL, func: quartu_giant_mission::UPDATE_FN, classes: &quartu_giant_mission::CLASSES, update: quartu_giant_mission::update, joints: &[] },
+    UnitPort { unit: "U499 1446", level: quartu_giant_mission::REFERENCE_LEVEL, func: quartu_giant_mission::UPDATE_FN, classes: &quartu_giant_mission::CLASSES, update: quartu_giant_mission::update, joints: &quartu_giant_mission::CLASSES },
     UnitPort { unit: "U307 664", level: riding_floats::REFERENCE_LEVEL_664, func: riding_floats::UPDATE_FN_664, classes: &riding_floats::CLASSES_664, update: riding_floats::float_664, joints: &[] },
     UnitPort { unit: "U316 1293", level: riding_floats::REFERENCE_LEVEL_1293, func: riding_floats::UPDATE_FN_1293, classes: &riding_floats::CLASSES_1293, update: riding_floats::float_1293, joints: &[] },
     UnitPort { unit: "U255 1069", level: riding_floats::REFERENCE_LEVEL_1069, func: riding_floats::UPDATE_FN_1069, classes: &riding_floats::CLASSES_1069, update: riding_floats::float_1069, joints: &[] },
@@ -1108,6 +1116,28 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U488 8", level: oltanis_sentry::REFERENCE_LEVEL, func: oltanis_sentry::UPDATE_FN, classes: &oltanis_sentry::CLASSES, update: oltanis_sentry::update, joints: &oltanis_sentry::CLASSES },
     UnitPort { unit: "U488 8 cones", level: oltanis_sentry::REFERENCE_LEVEL, func: oltanis_sentry::MASTER_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U488 8 spot", level: oltanis_sentry::REFERENCE_LEVEL, func: oltanis_sentry::SPOT_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U551 1394", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::DROPPER_FN, classes: &quartu_small::DROPPER_CLASSES, update: quartu_small::dropper_update, joints: &[] },
+    UnitPort { unit: "U551 1257", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::BOMB_FN, classes: &quartu_small::BOMB_CLASSES, update: quartu_small::bomb_update, joints: &[] },
+    UnitPort { unit: "U560 1560", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::THRUSTERS_FN, classes: &quartu_small::THRUSTERS_CLASSES, update: quartu_small::thrusters_update, joints: &[] },
+    UnitPort { unit: "U535 78", level: barrier_field::REFERENCE_LEVEL, func: barrier_field::UPDATE_FN, classes: &barrier_field::CLASSES, update: barrier_field::update, joints: &[] },
+    UnitPort { unit: "U535 78 shimmer", level: barrier_field::REFERENCE_LEVEL, func: barrier_field::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U546 655", level: water_shock::REFERENCE_LEVEL, func: water_shock::UPDATE_FN, classes: &water_shock::CLASSES, update: water_shock::update, joints: &[] },
+    UnitPort { unit: "U546 655 bolt", level: water_shock::REFERENCE_LEVEL, func: water_shock::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U546 655 countdown", level: water_shock::REFERENCE_LEVEL, func: water_shock::COUNTDOWN_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1408", level: wave_mesh::DEFS[0].level, func: wave_mesh::DEFS[0].update, classes: &wave_mesh::CLASSES[0], update: wave_mesh::UPDATES[0], joints: &[] },
+    UnitPort { unit: "U552 1408 draw", level: wave_mesh::DEFS[0].level, func: wave_mesh::DEFS[0].draw, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1409", level: wave_mesh::DEFS[1].level, func: wave_mesh::DEFS[1].update, classes: &wave_mesh::CLASSES[1], update: wave_mesh::UPDATES[1], joints: &[] },
+    UnitPort { unit: "U552 1409 draw", level: wave_mesh::DEFS[1].level, func: wave_mesh::DEFS[1].draw, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1565", level: wave_mesh::DEFS[2].level, func: wave_mesh::DEFS[2].update, classes: &wave_mesh::CLASSES[2], update: wave_mesh::UPDATES[2], joints: &[] },
+    UnitPort { unit: "U552 1565 draw", level: wave_mesh::DEFS[2].level, func: wave_mesh::DEFS[2].draw, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1567", level: wave_mesh::DEFS[3].level, func: wave_mesh::DEFS[3].update, classes: &wave_mesh::CLASSES[3], update: wave_mesh::UPDATES[3], joints: &[] },
+    UnitPort { unit: "U552 1567 draw", level: wave_mesh::DEFS[3].level, func: wave_mesh::DEFS[3].draw, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1405", level: wave_mesh::DEFS[4].level, func: wave_mesh::DEFS[4].update, classes: &wave_mesh::CLASSES[4], update: wave_mesh::UPDATES[4], joints: &[] },
+    UnitPort { unit: "U552 1405 draw", level: wave_mesh::DEFS[4].level, func: wave_mesh::DEFS[4].draw, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1406", level: wave_mesh::DEFS[5].level, func: wave_mesh::DEFS[5].update, classes: &wave_mesh::CLASSES[5], update: wave_mesh::UPDATES[5], joints: &[] },
+    UnitPort { unit: "U552 1406 draw", level: wave_mesh::DEFS[5].level, func: wave_mesh::DEFS[5].draw, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U552 1407", level: wave_mesh::DEFS[6].level, func: wave_mesh::DEFS[6].update, classes: &wave_mesh::CLASSES[6], update: wave_mesh::UPDATES[6], joints: &[] },
+    UnitPort { unit: "U552 1407 draw", level: wave_mesh::DEFS[6].level, func: wave_mesh::DEFS[6].draw, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U507 921", level: oltanis_carrier::REFERENCE_LEVEL, func: oltanis_carrier::CARRIER_FN, classes: &oltanis_carrier::CARRIER_CLASSES, update: oltanis_carrier::carrier_update, joints: &[] },
     UnitPort { unit: "U508 922", level: oltanis_carrier::REFERENCE_LEVEL, func: oltanis_carrier::MISSILE_FN, classes: &oltanis_carrier::MISSILE_CLASSES, update: oltanis_carrier::missile_update, joints: &[] },
     UnitPort { unit: "U496 386", level: oltanis_arc::REFERENCE_LEVEL, func: oltanis_arc::UPDATE_FN, classes: &oltanis_arc::CLASSES, update: oltanis_arc::update, joints: &[] },
@@ -1342,6 +1372,10 @@ pub struct Globals {
     pub oltanis_lightning: oltanis_lightning::Lightning,
     /// Oltanis's searchlight cones' colours and the draws' camera (`oltanis_sentry`, level14 0x1d80c8..).
     pub oltanis_sentry: oltanis_sentry::Cone,
+    /// Quartu's and the Fleet's rippling water strips (`wave_mesh`; read from the overlay by the engine at the level load).
+    pub wave_meshes: Option<std::sync::Arc<wave_mesh::Meshes>>,
+    /// The electrified water's bolt (`water_shock`, level15 0x1d3750.. / 0x161cc0..).
+    pub water_shock: water_shock::Bolt,
     /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
     /// during its cutaways): the points, to put back.
     pub parked_paths: std::collections::HashMap<usize, Vec<[u32; 4]>>,
@@ -1450,6 +1484,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::fx_quads(table, svc, id),
         Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::PIECE_DRAW_FN)) => oltanis_zapper::piece_quads(table, svc, id),
         Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::SPOT_FN)) => oltanis_sentry::spot_quads(table, svc, id),
+        Some((l, f)) if wave_mesh::DEFS.iter().any(|d| d.level == l && d.draw == f) => wave_mesh::fx_quads(table, svc, l, f, id),
         Some((oltanis_bolt::REFERENCE_LEVEL, oltanis_bolt::DRAW_FN)) => oltanis_bolt::fx_quads(table, svc, id),
         Some((oltanis_wind::REFERENCE_LEVEL, oltanis_wind::DRAW_FN)) => oltanis_wind::fx_quads(table, svc, id),
         Some((gemlik_robot::REFERENCE_LEVEL, gemlik_robot::DRAW_FN)) => gemlik_robot::fx_quads(table, svc, id),
@@ -1500,6 +1535,8 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
         Some((oltanis_lightning::REFERENCE_LEVEL, oltanis_lightning::DRAW_FN)) => oltanis_lightning::fx_quad_groups(table, svc, id),
         Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::DRAW_FN)) => oltanis_zapper::fx_quad_groups(table, svc, id),
         Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::MASTER_DRAW_FN)) => oltanis_sentry::fx_quad_groups(table, svc, id),
+        Some((barrier_field::REFERENCE_LEVEL, barrier_field::DRAW_FN)) => barrier_field::fx_quad_groups(table, svc, id),
+        Some((water_shock::REFERENCE_LEVEL, water_shock::DRAW_FN)) => water_shock::fx_quad_groups(table, svc, id),
         Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::fx_quad_groups(table, svc, id),
         Some((1, crate::shadows::BLOB_FN)) => {
             let quads = svc.blobs.1.iter().filter(|b| b.0 == id).map(|(_, b)| {
@@ -1554,6 +1591,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((oltanis_lightning::REFERENCE_LEVEL, oltanis_lightning::DRAW_FN)) => oltanis_lightning::frame(w, id),
         Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::DRAW_FN)) => oltanis_zapper::frame(w, id),
         Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::MASTER_DRAW_FN | oltanis_sentry::SPOT_FN)) => oltanis_sentry::frame(w, id),
+        Some((water_shock::REFERENCE_LEVEL, water_shock::DRAW_FN | water_shock::COUNTDOWN_FN)) => water_shock::frame(w, id),
         Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::frame(w, id),
         Some((oltanis_bolt::REFERENCE_LEVEL, oltanis_bolt::DRAW_FN)) => oltanis_bolt::frame(w, id),
         Some((oltanis_wind::REFERENCE_LEVEL, oltanis_wind::DRAW_FN)) => oltanis_wind::frame(w, id),

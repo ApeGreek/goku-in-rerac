@@ -313,6 +313,7 @@ pub fn sparkle_burst(h: &mut Hero, rng: &mut Rng, point: &mut [f32; 3], n: i32) 
 /// The particle hook's part: create the hero's queued spawns of this tick, in order (before `UpdateParts`).
 pub fn create_particles(h: &Hero, sys: &mut Particles) {
     sys.hero = crate::hero::physics::to_f32x3(h.pos);
+    sys.hero_body = crate::hero::physics::to_f32x3(h.body_point);
     let gold = h.weapons.gold[super::pyrocitor::PYROCITOR as usize];
     sys.gold = gold;
     sys.hero_plat = crate::hero::physics::to_f32x3(h.plat_applied);

@@ -89,6 +89,19 @@ pub fn part69(w: &mut World, p: V, vel: V, alpha: i32, moby: Option<MobyId>) -> 
     i
 }
 
+/// `PartType71Spawn(pos, v1, v2, c1, c2, A, B, C, moby)` (level15 `0x2647f0`, [`crate::particles::type71`]): the
+/// record's pool index.
+pub fn part71(w: &mut World, s: &crate::particles::type71::Spawn) -> Option<usize> {
+    let Some(sys) = w.particles.as_deref_mut() else {
+        part_unported(w, 71);
+        return None;
+    };
+    *w.svc.fx.part_spawns.entry(71).or_default() += 1;
+    let i = crate::particles::type71::spawn(sys, w.rng, s);
+    if i.is_none() { w.svc.fx.part_failed += 1; }
+    i
+}
+
 /// [`part23`] returning the record's pool index for the caller's patch (`None`: no record, or no particle system).
 #[allow(clippy::too_many_arguments)]
 pub fn part23_rec(w: &mut World, [jitter, lo, hi, size]: [f32; 4], p: V, spin: i32, vel: V, rgba: u32) -> Option<usize> {

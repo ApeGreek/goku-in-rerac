@@ -28,7 +28,7 @@
 //!   [`type73`], [`type01`]: the weather's streaks, flakes and splashes, `SpawnImpactSparks`), 5 / 7 ([`type05`]), 10
 //!   ([`type10`]), 14 ([`type14`]), 18 ([`type18`]), 28 ([`type28`]), 31 ([`type31`]), 39 ([`type39`]), 41
 //!   ([`type41`]), 43 ([`type43`]), 48 / 50 ([`type48`]), 49 ([`type49`]), 51 ([`type51`]), 61 ([`type61`]), 65 (a row
-//!   on [`type25`]), 67 ([`type67`]), 68 ([`type68`]), 69 ([`type69`]), 70 ([`type70`]), 74 ([`type74`]), 77
+//!   on [`type25`]), 67 ([`type67`]), 68 ([`type68`]), 69 ([`type69`]), 70 ([`type70`]), 71 ([`type71`]), 74 ([`type74`]), 77
 //!   ([`type77`]), 78 ([`type78`]), 79 / 80 ([`type79`]); a record of any other type kills itself on its first update
 //!   and is counted in [`PartStats::unported_kills`], so a missing type is visible in the stats line.
 //! * **Mobys held by pointer** (types 14, 31, 39, 61, 67, 68, 74, 78, 79): the record keeps the moby index + 1; the moby
@@ -106,6 +106,7 @@ pub mod type67;
 pub mod type68;
 pub mod type69;
 pub mod type70;
+pub mod type71;
 pub mod type72;
 pub mod type73;
 pub mod type74;
@@ -380,6 +381,8 @@ pub struct Particles {
     pub coll: Option<std::sync::Arc<rc_formats::collision::Collision>>,
     /// 0x13f3d0: the hero position (the attached glints of type 60 follow it), set by the particle hook.
     pub hero: [f32; 3],
+    /// 0x13f420: the hero's body point (type 71's motes drift toward a barrier's touch point near it), set by the hook.
+    pub hero_body: [f32; 3],
     /// 0x167258: the camera yaw as the previous tick's camera update left it (type 34's wobble), set by the hook.
     pub cam_yaw: f32,
     /// 0x15f5cc: the tick counter as the tick's updates see it (types 2 and 15 act on odd ticks), set by the hook.
@@ -416,6 +419,9 @@ pub struct Particles {
     /// The points type 69's modes 1 / 2 / 3 copy out of a moby's pvar block (+0xd0, +0x1f0, +0xe0: [`type69::moby_of`]),
     /// written with [`Particles::moby_frames`] (`moby_update::services::pvar_block_point`).
     pub pvar_points: std::collections::HashMap<usize, [[f32; 3]; 3]>,
+    /// The point at +0x00 of the pvar blocks type-71 records hold (the energy barrier's touch point), written with
+    /// [`Particles::moby_frames`].
+    pub pvar_heads: std::collections::HashMap<usize, [f32; 3]>,
     /// The descriptors type-74 records point at (+0x3c: the caller's static data), added by [`type74::spawn`].
     pub descs74: Vec<type74::Desc>,
     /// 0x13f5e0: the gravity direction (type 78 homes around it); (0, 0, −1) unless the hero hook writes it.
@@ -514,6 +520,7 @@ impl Particles {
         table[68] = Some(type68::update as UpdateFn);
         table[69] = Some(type69::update as UpdateFn);
         table[70] = Some(type70::update as UpdateFn);
+        table[71] = Some(type71::update as UpdateFn);
         table[72] = Some(type72::update as UpdateFn);
         table[73] = Some(type73::update as UpdateFn);
         table[74] = Some(type74::update as UpdateFn);
@@ -521,7 +528,7 @@ impl Particles {
         table[78] = Some(type78::update as UpdateFn);
         table[79] = Some(type79::update79 as UpdateFn);
         table[80] = Some(type79::update80 as UpdateFn);
-        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3], moby_frames: Default::default(), joint_frames: Default::default(), pvar_points: Default::default(), descs74: Vec::new(), gravity: [0.0, 0.0, -1.0], grid: None, weather: Weather::default(), hits: Vec::new(), lines: Vec::new() }
+        Particles { pool: PartPool::new(), time: TimeBase::NTSC, table, defs, owners, stats: PartStats::default(), frame_load: [0; 2], camera: [0; 3], coll: None, hero: [0.0; 3], hero_body: [0.0; 3], cam_yaw: 0.0, counter: 0, anchors: Default::default(), anchor_scales: Default::default(), joint_anchors: Default::default(), water_z: 0.0, level: 0, gold: 0, links: Default::default(), hero_plat: [0.0; 3], moby_frames: Default::default(), joint_frames: Default::default(), pvar_points: Default::default(), pvar_heads: Default::default(), descs74: Vec::new(), gravity: [0.0, 0.0, -1.0], grid: None, weather: Weather::default(), hits: Vec::new(), lines: Vec::new() }
     }
 
     pub fn create_part(&mut self, ty: u8) -> Option<usize> {
@@ -566,7 +573,7 @@ impl Particles {
                 mobys.push(m);
                 joints.push((m, l));
             }
-            mobys.extend(type74::moby_of(r).or_else(|| type78::moby_of(r)).or_else(|| type67::moby_of(r)).or_else(|| type14::moby_of(r)).or_else(|| type79::moby_of(r)).or_else(|| type39::moby_of(r)).or_else(|| type31::moby_of(r)).or_else(|| type69::moby_of(r)));
+            mobys.extend(type74::moby_of(r).or_else(|| type78::moby_of(r)).or_else(|| type67::moby_of(r)).or_else(|| type14::moby_of(r)).or_else(|| type79::moby_of(r)).or_else(|| type39::moby_of(r)).or_else(|| type31::moby_of(r)).or_else(|| type69::moby_of(r)).or_else(|| type71::moby_of(r)));
         }
         mobys.sort_unstable();
         mobys.dedup();
