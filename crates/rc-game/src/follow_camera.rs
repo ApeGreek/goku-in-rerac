@@ -1884,6 +1884,16 @@ impl Camera {
         if self.follow_is_current() { self.cam.script |= 3; }
     }
 
+    /// A class's stores into the follow camera when it is current (Orxon's teleport pads 351 / 1301, level10
+    /// `0x2be858`): D+0x20 = `ticks(90)` and the camera's +0x40 = +0x00 (the saved forward from the forward row: the
+    /// row blend out of the old view).
+    pub fn row_blend(&mut self) {
+        if !self.follow_is_current() { return; }
+        let d = &mut self.cam;
+        d.row_blend = t(90) as i16;
+        d.saved_fwd = d.rows[0];
+    }
+
     /// `0x313af0(rate, tolerance, dir)`: turn toward `dir` at `rate` per tick (D+0x1bc) through the scripted yaw input
     /// D+0x1c4 (`0x313888`, [`yaw_input_toward`]); nothing when `rate` is 0.
     pub fn turn_toward(&mut self, rate: f32, tolerance: f32, dir: [f32; 3]) {

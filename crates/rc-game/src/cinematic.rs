@@ -77,6 +77,14 @@ pub enum CinematicCall {
     /// A class's store into 0x16735c, the follow camera's scripted focus moby
     /// ([`crate::follow_camera::Camera::set_focus_moby`]).
     FocusMoby(Option<MobyId>),
+    /// `0x313768(k, d)` / `0x313858()` / `0x313820()` / `0x313740(v)`: the follow camera's horizontal spring, stick off,
+    /// look from the smoothed target, leash ([`crate::follow_camera::Camera::set_h_spring`] …).
+    FollowHSpring { k: f32, d: f32 },
+    FollowStickOff,
+    FollowLookSmoothed,
+    FollowLeash(i16),
+    /// The follow camera's row blend from its forward ([`crate::follow_camera::Camera::row_blend`]).
+    FollowRowBlend,
     /// A class's store `0x167360 = t` (the ticks since the right stick moved, which ease the focus turn in; Hoven's
     /// drones 326 write 0 with their focus store): [`crate::follow_camera::Camera::focus_ticks`].
     FocusTicks(i32),
@@ -447,6 +455,11 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             CinematicCall::FollowPivotHeight { h, rate } => cam.set_pivot_height(h, rate),
             CinematicCall::FollowTurnToward { rate, tolerance, dir } => cam.turn_toward(rate, tolerance, dir),
             CinematicCall::FollowLookHeight { h, rate, add } => cam.set_look_height(h, rate, add),
+            CinematicCall::FollowHSpring { k, d } => cam.set_h_spring(k, d),
+            CinematicCall::FollowStickOff => cam.stick_off(),
+            CinematicCall::FollowLookSmoothed => cam.look_from_smoothed(),
+            CinematicCall::FollowLeash(v) => cam.set_leash(v),
+            CinematicCall::FollowRowBlend => cam.row_blend(),
             CinematicCall::FocusMoby(m) => cam.set_focus_moby(m),
             CinematicCall::FocusTicks(t) => cam.focus_ticks = t,
             CinematicCall::FocusRecord { record, distance, pivot } => {
