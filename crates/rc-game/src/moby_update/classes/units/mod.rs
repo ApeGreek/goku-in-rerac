@@ -250,6 +250,16 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U445 | 1557 Hoven's scene thrusters (12) | level12 0x3094a0 | [`hoven_story`] |
+//! | U441 | 1345 Hoven's power beams (12): the crackling curtain held until its moby is destroyed, the mission | level12 0x3081b0, 0x308350 | [`hoven_beam`] |
+//! | U440 | 1281 Hoven's mine dispensers (12): opening on the target and releasing their seeker mines | level12 0x307840 | [`hoven_dispenser`] |
+//! | U438 | 1269 Hoven's seeker mines (12): the pop-up, the swerving roll at the target, the bursts, the blob shadow | level12 0x304e00 | [`hoven_mine`] |
+//! | U436 | 1259 Hoven's arc posts (12): sliding pairs with four crackling bolts between them that hurt | level12 0x302f30, 0x3028c8 | [`hoven_arc`] |
+//! | U432 | 384 Hoven's falls (12): the pulsing curtain raised and lowered by commands, its drips | level12 0x2ec720, 0x2ecac0 | [`hoven_fall`] |
+//! | U430 | 336 Hoven's helicopters (12): circling their paths, blown up and back out of view, hidden during the carrier battle, the skill point | level12 0x2ebea8 | [`hoven_copter`] |
+//! | U427 | 294 Hoven's gunners (12): the ambush, the path, the sidestepping approach, the aimed gun shot, the knockback and death, the crate smash | level12 0x2e72c0 | [`hoven_gunner`] |
+//! | U424 | 240 Hoven's hover platforms (12): the path, bob and hover kinds, the tilt under Ratchet, the jets | level12 0x2e3ed8 | [`hoven_platform`] |
+//! | U423 | 238 Hoven's burrowers (12): out of the ground, the sidestepping chase and bite, the wander, the jump-out, the Suck Cannon's hold | level12 0x2e1be0 | [`hoven_burrower`] |
 //! | U369 | 1378 Orxon's air curtains: no air on their front (the O2 Mask's cue), their six-layer shimmer | level10 0x2e9028, 0x2e91b8 | [`orxon_airlock`] |
 //! | U363 | 1229 Orxon's gun drones (10): the rise, the patrol and the shots at Ratchet or Clank's bots, the muzzle flash, the flight away; their shots 819 | level10 0x2e4a88, 0x2cc2e8 | [`orxon_drone`] |
 //! | U349 | 702 Orxon's flame vents (10): the on / off bursts of flame lines (particle type 40) and the roar | level10 0x2c7a20 | [`orxon_flame`] |
@@ -342,6 +352,15 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod hoven_beam;
+pub mod hoven_dispenser;
+pub mod hoven_mine;
+pub mod hoven_arc;
+pub mod hoven_fall;
+pub mod hoven_copter;
+pub mod hoven_gunner;
+pub mod hoven_platform;
+pub mod hoven_burrower;
 pub mod orxon_airlock;
 pub mod orxon_drone;
 pub mod orxon_flame;
@@ -989,7 +1008,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U365 298", level: pokitaru_story::REFERENCE_LEVEL, func: pokitaru_story::PERSUADER_FN, classes: &pokitaru_story::PERSUADER_CLASSES, update: pokitaru_story::persuader_update, joints: &[] },
     UnitPort { unit: "U394 282", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::MERCHANT_FN, classes: &hoven_story::MERCHANT_CLASSES, update: hoven_story::merchant_update, joints: &hoven_story::MERCHANT_CLASSES },
     UnitPort { unit: "U411 1404", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::SCENE_FN, classes: &hoven_story::SCENE_CLASSES, update: hoven_story::scene_trigger_update, joints: &[] },
-    UnitPort { unit: "U398 328", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::HYDRO_FN, classes: &hoven_story::HYDRO_CLASSES, update: hoven_story::hydro_update, joints: &[] },
+    UnitPort { unit: "U398 328", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::HYDRO_FN, classes: &hoven_story::HYDRO_CLASSES, update: hoven_story::hydro_update, joints: &hoven_story::HYDRO_CLASSES },
     UnitPort { unit: "U440 1353", level: gemlik_story::REFERENCE_LEVEL, func: gemlik_story::UPDATE_FN, classes: &gemlik_story::CLASSES, update: gemlik_story::update, joints: &[] },
     UnitPort { unit: "U464 851", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::QWARK_FN, classes: &oltanis_story::QWARK_CLASSES, update: oltanis_story::qwark_update, joints: &[] },
     UnitPort { unit: "U469 924", level: oltanis_story::REFERENCE_LEVEL, func: oltanis_story::MERCHANT_FN, classes: &oltanis_story::MERCHANT_CLASSES, update: oltanis_story::merchant_update, joints: &[] },
@@ -1007,6 +1026,22 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U445 1557", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::THRUSTERS_FN, classes: &hoven_story::THRUSTERS_CLASSES, update: hoven_story::thrusters_update, joints: &[] },
+    UnitPort { unit: "U441 1345", level: hoven_beam::REFERENCE_LEVEL, func: hoven_beam::UPDATE_FN, classes: &hoven_beam::CLASSES, update: hoven_beam::update, joints: &[] },
+    // Draw callback only (1345's curtain: `Callback::UnitFrame` for its `rand`, `Callback::UnitQuads`).
+    UnitPort { unit: "U441 1345 curtain", level: hoven_beam::REFERENCE_LEVEL, func: hoven_beam::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U440 1281", level: hoven_dispenser::REFERENCE_LEVEL, func: hoven_dispenser::UPDATE_FN, classes: &hoven_dispenser::CLASSES, update: hoven_dispenser::update, joints: &[] },
+    UnitPort { unit: "U438 1269", level: hoven_mine::REFERENCE_LEVEL, func: hoven_mine::UPDATE_FN, classes: &hoven_mine::CLASSES, update: hoven_mine::update, joints: &[] },
+    UnitPort { unit: "U436 1259", level: hoven_arc::REFERENCE_LEVEL, func: hoven_arc::UPDATE_FN, classes: &hoven_arc::CLASSES, update: hoven_arc::update, joints: &[] },
+    // Draw callback only (1259's bolts: `Callback::UnitQuads`).
+    UnitPort { unit: "U436 1259 bolts", level: hoven_arc::REFERENCE_LEVEL, func: hoven_arc::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U432 384", level: hoven_fall::REFERENCE_LEVEL, func: hoven_fall::UPDATE_FN, classes: &hoven_fall::CLASSES, update: hoven_fall::update, joints: &[] },
+    // Draw callback only (384's strips: `Callback::UnitQuads`).
+    UnitPort { unit: "U432 384 strips", level: hoven_fall::REFERENCE_LEVEL, func: hoven_fall::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U430 336", level: hoven_copter::REFERENCE_LEVEL, func: hoven_copter::UPDATE_FN, classes: &hoven_copter::CLASSES, update: hoven_copter::update, joints: &[] },
+    UnitPort { unit: "U427 294", level: hoven_gunner::REFERENCE_LEVEL, func: hoven_gunner::UPDATE_FN, classes: &hoven_gunner::CLASSES, update: hoven_gunner::update, joints: &hoven_gunner::CLASSES },
+    UnitPort { unit: "U424 240", level: hoven_platform::REFERENCE_LEVEL, func: hoven_platform::UPDATE_FN, classes: &hoven_platform::CLASSES, update: hoven_platform::update, joints: &[] },
+    UnitPort { unit: "U423 238", level: hoven_burrower::REFERENCE_LEVEL, func: hoven_burrower::UPDATE_FN, classes: &hoven_burrower::CLASSES, update: hoven_burrower::update, joints: &hoven_burrower::CLASSES },
     UnitPort { unit: "U369 1378", level: orxon_airlock::REFERENCE_LEVEL, func: orxon_airlock::UPDATE_FN, classes: &orxon_airlock::CLASSES, update: orxon_airlock::update, joints: &[] },
     // Draw callback only (1378's shimmer: `Callback::UnitQuads`, six groups).
     UnitPort { unit: "U369 1378 shimmer", level: orxon_airlock::REFERENCE_LEVEL, func: orxon_airlock::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
@@ -1293,6 +1328,9 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((1, crate::moby_update::classes::teleporter::BEAM_FN)) => crate::moby_update::classes::teleporter::beam_quads(table, svc, id),
         Some((pokitaru_teleporter::REFERENCE_LEVEL, pokitaru_teleporter::BEAM_FN)) => pokitaru_teleporter::beam_quads(table, svc, id),
         Some((laser_fence::REFERENCE_LEVEL, laser_fence::UPDATE_FN)) => laser_fence::fx_quads(table, svc, id),
+        Some((hoven_fall::REFERENCE_LEVEL, hoven_fall::DRAW_FN)) => hoven_fall::fx_quads(table, svc, id),
+        Some((hoven_arc::REFERENCE_LEVEL, hoven_arc::DRAW_FN)) => hoven_arc::fx_quads(table, svc, id),
+        Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
         Some((kalebo_lift::REFERENCE_LEVEL, kalebo_lift::GLOW_FN)) => kalebo_lift::fx_quads(table, svc, id),
         Some((rilgar_trail_rider::REFERENCE_LEVEL, rilgar_trail_rider::TRAIL_FN)) => rilgar_trail_rider::fx_quads(table, svc, id),
@@ -1381,6 +1419,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::frame(w, id),
         Some((batalia_turret::REFERENCE_LEVEL, batalia_turret::HUD_FN)) => batalia_turret::hud_frame(w, id),
         Some((batalia_flame::REFERENCE_LEVEL, batalia_flame::DRAW_FN)) => batalia_flame::frame(w, id),
+        Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::frame(w, id),
         Some((umbris_beast_fx::REFERENCE_LEVEL, f @ (umbris_beast_fx::BEAM_FN | umbris_beast_fx::GROUND_FN))) => umbris_beast_fx::frame(w, f, id),
         _ => {}
     }

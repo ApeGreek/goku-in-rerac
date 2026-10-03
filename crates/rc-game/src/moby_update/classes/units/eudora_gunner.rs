@@ -531,8 +531,14 @@ fn states(w: &mut World, id: MobyId, k: &Tick) -> bool {
 }
 
 /// The gun on joint 1 (module doc).
-fn hold_gun(w: &mut World, id: MobyId) {
-    let Some(g) = gun(w, id) else {
+fn hold_gun(w: &mut World, id: MobyId) { hold_gun_at(w, id, p::GUN); }
+
+/// The gun (class 499, the moby + 1 at pvar `ofs`) on joint 1: created there the first time (level12's copy
+/// `0x2f1118`), then carried by the joint and hidden with its holder (level12 `0x2e8720` with `0x27b9c0`);
+/// Hoven's soldiers 294 hold the same gun.
+pub fn hold_gun_at(w: &mut World, id: MobyId, ofs: usize) {
+    let linked = usize::try_from(c::pi32(w, id, ofs) - 1).ok().filter(|&g| g < w.table.mobys.len());
+    let Some(g) = linked else {
         let at = w.joint_point(id, 1);
         let Some(g) = w.create_moby(GUN) else { return };
         let (dd, yaw, light, ambient) = { let m = w.m(id); (m.draw_dist, m.rotation[2], m.light, m.ambient) };
@@ -545,7 +551,7 @@ fn hold_gun(w: &mut World, id: MobyId) {
         m.ambient = ambient;
         m.position = at;
         w.build_matrix(g);
-        c::set_pi32(w, id, p::GUN, g as i32 + 1);
+        c::set_pi32(w, id, ofs, g as i32 + 1);
         return;
     };
     let mtx = w.joint_matrix(id, 1);

@@ -621,42 +621,10 @@ fn swing_state(w: &mut World, id: MobyId) {
     }
 }
 
-/// `0x2e3a90`: the death sparks (module doc).
+/// `0x2e3a90`: the death sparks (module doc; `fx::clump_sparks`).
 fn sparks(w: &mut World, id: MobyId) {
     let dying = state(w, id) == st::DEAD;
-    let kv = c::scale(c::pv4(w, id, pv::K), 0.5);
-    for _ in 0..10 {
-        let mut p = c::pos(w, id);
-        fx::jitter(w, 0.5, &mut p);
-        p[2] += 0.55;
-        let a = w.rng.rand_angle();
-        let mut s1 = w.rng.randf(1.0, 5.0);
-        let mut s2 = w.rng.randf(2.0, 5.0);
-        if dying {
-            s1 *= 0.55;
-            s2 *= 0.55;
-            p[2] -= 0.2;
-        }
-        let (cs, sn) = c::cs(a);
-        let mut v1 = [cs * s1 * DT + kv[0], sn * s1 * DT + kv[1], s2 * DT + 0.0 + kv[2], 0.0];
-        let mut v2 = v1;
-        let t30 = w.ticks(30);
-        v2[2] -= 20.0 * DT2 * t30 as f32;
-        for _ in 0..8 {
-            let r = w.rng.randf(0.5, 1.5);
-            v1[3] = r * 0.125;
-            v2[3] = r * 0.065;
-            fx::jitter(w, 0.2, &mut p);
-            fx::jitter(w, 0.5 * DT, &mut v2);
-            let f = w.rng.randf(0.0, 1.0);
-            let c1 = crate::particles::tween_color(f.to_bits(), 0x8000_eeee, 0x8000_ff90);
-            let f = w.rng.randf(0.0, 1.0);
-            let c2 = crate::particles::tween_color(f.to_bits(), 0x0000_ffee, 0x0000_ffee);
-            let (ta, tb) = (w.ticks(10), w.ticks(30));
-            let tc = w.svc.timing.scale(Pf::f(w.rng.randf(5.0, 25.0))).to_f32() as i32;
-            fx::part02(w, &crate::particles::type02::Spawn { pos: p, v1, v2, c1, c2, t: [ta, tb, tc], def: -1 });
-        }
-    }
+    fx::clump_sparks(w, id, pv::K, 10, dying);
 }
 
 /// Case 0xb's body (module doc).

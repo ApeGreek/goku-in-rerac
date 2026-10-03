@@ -10,6 +10,8 @@
 //!
 //! * **1404 the scene triggers** (`0x3093c8`, U411, two instances): once per global flag 0x5c + P[1], Ratchet in
 //!   cuboid P[0] starts scene P[2] and is put back where he stands when it ends; gone once the flag is set.
+//! * **1557 the scene thrusters** (`0x3094a0`, U445, one instance): updated always (+0x30 0xff); in a scene (game
+//!   mode 2) 1 or 7, the thrusters (`0x27bf50` = L01 `0x278450`) on actor 2 (scene 1) or 0 (scene 7).
 //!
 //! **System or not.** Per-class code from the NPC template (look-at layout rows, `story_npc::attach_child`: the
 //! level's child-on-joint helper `0x27b9c0`), the talk system, `story`.
@@ -58,6 +60,8 @@ pub const HYDRO_FN: u32 = 0x2e_b570;
 pub const HYDRO_CLASSES: [i16; 1] = [328];
 pub const SCENE_FN: u32 = 0x30_93c8;
 pub const SCENE_CLASSES: [i16; 1] = [1404];
+pub const THRUSTERS_FN: u32 = 0x30_94a0;
+pub const THRUSTERS_CLASSES: [i16; 1] = [1557];
 /// 0x13d3e4: the scene triggers' flags (global flag 0x5c + P[1]).
 const SCENE_FLAGS: usize = story::flag_index(0x13_d3e4);
 
@@ -242,4 +246,26 @@ pub fn scene_trigger_update(w: &mut World, id: MobyId) {
     let (gz, yaw) = (w.hero.ground_z.to_f32(), w.hero.yaw().to_f32());
     w.svc.interact.scene_end_place = Some(([h[0], h[1], gz], yaw));
     if let Ok(scene) = usize::try_from(p::i32(&w.m(id).pvars, 8)) { crate::cinematic::start_scene(w, scene, false); }
+}
+
+/// Level12 `0x3094a0`: the scene thrusters (module doc).
+pub fn thrusters_update(w: &mut World, id: MobyId) {
+    match w.m(id).state {
+        0 => {
+            let m = w.mm(id);
+            m.state = 1;
+            m.update_dist = 0xff;
+        }
+        1 => {
+            if w.svc.game_mode != 2 { return; }
+            let Some(scene) = w.svc.cinematic.scene.clone() else { return };
+            let k = match scene.id {
+                1 => 2,
+                7 => 0,
+                _ => return,
+            };
+            if let Some(a) = scene.actors.get(k) { crate::moby_update::classes::cutscene_fx::infobot_thrusters(w, a); }
+        }
+        _ => {}
+    }
 }

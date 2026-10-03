@@ -137,6 +137,9 @@ pub enum Hooks {
     /// 580: a swallow takes one off its nest's count; the delete slot respawns it
     /// ([`crate::moby_update::classes::units::aridia_sandshark`]).
     Aridia580,
+    /// 238's wrappers (level12 0x2e16b8, 0x2e17f8): slot +0x00 refuses a burrower in its states 9, 0xb, 0xd before the
+    /// pull and wakes its group (command 1) when it takes it; slot +0x0c leaves states 9 / 0xb as they are.
+    Hoven238,
 }
 
 /// What a table's slot +0x0c does after the let-go handler [`let_go`].
@@ -208,8 +211,13 @@ pub const ARIDIA_580: Wrappers = Wrappers { held: 9, release: 1, start_only: Non
 /// 0x161bf0: 4, 4, 4, 2, 2, 2, 2, 2, 2) ([`crate::moby_update::classes::units::blarg_crawler`]).
 pub const BLARG_827: Wrappers = Wrappers { held: 0x10, release: 8, start_only: None, bounce_sound: None, seqs: [4, 4, 4, 2, 2, 2, 2, 2, 2], record: 0x60, saved: false, pool: false, let_go: LetGo::Held, take_states: &[8, 9, 0xc, 0xd, 0x10], hooks: Hooks::None, release_seq: Some((0, 10)) };
 
+/// 238's table (level12 0x20d228: 0x2e16b8, 0x2e1758, 0x2e17a8, 0x2e17f8, 0x2e1848 → pvar +0x60, 0x2fbcc8
+/// `DeleteMoby`): the level-01 shape with held 8 (refused → 1) and [`Hooks::Hoven238`]; its sequence table gp−0x5318
+/// (level12 0x1618e8: 3, 3, 3, 10, 11, 11, 11, 11, 11) ([`crate::moby_update::classes::units::hoven_burrower`]).
+pub const HOVEN_238: Wrappers = Wrappers { held: 8, release: 1, start_only: None, bounce_sound: None, seqs: [3, 3, 3, 10, 11, 11, 11, 11, 11], record: 0x60, saved: false, pool: false, let_go: LetGo::Held, take_states: &[], hooks: Hooks::Hoven238, release_seq: None };
+
 /// The reaction tables reversed on other levels: (level, its slots +0x00 / +0x08 / +0x0c there, the table).
-pub const OTHER_REFS: [(u32, [u32; 3], Table); 7] = [
+pub const OTHER_REFS: [(u32, [u32; 3], Table); 8] = [
     (0, [0x2d56e0, 0x2d5780, 0x2d57d0], Table::Veldin749),
     (18, [0x2d6108, 0x2d61e0, 0x2d6230], Table::RollingMine568),
     (9, [0x2e2680, 0x2e2720, 0x2e2770], Table::Held7),
@@ -217,6 +225,7 @@ pub const OTHER_REFS: [(u32, [u32; 3], Table); 7] = [
     (11, [0x316160, 0x316270, 0x3162d0], Table::Pokitaru1246),
     (2, [0x2d61c0, 0x2d6290, 0x2d62e0], Table::Aridia580),
     (6, [0x2ea5e0, 0x2ea738, 0x2ea7c8], Table::Blarg827),
+    (12, [0x2e16b8, 0x2e17a8, 0x2e17f8], Table::Hoven238),
 ];
 
 /// The classes' sequence tables as their inits store them in the suck record's +0x70 (the game: a pointer to the
@@ -254,6 +263,8 @@ pub enum Table {
     Aridia580,
     /// 827 (levels 06, 10: [`BLARG_827`]).
     Blarg827,
+    /// 238 (level 12: [`HOVEN_238`]).
+    Hoven238,
 }
 
 /// The Suck Cannon as its last update left it (module doc).
@@ -375,6 +386,7 @@ pub fn wrappers(w: &World, id: MobyId) -> Option<Wrappers> {
         Table::Pokitaru1246 => POKITARU_1246,
         Table::Aridia580 => ARIDIA_580,
         Table::Blarg827 => BLARG_827,
+        Table::Hoven238 => HOVEN_238,
     })
 }
 
@@ -456,6 +468,7 @@ fn class_scale(w: &World, id: MobyId) -> f32 { w.class_scale(w.m(id).o_class).to
 /// Slot +0x00 `(moby, mouth, cannon)`: the suck start (0 no, 1 coming, 2 taken, 3 held).
 pub fn slot_start(w: &mut World, id: MobyId, mouth: V) -> i32 {
     let Some(x) = wrappers(w, id) else { return 0 };
+    if x.hooks == Hooks::Hoven238 && [9, 0xb, 0xd].contains(&w.m(id).state) { return 0; }
     let r = approach(w, id, mouth);
     if r == 0 {
         refuse(w, id, &x);
@@ -485,6 +498,10 @@ pub fn slot_start(w: &mut World, id: MobyId, mouth: V) -> i32 {
     if let Some((only, not_in)) = x.start_only {
         if w.m(id).o_class != only || w.m(id).state == not_in { return 0; }
     }
+    if x.hooks == Hooks::Hoven238 {
+        let g = w.m(id).group;
+        if g != -1 { crate::moby_update::scheduler::group_cmd(w, g, 1); }
+    }
     w.mm(id).state = x.held;
     r
 }
@@ -513,6 +530,7 @@ pub fn slot_fire(w: &mut World, id: MobyId, height: f32, vel: V, target: Option<
 pub fn slot_let_go(w: &mut World, id: MobyId) {
     let Some(x) = wrappers(w, id) else { return };
     let_go(w, id);
+    if x.hooks == Hooks::Hoven238 && [9, 0xb].contains(&w.m(id).state) { return; }
     match x.let_go {
         LetGo::Held => w.mm(id).state = x.held,
         LetGo::Keep => {}

@@ -48,6 +48,25 @@ pub fn part_unported(w: &mut World, ty: u8) -> bool {
     ok
 }
 
+/// `PartType28Spawn(spread, pos, 0)` 0x282ef0 (the mote ring, no frame: `crate::particles::type28`).
+pub fn part28(w: &mut World, spread: f32, p: V) -> bool {
+    let Some(sys) = w.particles.as_deref_mut() else { return part_unported(w, 28) };
+    *w.svc.fx.part_spawns.entry(28).or_default() += 1;
+    let ok = crate::particles::type28::spawn(sys, w.rng, spread, p, None).is_some();
+    if !ok { w.svc.fx.part_failed += 1; }
+    ok
+}
+
+/// `PartType23Spawn(jitter, grow_lo, grow_hi, size, pos, spin, vel, rgba)` 0x282060 as is (`crate::particles::type23`).
+#[allow(clippy::too_many_arguments)]
+pub fn part23(w: &mut World, [jitter, lo, hi, size]: [f32; 4], p: V, spin: i32, vel: V, rgba: u32) -> bool {
+    let Some(sys) = w.particles.as_deref_mut() else { return part_unported(w, 23) };
+    *w.svc.fx.part_spawns.entry(23).or_default() += 1;
+    let ok = crate::particles::type23::spawn(sys, w.rng, jitter, lo, hi, size, p, spin, vel, rgba).is_some();
+    if !ok { w.svc.fx.part_failed += 1; }
+    ok
+}
+
 /// One type-23 puff of [`jet_puffs`]: `PartType23Spawn(jitter, grow_lo, grow_hi, size, pos, spin, vel, rgba)` 0x282060
 /// with the callers' patch: timer +0x0a = `life`, byte 9 = 4 + 0x40, the rotation byte `randi(255)` when asked (drawn
 /// after the spawn, only with a record), phase 2 (+0x24) fading from +0x2a = `a0` over +0x2b = the timer's low byte.
@@ -1100,6 +1119,49 @@ fn free_slot(w: &mut World, id: MobyId) {
     if slot != -1 {
         w.svc.point_lights.free(slot as usize);
         pvar::set_i32(&mut w.mm(id).pvars, lp::SLOT, -1);
+    }
+}
+
+/// The melee creatures' death sparks (level10 `0x2e3a90` Orxon's brawler 1202, level12 `0x2e3098` Hoven's burrower
+/// 238; the same code, their gp words equal): `clumps` clumps from the position jittered 0.5 and 0.55 up (`dying`:
+/// speeds × 0.55, 0.2 lower), `randf(1, 5)` out and `randf(2, 5)` up per second plus half the knockback velocity (the
+/// record at pvar `k`), the second velocity falling 20·dt² over `ticks(30)`; 8 type-2 blobs each (r = `randf(0.5,
+/// 1.5)`, sizes 0.125·r / 0.065·r, jitter 0.2 / 0.5·dt, colours 0x8000eeee–0x8000ff90 / 0xffee, `ticks(10)`,
+/// `ticks(30)`, `scale(randf(5, 25))`).
+pub fn clump_sparks(w: &mut World, id: MobyId, k: usize, clumps: i32, dying: bool) {
+    let (dt, dt2) = (super::DT, super::DT2);
+    let kv = scale(super::pv4(w, id, k), 0.5);
+    for _ in 0..clumps {
+        let mut p = super::pos(w, id);
+        jitter(w, 0.5, &mut p);
+        p[2] += 0.55;
+        let a = w.rng.rand_angle();
+        let mut s1 = w.rng.randf(1.0, 5.0);
+        let mut s2 = w.rng.randf(2.0, 5.0);
+        if dying {
+            s1 *= 0.55;
+            s2 *= 0.55;
+            p[2] -= 0.2;
+        }
+        let (c, sn) = cs(a);
+        let mut v1 = [c * s1 * dt + kv[0], sn * s1 * dt + kv[1], s2 * dt + 0.0 + kv[2], 0.0];
+        let mut v2 = v1;
+        let t30 = w.ticks(30);
+        v2[2] -= 20.0 * dt2 * t30 as f32;
+        for _ in 0..8 {
+            let r = w.rng.randf(0.5, 1.5);
+            v1[3] = r * 0.125;
+            v2[3] = r * 0.065;
+            jitter(w, 0.2, &mut p);
+            jitter(w, 0.5 * dt, &mut v2);
+            let f = w.rng.randf(0.0, 1.0);
+            let c1 = crate::particles::tween_color(f.to_bits(), 0x8000_eeee, 0x8000_ff90);
+            let f = w.rng.randf(0.0, 1.0);
+            let c2 = crate::particles::tween_color(f.to_bits(), 0x0000_ffee, 0x0000_ffee);
+            let (ta, tb) = (w.ticks(10), w.ticks(30));
+            let tc = w.svc.timing.scale(Pf::f(w.rng.randf(5.0, 25.0))).to_f32() as i32;
+            part02(w, &crate::particles::type02::Spawn { pos: p, v1, v2, c1, c2, t: [ta, tb, tc], def: -1 });
+        }
     }
 }
 
