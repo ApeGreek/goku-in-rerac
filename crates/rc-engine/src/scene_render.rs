@@ -954,7 +954,9 @@ fn fade_pass(mut commands: Commands, active: Res<ActiveScene>, hold: Res<FadeHol
     let mut want = ((active.running || hold.frames > 0 || gameplay > 0.0) && alpha > 0).then(|| SceneFade { rgba: UVec4::new(0, 0, 0, alpha) });
     // The white quad 0x15f400 (mode 6, crate::travel_render) when no black one is drawn [L: the game draws both, black
     // first; they never overlap in the take-off].
-    let white = (active.white.clamp(0.0, 1.0) * 128.0) as u32;
+    // In gameplay also the classes' white (`rc_game::cinematic::set_white`, Blarg's escape 1108).
+    let white_g = if active.running { 0.0 } else { play.as_ref().map_or(0.0, |p| p.svc.cinematic.white) };
+    let white = (active.white.max(white_g).clamp(0.0, 1.0) * 128.0) as u32;
     if want.is_none() && white > 0 { want = Some(SceneFade { rgba: UVec4::new(255, 255, 255, white) }); }
     for (e, have) in &cams {
         match (want, have) {

@@ -111,3 +111,19 @@ pub fn joint_hit(w: &mut World, r: f32, push: f32, id: MobyId, list: usize, n: i
     let p = w.joint_point(id, list);
     sphere_hit(w, r, n as f32, push, id, p, n as u32, b18, b19, sphere_flags)
 }
+
+/// `0x26ebe8(a, b, a_prev, b_prev, moby, tmpl, n)`: `n` lines between last tick's segment and this tick's (at
+/// `k/n` of the way, k = 1..n), each `CollLine_Fix(…, 0, moby, tmpl)`; the first that hits ends it. The wrench's
+/// swing (`crate::hero::melee`) and the swinging creatures (Blarg's 1068).
+#[allow(clippy::too_many_arguments)]
+pub fn swept_lines(w: &mut World, a: V, b: V, a_prev: V, b_prev: V, id: MobyId, tmpl: &crate::moby_update::services::HitTemplate, n: i32) {
+    use crate::moby_update::services::pv;
+    let k = 1.0 / n as f32;
+    let mut t = k;
+    for _ in 0..n {
+        let p = std::array::from_fn(|i| (a[i] - a_prev[i]) * t + a_prev[i]);
+        let q = std::array::from_fn(|i| (b[i] - b_prev[i]) * t + b_prev[i]);
+        if crate::moby_update::services::line_hit_in(w.table, w.svc, w.classes, w.coll, pv(p), pv(q), 0, Some(id), tmpl).is_some() { break; }
+        t += k;
+    }
+}

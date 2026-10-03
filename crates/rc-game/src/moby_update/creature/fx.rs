@@ -534,14 +534,32 @@ pub fn goo_burst(w: &mut World, id: MobyId, dir: V, size: f32) { goo_burst_k(w, 
 /// [`goo_burst`] with the clumps' share of `dir` drawn as `randf(0, k)` (the amoeboids 0; Rilgar's boost pickups 133 1,
 /// their copy `0x2db238` with size 0.5).
 pub fn goo_burst_k(w: &mut World, id: MobyId, dir: V, size: f32, k: f32) {
+    goo_burst_with(w, id, dir, &Goo { spread: 0.5 * size, lift: 1.0, blob_spread: 0.2, k })
+}
+
+/// The numbers that differ between the goo bursts' copies (level01 `0x2ef770`: [`goo_burst_k`]; level06 `0x2ea198`,
+/// Blarg's 827: spread 0.25, lift 0.25, blob spread 0.125, k 0 from its words gp−0x4fe0..−0x4f9c).
+#[derive(Clone, Copy, Debug)]
+pub struct Goo {
+    /// The clump's jitter about the feet, and its lift.
+    pub spread: f32,
+    pub lift: f32,
+    /// Each blob's jitter of the clump's point.
+    pub blob_spread: f32,
+    /// The clumps' share of `dir`: `randf(0, k)`.
+    pub k: f32,
+}
+
+/// [`goo_burst`] with a copy's numbers ([`Goo`]).
+pub fn goo_burst_with(w: &mut World, id: MobyId, dir: V, g: &Goo) {
     for _ in 0..20 {
         let mut p = w.m(id).position;
-        jitter(w, 0.5 * size, &mut p);
-        p[2] += 1.0;
+        jitter(w, g.spread, &mut p);
+        p[2] += g.lift;
         let a = w.rng.rand_angle();
         let s1 = w.rng.randf(1.0, 8.0) * super::DT;
         let s2 = w.rng.randf(2.0, 6.0) * super::DT;
-        let s3 = w.rng.randf(0.0, k);
+        let s3 = w.rng.randf(0.0, g.k);
         let mut v1 = scale(dir, s3 * super::DT);
         let (cs_, sn) = cs(a);
         v1[0] += cs_ * s1;
@@ -554,7 +572,7 @@ pub fn goo_burst_k(w: &mut World, id: MobyId, dir: V, size: f32, k: f32) {
             let r = w.rng.randf(0.5, 1.5);
             v1[3] = r * 0.125;
             v2[3] = r * 0.065;
-            jitter(w, 0.2, &mut p);
+            jitter(w, g.blob_spread, &mut p);
             jitter(w, 0.5 * super::DT, &mut v2);
             let f = w.rng.randf(0.0, 1.0);
             let c1 = crate::particles::tween_color(f.to_bits(), 0x8000_eeee, 0x8000_ff90);

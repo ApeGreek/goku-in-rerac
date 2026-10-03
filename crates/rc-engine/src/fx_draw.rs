@@ -348,6 +348,8 @@ pub struct LevelFx {
     pub ship_glass: Option<ShipGlassTables>,
     /// Level 18's pool meshes (`rc_game` `units::veldin_pool`; handed to the moby loop at the level load).
     pub veldin_pools: Option<std::sync::Arc<rc_game::moby_update::classes::units::veldin_pool::Meshes>>,
+    /// Level 6's glass meshes (`rc_game` `units::blarg_glass`).
+    pub blarg_glass: Option<std::sync::Arc<rc_game::moby_update::classes::units::blarg_glass::Meshes>>,
 }
 
 impl LevelFx {
@@ -362,7 +364,9 @@ impl LevelFx {
         });
         let veldin_pools = rc_game::moby_update::classes::units::veldin_pool::Meshes::parse(ov, level);
         if level == rc_game::moby_update::classes::units::veldin_pool::REFERENCE_LEVEL && veldin_pools.is_none() { eprintln!("fx: the pool meshes of level 18 did not read"); }
-        LevelFx { nanotech, ship_glass, veldin_pools }
+        let blarg_glass = rc_game::moby_update::classes::units::blarg_glass::Meshes::parse(ov, level);
+        if level == rc_game::moby_update::classes::units::blarg_glass::REFERENCE_LEVEL && blarg_glass.is_none() { eprintln!("fx: the glass meshes of level 6 did not read"); }
+        LevelFx { nanotech, ship_glass, veldin_pools, blarg_glass }
     }
 }
 

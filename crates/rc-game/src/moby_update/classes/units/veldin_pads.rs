@@ -433,13 +433,20 @@ pub const COUNTDOWN_RGBA: [u32; 2] = [0x80c0_c0c0, 0x8040_40ff];
 pub fn countdown_draw(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < button::SIZE { return; }
     let n = c::pi32(w, id, button::COUNT);
+    push_countdown(w, n, COUNTDOWN_CENTRE, COUNTDOWN_RGBA);
+}
+
+/// The countdown text of `n` ticks at `centre` (its frame −5 / +20 by −50 / +52 about it, alpha 0x60), colours
+/// pulsing between `rgba`: the code of Veldin's `0x2d8098` and Blarg's escape `0x3021d8` (their own centres).
+pub fn push_countdown(w: &mut World, n: i32, centre: (i32, i32), rgba2: [u32; 2]) {
     let k = (w.counter % 60) as f32;
     let s = ((k / 60.0) * f32::from_bits(0x40c9_0fd0)).sin() * 3.0 + 0.5;
     let t = s.clamp(0.0, 1.0);
-    let rgba = crate::hud::tween_color(t, COUNTDOWN_RGBA[0], COUNTDOWN_RGBA[1]);
+    let rgba = crate::hud::tween_color(t, rgba2[0], rgba2[1]);
     let (t3600, t600, t60, t6) = (w.ticks(0xe10), w.ticks(600), w.ticks(0x3c), w.ticks(6));
     let d = |x: i32| b'0'.wrapping_add(x as u8);
     let r = w.rng.randi(10);
     let text = [b'0', d(n / t3600), b':', d((n % t3600) / t600), d((n % t600) / t60), b':', d((n % t60) / t6), d(r)];
-    w.svc.draw_callbacks.texts.push(CountdownDraw { frame: COUNTDOWN_FRAME, x: COUNTDOWN_CENTRE.0, y: COUNTDOWN_CENTRE.1, rgba, text });
+    let frame = [centre.1 - 5, centre.1 + 20, centre.0 - 50, centre.0 + 52, 0x60];
+    w.svc.draw_callbacks.texts.push(CountdownDraw { frame, x: centre.0, y: centre.1, rgba, text });
 }

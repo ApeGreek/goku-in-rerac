@@ -249,6 +249,18 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U233 | 1051 Blarg's mini-boss (06): the drop-in cutaway, the chase and slam, the crawler and trooper phases, the boss meter | level06 0x2f9a28 | [`blarg_boss`] |
+//! | U238 | 1068 Blarg's fire-wave bots (06, 10): the rolling fire wall and its strip, the swing, the walk-out, knockback and death | level06 0x2fdbd0, 0x2ff680 | [`blarg_wave_bot`] |
+//! | U232 | 1048 Blarg's troopers (06): group wakes, the surround, the jab, the leap, the guards, knockback and death | level06 0x2f7d78 | [`blarg_trooper`] |
+//! | U236 | 1062 Blarg's windows, 1083 its breakable window, 1085..1088 the shards (06): overlay glass meshes, the break cutaway | level06 0x2fd088, 0x2ffcb0, 0x300b90 | [`blarg_glass`] |
+//! | U227 | 1028 Blarg's bridge (06): Clank's cutaway, the deck sliding out, the rails flipping up | level06 0x2f55a0 | [`blarg_bridge`] |
+//! | U242 | 1108 Blarg's escape (06): the held groups, the tube's ride, the camera run, the countdown, the blasts, the white-out | level06 0x301b90, 0x3021d8 | [`blarg_escape`] |
+//! | U244 | 1118 Blarg's launch tube (06): the doors, the prompt, the ride up with the script camera and sparks | level06 0x304098 | [`blarg_launch_tube`] |
+//! | U246 | 1302 Clank's gadgetbot pads (06, 10): the hologram arrow, the count in digits, the links | level06 0x307d30, 0x307578 | [`blarg_bot_pad`] |
+//! | U228 | 1035 Blarg's laser gates (06): nine shared crackling beams, the hurt lines, the touch hint, the generators | level06 0x2f6470, 0x2f6dd0 | [`blarg_laser_gate`] |
+//! | U245 | 1123 Blarg's energy barriers (06): four crackling beams, the hurt lines, the switch, the spark burst | level06 0x3049f8, 0x305170 | [`blarg_barrier`] |
+//! | U221 | 55 Blarg's landing bay doors, 1551 its scene thrusters (06) | level06 0x2b4770, 0x309348 | [`blarg_small`] |
+//! | U223 | 827 Blarg's crawlers (06, 10): surface crawling, pods, the entry leap, the bite, goo, lives, the Suck Cannon | level06 0x2e8678 | [`blarg_crawler`] |
 //! | U405 | 1267 Hoven's turret mini-game (Gemlik's unlock, planet 13), its HUD 0x304218 and red screen 0x304d98 (12) | level12 0x303540 | [`hoven_turret`] |
 //! | U424 | 69 Gemlik's ship (the base battle: the flight, the guns, the missiles, the vehicle record), its HUD 0x2b97f8 (the lock, the targets left, the gauge) (13) | level13 0x2bb068 | [`gemlik_ship`], [`gemlik_ship_hud`] |
 //! | U434 | 388 Qwark's ship (the Gemlik base battle's boss: paths, phases, tractor beam, shield, taunts), its parts 389..401, shield 352, missile 82 and mine 83 (13) | level13 0x2eb098 | [`qwark_ship`], [`qwark_ship_parts`] |
@@ -299,6 +311,18 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod blarg_boss;
+pub mod blarg_wave_bot;
+pub mod blarg_trooper;
+pub mod blarg_glass;
+pub mod blarg_bridge;
+pub mod blarg_escape;
+pub mod blarg_launch_tube;
+pub mod blarg_bot_pad;
+pub mod blarg_laser_gate;
+pub mod blarg_barrier;
+pub mod blarg_small;
+pub mod blarg_crawler;
 pub mod marker;
 pub mod smoke_emitter;
 pub mod hydro_pad;
@@ -892,7 +916,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U200 918", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::GIRL_FN, classes: &rilgar_story::GIRL_CLASSES, update: rilgar_story::race_girl_update, joints: &rilgar_story::GIRL_CLASSES },
     UnitPort { unit: "U201 919", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::BOUNCER_FN, classes: &rilgar_story::BOUNCER_CLASSES, update: rilgar_story::bouncer_update, joints: &rilgar_story::BOUNCER_CLASSES },
     UnitPort { unit: "U203 925", level: rilgar_story::REFERENCE_LEVEL, func: rilgar_story::SALESMAN_FN, classes: &rilgar_story::SALESMAN_CLASSES, update: rilgar_story::salesman_update, joints: &rilgar_story::SALESMAN_CLASSES },
-    UnitPort { unit: "U233 1105", level: blarg_story::REFERENCE_LEVEL, func: blarg_story::SCIENTIST_FN, classes: &blarg_story::SCIENTIST_CLASSES, update: blarg_story::scientist_update, joints: &[] },
+    UnitPort { unit: "U233 1105", level: blarg_story::REFERENCE_LEVEL, func: blarg_story::SCIENTIST_FN, classes: &blarg_story::SCIENTIST_CLASSES, update: blarg_story::scientist_update, joints: &blarg_story::SCIENTIST_CLASSES },
     UnitPort { unit: "U297 1130", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::COMMANDO_FN, classes: &batalia_story::COMMANDO_CLASSES, update: batalia_story::commando_update, joints: &[] },
     UnitPort { unit: "U298 1144", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::DESERTER_FN, classes: &batalia_story::DESERTER_CLASSES, update: batalia_story::deserter_update, joints: &[] },
     UnitPort { unit: "U299 1283", level: batalia_story::REFERENCE_LEVEL, func: batalia_story::WORKER_FN, classes: &batalia_story::WORKER_CLASSES, update: batalia_story::water_worker_update, joints: &[] },
@@ -922,6 +946,33 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U233 1051", level: blarg_boss::REFERENCE_LEVEL, func: blarg_boss::UPDATE_FN, classes: &blarg_boss::CLASSES, update: blarg_boss::update, joints: &blarg_boss::CLASSES },
+    UnitPort { unit: "U238 1068", level: blarg_wave_bot::REFERENCE_LEVEL, func: blarg_wave_bot::UPDATE_FN, classes: &blarg_wave_bot::CLASSES, update: blarg_wave_bot::update, joints: &blarg_wave_bot::CLASSES },
+    UnitPort { unit: "U238 1068 wave", level: blarg_wave_bot::REFERENCE_LEVEL, func: blarg_wave_bot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U232 1048", level: blarg_trooper::REFERENCE_LEVEL, func: blarg_trooper::UPDATE_FN, classes: &blarg_trooper::CLASSES, update: blarg_trooper::update, joints: &blarg_trooper::CLASSES },
+    UnitPort { unit: "U236 1062", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::WINDOWS_FN, classes: &blarg_glass::WINDOWS_CLASSES, update: blarg_glass::windows_update, joints: &[] },
+    UnitPort { unit: "U239 1083", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::WINDOW_FN, classes: &blarg_glass::WINDOW_CLASSES, update: blarg_glass::window_update, joints: &[] },
+    UnitPort { unit: "U239 1085", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::SHARD_FN, classes: &blarg_glass::SHARD_CLASSES, update: blarg_glass::shard_update, joints: &[] },
+    UnitPort { unit: "U236 glass 0", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[0], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U236 glass 1", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[1], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U236 glass 2", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[2], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U236 glass 3", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[3], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U236 glass 4", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[4], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U236 glass 5", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[5], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U236 glass 6", level: blarg_glass::REFERENCE_LEVEL, func: blarg_glass::DRAW_FNS[6], classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U227 1028", level: blarg_bridge::REFERENCE_LEVEL, func: blarg_bridge::UPDATE_FN, classes: &blarg_bridge::CLASSES, update: blarg_bridge::update, joints: &[] },
+    UnitPort { unit: "U242 1108", level: blarg_escape::REFERENCE_LEVEL, func: blarg_escape::UPDATE_FN, classes: &blarg_escape::CLASSES, update: blarg_escape::update, joints: &[] },
+    UnitPort { unit: "U242 1108 countdown", level: blarg_escape::REFERENCE_LEVEL, func: blarg_escape::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U244 1118", level: blarg_launch_tube::REFERENCE_LEVEL, func: blarg_launch_tube::UPDATE_FN, classes: &blarg_launch_tube::CLASSES, update: blarg_launch_tube::update, joints: &[] },
+    UnitPort { unit: "U246 1302", level: blarg_bot_pad::REFERENCE_LEVEL, func: blarg_bot_pad::UPDATE_FN, classes: &blarg_bot_pad::CLASSES, update: blarg_bot_pad::update, joints: &[] },
+    UnitPort { unit: "U246 1302 hologram", level: blarg_bot_pad::REFERENCE_LEVEL, func: blarg_bot_pad::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U228 1035", level: blarg_laser_gate::REFERENCE_LEVEL, func: blarg_laser_gate::UPDATE_FN, classes: &blarg_laser_gate::CLASSES, update: blarg_laser_gate::update, joints: &[] },
+    UnitPort { unit: "U228 1035 beams", level: blarg_laser_gate::REFERENCE_LEVEL, func: blarg_laser_gate::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U245 1123", level: blarg_barrier::REFERENCE_LEVEL, func: blarg_barrier::UPDATE_FN, classes: &blarg_barrier::CLASSES, update: blarg_barrier::update, joints: &[] },
+    UnitPort { unit: "U245 1123 beams", level: blarg_barrier::REFERENCE_LEVEL, func: blarg_barrier::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U221 55", level: blarg_small::REFERENCE_LEVEL, func: blarg_small::DOOR_FN, classes: &blarg_small::DOOR_CLASSES, update: blarg_small::door_update, joints: &[] },
+    UnitPort { unit: "U249 1551", level: blarg_small::REFERENCE_LEVEL, func: blarg_small::SCENE_FX_FN, classes: &blarg_small::SCENE_FX_CLASSES, update: blarg_small::scene_fx_update, joints: &[] },
+    UnitPort { unit: "U223 827", level: blarg_crawler::REFERENCE_LEVEL, func: blarg_crawler::UPDATE_FN, classes: &blarg_crawler::CLASSES, update: blarg_crawler::update, joints: &blarg_crawler::CLASSES },
     UnitPort { unit: "U424 69", level: gemlik_ship::REFERENCE_LEVEL, func: gemlik_ship::UPDATE_FN, classes: &gemlik_ship::CLASSES, update: gemlik_ship::update, joints: &gemlik_ship::CLASSES },
     UnitPort { unit: "U424 69 hud", level: gemlik_ship::REFERENCE_LEVEL, func: gemlik_ship_hud::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U434 388", level: qwark_ship::REFERENCE_LEVEL, func: qwark_ship::UPDATE_FN, classes: &qwark_ship::CLASSES, update: qwark_ship::update, joints: &qwark_ship::CLASSES },
@@ -977,6 +1028,13 @@ pub struct Globals {
     pub veldin_finale: veldin_finale_fx::Fx,
     /// The pool meshes of level 18 (`veldin_pool`; read from the overlay by the engine at the level load).
     pub veldin_pools: Option<std::sync::Arc<veldin_pool::Meshes>>,
+    /// Blarg's laser gates' shared beams (level06 0x1db0f0 / 0x1db870 / 0x161e40: `blarg_laser_gate`).
+    pub blarg_gates: blarg_barrier::Beams,
+    /// Level 6's glass meshes (`blarg_glass`; read from the overlay by the engine at the level load).
+    pub blarg_glass: Option<std::sync::Arc<blarg_glass::Meshes>>,
+    /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
+    /// during its cutaways): the points, to put back.
+    pub parked_paths: std::collections::HashMap<usize, Vec<[u32; 4]>>,
 }
 
 impl Globals {
@@ -1096,6 +1154,9 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((veldin_hopper::REFERENCE_LEVEL, veldin_hopper::BEAM_FN)) => veldin_hopper::beam_quads(table, svc, id),
         Some((aridia_lift::REFERENCE_LEVEL, aridia_lift::DRAW_FN)) => aridia_lift::fx_quads(table, svc, id),
         Some((qwark_ship::REFERENCE_LEVEL, qwark_ship::BEAM_FN)) => qwark_ship::beam_quads(table, svc, id),
+        Some((blarg_barrier::REFERENCE_LEVEL, blarg_barrier::DRAW_FN)) => blarg_barrier::fx_quads(table, svc, id),
+        Some((blarg_laser_gate::REFERENCE_LEVEL, blarg_laser_gate::DRAW_FN)) => blarg_laser_gate::fx_quads(table, svc, id),
+        Some((blarg_wave_bot::REFERENCE_LEVEL, blarg_wave_bot::DRAW_FN)) => blarg_wave_bot::fx_quads(table, svc, id),
         Some((ship_fighter::REFERENCE_LEVEL, ship_fighter::TRAIL_FN)) | Some((ship_fighter::FLEET_LEVEL, ship_fighter::FLEET_TRAIL_FN)) => ship_fighter::trail_quads(table, svc, id),
         _ => None,
     }
@@ -1107,6 +1168,8 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((veldin_beamer::REFERENCE_LEVEL, veldin_beamer::BEAM_FN)) => veldin_beamer::fx_quad_groups(svc),
         Some((energy_fan::REFERENCE_LEVEL, energy_fan::DRAW_FN)) => energy_fan::fx_quad_groups(table, svc, id),
+        Some((blarg_glass::REFERENCE_LEVEL, f)) if blarg_glass::DRAW_FNS.contains(&f) => blarg_glass::fx_quad_groups(table, svc, f),
+        Some((blarg_bot_pad::REFERENCE_LEVEL, blarg_bot_pad::DRAW_FN)) => blarg_bot_pad::fx_quad_groups(table, svc, id),
         Some((1, crate::shadows::BLOB_FN)) => {
             let quads = svc.blobs.1.iter().filter(|b| b.0 == id).map(|(_, b)| {
                 let (corners, st) = crate::shadows::blob_quad(b);
@@ -1143,6 +1206,8 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
 pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((veldin_pads::REFERENCE_LEVEL, veldin_pads::COUNTDOWN_FN)) => veldin_pads::countdown_draw(w, id),
+        Some((blarg_escape::REFERENCE_LEVEL, blarg_escape::DRAW_FN)) => blarg_escape::frame(w, id),
+        Some((blarg_wave_bot::REFERENCE_LEVEL, blarg_wave_bot::DRAW_FN)) => blarg_wave_bot::frame(w, id),
         Some((hoven_turret::REFERENCE_LEVEL, hoven_turret::HUD_FN)) => hoven_turret::hud_frame(w, id),
         Some((gemlik_ship::REFERENCE_LEVEL, gemlik_ship_hud::HUD_FN)) => gemlik_ship_hud::hud_frame(w, id),
         Some((pokitaru_jet::REFERENCE_LEVEL, pokitaru_jet_hud::HUD_FN)) => pokitaru_jet_hud::hud_frame(w, id),

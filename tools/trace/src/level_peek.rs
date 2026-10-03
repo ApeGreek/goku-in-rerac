@@ -109,7 +109,12 @@ pub fn splines(level: u32, idx: &[usize]) -> Result<()> {
 pub fn vtbl(extracted: &Path, level: u32, classes: &[i32]) -> Result<()> {
     let ov = overlay(extracted, level)?;
     for e in ov.vtbl() {
-        if classes.is_empty() || classes.contains(&{ e.o_class }) { println!("class {} update {:#x}", e.o_class, e.update); }
+        if !(classes.is_empty() || classes.contains(&{ e.o_class })) { continue; }
+        println!("class {} update {:#x} react {:#x}", e.o_class, e.update, e.w8);
+        if !classes.is_empty() && e.w8 != 0 {
+            let slots: Vec<String> = (0..6).map(|k| ov.u32(e.w8 + 4 * k).map_or("?".into(), |v| format!("{v:#x}"))).collect();
+            println!("  slots {}", slots.join(" "));
+        }
     }
     Ok(())
 }

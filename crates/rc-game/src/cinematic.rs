@@ -158,6 +158,9 @@ pub struct Cinematic {
     /// `trunc(min(f, 1)·128)` black when > 0, `DrawWorld` 0x21a1b8). The scene player keeps its own copy in mode 2 and
     /// ends it at 0, so a scene start clears this one ([`start_scene`]) [L].
     pub fade: f32,
+    /// 0x15f400 as the gameplay classes write it (the white quad over the world, 0..1, drawn like [`Cinematic::fade`];
+    /// Blarg's escape 1108 whites out the exploding station).
+    pub white: f32,
 }
 
 /// `ShowBanner(msg, ticks)` 0x2789e0 as the HUD takes it (`HudState::show_banner_msg`).
@@ -311,6 +314,9 @@ pub fn start_movie(w: &mut World, movie: i32) {
 
 /// `0x15f3fc = f` from a class update in gameplay ([`Cinematic::fade`]).
 pub fn set_fade(w: &mut World, f: f32) { w.svc.cinematic.fade = f; }
+
+/// `0x15f400 = f` from a class update in gameplay ([`Cinematic::white`]).
+pub fn set_white(w: &mut World, f: f32) { w.svc.cinematic.white = f; }
 
 /// `FadeToBlack(n)` from a class (see [`EngineRequest::FadeToBlack`]).
 pub fn fade_to_black(w: &mut World, frames: i32) { w.svc.cinematic.requests.push(EngineRequest::FadeToBlack { frames }); }
