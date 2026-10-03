@@ -269,10 +269,14 @@
 //! | U499 | 643 Oltanis's floating mines, 1352 its risers (14) | level14 0x2ec810, 0x305408 | [`oltanis_small`] |
 //! | U494 | 250 Oltanis's hatches, 309 its leaning floats (14) | level14 0x2d96e0, 0x2de1f8 | [`oltanis_small`] |
 //! | U488 | 8 Oltanis's searchlight sentries (14): sweep a beam along a path, raise the pop-up turrets on finding Ratchet | level14 0x2ac618, 0x2aee28, 0x2ae260 | [`oltanis_sentry`] |
-//! | U551, U560 | 1394 Quartu's bomb droppers and their bombs 1257, 1560 its scene thrusters (15) | level15 0x2eabd8, 0x2e7f68, 0x2edb20 | [`quartu_small`] |
+//! | U551, U560, U536, U556, U530 | 1394 Quartu's bomb droppers and their bombs 1257, 1560 its scene thrusters, 92 its gates, 1430 its dispenser and its piece 1428, 67 its sliding doors (15) | level15 0x2eabd8, 0x2e7f68, 0x2edb20, 0x2a36d0, 0x2ec030, 0x2ebd78, 0x29aff0 | [`quartu_small`] |
 //! | U552 | 1408, 1409, 1565, 1567 Quartu's and 1405, 1406, 1407 the Fleet's rippling water meshes (15, 17) | level15 0x2eb0a0.., level17 0x2f08e0.. | [`wave_mesh`] |
 //! | U535 | 78 the energy barriers (15, 17): a shimmering wall with drifting motes, shut down by a link or the mission | level15 0x2a2bf0, 0x2a3138 | [`barrier_field`] |
 //! | U546 | 655 the electrified water (15, 17): shocks Ratchet in it, sparks along its lines, switched off for a countdown | level15 0x2d6810, 0x2d8710, 0x2d77c0 | [`water_shock`] |
+//! | U528 | 44 Quartu's guards (15): watch, patrol, raise the alarm, shoot; fooled by the Hologuise; their shot 934 | level15 0x2979d8, 0x2e4380 | [`quartu_guard`] |
+//! | U543 | 233 Quartu's flame drones (15): hover round Ratchet with a rider, spray flame streams; Clank's come back | level15 0x2c5630 | [`quartu_hover`] |
+//! | U545 | 491 Quartu's jet robots (15, Giant Clank's): fly in, shoot volleys, lunge and swipe, jump between paths | level15 0x2cf3a8 | [`quartu_jet_bot`] |
+//! | U539, U540 | 148, 255 Quartu's buildings and 154 its walls (15): knocked down by Giant Clank into burning bits and smoke | level15 0x2a7880, 0x2aa280 | [`quartu_building`] |
 //! | U480 | 1403 Gemlik's tracker, 1558 its scene thrusters (13) | level13 0x30bb70, 0x30bdf0 | [`gemlik_small`] |
 //! | U477 | 1270 Gemlik's tipping lift (13) | level13 0x30a6d8 | [`gemlik_lift`] |
 //! | U475 | 1262 Gemlik's stomper robots (13): the shockwave ring, the walk and swing, the knockback and death | level13 0x307e98, 0x3098d0 | [`gemlik_robot`] |
@@ -405,6 +409,10 @@ pub mod quartu_small;
 pub mod wave_mesh;
 pub mod barrier_field;
 pub mod water_shock;
+pub mod quartu_guard;
+pub mod quartu_hover;
+pub mod quartu_jet_bot;
+pub mod quartu_building;
 pub mod gemlik_small;
 pub mod gemlik_robot;
 pub mod gemlik_relay;
@@ -1119,11 +1127,22 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U551 1394", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::DROPPER_FN, classes: &quartu_small::DROPPER_CLASSES, update: quartu_small::dropper_update, joints: &[] },
     UnitPort { unit: "U551 1257", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::BOMB_FN, classes: &quartu_small::BOMB_CLASSES, update: quartu_small::bomb_update, joints: &[] },
     UnitPort { unit: "U560 1560", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::THRUSTERS_FN, classes: &quartu_small::THRUSTERS_CLASSES, update: quartu_small::thrusters_update, joints: &[] },
+    UnitPort { unit: "U536 92", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::GATE_FN, classes: &quartu_small::GATE_CLASSES, update: quartu_small::gate_update, joints: &[] },
+    UnitPort { unit: "U530 67", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::DOOR_FN, classes: &quartu_small::DOOR_CLASSES, update: quartu_small::door_update, joints: &[] },
+    UnitPort { unit: "U556 1430", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::DISPENSER_FN, classes: &quartu_small::DISPENSER_CLASSES, update: quartu_small::dispenser_update, joints: &[] },
+    UnitPort { unit: "U556 1428", level: quartu_small::REFERENCE_LEVEL, func: quartu_small::PIECE_FN, classes: &quartu_small::PIECE_CLASSES, update: quartu_small::piece_update, joints: &[] },
     UnitPort { unit: "U535 78", level: barrier_field::REFERENCE_LEVEL, func: barrier_field::UPDATE_FN, classes: &barrier_field::CLASSES, update: barrier_field::update, joints: &[] },
     UnitPort { unit: "U535 78 shimmer", level: barrier_field::REFERENCE_LEVEL, func: barrier_field::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U546 655", level: water_shock::REFERENCE_LEVEL, func: water_shock::UPDATE_FN, classes: &water_shock::CLASSES, update: water_shock::update, joints: &[] },
     UnitPort { unit: "U546 655 bolt", level: water_shock::REFERENCE_LEVEL, func: water_shock::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U546 655 countdown", level: water_shock::REFERENCE_LEVEL, func: water_shock::COUNTDOWN_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U528 44", level: quartu_guard::REFERENCE_LEVEL, func: quartu_guard::UPDATE_FN, classes: &quartu_guard::CLASSES, update: quartu_guard::update, joints: &quartu_guard::CLASSES },
+    UnitPort { unit: "U528 44 eyes", level: quartu_guard::REFERENCE_LEVEL, func: quartu_guard::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U528 934", level: quartu_guard::REFERENCE_LEVEL, func: quartu_guard::SHOT_FN, classes: &quartu_guard::SHOT_CLASSES, update: quartu_guard::shot_update, joints: &[] },
+    UnitPort { unit: "U543 233", level: quartu_hover::REFERENCE_LEVEL, func: quartu_hover::UPDATE_FN, classes: &quartu_hover::CLASSES, update: quartu_hover::update, joints: &quartu_hover::CLASSES },
+    UnitPort { unit: "U545 491", level: quartu_jet_bot::REFERENCE_LEVEL, func: quartu_jet_bot::UPDATE_FN, classes: &quartu_jet_bot::CLASSES, update: quartu_jet_bot::update, joints: &quartu_jet_bot::CLASSES },
+    UnitPort { unit: "U539 148 255", level: quartu_building::REFERENCE_LEVEL, func: quartu_building::UPDATE_FN, classes: &quartu_building::CLASSES, update: quartu_building::update, joints: &[] },
+    UnitPort { unit: "U540 154", level: quartu_building::REFERENCE_LEVEL, func: quartu_building::WALL_FN, classes: &quartu_building::WALL_CLASSES, update: quartu_building::wall_update, joints: &[] },
     UnitPort { unit: "U552 1408", level: wave_mesh::DEFS[0].level, func: wave_mesh::DEFS[0].update, classes: &wave_mesh::CLASSES[0], update: wave_mesh::UPDATES[0], joints: &[] },
     UnitPort { unit: "U552 1408 draw", level: wave_mesh::DEFS[0].level, func: wave_mesh::DEFS[0].draw, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U552 1409", level: wave_mesh::DEFS[1].level, func: wave_mesh::DEFS[1].update, classes: &wave_mesh::CLASSES[1], update: wave_mesh::UPDATES[1], joints: &[] },
@@ -1566,6 +1585,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((super::mouse::REFERENCE_LEVEL, super::mouse::GLOW_FN)) => super::mouse::glow_quads(table, id),
         Some((kalebo_trooper::REFERENCE_LEVEL, kalebo_trooper::GLOW_FN)) => kalebo_trooper::glow_quads(table, svc, id),
         Some((rilgar_trail_rider::REFERENCE_LEVEL, rilgar_trail_rider::GLOW_FN)) => rilgar_trail_rider::glow_quads(table, svc, id),
+        Some((quartu_guard::REFERENCE_LEVEL, quartu_guard::DRAW_FN)) => quartu_guard::glow_quads(table, svc, id),
         _ => Vec::new(),
     }
 }

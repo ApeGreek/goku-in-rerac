@@ -13,8 +13,29 @@
 //! * **1560**: updated always; in a scene (game mode 2) 1..4 or 6, the thrusters (`0x252ef0` = L01 `0x278450`) on
 //!   actor 4 (scene 1), 2 (scenes 2..4) or 1 (scene 6).
 //!
+//! * **92 the gates** (`0x2a36d0`, U536, 4 placed): open 4.25 up (or, Giant Clank's (+0x20 a cuboid), five times
+//!   as fast down, the level word 0x184aa8 = 1 while open) in 0.6 s when Ratchet (as Giant Clank for theirs) enters
+//!   +0x10, or when their link (+0x24) is gone with no alarm running (and then stay open); they close again once
+//!   neither Ratchet nor the camera is in +0x14 (or Ratchet has left +0x20); the hum (sound 0) while moving. Giant
+//!   Clank's stay open once planet 16 is unlocked.
+//! * **1430 the dispenser** (`0x2ec030`, U556, one placed): carried by its link (+0x0c); hides its 24 groups;
+//!   with flag 0x13d38a set and Ratchet on foot within 3: the fly-by camera +0x00 armed (camera class 19, not run:
+//!   G-HERO-027, logged), then a piece 1428 slides out of it beside Ratchet (put 3 away facing it, state 0x72), the
+//!   first group shown; the piece slides back over a full turn of `scale(360)` ticks; the level word 0x184aac = 1;
+//!   with ten of the group gone, flag 0x13d3f5 and 15000 bolts. **1428** (`0x2ebd78`) does nothing on level 15.
+//!
+//! * **67 the sliding doors** (`0x29aff0`, U530, 8 placed; read from the disassembly, no decomp): slide +0x24 to the
+//!   side (against the yaw) in 0.6 s, the hum (sound 0) while moving, when Ratchet enters +0x10 or their link (+0x1c:
+//!   a 1209 or a dispenser 1430) reaches state 4 (or, with +0x28, they were opened for good before); they close once
+//!   neither Ratchet nor the camera is in +0x14, and reopen if one comes back into +0x10; a linked (or +0x28) door
+//!   stays open (its death bits).
+//!
 //! | address | what | port |
 //! |---|---|---|
+//! | `0x29aff0` | 67 | [`door_update`] |
+//! | `0x2a36d0` | 92 | [`gate_update`] |
+//! | `0x2ec030` / `0x2eb9e0` / `0x2ebf28` / `0x2ebfb0` | 1430, the piece, a group shown / hidden, gone in a group | [`dispenser_update`] |
+//! | `0x2ebd78` | 1428 | [`piece_update`] |
 //! | `0x2eabd8` / `0x2e7ed8` | 1394, the bomb's spawn | [`dropper_update`], [`spawn_bomb`] |
 //! | `0x2e7f68` | 1257 | [`bomb_update`] |
 //! | `0x2edb20` | 1560 | [`thrusters_update`] |
@@ -25,6 +46,7 @@ use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{self as c, attack, fx};
 use crate::moby_update::services::{pv, World};
 use crate::moby_update::{story, triggers};
+use std::f32::consts::FRAC_PI_2;
 use crate::ps2v::Pf;
 
 pub const REFERENCE_LEVEL: u32 = 15;
@@ -34,6 +56,22 @@ pub const BOMB_FN: u32 = 0x2e_7f68;
 pub const BOMB_CLASSES: [i16; 1] = [1257];
 pub const THRUSTERS_FN: u32 = 0x2e_db20;
 pub const THRUSTERS_CLASSES: [i16; 1] = [1560];
+pub const DOOR_FN: u32 = 0x29_aff0;
+pub const DOOR_CLASSES: [i16; 1] = [67];
+pub const GATE_FN: u32 = 0x2a_36d0;
+pub const GATE_CLASSES: [i16; 1] = [92];
+pub const DISPENSER_FN: u32 = 0x2e_c030;
+pub const DISPENSER_CLASSES: [i16; 1] = [1430];
+pub const PIECE_FN: u32 = 0x2e_bd78;
+pub const PIECE_CLASSES: [i16; 1] = [1428];
+
+/// gp−0x5708: the gates' rise.
+const GATE_RISE: f32 = 4.25;
+/// The level words the gates and the dispenser write (0x184aa8 / 0x184aac) and the alarm's (0x161ac0).
+const GATE_WORD: u32 = 0x18_4aa8;
+const DISPENSER_WORD: u32 = 0x18_4aac;
+const FLAG_DISPENSER: usize = story::flag_index(0x13_d38a);
+const FLAG_BOLTS: usize = story::flag_index(0x13_d3f5);
 
 /// gp−0x4b84: the drop interval (seconds).
 const INTERVAL: f32 = 3.5;
@@ -180,6 +218,322 @@ pub fn thrusters_update(w: &mut World, id: MobyId) {
                 _ => return,
             };
             if let Some(a) = scene.actors.get(k) { crate::moby_update::classes::cutscene_fx::infobot_thrusters(w, a); }
+        }
+        _ => {}
+    }
+}
+
+fn unlocked16(w: &World) -> bool { w.svc.interact.game.planet_unlocked.get(16).copied().unwrap_or(0) != 0 }
+
+/// Level15 `0x2a36d0` (module doc).
+pub fn gate_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x2c);
+    let giant = c::pi32(w, id, 0x20) != -1;
+    let home_z = c::pf(w, id, 8);
+    let hero = w.hero_point();
+    let cam = w.camera_point();
+    let cam = [cam[0], cam[1], cam[2]];
+    let speed = || { let v = GATE_RISE / 0.6 * crate::moby_update::creature::DT; if giant { v * 5.0 } else { v } };
+    let set_z = |w: &mut World| {
+        let f = c::pf(w, id, 0x18);
+        w.mm(id).position[2] = home_z + if giant { -f } else { f };
+    };
+    let hum = |w: &mut World| {
+        if !w.sound_alive(c::pi32(w, id, 0x1c), id) {
+            let v = w.play_sound(0, 4, id);
+            c::set_pi32(w, id, 0x1c, v);
+        }
+    };
+    let quiet = |w: &mut World| {
+        let v = c::pi32(w, id, 0x1c);
+        if v != -1 && w.sound_alive(v, id) { w.release_sound(v, id); }
+        c::set_pi32(w, id, 0x1c, -1);
+    };
+    match w.m(id).state {
+        0 => {
+            let p = c::pos(w, id);
+            c::set_pv4(w, id, 0, p);
+            w.mm(id).state = 1;
+            c::set_pi32(w, id, 0x28, 0);
+            if giant { w.mm(id).update_dist = 0xff; }
+            if unlocked16(w) && giant {
+                w.mm(id).state = 5;
+                w.mm(id).position[2] = p[2] - GATE_RISE;
+            }
+        }
+        1 => {
+            c::set_pf(w, id, 0x18, 0.0);
+            if giant { w.svc.units.set_word(GATE_WORD, 0); }
+            let link = c::pi32(w, id, 0x24);
+            if link == -1 {
+                if w.in_cuboid(hero, c::pi32(w, id, 0x10)) && (!giant || w.hero.mode == 2) { w.mm(id).state = 2; }
+            } else {
+                let gone = usize::try_from(link).ok().filter(|&m| m < w.table.mobys.len()).is_none_or(|m| w.m(m).state >= 0xfd);
+                if gone && w.svc.units.word(super::quartu_alarm::lw::PLAYING) == 0 {
+                    w.mm(id).state = 2;
+                    c::set_pi32(w, id, 0x28, 1);
+                }
+            }
+            if unlocked16(w) && giant {
+                w.mm(id).state = 5;
+                w.mm(id).position[2] = home_z - GATE_RISE;
+            }
+        }
+        2 => {
+            hum(w);
+            let f = c::pf(w, id, 0x18) + speed();
+            c::set_pf(w, id, 0x18, f);
+            if GATE_RISE < f {
+                quiet(w);
+                c::set_pf(w, id, 0x18, GATE_RISE);
+                w.mm(id).state = 3;
+            }
+            set_z(w);
+        }
+        3 => {
+            if giant { w.svc.units.set_word(GATE_WORD, 1); }
+            let watched = w.in_cuboid(hero, c::pi32(w, id, 0x14)) || w.in_cuboid(cam, c::pi32(w, id, 0x14));
+            if watched && !w.in_cuboid(hero, c::pi32(w, id, 0x20)) { return; }
+            if c::pi32(w, id, 0x28) == 0 { w.mm(id).state = 4; }
+        }
+        4 => {
+            hum(w);
+            let f = c::pf(w, id, 0x18) - speed();
+            c::set_pf(w, id, 0x18, f);
+            if f < 0.0 {
+                quiet(w);
+                c::set_pf(w, id, 0x18, 0.0);
+                w.mm(id).state = 1;
+                if giant {
+                    w.mm(id).state = 5;
+                    w.svc.units.set_word(GATE_WORD, 0);
+                }
+            }
+            set_z(w);
+            let open = c::pi32(w, id, 0x10);
+            if w.in_cuboid(hero, open) || w.in_cuboid(cam, open) { w.mm(id).state = 2; }
+        }
+        5 => {
+            if !unlocked16(w) {
+                if w.hero.mode != 2 {
+                    w.mm(id).state = 1;
+                    w.mm(id).position[2] = home_z;
+                    w.svc.units.set_word(GATE_WORD, 0);
+                }
+            } else {
+                w.mm(id).position[2] = home_z - GATE_RISE;
+                w.svc.units.set_word(GATE_WORD, 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `0x2ebf28(g, shown)`: group `g` shown (drawn, collision) or hidden.
+fn show_group(w: &mut World, g: i32, shown: bool) {
+    for m in crate::moby_update::scheduler::group_ids(w, g as i8) {
+        let coll = super::class_collision(w, w.m(m).o_class);
+        let mo = w.mm(m);
+        if shown {
+            mo.visible = 1;
+            mo.mode &= 0xfffc;
+            mo.has_collision = coll;
+        } else {
+            mo.has_collision = false;
+            mo.visible = 0;
+            mo.mode |= 3;
+        }
+    }
+}
+
+/// `0x2eb9e0(pos, rot)`: a piece 1428 (always updated and drawn).
+fn make_piece(w: &mut World, p: c::V, rot: [f32; 4]) -> Option<MobyId> {
+    let m = w.create_moby(PIECE_CLASSES[0])?;
+    let mo = w.mm(m);
+    mo.update_dist = 0xff;
+    mo.draw_dist = 0xff;
+    mo.visible = 1;
+    mo.position = p;
+    mo.rotation = rot;
+    w.build_matrix(m);
+    Some(m)
+}
+
+/// Level15 `0x2ec030` (module doc).
+pub fn dispenser_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x80);
+    let link = c::pi32(w, id, 0x0c);
+    if let Some(l) = usize::try_from(link).ok().filter(|&m| m < w.table.mobys.len()) {
+        let lp = c::pos(w, l);
+        if w.m(id).state != 0 {
+            let d = c::sub(lp, c::pv4(w, id, 0x10));
+            let p = c::add(c::pos(w, id), [d[0], d[1], d[2], 0.0]);
+            w.mm(id).position = p;
+        }
+        c::set_pv4(w, id, 0x10, lp);
+    }
+    let yaw = w.m(id).rotation[2];
+    let side = c::add_rot(yaw, -FRAC_PI_2);
+    let off = |k: f32| [side.cos() * k, side.sin() * k, 0.0, 0.0];
+    let piece = |w: &World| usize::try_from(c::pi32(w, id, 4) - 1).ok().filter(|&m| m < w.table.mobys.len());
+    match w.m(id).state {
+        0 => {
+            let (lvl, sid) = (w.svc.level, w.m(id).spawn_id);
+            let gone = w.svc.save.collected.get(&sid).is_some_and(|&b| b != 0) || w.svc.save.death.contains(&(lvl, sid));
+            if gone {
+                w.mm(id).state = 4;
+            } else {
+                w.svc.units.set_word(DISPENSER_WORD, 0);
+                w.mm(id).state = 1;
+                for k in 0..24 {
+                    let g = c::pi32(w, id, 0x20 + 4 * k);
+                    if g != -1 { show_group(w, g, false); }
+                }
+            }
+        }
+        1 => {
+            if story::flag(w, FLAG_DISPENSER) != 0 && c::dist2(super::hero_pos(w), c::pos(w, id)) < 3.0 && w.hero.mode == 0 {
+                w.svc.unported("quartu 1430: the fly-by camera's arming 0x2f78b8 (camera class 19, G-HERO-027)");
+                w.mm(id).state = 2;
+            }
+        }
+        2 => {
+            if w.camera_class != 0x13 {
+                let p = c::add(c::pos(w, id), off(2.0));
+                let pc = make_piece(w, p, [0.0, FRAC_PI_2, c::add_rot(yaw, FRAC_PI_2), 0.0]);
+                c::set_pi32(w, id, 4, pc.map_or(0, |m| m as i32 + 1));
+                c::set_pf(w, id, 8, 0.0);
+                let mut q = c::add(c::pos(w, id), off(3.0));
+                q[2] = w.ground_height(Pf::f(0.5), pv(q), 0).to_f32();
+                crate::cinematic::hero_teleport(w, [q[0], q[1], q[2]], [0.0, 0.0, c::add_rot(yaw, FRAC_PI_2)], 0x72, false);
+                let g = c::pi32(w, id, 0x20);
+                if g != -1 { show_group(w, g, true); }
+                w.mm(id).state = 3;
+            }
+        }
+        3 => {
+            if let Some(pc) = piece(w) {
+                let per = w.svc.timing.scale(Pf::f(360.0)).to_f32();
+                let a = c::add_rot(c::pf(w, id, 8), 360.0 / per * 0.017_453_292);
+                c::set_pf(w, id, 8, a);
+                let f = a.cos() + 1.0;
+                let p = c::add(c::pos(w, id), off(f));
+                w.mm(pc).position = p;
+                if f < 0.5 {
+                    story::death_bits(w, id);
+                    w.mm(id).state = 4;
+                }
+            }
+        }
+        4 => {
+            w.svc.units.set_word(DISPENSER_WORD, 1);
+            let p = c::add(c::pos(w, id), off(0.5));
+            let rot = [0.0, FRAC_PI_2, c::add_rot(yaw, FRAC_PI_2), 0.0];
+            match piece(w) {
+                None => {
+                    let pc = make_piece(w, p, rot);
+                    c::set_pi32(w, id, 4, pc.map_or(0, |m| m as i32 + 1));
+                }
+                Some(pc) => {
+                    let m = w.mm(pc);
+                    m.position = p;
+                    m.rotation = rot;
+                }
+            }
+            if story::flag(w, FLAG_BOLTS) == 0 {
+                let g = c::pi32(w, id, 0x20);
+                let gone = crate::moby_update::scheduler::group_ids(w, g as i8).iter().filter(|&&m| w.m(m).state >= 0xfd).count();
+                if 9 < gone {
+                    story::set_flag(w, FLAG_BOLTS, 1);
+                    story::add_bolts(w, 15000);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Level15 `0x2ebd78`: nothing on level 15 (the code's own test); the rest of it has no caller here.
+pub fn piece_update(w: &mut World, _id: MobyId) {
+    if w.svc.level == 15 { return; }
+    w.svc.unported("quartu 1428: the item pickup off level 15");
+}
+
+/// Level15 `0x29aff0` (module doc).
+pub fn door_update(w: &mut World, id: MobyId) {
+    story::pvars(w, id, 0x2c);
+    let hero = w.hero_point();
+    let cam = w.camera_point();
+    let cam = [cam[0], cam[1], cam[2]];
+    let slide = |w: &mut World| {
+        let (y, f, home) = (w.m(id).rotation[2], c::pf(w, id, 0x18), c::pv4(w, id, 0));
+        let p = [home[0] + y.cos() * -f, home[1] + y.sin() * -f, home[2], home[3]];
+        w.mm(id).position = p;
+    };
+    let hum = |w: &mut World| {
+        if !w.sound_alive(c::pi32(w, id, 0x20), id) {
+            let v = w.play_sound(0, 4, id);
+            c::set_pi32(w, id, 0x20, v);
+        }
+    };
+    let quiet = |w: &mut World| {
+        let v = c::pi32(w, id, 0x20);
+        if v != -1 && w.sound_alive(v, id) { w.release_sound(v, id); }
+        c::set_pi32(w, id, 0x20, -1);
+    };
+    let step = |w: &World| c::pf(w, id, 0x24) / f32::from_bits(0x3f19_999a) * crate::moby_update::creature::DT;
+    match w.m(id).state {
+        0 => {
+            let p = c::pos(w, id);
+            c::set_pv4(w, id, 0, p);
+            w.mm(id).state = 1;
+        }
+        1 => {
+            c::set_pf(w, id, 0x18, 0.0);
+            let mut go = false;
+            if let Some(l) = usize::try_from(c::pi32(w, id, 0x1c)).ok().filter(|&m| m < w.table.mobys.len()) {
+                let lc = w.m(l).o_class;
+                if (lc == 0x4b9 || lc == 0x596) && w.m(l).state == 4 { go = true; }
+            }
+            if c::pi32(w, id, 0x28) != 0 {
+                let (lvl, sid) = (w.svc.level, w.m(id).spawn_id);
+                if w.svc.save.collected.get(&sid).is_some_and(|&b| b != 0) || w.svc.save.death.contains(&(lvl, sid)) { go = true; }
+            }
+            if w.in_cuboid(hero, c::pi32(w, id, 0x10)) || go { w.mm(id).state = 2; }
+        }
+        2 => {
+            hum(w);
+            let f = c::pf(w, id, 0x18) + step(w);
+            c::set_pf(w, id, 0x18, f);
+            let full = c::pf(w, id, 0x24);
+            if full < f {
+                quiet(w);
+                c::set_pf(w, id, 0x18, full);
+                if c::pi32(w, id, 0x1c) == -1 && c::pi32(w, id, 0x28) == 0 {
+                    w.mm(id).state = 3;
+                } else {
+                    story::death_bits(w, id);
+                    w.mm(id).state = 5;
+                }
+            }
+            slide(w);
+        }
+        3 => {
+            let keep = c::pi32(w, id, 0x14);
+            if !w.in_cuboid(hero, keep) && !w.in_cuboid(cam, keep) { w.mm(id).state = 4; }
+        }
+        4 => {
+            hum(w);
+            let f = c::pf(w, id, 0x18) - step(w);
+            c::set_pf(w, id, 0x18, f);
+            if f < 0.0 {
+                quiet(w);
+                c::set_pf(w, id, 0x18, 0.0);
+                w.mm(id).state = 1;
+            }
+            slide(w);
+            let open = c::pi32(w, id, 0x10);
+            if w.in_cuboid(hero, open) || w.in_cuboid(cam, open) { w.mm(id).state = 2; }
         }
         _ => {}
     }

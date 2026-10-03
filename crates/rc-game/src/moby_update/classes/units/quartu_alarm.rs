@@ -1,6 +1,6 @@
 //! The alarms, class 408: level15 0x2cb4c8, the same code on 17 (census U480; 48 created instances). An alarm is a
 //! small animated state machine: set off (its pvar +0x08 raised by the family call [`set_off`], 0x2cbac0, which the
-//! guards 44 make: 0x2979d8, unported, G-CLS-001), it opens (sequences 3 → 4 / 5 → 6), and while its timer runs it
+//! guards 44 make: 0x2979d8, [`super::quartu_guard`]), it opens (sequences 3 → 4 / 5 → 6), and while its timer runs it
 //! releases one alarm drone 77 ([`super::quartu_drone::release`]) every +0x10 ticks when Ratchet is within 16 units
 //! (xy) and in its line of sight, then closes (7 → 8 → 1). Kind 1 alarms pulse their light red while armed and
 //! darker red while running. Every active alarm keeps the level's alarm word set, which the drones read; the first
@@ -185,6 +185,23 @@ pub fn set_off(w: &mut World, id: MobyId, mut t: i32) {
     for e in list {
         let a = (e & 0x7fff) as usize;
         if w.table.mobys.get(a).is_some_and(|m| m.o_class == CLASSES[0] && m.pvars.len() >= 0x1c) { arm(w, a); }
+    }
+}
+
+/// Level15 `0x2cbba0(m)`: a guard 44 at the alarm (its poke): closed (1) → opening (2, sequence 1 over `ticks(10)`);
+/// open (3) and not set off → its timer `ticks(120)`.
+pub fn poke(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < 0x1c { return; }
+    if w.m(id).state == 1 {
+        w.mm(id).state = 2;
+        if w.m(id).anim.seq_b != 1 {
+            let t = w.ticks(10);
+            w.anim_blend(id, 1, 0, t);
+        }
+    }
+    if w.m(id).state == 3 && pi32(w, id, pv::ACTIVE) == 0 {
+        let t = w.ticks(0x78);
+        set_pi32(w, id, pv::TIMER, t);
     }
 }
 

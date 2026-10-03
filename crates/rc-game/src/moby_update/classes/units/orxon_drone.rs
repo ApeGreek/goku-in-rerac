@@ -223,7 +223,7 @@ fn aim(w: &mut World, id: MobyId, t: MobyId) -> (V, bool) {
 }
 
 /// `0x255ab0(m, p, off)`: the muzzle flash about the drone's forward (module doc).
-fn muzzle_flash(w: &mut World, id: MobyId, p: V) {
+pub(super) fn muzzle_flash(w: &mut World, id: MobyId, p: V) {
     let r = w.m(id).rows;
     let (fwd, up) = ([r[0][0], r[0][1], r[0][2]], [r[2][0], r[2][1], r[2][2]]);
     for i in 0..24 {
@@ -250,7 +250,7 @@ fn muzzle_flash(w: &mut World, id: MobyId, p: V) {
 }
 
 /// `0x2cc1b8(scale, v, p, owner, target, life)`: a shot.
-fn shot(w: &mut World, scale: f32, v: V, p: V, owner: MobyId, target: Option<MobyId>, life: i32) {
+pub(super) fn shot(w: &mut World, scale: f32, v: V, p: V, owner: MobyId, target: Option<MobyId>, life: i32) {
     let Some(m) = w.create_moby(SHOT) else { return };
     story::pvars(w, m, 0x40);
     let hp = w.hero_point();
