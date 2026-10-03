@@ -250,6 +250,17 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U480 | 1403 Gemlik's tracker, 1558 its scene thrusters (13) | level13 0x30bb70, 0x30bdf0 | [`gemlik_small`] |
+//! | U477 | 1270 Gemlik's tipping lift (13) | level13 0x30a6d8 | [`gemlik_lift`] |
+//! | U475 | 1262 Gemlik's stomper robots (13): the shockwave ring, the walk and swing, the knockback and death | level13 0x307e98, 0x3098d0 | [`gemlik_robot`] |
+//! | U470 | 667 Gemlik's state relay, 674 / 677 / 680 its watched fields (13) | level13 0x2f8880, 0x2f8a78 | [`gemlik_relay`] |
+//! | U467 | 404, 405 Gemlik's tower fields (13): the flat fields that hurt what touches them, fading once their tower is destroyed | level13 0x2ed4a8 | [`gemlik_field`] |
+//! | U462 | 231 Gemlik's target switches (13): shot green in a group, the timed countdown, the blinking done state | level13 0x2e4448 | [`gemlik_switch`] |
+//! | U459 | 170 Gemlik's base towers (13): hit from the ship above, the staged blow-up and debris; their hit proxy 1632 (created by code) | level13 0x2cefc0, 0x30c060 | [`gemlik_tower`] |
+//! | U457 | 111 Gemlik's space fighters (13): the squadron's path flight, the attack runs on Ratchet's ship, the pickups they drop | level13 0x2c4428 | [`gemlik_fighter`] |
+//! | U456 | 101 Gemlik's missile drones (13) and their missiles 1233 (created by code) | level13 0x2c25b8, 0x305a58 | [`gemlik_launcher`] |
+//! | U449 | 21, 244 Gemlik's lifts (13): the ride with the script camera, the call to the other end | level13 0x2b39e0 | [`gemlik_lift`] |
+//! | U448 | 6 Gemlik's state triggers (13): the cuboid that sets mobys' and groups' states on enter and leave | level13 0x2b0e80 | [`gemlik_trigger`] |
 //! | U445 | 1557 Hoven's scene thrusters (12) | level12 0x3094a0 | [`hoven_story`] |
 //! | U441 | 1345 Hoven's power beams (12): the crackling curtain held until its moby is destroyed, the mission | level12 0x3081b0, 0x308350 | [`hoven_beam`] |
 //! | U440 | 1281 Hoven's mine dispensers (12): opening on the target and releasing their seeker mines | level12 0x307840 | [`hoven_dispenser`] |
@@ -352,6 +363,16 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod gemlik_small;
+pub mod gemlik_robot;
+pub mod gemlik_relay;
+pub mod gemlik_field;
+pub mod gemlik_switch;
+pub mod gemlik_tower;
+pub mod gemlik_fighter;
+pub mod gemlik_launcher;
+pub mod gemlik_lift;
+pub mod gemlik_trigger;
 pub mod hoven_beam;
 pub mod hoven_dispenser;
 pub mod hoven_mine;
@@ -1026,6 +1047,23 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U480 1403", level: gemlik_small::REFERENCE_LEVEL, func: gemlik_small::TRACKER_FN, classes: &gemlik_small::TRACKER_CLASSES, update: gemlik_small::tracker_update, joints: &[] },
+    UnitPort { unit: "U481 1558", level: gemlik_small::REFERENCE_LEVEL, func: gemlik_small::THRUSTERS_FN, classes: &gemlik_small::THRUSTERS_CLASSES, update: gemlik_small::thrusters_update, joints: &[] },
+    UnitPort { unit: "U477 1270", level: gemlik_lift::REFERENCE_LEVEL, func: gemlik_lift::TIP_FN, classes: &gemlik_lift::TIP_CLASSES, update: gemlik_lift::tip_update, joints: &[] },
+    UnitPort { unit: "U475 1262", level: gemlik_robot::REFERENCE_LEVEL, func: gemlik_robot::UPDATE_FN, classes: &gemlik_robot::CLASSES, update: gemlik_robot::update, joints: &gemlik_robot::CLASSES },
+    // Draw callback only (1262's shockwave ring: `Callback::UnitFrame` for its `rand`, `Callback::UnitQuads`).
+    UnitPort { unit: "U475 1262 ring", level: gemlik_robot::REFERENCE_LEVEL, func: gemlik_robot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U470 667", level: gemlik_relay::REFERENCE_LEVEL, func: gemlik_relay::RELAY_FN, classes: &gemlik_relay::RELAY_CLASSES, update: gemlik_relay::relay_update, joints: &[] },
+    UnitPort { unit: "U471 674", level: gemlik_relay::REFERENCE_LEVEL, func: gemlik_relay::FIELD_FN, classes: &gemlik_relay::FIELD_CLASSES, update: gemlik_relay::field_update, joints: &[] },
+    UnitPort { unit: "U467 404", level: gemlik_field::REFERENCE_LEVEL, func: gemlik_field::UPDATE_FN, classes: &gemlik_field::CLASSES, update: gemlik_field::update, joints: &[] },
+    UnitPort { unit: "U462 231", level: gemlik_switch::REFERENCE_LEVEL, func: gemlik_switch::UPDATE_FN, classes: &gemlik_switch::CLASSES, update: gemlik_switch::update, joints: &[] },
+    UnitPort { unit: "U459 170", level: gemlik_tower::REFERENCE_LEVEL, func: gemlik_tower::UPDATE_FN, classes: &gemlik_tower::CLASSES, update: gemlik_tower::update, joints: &gemlik_tower::CLASSES },
+    UnitPort { unit: "— 1632", level: gemlik_tower::REFERENCE_LEVEL, func: gemlik_tower::PROXY_FN, classes: &gemlik_tower::PROXY_CLASSES, update: gemlik_tower::proxy_update, joints: &[] },
+    UnitPort { unit: "U457 111", level: gemlik_fighter::REFERENCE_LEVEL, func: gemlik_fighter::UPDATE_FN, classes: &gemlik_fighter::CLASSES, update: gemlik_fighter::update, joints: &[] },
+    UnitPort { unit: "U456 101", level: gemlik_launcher::REFERENCE_LEVEL, func: gemlik_launcher::UPDATE_FN, classes: &gemlik_launcher::CLASSES, update: gemlik_launcher::update, joints: &gemlik_launcher::CLASSES },
+    UnitPort { unit: "— 1233", level: gemlik_launcher::REFERENCE_LEVEL, func: gemlik_launcher::MISSILE_FN, classes: &gemlik_launcher::MISSILE_CLASSES, update: gemlik_launcher::missile_update, joints: &[] },
+    UnitPort { unit: "U449 21", level: gemlik_lift::REFERENCE_LEVEL, func: gemlik_lift::UPDATE_FN, classes: &gemlik_lift::CLASSES, update: gemlik_lift::update, joints: &[] },
+    UnitPort { unit: "U448 6", level: gemlik_trigger::REFERENCE_LEVEL, func: gemlik_trigger::UPDATE_FN, classes: &gemlik_trigger::CLASSES, update: gemlik_trigger::update, joints: &[] },
     UnitPort { unit: "U445 1557", level: hoven_story::REFERENCE_LEVEL, func: hoven_story::THRUSTERS_FN, classes: &hoven_story::THRUSTERS_CLASSES, update: hoven_story::thrusters_update, joints: &[] },
     UnitPort { unit: "U441 1345", level: hoven_beam::REFERENCE_LEVEL, func: hoven_beam::UPDATE_FN, classes: &hoven_beam::CLASSES, update: hoven_beam::update, joints: &[] },
     // Draw callback only (1345's curtain: `Callback::UnitFrame` for its `rand`, `Callback::UnitQuads`).
@@ -1331,6 +1369,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((hoven_fall::REFERENCE_LEVEL, hoven_fall::DRAW_FN)) => hoven_fall::fx_quads(table, svc, id),
         Some((hoven_arc::REFERENCE_LEVEL, hoven_arc::DRAW_FN)) => hoven_arc::fx_quads(table, svc, id),
         Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::fx_quads(table, svc, id),
+        Some((gemlik_robot::REFERENCE_LEVEL, gemlik_robot::DRAW_FN)) => gemlik_robot::fx_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::ARC_FN)) => hover_zapper::fx_quads(table, svc, id),
         Some((kalebo_lift::REFERENCE_LEVEL, kalebo_lift::GLOW_FN)) => kalebo_lift::fx_quads(table, svc, id),
         Some((rilgar_trail_rider::REFERENCE_LEVEL, rilgar_trail_rider::TRAIL_FN)) => rilgar_trail_rider::fx_quads(table, svc, id),
@@ -1420,6 +1459,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((batalia_turret::REFERENCE_LEVEL, batalia_turret::HUD_FN)) => batalia_turret::hud_frame(w, id),
         Some((batalia_flame::REFERENCE_LEVEL, batalia_flame::DRAW_FN)) => batalia_flame::frame(w, id),
         Some((hoven_beam::REFERENCE_LEVEL, hoven_beam::DRAW_FN)) => hoven_beam::frame(w, id),
+        Some((gemlik_robot::REFERENCE_LEVEL, gemlik_robot::DRAW_FN)) => gemlik_robot::frame(w, id),
         Some((umbris_beast_fx::REFERENCE_LEVEL, f @ (umbris_beast_fx::BEAM_FN | umbris_beast_fx::GROUND_FN))) => umbris_beast_fx::frame(w, f, id),
         _ => {}
     }

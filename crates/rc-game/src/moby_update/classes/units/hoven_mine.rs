@@ -9,14 +9,14 @@
 //!
 //! | address | what | port |
 //! |---|---|---|
-//! | `0x304e00` | 0: targetable, home, the swerve ±40° (the spawner's +0xbc), → 1; 1: the roll (module doc); 2: the big burst (`SpawnBeamExplosion(0, 0, 2, 1, 4, 1, 7, m, 0, —, 5, 15, 25, 2, 0, 9, −1, 0)`), deleted; the near / hit burst (`(0, 0, 1, 0.5, 4, 0.7, 7, m, 0, —, 3, 3, 5, 2, 0, 0, −1, 0)`), `SetDeathBits`, deleted; the shadow `0x272eb8(1, m)` | [`update`] (`fx::beam_explosion`, `shadows::blob`) |
+//! | `0x304e00` | 0: targetable, home, the swerve ±40° (the spawner's +0xbc), → 1; 1: the roll (module doc); 2: the big burst (`SpawnBeamExplosion(0, 0, 2, 1, 4, 1, 7, m, 0, —, 5, 15, 25, 2, 0, 9, −1, 0)`), deleted; the near / hit burst (`(0, 0, 1, 0.5, 4, 0.7, 7, m, 0, —, 3, 3, 5, 2, 0, 0, −1, 0)`), `SetDeathBits`, deleted; the shadow `0x272eb8(1, m)` | [`update`] (`fx::beam_explosion`, `shadows::blob`, `Spring` 0x2747b0 = L01 0x270780: `hero::physics::spring`) |
 //!
 //! Read from the level12 decomp and disassembly (the explosions' arguments, the spheres' radii). [L] The explosions
 //! pass no position (null): the moby's. Native `f32`.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::set_death_bits;
-use crate::moby_update::creature::{self as c, damage, fx, target, turn};
+use crate::moby_update::creature::{self as c, damage, fx, target};
 use crate::moby_update::services::{pv, HitTemplate, World};
 use crate::ps2v::Pf;
 use std::f32::consts::PI;
@@ -108,10 +108,10 @@ pub fn update(w: &mut World, id: MobyId) {
                 let g = c::ground::ground(w, c::pos(w, id), 0.5, 0).z.max(w.hero.ground_z.to_f32());
                 let d = g - c::pos(w, id)[2];
                 if d < 0.5 && -3.0 < d {
-                    let (mut z, mut v) = (c::pos(w, id)[2], c::pf(w, id, o::ZV));
-                    turn::spring(g + 0.58, 0.02, 0.3, DT * 4.0, &mut z, &mut v);
-                    w.mm(id).position[2] = z;
-                    c::set_pf(w, id, o::ZV, v);
+                    let (mut z, mut v) = (Pf::f(c::pos(w, id)[2]), Pf::f(c::pf(w, id, o::ZV)));
+                    crate::hero::physics::spring(Pf::f(g + 0.58), Pf::f(0.02), Pf::f(f32::from_bits(0x3e99_999a)), Pf::f(DT * 4.0), &mut z, &mut v);
+                    w.mm(id).position[2] = z.to_f32();
+                    c::set_pf(w, id, o::ZV, v.to_f32());
                 }
             }
             if w.ticks(0x1e) < age {
