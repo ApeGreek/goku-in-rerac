@@ -29,6 +29,10 @@
 //! flag written only at the init (0), the end of the way out (1) and home (0), and a platform block at +0x60:
 //! `CarryRiders(+0x60, position − old position, rotation, rotation)` every tick (0x288d88 = L01 0x2755f8)
 //! ([`platform_update`], [`run`] with base 0xa0; read from the level07 decomp of 0x31aee0).
+//!
+//! **The held variant**, class 1128: level07 0x31a9e8 (census U276; 1 placed): the same machine on the block at +0x00,
+//! but when its mission's loaded byte (`0x15fc88[+0xb0]`, `MissionState::mission_slot`) is −1 it no longer follows the
+//! link: with pvar +0x3c = 0 it stays home (or goes back), else it opens and stays open ([`held_update`]).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{add, len3, pf, pi32, pv4, set_len3, set_pf, set_pi32, set_pv4, DT};
@@ -42,6 +46,9 @@ pub const CLASSES: [i16; 4] = [1063, 1078, 1079, 1131];
 pub const PLATFORM_FN: u32 = 0x31_aee0;
 pub const PLATFORM_CLASSES: [i16; 3] = [104, 106, 1129];
 pub const PLATFORM_BASE: usize = 0xa0;
+/// The held variant (level07 0x31a9e8, class 1128; census U276).
+pub const HELD_FN: u32 = 0x31_a9e8;
+pub const HELD_CLASSES: [i16; 1] = [1128];
 
 type V = [f32; 4];
 
@@ -84,8 +91,21 @@ pub fn platform_update(w: &mut World, id: MobyId) {
     crate::moby_update::triggers::carry_riders(&mut m.pvars, 0x60, d, r, r);
 }
 
+/// Level07 0x31a9e8 (class 1128, census U276): [`run`] with the mission's loaded byte (`0x15fc88[+0xb0]`) at −1
+/// holding it: pvar +0x3c 0 keeps it shut (it closes), else open (module doc).
+pub fn held_update(w: &mut World, id: MobyId) {
+    if w.m(id).pvars.len() < 0x40 { return; }
+    let mission = w.m(id).mission;
+    let held = (w.missions.mission_slot(mission) == 0xff).then(|| pi32(w, id, 0x3c) != 0);
+    run_with(w, id, 0, held);
+}
+
 /// The state machine on the block at pvar `base` (module doc; offsets relative to `base`).
-pub fn run(w: &mut World, id: MobyId, base: usize) {
+pub fn run(w: &mut World, id: MobyId, base: usize) { run_with(w, id, base, None) }
+
+/// [`run`] with the held variant's override: `Some(false)` shut, `Some(true)` open, whatever the link does.
+fn run_with(w: &mut World, id: MobyId, base: usize, held: Option<bool>) {
+    let (shut, open) = (held == Some(false), held == Some(true));
     let (mission, level) = (w.m(id).mission, w.svc.level);
     if mission != 0xff && w.missions.mission_done(level, mission) == 0xff { set_pi32(w, id, base + 0x10, -1); }
     let (a, b) = (pi32(w, id, base + 0x14) as u32, pi32(w, id, base + 0x18) as u32);
@@ -98,14 +118,14 @@ pub fn run(w: &mut World, id: MobyId, base: usize) {
             1
         }
         1 => {
-            if link.is_some_and(|s| s != a) { return; }
+            if shut || (!open && link.is_some_and(|s| s != a)) { return; }
             let l = len3(travel(w, id, base));
             set_pf(w, id, base + 0xc, l);
             sound(w, id, base + 0x30);
             2
         }
         2 => {
-            if link == Some(b) {
+            if shut || (!open && link == Some(b)) {
                 sound(w, id, base + 0x30);
                 4
             } else {
@@ -125,13 +145,13 @@ pub fn run(w: &mut World, id: MobyId, base: usize) {
             }
         }
         3 => {
-            if link != Some(b) { return; }
+            if !shut && (open || link != Some(b)) { return; }
             set_pf(w, id, base + 0xc, 0.0);
             sound(w, id, base + 0x30);
             4
         }
         4 => {
-            if link.is_none_or(|s| s == a) {
+            if !shut && (open || link.is_none_or(|s| s == a)) {
                 sound(w, id, base + 0x30);
                 2
             } else {

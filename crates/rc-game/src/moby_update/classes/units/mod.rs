@@ -167,6 +167,7 @@
 //! | U505 | 470 Kalebo's glowing beacons (16; the gold bolts' item glow) | level16 0x2c9480 | [`kalebo_glow`] |
 //! | U341 | 1240 Orxon's spark fountains (10) | level10 0x2e5be0 | [`orxon_sparks`] |
 //! | U263 | 104, 106, 1129 linked platforms (07, 13): `linked_mover`'s state machine at +0xa0 with a carry | level07 0x31aee0 | [`linked_mover::platform_update`] |
+//! | U276 | 1128 the held linked mover (07): `linked_mover`'s machine, held shut or open by its mission's loaded byte | level07 0x31a9e8 | [`linked_mover::held_update`] |
 //! | U222 | 1054 Blarg's split doors (06) and their half 1055 | level06 0x2fbfb0 | [`blarg_doors`] |
 //! | U88 | 1504 wandering point lights (01, 06) | level01 0x30b618 | [`wandering_light`] |
 //! | U376 | 1248 Pokitaru's rising gates (11) and their halves 1247 | level11 0x316320 | [`pokitaru_gate`] |
@@ -249,6 +250,11 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U267 | 1059 Umbris' swamp beasts (07): cruising the swamp, swallowing Ratchet in the water, wading and biting, knocks | level07 0x30f5f0 | [`umbris_swamp`] |
+//! | U275 | 1126 Umbris' pop-up turrets and their shots 880 (07): the sweep, the bursts, down into the ground when hit | level07 0x31a250, 0x30b6a8 | [`umbris_turret`] |
+//! | U272 | 1110, 1112, 871 Umbris' floating mines (07): lone mines, the chain mines on their leader's path, the leader that revives them | level07 0x319040, 0x3196e0, 0x30b000 | [`umbris_mines`] |
+//! | U258 | 529, 1789, 1552, 1133, 1142, 1113–1116 Umbris' small classes (07): the parked ship, scene jets and dust, the swinging part, the ammo drop, the beast's walls | level07 0x2fbdb8, 0x31f900, 0x31eba8, 0x31b3f0, 0x31d2e0, 0x319f48 | [`umbris_small`] |
+//! | U254 | 38, 1474 Umbris' path lifts (07): the ride from end to end, Ratchet held, the pause over him, the vanish and return | level07 0x2cd2b0, 0x2cdb28 | [`umbris_lift`] |
 //! | U224 | 857 Clank's gadgetbots (06, 10), 302 their bubbles, 303 their markers (06): follow, wait, attack and pad commands, the share-out of targets, the glow, the shattering bubble | level06 0x2f0040, 0x2f37d0, 0x2d85a0, 0x2d8738, 0x2d8c20 | [`blarg_gadgetbot`] |
 //! | U233 | 1051 Blarg's mini-boss (06): the drop-in cutaway, the chase and slam, the crawler and trooper phases, the boss meter | level06 0x2f9a28 | [`blarg_boss`] |
 //! | U238 | 1068 Blarg's fire-wave bots (06, 10): the rolling fire wall and its strip, the swing, the walk-out, knockback and death | level06 0x2fdbd0, 0x2ff680 | [`blarg_wave_bot`] |
@@ -312,6 +318,11 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod umbris_swamp;
+pub mod umbris_turret;
+pub mod umbris_mines;
+pub mod umbris_small;
+pub mod umbris_lift;
 pub mod blarg_gadgetbot;
 pub mod blarg_boss;
 pub mod blarg_wave_bot;
@@ -769,6 +780,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U505 470", level: kalebo_glow::REFERENCE_LEVEL, func: kalebo_glow::UPDATE_FN, classes: &kalebo_glow::CLASSES, update: kalebo_glow::update, joints: &[] },
     UnitPort { unit: "U341 1240", level: orxon_sparks::REFERENCE_LEVEL, func: orxon_sparks::UPDATE_FN, classes: &orxon_sparks::CLASSES, update: orxon_sparks::update, joints: &[] },
     UnitPort { unit: "U263 104", level: linked_mover::REFERENCE_LEVEL, func: linked_mover::PLATFORM_FN, classes: &linked_mover::PLATFORM_CLASSES, update: linked_mover::platform_update, joints: &[] },
+    UnitPort { unit: "U276 1128", level: linked_mover::REFERENCE_LEVEL, func: linked_mover::HELD_FN, classes: &linked_mover::HELD_CLASSES, update: linked_mover::held_update, joints: &[] },
     UnitPort { unit: "U222 1054", level: blarg_doors::REFERENCE_LEVEL, func: blarg_doors::UPDATE_FN, classes: &blarg_doors::CLASSES, update: blarg_doors::update, joints: &[] },
     UnitPort { unit: "U88 1504", level: wandering_light::REFERENCE_LEVEL, func: wandering_light::UPDATE_FN, classes: &wandering_light::CLASSES, update: wandering_light::update, joints: &[] },
     UnitPort { unit: "U376 1248", level: pokitaru_gate::REFERENCE_LEVEL, func: pokitaru_gate::UPDATE_FN, classes: &pokitaru_gate::CLASSES, update: pokitaru_gate::update, joints: &[] },
@@ -948,6 +960,20 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U267 1059", level: umbris_swamp::REFERENCE_LEVEL, func: umbris_swamp::UPDATE_FN, classes: &umbris_swamp::CLASSES, update: umbris_swamp::update, joints: &umbris_swamp::CLASSES },
+    UnitPort { unit: "U275 1126", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::UPDATE_FN, classes: &umbris_turret::CLASSES, update: umbris_turret::update, joints: &[] },
+    UnitPort { unit: "U275 880", level: umbris_turret::REFERENCE_LEVEL, func: umbris_turret::SHOT_FN, classes: &umbris_turret::SHOT_CLASSES, update: umbris_turret::shot_update, joints: &[] },
+    UnitPort { unit: "U272 1110", level: umbris_mines::REFERENCE_LEVEL, func: umbris_mines::LONE_FN, classes: &umbris_mines::LONE_CLASSES, update: umbris_mines::lone_update, joints: &[] },
+    UnitPort { unit: "U273 1112", level: umbris_mines::REFERENCE_LEVEL, func: umbris_mines::CHAIN_FN, classes: &umbris_mines::CHAIN_CLASSES, update: umbris_mines::chain_update, joints: &[] },
+    UnitPort { unit: "U260 871", level: umbris_mines::REFERENCE_LEVEL, func: umbris_mines::LEADER_FN, classes: &umbris_mines::LEADER_CLASSES, update: umbris_mines::leader_update, joints: &[] },
+    UnitPort { unit: "U258 529", level: umbris_small::REFERENCE_LEVEL, func: umbris_small::SHIP_FN, classes: &umbris_small::SHIP_CLASSES, update: umbris_small::ship_update, joints: &[] },
+    UnitPort { unit: "U284 1789", level: umbris_small::REFERENCE_LEVEL, func: umbris_small::JETS_FN, classes: &umbris_small::JETS_CLASSES, update: umbris_small::jets_update, joints: &[] },
+    UnitPort { unit: "U280 1552", level: umbris_small::REFERENCE_LEVEL, func: umbris_small::SCENE_FX_FN, classes: &umbris_small::SCENE_FX_CLASSES, update: umbris_small::scene_fx_update, joints: &[] },
+    UnitPort { unit: "U278 1133", level: umbris_small::REFERENCE_LEVEL, func: umbris_small::SWING_FN, classes: &umbris_small::SWING_CLASSES, update: umbris_small::swing_update, joints: &[] },
+    UnitPort { unit: "U279 1142", level: umbris_small::REFERENCE_LEVEL, func: umbris_small::AMMO_FN, classes: &umbris_small::AMMO_CLASSES, update: umbris_small::ammo_drop_update, joints: &[] },
+    UnitPort { unit: "U274 1113", level: umbris_small::REFERENCE_LEVEL, func: umbris_small::WALL_FN, classes: &umbris_small::WALL_CLASSES, update: umbris_small::wall_update, joints: &[] },
+    UnitPort { unit: "U254 38", level: umbris_lift::REFERENCE_LEVEL, func: umbris_lift::UPDATE_FN, classes: &umbris_lift::CLASSES, update: umbris_lift::update, joints: &[] },
+    UnitPort { unit: "U255 1474", level: umbris_lift::REFERENCE_LEVEL, func: umbris_lift::GATED_FN, classes: &umbris_lift::GATED_CLASSES, update: umbris_lift::gated_update, joints: &[] },
     UnitPort { unit: "U224 857", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::UPDATE_FN, classes: &blarg_gadgetbot::CLASSES, update: blarg_gadgetbot::update, joints: &blarg_gadgetbot::CLASSES },
     UnitPort { unit: "U224 857 glow", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U224 302", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::BUBBLE_FN, classes: &blarg_gadgetbot::BUBBLE_CLASSES, update: blarg_gadgetbot::bubble_update, joints: &[] },
