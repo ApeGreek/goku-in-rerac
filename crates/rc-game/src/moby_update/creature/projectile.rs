@@ -55,6 +55,21 @@ pub fn part26(w: &mut World, size: f32, moby: MobyId, rgba: u32, life: i32) {
     if crate::particles::type26::spawn(sys, w.rng, size, moby, rgba, life, -1, [p[0], p[1], p[2]]).is_none() { w.svc.fx.part_failed += 1; }
 }
 
+/// `PartType26Spawn(size, moby, rgba, life, list)` with a joint list: the glow follows the list's point, starting 0.4
+/// from it toward the camera (0x167240).
+pub fn part26_joint(w: &mut World, size: f32, moby: MobyId, rgba: u32, life: i32, list: i16) {
+    *w.svc.fx.part_spawns.entry(26).or_default() += 1;
+    let j = w.joint_point(moby, list as usize);
+    let cam = w.camera_point();
+    let d = super::set_len3([cam[0] - j[0], cam[1] - j[1], cam[2] - j[2], 0.0], 0.4);
+    let at = [j[0] + d[0], j[1] + d[1], j[2] + d[2]];
+    let Some(sys) = w.particles.as_deref_mut() else {
+        w.rng.rand();
+        return;
+    };
+    if crate::particles::type26::spawn(sys, w.rng, size, moby, rgba, life, list, at).is_none() { w.svc.fx.part_failed += 1; }
+}
+
 /// The hit template the enemy projectiles build (`+0x00` push, `+0x10` attacker, `+0x14` flags, `+0x18`/`+0x19` type
 /// / subtype, `+0x1a` class, `+0x1c` damage, `+0x20`).
 pub fn template(w: &World, shot: MobyId, dir: V, flags: u32, kind: (u8, u8), damage: f32, w20: u32) -> HitTemplate {

@@ -1143,6 +1143,7 @@ fn setup(
     // Level 18's pool meshes (rc_game units::veldin_pool, read with the draw-callback tables).
     svc.units.veldin_pools = lv.water.fx.veldin_pools.clone();
     svc.units.blarg_glass = lv.water.fx.blarg_glass.clone();
+    svc.units.blarg_bubble = lv.water.fx.blarg_bubble.clone();
     if let Ok(sp) = rc_formats::gameplay::parse_splines(&lv.gameplay) { svc.set_splines(&sp); }
     svc.pvar_shared = rc_formats::gameplay::parse_pvar_shared_data(&lv.gameplay).unwrap_or_default();
     // The volume sections (cuboids, spheres, cylinders, pills, paths, grind paths) for the trigger tests.

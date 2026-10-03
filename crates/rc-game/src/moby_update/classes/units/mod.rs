@@ -249,6 +249,7 @@
 //! | U248 | 436 Umbris' story director (the lair, planet 8, the trip to Batalia) (07) | level07 0x2f5ba0 | [`umbris_story`] |
 //! | U118 | 1005 / 1016 the item scenes: the Trespasser (02), the Hydrodisplacer (06) | level02 0x2ea210 | [`aridia_story`] |
 //! | U237 | 1109 Blarg's shuttle (the station's routes, the last ride's blast, the infobot hand-off, planet 5) (06) | level06 0x302578 | [`blarg_shuttle`] |
+//! | U224 | 857 Clank's gadgetbots (06, 10), 302 their bubbles, 303 their markers (06): follow, wait, attack and pad commands, the share-out of targets, the glow, the shattering bubble | level06 0x2f0040, 0x2f37d0, 0x2d85a0, 0x2d8738, 0x2d8c20 | [`blarg_gadgetbot`] |
 //! | U233 | 1051 Blarg's mini-boss (06): the drop-in cutaway, the chase and slam, the crawler and trooper phases, the boss meter | level06 0x2f9a28 | [`blarg_boss`] |
 //! | U238 | 1068 Blarg's fire-wave bots (06, 10): the rolling fire wall and its strip, the swing, the walk-out, knockback and death | level06 0x2fdbd0, 0x2ff680 | [`blarg_wave_bot`] |
 //! | U232 | 1048 Blarg's troopers (06): group wakes, the surround, the jab, the leap, the guards, knockback and death | level06 0x2f7d78 | [`blarg_trooper`] |
@@ -311,6 +312,7 @@ pub mod grind_mine;
 pub mod rising_block;
 pub mod bob_block;
 pub mod blarg_shuttle;
+pub mod blarg_gadgetbot;
 pub mod blarg_boss;
 pub mod blarg_wave_bot;
 pub mod blarg_trooper;
@@ -946,6 +948,11 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U405 1267 hud", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::HUD_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U405 1267 tint", level: hoven_turret::REFERENCE_LEVEL, func: hoven_turret::TINT_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U237 1109", level: blarg_shuttle::REFERENCE_LEVEL, func: blarg_shuttle::UPDATE_FN, classes: &blarg_shuttle::CLASSES, update: blarg_shuttle::update, joints: &[] },
+    UnitPort { unit: "U224 857", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::UPDATE_FN, classes: &blarg_gadgetbot::CLASSES, update: blarg_gadgetbot::update, joints: &blarg_gadgetbot::CLASSES },
+    UnitPort { unit: "U224 857 glow", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U224 302", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::BUBBLE_FN, classes: &blarg_gadgetbot::BUBBLE_CLASSES, update: blarg_gadgetbot::bubble_update, joints: &[] },
+    UnitPort { unit: "U224 302 bubble", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::BUBBLE_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U224 303", level: blarg_gadgetbot::REFERENCE_LEVEL, func: blarg_gadgetbot::MARKER_FN, classes: &blarg_gadgetbot::MARKER_CLASSES, update: blarg_gadgetbot::marker_update, joints: &[] },
     UnitPort { unit: "U233 1051", level: blarg_boss::REFERENCE_LEVEL, func: blarg_boss::UPDATE_FN, classes: &blarg_boss::CLASSES, update: blarg_boss::update, joints: &blarg_boss::CLASSES },
     UnitPort { unit: "U238 1068", level: blarg_wave_bot::REFERENCE_LEVEL, func: blarg_wave_bot::UPDATE_FN, classes: &blarg_wave_bot::CLASSES, update: blarg_wave_bot::update, joints: &blarg_wave_bot::CLASSES },
     UnitPort { unit: "U238 1068 wave", level: blarg_wave_bot::REFERENCE_LEVEL, func: blarg_wave_bot::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
@@ -1032,6 +1039,8 @@ pub struct Globals {
     pub blarg_gates: blarg_barrier::Beams,
     /// Level 6's glass meshes (`blarg_glass`; read from the overlay by the engine at the level load).
     pub blarg_glass: Option<std::sync::Arc<blarg_glass::Meshes>>,
+    /// Level 6's gadgetbot bubble mesh (`blarg_gadgetbot`; read from the overlay by the engine at the level load).
+    pub blarg_bubble: Option<std::sync::Arc<blarg_gadgetbot::Bubble>>,
     /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
     /// during its cutaways): the points, to put back.
     pub parked_paths: std::collections::HashMap<usize, Vec<[u32; 4]>>,
@@ -1156,6 +1165,7 @@ pub fn fx_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update
         Some((qwark_ship::REFERENCE_LEVEL, qwark_ship::BEAM_FN)) => qwark_ship::beam_quads(table, svc, id),
         Some((blarg_barrier::REFERENCE_LEVEL, blarg_barrier::DRAW_FN)) => blarg_barrier::fx_quads(table, svc, id),
         Some((blarg_laser_gate::REFERENCE_LEVEL, blarg_laser_gate::DRAW_FN)) => blarg_laser_gate::fx_quads(table, svc, id),
+        Some((blarg_gadgetbot::REFERENCE_LEVEL, blarg_gadgetbot::BUBBLE_DRAW_FN)) => blarg_gadgetbot::bubble_quads(table, svc, id),
         Some((blarg_wave_bot::REFERENCE_LEVEL, blarg_wave_bot::DRAW_FN)) => blarg_wave_bot::fx_quads(table, svc, id),
         Some((ship_fighter::REFERENCE_LEVEL, ship_fighter::TRAIL_FN)) | Some((ship_fighter::FLEET_LEVEL, ship_fighter::FLEET_TRAIL_FN)) => ship_fighter::trail_quads(table, svc, id),
         _ => None,
@@ -1187,6 +1197,7 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
 pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, i: u16, id: MobyId) -> Vec<GlowQuad> {
     match PORTS.get(i as usize).map(|u| (u.level, u.func)) {
         Some((lamp::REFERENCE_LEVEL, lamp::UPDATE_FN)) => lamp::glow_quads(table, svc, id),
+        Some((blarg_gadgetbot::REFERENCE_LEVEL, blarg_gadgetbot::DRAW_FN)) => blarg_gadgetbot::glow_quads(table, svc, id),
         Some((hover_zapper::REFERENCE_LEVEL, hover_zapper::GLOW_FN)) => hover_zapper::glow_quads(table, id),
         Some((veldin_diver::REFERENCE_LEVEL, veldin_diver::UPDATE_FN)) => veldin_diver::glow_quads(table, svc, id),
         Some((veldin_boss::REFERENCE_LEVEL, veldin_boss::DRAW_FN)) => veldin_boss::glow_quads(table, svc, id),
