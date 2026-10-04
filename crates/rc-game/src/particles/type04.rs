@@ -12,7 +12,7 @@ use super::{fast_dec_timer, rec, tween_color, Particles};
 use crate::rng::Rng;
 
 /// The spawner's arguments.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spawn {
     pub pos: [f32; 4],
     pub vel: [f32; 4],

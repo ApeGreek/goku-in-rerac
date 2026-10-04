@@ -49,8 +49,12 @@
 //! **Water effects** (`super::swim::effects`): 0x75's surface wake `0x22ac40(15, 30)`, 0x76's bubbles
 //! `0x22b140(n, 0)` (`super::fx::bubbles`), 0x82's breath bubbles (the drowned physics, as 0x6a's).
 //!
+//! **The burns' fire** (2026-10-04): 0x7c's every tick (L00 `0x217450`, also 0x7b's entry on level 15) and 0x3c's
+//! while it rises (`0x209ec8`: the side spark and the fire ring on their timers 0x13f7ee / 0x13f7ec):
+//! [`super::fx::burn_fire`], [`super::fx::burn_bounce_fire`].
+//!
 //! **Not ported** (cosmetic, and they draw from `rand`, so the stream diverges from the PS2 in these states only):
-//! 0x3c's and 0x7c's fire (`0x209ec8`, L00 `0x217450`), 0x7f's
+//! 0x7f's
 //! bubble moby (class 0x52a, `CreateMoby` + its class sound); 0x7c's level-6 fog colour (0x141644 / 0x141648);
 //! the help-flag clear `0x225938` and the level-15 flag 0x15f5a4 of the death sequence; the game mode 0x15f5c4
 //! test of the intake (0 in gameplay ticks); the Giant Clank branch of the intake (body 2, not ported).
@@ -131,6 +135,9 @@ pub struct Damage {
     pub grind_hit: u8,
     /// 0x13f644 as 0x7c sets it: the ground height it sinks from.
     pub burn_floor: f32,
+    /// 0x13f7ee / 0x13f7ec: the burn bounce's spark and fire-ring timers ([`super::fx::burn_bounce_fire`]).
+    pub burn_spark: i16,
+    pub burn_ring: i16,
     /// Voices queued by the entries, played by [`flush`]; 0x77's spin draws follow them.
     pending: Vec<(i32, u32)>,
     pending_spin: bool,
@@ -449,7 +456,9 @@ fn burn_bounce_entry(h: &mut Hero, c: &mut Ctx, play: bool, old_sub: i32) -> Opt
     let j = &mut h.jump;
     j.fallover_after = ticks(150) as i16;
     j.g = DT2 * Pf::f(15.0);
-    // 0x13f7ec = 5, 0x13f7ee = 4: jump-block words the port's jump system does not read.
+    // The fire ring and spark timers (L00 0x2223f8: 0x13f7ec = ticks(5), 0x13f7ee = ticks(4)).
+    h.damage.burn_ring = ticks(5) as i16;
+    h.damage.burn_spark = ticks(4) as i16;
     if play { h.set_anim(c.anim, c.rng, blend(4), 0x43, 0); }
     None
 }
@@ -513,12 +522,19 @@ pub(super) fn physics(h: &mut Hero, env: &Env, anim: &mut dyn AnimCtl, rng: &mut
             h.gravity_from(h.eff_v[2], DT2 * Pf::f(18.0));
         }
         0x7c => {
+            // L00 0x217970 case 0x7c: the fire (0x217450), then the sinking.
+            let floor = h.damage.burn_floor;
+            super::fx::burn_fire(h, rng, floor);
             h.vel = V0;
             h.vel[2] = -DT;
         }
         0x3d | 0x80 => h.phys_ground(env, anim, rng),
         0x82 => h.phys_drown(anim, rng),
-        0x3c => h.phys_jump(env),
+        0x3c => {
+            h.phys_jump(env);
+            // L00 0x21f290: rising faster than 1.5·dt (0x13f438) and not descending → the fire (0x209ec8).
+            if h.state == 0x3c && h.jump.descending == 0 && DT * Pf::f(1.5) < h.vel[2] { super::fx::burn_bounce_fire(h, rng); }
+        }
         _ => return false,
     }
     true

@@ -430,9 +430,13 @@ pub(super) fn entry(h: &mut Hero, c: &mut Ctx, id: i32, play: bool, old_sub: i32
             None
         }
         0x7b => {
-            // L00 0x226724 (level 15 also splashes lava, 0x217450: not ported).
+            // L00 0x226724 (level 15 also splashes lava: the burn death's fire 0x217450 at the liquid level).
             h.group = 0x19;
             h.f15d4 = 0;
+            if h.idle.level == 0xf {
+                let floor = h.surf.liquid;
+                super::fx::burn_fire(h, c.rng, floor);
+            }
             h.no_vel_clamp = 10000;
             h.surf.events.push(SurfaceEvent::Sound(9));
             h.idle.blink_period = 0x68;

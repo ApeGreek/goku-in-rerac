@@ -30,7 +30,7 @@ use super::swim::SwimEvent;
 use super::{Hero, HeroSounds};
 use crate::follow_camera::{ShakeAxis, ShakeRequest};
 use crate::moby_runtime::Moby;
-use crate::particles::{type02, type12, type25, type34, type35, type45, type46, type47, type53, Particles};
+use crate::particles::{type02, type04, type12, type25, type34, type35, type45, type46, type47, type53, Particles};
 use crate::rng::Rng;
 
 /// A particle spawn the hero code made this tick, with its spawner's random draws already made.
@@ -86,6 +86,9 @@ pub enum PartSpawn {
     /// `PartType78Spawn(s1, s2, pos, life, rgba, mode, spin, vel, target)` 0x28ad08: a Morph-o-Ray beam spark
     /// (`super::morph_ray`; modes 0 / 1: no draw); `target_word` = the target's record +0x10.
     Spark78 { s1: f32, s2: f32, pos: [f32; 4], life: i16, rgba: u32, mode: i32, spin: u8, vel: [f32; 3], target: Option<usize>, target_word: u32 },
+    /// `PartType04Spawn` 0x27e538: a fire puff (the burns' fire, [`burn_fire`] / [`burn_bounce_fire`]); `rng` = the
+    /// stream at its rotation draw (made at the call).
+    Fire04 { spawn: type04::Spawn, rng: Rng },
 }
 
 /// A moby the hero code created this tick (`CreateMoby` inside the hero update), with the creator's draws already made.
@@ -310,6 +313,73 @@ pub fn sparkle_burst(h: &mut Hero, rng: &mut Rng, point: &mut [f32; 3], n: i32) 
     }
 }
 
+/// One fire puff of the burns: `base` / `growth` = `trunc(randf(4200, 7350) / 1000)` / `trunc(randf(21000,
+/// 31500.01) / 1000)` (drawn first), colour `c1` → 0x70f0 over `ticks(40)`, additive.
+fn fire_sizes(rng: &mut Rng) -> (i16, i16) {
+    let base = (rng.randf(4200.0, 7350.0) / 1000.0) as i16;
+    let growth = (rng.randf(21000.0, f32::from_bits(0x46f6_1801)) / 1000.0) as i16;
+    (base, growth)
+}
+
+fn fire_puff(h: &mut Hero, rng: &mut Rng, pos: [f32; 4], vel: [f32; 4], c1: u32, base: i16, growth: i16) {
+    let spawn = type04::Spawn { pos, vel, c1, c2: 0x70f0, life: crate::hero::physics::ticks(0x28), base, growth, additive: true };
+    let at = reserve(rng, 1);
+    h.fx.parts.push(PartSpawn::Fire04 { spawn, rng: at });
+}
+
+/// `FUN_00262c50(len, a, b)`: (cos a·l·cos b, sin a·l·cos b, sin b·l).
+fn polar(l: f32, a: f32, b: f32) -> [f32; 4] { [a.cos() * l * b.cos(), a.sin() * l * b.cos(), b.sin() * l, 0.0] }
+
+/// L00 `0x217450`: the burn death's fire (every tick of 0x7c; once at the lava sinking death 0x7b's entry on level 15):
+/// ten puffs (colour 0x7000c0f0) around Ratchet within `randf(0.05, radius + 0.2)`, at the height `floor` (Ratchet's
+/// own off level 6), rising at `randf(0.15, 0.7)·dt` 20°..80° up. Draws per puff: the sizes, the speed, the angle, the
+/// elevation, the distance, the spawner's rotation.
+pub fn burn_fire(h: &mut Hero, rng: &mut Rng, floor: f32) {
+    let dt = crate::hero::physics::DT.to_f32();
+    for _ in 0..10 {
+        let (base, growth) = fire_sizes(rng);
+        let speed = rng.randf(dt * 0.15, dt * 0.7);
+        let p = super::physics::to_f32x3(h.pos);
+        let z = if h.idle.level != 6 { floor } else { p[2] };
+        let a = rng.rand_angle();
+        let b = rng.randf(f32::from_bits(0x3eb2_b8c2), f32::from_bits(0x3fb2_b8c2));
+        let r = rng.randf(f32::from_bits(0x3d4c_cccd), h.cap_radius.to_f32() + 0.2);
+        let vel = polar(speed, a, b);
+        let pos = [p[0] + a.cos() * r, p[1] + a.sin() * r, z, h.pos[3].to_f32()];
+        fire_puff(h, rng, pos, vel, 0x7000_c0f0, base, growth);
+    }
+}
+
+/// L00 `0x209ec8`: the burn bounce's effects while 0x3c rises (the physics after the jump's): every 2..3 ticks
+/// (0x13f7ee) a spark (type 25) off his side (+90°) at `randf(0.2, 0.7)·dt`, falling at 8·dt²; every 3..7 ticks
+/// (0x13f7ec) a ring of 57 fire puffs in every direction at `randf(0.15, 0.57)·dt`, their alpha 240 → 32 over his first
+/// 40 ticks in the state (0x13f4e8), at most 160.
+pub fn burn_bounce_fire(h: &mut Hero, rng: &mut Rng) {
+    use crate::hero::physics::{ticks, DT, DT2};
+    let (dt, dt2) = (DT.to_f32(), DT2.to_f32());
+    let fire = |t: &mut i16| { if *t == 0 { return true; } *t -= 1; *t == 0 };
+    if fire(&mut h.damage.burn_spark) {
+        let y = crate::moby_update::creature::add_rot(h.rot[2].to_f32(), std::f32::consts::FRAC_PI_2);
+        let s = rng.randf(dt * 0.2, dt * 0.7);
+        let pos = h.pos.map(|x| x.to_f32());
+        spark(h, rng, pos, [y.cos() * s, y.sin() * s, 0.0, dt2 * -8.0], false);
+        h.damage.burn_spark = rng.rand_range(2, 3) as i16;
+    }
+    if fire(&mut h.damage.burn_ring) {
+        let f = ((ticks(0x28) - h.timer) as f32 / ticks(0x28) as f32).clamp(0.0, 1.0);
+        let alpha = ((f * 240.0) as i32).clamp(0x20, 0xa0) as u32;
+        for _ in 0..57 {
+            let (base, growth) = fire_sizes(rng);
+            let speed = rng.randf(dt * 0.15, dt * 0.57);
+            let a = rng.rand_angle();
+            let b = rng.rand_angle();
+            let pos = h.pos.map(|x| x.to_f32());
+            fire_puff(h, rng, pos, polar(speed, a, b), alpha << 24 | 0xc0f0, base, growth);
+        }
+        h.damage.burn_ring = rng.rand_range(ticks(3), ticks(7)) as i16;
+    }
+}
+
 /// The particle hook's part: create the hero's queued spawns of this tick, in order (before `UpdateParts`).
 pub fn create_particles(h: &Hero, sys: &mut Particles) {
     sys.hero = crate::hero::physics::to_f32x3(h.pos);
@@ -334,6 +404,7 @@ pub fn create_one(sys: &mut Particles, s: &PartSpawn, gold: u8) {
         }
         PartSpawn::Flame { len, pos, vel, flags, draws } => { type12::spawn(sys, len, pos, vel, flags, gold, &draws); }
         PartSpawn::Blob { spawn, mut rng } => { type02::spawn(sys, &mut rng, &spawn); }
+        PartSpawn::Fire04 { spawn, mut rng } => { type04::spawn(sys, &mut rng, &spawn); }
         PartSpawn::Ring45 { size, growth, pos, mut rng } => { type45::spawn45_on(sys, &mut rng, size, growth, pos, type45::HERO_WATER_LEVEL, u32::MAX); }
         PartSpawn::Ring46 { size, spin, pos, vel, mut rng } => { type46::spawn_on(sys, &mut rng, size, spin, pos, vel, type45::HERO_WATER_LEVEL); }
         PartSpawn::Drop35 { pos, vel, kind, life, mut rng } => { type35::spawn(sys, &mut rng, pos, vel, kind, life); }
