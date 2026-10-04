@@ -126,10 +126,12 @@ pub struct CameraPorts {
     pub flyby: bool,
     /// Classes 20 and 21's functions and helpers are level 14's (Oltanis's grind race, [`super::race`]).
     pub race: bool,
+    /// Class 22's hook and helpers are level 15's (Giant Clank's view, [`super::giant`]).
+    pub giant: bool,
 }
 
 impl Default for CameraPorts {
-    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true, board: true, flyby: true, race: true } }
+    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true, board: true, flyby: true, race: true, giant: true } }
 }
 
 impl CameraPorts {
@@ -140,7 +142,7 @@ impl CameraPorts {
     /// level's overlay; a class whose reference is missing is not run).
     pub fn from_overlays(target: &LevelOverlay, reference: &dyn Fn(u32) -> Option<Arc<LevelOverlay>>) -> CameraPorts {
         let Some(level01) = reference(1) else {
-            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false, board: false, flyby: false, race: false };
+            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false, board: false, flyby: false, race: false, giant: false };
         };
         let rel = rc_formats::level_overlay::Relocation::new(&level01, target);
         let region = target.camvtbl().iter().find(|e| e.class == CLASS_REGION).is_some_and(|e| {
@@ -201,7 +203,8 @@ impl CameraPorts {
         let flyby = four(super::flyby::CLASS_FLYBY, 10, super::flyby::FLYBY_FNS, &super::flyby::FLYBY_HELPERS);
         use super::race as rc;
         let race = four(rc::CLASS_INTRO, 14, rc::INTRO_FNS, &rc::INTRO_HELPERS) && four(rc::CLASS_RACE, 14, rc::RACE_FNS, &[]);
-        CameraPorts { region, swing, placed, focus, rail, fixed, side, board, flyby, race }
+        let giant = class_of(super::giant::CLASS_GIANT, 15, super::giant::GIANT_HOOK, 0x80 / 4, &super::giant::GIANT_HELPERS);
+        CameraPorts { region, swing, placed, focus, rail, fixed, side, board, flyby, race, giant }
     }
 
     /// Whether the port runs `class` as a current camera (the follow, first-person, script and type-6 cameras always).
@@ -248,6 +251,8 @@ pub struct Slot {
     pub intro: Option<super::race::IntroRec>,
     /// Class 21's block with its run-time words +0x20, +0x30, +0x32 ([`super::race`]).
     pub race: Option<super::race::RaceRec>,
+    /// Class 22's block with its run-time words +0x20, +0x3c ([`super::giant`]).
+    pub giant: Option<super::giant::GiantView>,
 }
 
 /// The level's camera slots and the follow camera's lock words.
@@ -294,7 +299,8 @@ impl LevelCameras {
                 let flyby = if class == super::flyby::CLASS_FLYBY || class == super::race::CLASS_INTRO { super::flyby::FlybyRec::parse(p) } else { None };
                 let intro = if class == super::race::CLASS_INTRO { super::race::IntroRec::parse(p) } else { None };
                 let race = if class == super::race::CLASS_RACE { super::race::RaceRec::parse(p) } else { None };
-                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side, board, flyby, intro, race }
+                let giant = if class == super::giant::CLASS_GIANT { super::giant::GiantView::parse(p) } else { None };
+                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side, board, flyby, intro, race, giant }
             })
             .collect();
         LevelCameras {
@@ -485,6 +491,7 @@ impl Camera {
                 }
                 super::race::CLASS_INTRO if self.level_cams.ports.race => self.intro_hook(i, best_now, inp),
                 super::race::CLASS_RACE if self.level_cams.ports.race => self.race_hook(i, best_now),
+                super::giant::CLASS_GIANT if self.level_cams.ports.giant => self.giant_hook(i, inp),
                 // The script and type-6 cameras' hooks answer 0; they are switched in by their calls (+0x7d is not
                 // set by the port's `CameraScript`, which switches directly). Class 3's hook `0x315dd8` answers 0.
                 _ => 0,

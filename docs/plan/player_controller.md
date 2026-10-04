@@ -1076,7 +1076,8 @@ camera turned along the trigger cuboid's x row at 8° a tick, distance 7, pivot 
   rail), turns his head back in stage 1 (head record targets 20° / −120°) and calls the bots' attacks (commands 1 / 5).
   Its stores reach the moby world before the next moby loop (`RaceOut`). G-LVL-007.
 * **Class 8, the hoverboard camera**: ported 2026-10-01 (`follow_camera/board.rs`, its coverage table in the module doc).
-* **Class 22** (L15 0x2f8ba8): class 18's modes 1 / 2 for giant Clank (body 2). G-HERO-005.
+* **Class 22** (L15 0x2f8ba8): class 18's modes 1 / 2 for Giant Clank (body 2), turning toward a cuboid's centre:
+  ported 2026-10-04 (`follow_camera/giant.rs`, its coverage table in the module doc).
 
 **The setters** (`Camera::…` in follow_camera.rs; each a no-op unless the follow camera is current): `0x313628`
 `set_distance`, `0x313668` `set_pull_max`, `0x313690` `set_pivot_height`, `0x3136c8` `set_look_height`, `0x313718`

@@ -262,7 +262,7 @@ impl Camera {
     /// The view test `0x2fb788(max_angle, max_pitch)`: true when both are 0; else the moby's elevation from the camera
     /// within `max_pitch`° of the camera's (about the up 0x1672c0), and the flat angle between the camera's forward
     /// and the moby within `max_angle`° (a flat vector: false).
-    fn focus_view(&self, _i: usize, max_angle: f32, max_pitch: f32, m: Option<CamMoby>) -> bool {
+    pub(super) fn focus_view(&self, _i: usize, max_angle: f32, max_pitch: f32, m: Option<CamMoby>) -> bool {
         if max_angle == 0.0 && max_pitch == 0.0 { return true; }
         let Some(m) = m else { return false };
         let up = to_f32x3(self.g.up2);

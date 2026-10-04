@@ -32,7 +32,7 @@
 //! | 0xc | circling; the timer out → `ticks(1200)`, 0xb (+0xbc 7, seq 6) | |
 //! | 0xd | home (facing within 45°, 4·dt); a target → 7; there → 7 (seq 1) | |
 //! | 0xe | flag 0x13d3ab; meter 0; update 0xff; seq done → `0x26e1f8(2, 20)` 1 up, the burst (0x6a2 ×1, 0x6a3 ×3, 6, 2), door +0x100 open, sliders down, 0xf (seq 1), hidden; no shots fired and flag 0x13d412 clear → it set, banner 0x53d6; morphed (+0x2e = 2): straight to 0xf | |
-//! | 0xf | the boss camera (type 0x12) let go [L: not modelled]; in a scene (mode 2) → door +0xfc opened, deleted | |
+//! | 0xf | the first camera slot of class 0x12 (the boss camera) let go (`0x316330`: its record +0x50 = 1); in a scene (mode 2) → door +0xfc opened, deleted | [`update`] |
 //! | `0x2fa9c0` | the spline wall in 4..13; meter = health·16; a hit (0x330000) through the resolver (column 4) outside 0xe / 3 / 5: the weapon factor; health −; crossing 20 or 10 with no fade running → held there, a fade (`ticks(30)`); a fade running → not below its floor; ≤ 0 → reaction 1, else 1 → 5; 1 / 2: the meter released, 0xe, `SetDeathBits`, the checkpoint at cuboid +0xf8, not targetable, seq 10, flash 0xfa; 3..10: flash 200; the flash; morphed → the meter released, 0xe; from state 2 on a held fire button with a hand item other than 8 marks +0x178; the fade: out over its last `ticks(10)` → at 0 the next phase (health 19.95: 3, the cutaway; else 9.9: 5, Ratchet teleported to +0xf8, the cutaway), home, facing Ratchet, seq 6; in back over `ticks(10)`; glow (120°/s, 0x80808080 → 0x80804080); the target in its arena (range 255) | [`hits`] |
 
 use crate::moby_runtime::{mode, MobyId};
@@ -633,9 +633,13 @@ pub fn update(w: &mut World, id: MobyId) {
             m.has_collision = false;
             blend(w, id, 1, 20);
         }
-        0xf if w.svc.game_mode == 2 => {
-            if let Some(d) = story::link(w, pi(w, id, pv::DOOR_A)) { super::petal_door::open(w, d); }
-            w.delete_moby(id);
+        0xf => {
+            // `0x316330` on the first slot of class 0x12 (the slots' active words 0x16a010: every loaded record).
+            if let Some(k) = w.svc.camera_classes.iter().take(0x30).position(|&c| c == 0x12) { crate::cinematic::focus_suppress(w, k); }
+            if w.svc.game_mode == 2 {
+                if let Some(d) = story::link(w, pi(w, id, pv::DOOR_A)) { super::petal_door::open(w, d); }
+                w.delete_moby(id);
+            }
         }
         _ => {}
     }

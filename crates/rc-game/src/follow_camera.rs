@@ -56,6 +56,7 @@ pub mod board;
 pub mod class_cam;
 pub mod cuboid;
 pub mod flyby;
+pub mod giant;
 pub mod race;
 pub mod focus;
 pub mod level;
