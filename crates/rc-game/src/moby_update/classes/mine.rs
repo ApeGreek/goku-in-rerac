@@ -49,7 +49,8 @@
 //! by π about x) is not written (the glove is not a table moby); the release's wall test starts at Ratchet (at the
 //! launch height; the disassembly's `lq`); the mines' list 0x1b0c30 is the table's mines; a mine on a moving platform
 //! does not ride it (0x13f64c: never set in the port); the blob shadow `0x26eec8(0.25)` is `crate::shadows::blob`; the gold
-//! mine (0x13e531) is not mirrored; the global 0x1613d0 that blows every mine up (0 in level01's data; its writer is
+//! mine (0x13e531, item 17: the seek range ×2, the blast and its puffs ×1.5, their colours shifted, class sound 3, the
+//! light 0x20a8e0) reads the mirrored gold table (`Weapons::gold`); the global 0x1613d0 that blows every mine up (0 in level01's data; its writer is
 //! not in the ported code) is not read.
 
 use crate::moby_runtime::{mode, MobyId, MobyTable};
@@ -545,9 +546,12 @@ fn after_move(w: &mut World, id: MobyId, drift: V, normal: V) {
 }
 
 /// The proximity search over the target list (module doc).
+/// The gold Mine Glove 0x13e531 (item 17), the byte as `0x2bfe40` reads it.
+fn gold(w: &World) -> u8 { w.hero.weapons.gold.get(17).copied().unwrap_or(0) }
+
 fn seek_search(w: &mut World, id: MobyId) {
     let pos = c::pos(w, id);
-    let mut range = 4.0f32;
+    let mut range = (gold(w) as f32 + 1.0) * 4.0;
     if c::pi32(w, id, pv::LURED) != 0 { range *= 3.0; }
     let list: Vec<MobyId> = w.svc.targets.clone();
     let mut best: Option<MobyId> = None;
@@ -587,14 +591,17 @@ fn explode(w: &mut World, id: MobyId, _drift: V, _normal: V) {
     let cam = w.camera.map(|x| x.to_f32());
     let dcam = c::dist2(pos, cam);
     let water = c::pi16(w, id, pv::WATER) != 0;
-    if !water { attack::area_hit(w, 2.0, pos, id, 3.0, 0.25, 1.5, None, 0x81_0000, 4, 1); }
+    // The blast sphere 2·(0x13e531·0.5 + 1).
+    let g = gold(w);
+    let gk = g as f32 * 0.5 + 1.0;
+    if !water { attack::area_hit(w, gk + gk, pos, id, 3.0, 0.25, 1.5, None, 0x81_0000, 4, 1); }
     let gz = w.ground_height(Pf::f(0.5), pvq(pos), 0x20).to_f32();
     if !water {
         if gz + 2.0 < pos[2] {
             let b = fx::Beam { damage_r: 0.0, damage: 0.0, flash: 2.0, flash2: 1.0, flash_dist: 4.0, scale: 1.0, light: 7.0, streaks: 3, sparks: 3, puffs: 5, debris: 1, sound: 2, shake: false };
             fx::beam_explosion(w, &b, Some(id), pos);
         } else {
-            smoke(w, pos);
+            smoke(w, pos, g);
         }
     } else {
         let surf = w.ground_height(Pf::f(0.5), pvq([pos[0], pos[1], pos[2] + 3.5, pos[3]]), 0).to_f32();
@@ -602,28 +609,31 @@ fn explode(w: &mut World, id: MobyId, _drift: V, _normal: V) {
         bomb_water::scorch(w, pos, surf, &bomb_water::MINE_SCORCH);
     }
     w.mm(id).cmd = 0;
-    w.play_sound(2, 0, id);
+    w.play_sound(if g == 0 { 2 } else { 3 }, 0, id);
     let amp = if dcam < 20.0 { 0.4 - dcam * 0.0175 } else { f32::from_bits(0x3d4c_ccd0) };
     let t = w.ticks(25);
     w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp, ticks: t });
-    fx::light_spawn(w, &fx::LIGHT_BOMB, pos);
+    fx::light_spawn(w, if g == 0 { &fx::LIGHT_BOMB } else { &fx::LIGHT_GOLD }, pos);
     w.delete_moby(id);
 }
 
 /// The ground explosion's 15 type-16 puffs (`0x2bfe40` at 0x2c1aa8): per puff `randi(4)` picks the kind (0 smoke,
 /// 1 fire, 2 flash, 3 embers), a velocity `(randf(±0.5·dt), randf(±0.5·dt), randf(4·dt, [14, 22, 12, 0][kind]·dt))`, a
 /// spot `randf(0, 0.25)` (0.5 for fire) out at a random angle and sunk by its cosine of 45°, the rise less 8·dt per
-/// unit out, then the kind's colours, size and life.
-fn smoke(w: &mut World, pos: V) {
+/// unit out, then the kind's colours, size and life. The gold mine (`gold` ≠ 0): velocities, spot and sizes ×1.5
+/// (0x13e531·0.5 + 1) and every colour through `0x270fa8(c, gold)` ([`fx::colour_shift`]).
+fn smoke(w: &mut World, pos: V, gold: u8) {
+    let gk = gold as f32 * 0.5 + 1.0;
+    let sh = |c: u32| fx::colour_shift(c, gold);
     use crate::particles::{tween_color, type16};
     let n = 15;
     for _ in 0..n {
         let kind = w.rng.randi(4);
         let tops = [DT * 14.0, DT * 22.0, DT * 12.0, 0.0];
-        let vx = w.rng.randf(DT * -0.5, DT * 0.5);
-        let vy = w.rng.randf(DT * -0.5, DT * 0.5);
-        let mut vz = w.rng.randf(DT * 4.0, tops[kind as usize]);
-        let r = w.rng.randf(0.0, if kind == 1 { 0.5 } else { 0.25 });
+        let vx = w.rng.randf(DT * -0.5, DT * 0.5) * gk;
+        let vy = w.rng.randf(DT * -0.5, DT * 0.5) * gk;
+        let mut vz = w.rng.randf(DT * 4.0, tops[kind as usize]) * gk;
+        let r = w.rng.randf(0.0, if kind == 1 { 0.5 } else { 0.25 }) * gk;
         let a = w.rng.rand_angle();
         let at = [a.cos() * r + pos[0], a.sin() * r + pos[1], pos[2] - r * f32::from_bits(0x3f49_0fd8).cos(), pos[3]];
         vz -= r * DT * 8.0;
@@ -631,19 +641,19 @@ fn smoke(w: &mut World, pos: V) {
         let (size, c1, c2, life, k) = match kind {
             1 => {
                 let size = w.rng.randf(50000.0, 100000.0);
-                (size, 0x3f08_1020, 0x0f08_1020, w.ticks(0xb4), 1)
+                (size * gk, sh(0x3f08_1020), sh(0x0f08_1020), w.ticks(0xb4), 1)
             }
             0 => {
                 let size = w.rng.randf(200_000.0, 300_000.0);
                 let (a, b) = (w.ticks(0xb4), w.ticks(0xf0));
                 let life = w.rng.rand_range(a, b);
-                (size, 0x1f10_1820, 0x10_1010, life, 0)
+                (size * gk, sh(0x1f10_1820), 0x10_1010, life, 0)
             }
             2 => {
                 let c = if 0x27 < w.rng.randi(100) { 0x2f48_6078 } else { 0x5ff8_f8f8 };
                 let (a, b) = (w.ticks(0x1e), w.ticks(0x2d));
                 let life = w.rng.rand_range(a, b);
-                (150_000.0, c, 0x0f00_0020, life, 2)
+                (150_000.0 * gk, sh(c), sh(0x0f00_0020), life, 2)
             }
             _ => {
                 let f = w.rng.randf(0.25, 1.0);
@@ -657,7 +667,7 @@ fn smoke(w: &mut World, pos: V) {
                 let size = w.rng.randf(200_000.0, 300_000.0);
                 let (lo, hi) = (w.ticks(0xf0), w.ticks(300));
                 let life = w.rng.rand_range(lo, hi);
-                (size, c1, c2, life, 3)
+                (size * gk, sh(c1), sh(c2), life, 3)
             }
         };
         let s = type16::Spawn { size, pos: at, vel, c1, c2, life, kind: k };

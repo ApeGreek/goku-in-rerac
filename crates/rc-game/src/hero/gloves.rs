@@ -405,7 +405,9 @@ fn mine_aim(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, b: MobyId) ->
     let launch = super::weapons::launch_point(to_f32x3(hero.pos), fwd);
     if hero.items.f13fc != 0 { return launch; }
     let strafe = env.pad.held & button::STRAFE != 0;
-    let k = if strafe { 6.0 } else { 4.0 };
+    // The gold Mine Glove (0x13e531, item 17) reaches 12 with L1 / L2.
+    let gold = hero.weapons.gold.get(17).is_some_and(|&g| g != 0);
+    let k = if !strafe { 4.0 } else if gold { 12.0 } else { 6.0 };
     let mut target = add3(launch, scale3(fwd, k));
     if strafe {
         if let Some(t) = first_person_target(env, k, DT * DT * 9.8) { target = t; }

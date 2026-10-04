@@ -679,13 +679,14 @@ impl GameState {
     pub fn options(&self) -> Options {
         let g = &self.global;
         Options {
-            yaw_normal: g.cam_yaw_normal != 0,
-            pitch_normal: g.cam_pitch_normal != 0,
-            rotation_speed: g.cam_speed.clamp(0, 2) as usize,
+            // The game reads these 4-byte globals as `*(u8*)` (the Options lists write only the low byte).
+            yaw_normal: g.cam_yaw_normal & 0xff != 0,
+            pitch_normal: g.cam_pitch_normal & 0xff != 0,
+            rotation_speed: (g.cam_speed & 0xff).clamp(0, 2) as usize,
             helpdesk_voice: g.helpdesk_voice != 0,
             helpdesk_text: g.helpdesk_text != 0,
             subtitles: g.subtitles != 0,
-            stereo: g.stereo != 0,
+            stereo: g.stereo & 0xff != 0,
             music_volume: g.music_volume,
             effects_volume: g.effects_volume,
             mirror: g.cheats_active[4] != 0,

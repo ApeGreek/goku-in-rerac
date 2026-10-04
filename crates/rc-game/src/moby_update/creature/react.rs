@@ -287,7 +287,7 @@ pub struct Globals {
     /// 0x1413c8 / 0x1413cc: held, coming.
     pub held: i32,
     pub coming: i32,
-    /// 0x13e529: the gold Suck Cannon (not mirrored: 0).
+    /// 0x13e529: the gold Suck Cannon (mirrored by the engine every tick).
     pub gold: bool,
     /// A write of the swap lock 0x1403fc by the moby side (the cannon's next update copies it to the hand slot [L]).
     pub swap_lock: Option<u8>,
@@ -301,7 +301,7 @@ pub struct Globals {
     /// (`crate::moby_update::classes::chicken`).
     pub chickens: [u32; 20],
     pub chicken_next: usize,
-    /// 0x13e535: the gold Morph-o-Ray (not mirrored: 0; the chickens' and feathers' gold size read it).
+    /// 0x13e535: the gold Morph-o-Ray (mirrored by the engine every tick; the chickens' and feathers' gold size read it).
     pub gold_morph: u8,
     /// The cannon's class sound 5 asked for by a swallow (played by its next update).
     pub cannon_sound5: u32,

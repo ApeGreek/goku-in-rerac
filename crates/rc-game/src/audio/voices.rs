@@ -164,6 +164,8 @@ pub struct UpdateCtx<'a> {
     /// Master volume options 0x15edf0 (sfx) and 0x15edec (music); 0x400 = full.
     pub sfx_option: i32,
     pub music_option: i32,
+    /// The Sound options page is open: group 2 at the music volume (`AudioSystem::sound_page`).
+    pub sound_page: bool,
     /// 0x15f5c4 == 2.
     pub cutscene: bool,
 }
@@ -384,7 +386,9 @@ impl SoundSlots {
         }
         if n > 1 { vel = vscale(vel, 1.0 / n as f32); }
 
-        for (group, vol) in master_volumes(ctx.sfx_option, ctx.music_option, l.underwater, ctx.cutscene).into_iter().enumerate() {
+        let mut groups = master_volumes(ctx.sfx_option, ctx.music_option, l.underwater, ctx.cutscene);
+        if ctx.sound_page { groups[2] = ctx.music_option; }
+        for (group, vol) in groups.into_iter().enumerate() {
             cmds.push(SndCommand::MasterVolume { group: group as u8, vol });
         }
 

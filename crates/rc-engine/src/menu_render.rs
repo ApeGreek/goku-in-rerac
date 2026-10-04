@@ -685,6 +685,8 @@ fn menu_frame(
                 if trace && !out.sounds.is_empty() { println!("menus: frame {frame}: sounds {:?}", out.sounds); }
                 // The class-0x472 sounds (`PlayClassSound(n, 0x11, frame moby)`), the close's audio, then the frame's sound_update.
                 if let Some(a) = audio.as_deref_mut() {
+                    // The Sound page (kind 0x20): group 2 at the music volume while it is open (`AudioSystem::sound_page`).
+                    a.system().sound_page = menu.kind == 0x20 && out.exit.is_none();
                     play_menu_sounds(&mut play, a, &out.sounds);
                     // The movie / scene / slideshow post-actions unpause after their fade and action (post_fade_step).
                     if let Some(x) = out.exit.filter(|x| !is_media_action(x)) { a.system().menu_close(!matches!(x, PostAction::ShipTravel(_))); }

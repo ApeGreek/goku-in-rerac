@@ -194,7 +194,8 @@ pub(crate) struct SceneRuntime {
     light_word: u32,
     ambient: [u8; 3],
     language: usize,
-    subtitles: bool,
+    /// `RC_SUBTITLES` (None: the game's option 0x15ee40).
+    subtitles: Option<bool>,
     glyphs: Option<[GlyphTable; 3]>,
     frames: u32,
     uploaded: Option<u32>,
@@ -216,7 +217,8 @@ pub struct SceneRenderPlugin;
 impl Plugin for SceneRenderPlugin {
     fn build(&self, app: &mut App) {
         let mode = scene_env();
-        let subtitles = !std::env::var("RC_SUBTITLES").is_ok_and(|v| v.trim() == "0");
+        // `RC_SUBTITLES=0|1` forces them; else the game's option 0x15ee40 (pause → Options → Subtitles) decides.
+        let subtitles = std::env::var("RC_SUBTITLES").ok().map(|v| v.trim() != "0");
         app.add_plugins(FullscreenMaterialPlugin::<SceneFade>::default())
             .init_resource::<ActiveScene>()
             // A runtime level change (crate::level_switch): the scene state of the old level dropped.
@@ -507,7 +509,7 @@ fn scene_frame(
             replay: menu.as_ref().is_some_and(|m| m.replay != 0),
             level: crate::level_load::level_index() as i32,
             language: rt.language,
-            subtitles: rt.subtitles,
+            subtitles: rt.subtitles.unwrap_or_else(|| gs.is_none_or(|g| g.subtitles != 0)),
         };
         println!(
             "scene: app frame {}: DialogStreamStart({k}) after gameplay tick {} ({}): {} ticks, {} chunks, actors {:?}, cuts {:?}; subtitles {} (game option 0x15ee40 = {}), language {}",

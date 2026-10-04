@@ -905,6 +905,13 @@ pub const LIGHT_BEAM_GOLD: LightTemplate = LightTemplate {
     ..LIGHT_BEAM
 };
 
+/// `0x20a8e0` = `0x20aa00`, the gold weapons' explosion light: the gold Mine Glove's mine (`0x2bfe40`) and the gold
+/// Devastator's missile (`0x2c5b70`) (the bomb's layout, other colours).
+pub const LIGHT_GOLD: LightTemplate = LightTemplate {
+    bytes: [0x00, 0x00, 0x80, 0x00, 0x80, 0x0c, 0x00, 0xff, 0x00, 0x80, 0x09, 0x00, 0x64, 0x00, 0x80, 0x0d],
+    ..LIGHT_BOMB
+};
+
 /// `0x20a930`, the Bomb Glove explosion's light (copied to the stack by `0x2c3300`, spawned at the explosion).
 pub const LIGHT_BOMB: LightTemplate = LightTemplate {
     offset: [0.0, 0.0, 1.0, 0.0],

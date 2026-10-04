@@ -127,7 +127,8 @@ pub struct Weapons {
     /// The item definitions' weapon fields (`0x22ee08`: the arm's sequences), by item id, from the level's item
     /// table (the engine sets them; none: no arm sequences).
     pub defs: Vec<super::items::WeaponDef>,
-    /// 0x13e520 + id: the gold weapons (the Pyrocitor reads its own, 0x13e530). Not mirrored yet: 0.
+    /// 0x13e520 + id: the gold weapons (the Pyrocitor reads its own, 0x13e530), mirrored from the saved game every
+    /// tick by the engine.
     pub gold: [u8; N],
     /// The Pyrocitor's pvars ([`super::pyrocitor`]).
     pub pyro: super::pyrocitor::Pyro,

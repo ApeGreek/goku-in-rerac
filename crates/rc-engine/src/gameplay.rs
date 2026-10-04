@@ -1822,6 +1822,17 @@ fn tick(
     if let Some(gs) = state.as_deref() {
         p.game.hero.weapons.ammo = gs.0.global.ammo;
         p.game.hero.owned.0 = gs.0.global.owned;
+        // The gold weapons 0x13e520 (by item id) as the hero code reads them (`Weapons::gold`; G-WPN-009).
+        for (d, v) in p.game.hero.weapons.gold.iter_mut().zip(gs.0.global.gold_weapons.iter()) { *d = *v; }
+        {
+            // The moby side's view of the same table: the item offers and the hit resolver (`Counters::gold_weapons`), the
+            // gold Suck Cannon 0x13e529 (item 9: ten slots) and the gold Morph-o-Ray 0x13e535 (item 21: the gold chickens).
+            let mut svc = svc_cell.borrow_mut();
+            let g = &gs.0.global.gold_weapons;
+            if svc.counters.gold_weapons.as_slice() != &g[..] { svc.counters.gold_weapons = g.to_vec(); }
+            svc.creatures.react.gold = g.get(9).is_some_and(|&b| b != 0);
+            svc.creatures.react.gold_morph = g.get(21).copied().unwrap_or(0);
+        }
         svc_cell.borrow_mut().interact.sync_game(&gs.0);
         // The cheat bytes 0x15edb0 (rc_game::cheats) for the tick and the hero (GameOptions) and the moby loop
         // (Services::cheats), and the options the game reads every tick (the mirror 0x15edb4, the camera's).

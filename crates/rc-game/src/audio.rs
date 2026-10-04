@@ -534,6 +534,9 @@ pub struct AudioSystem {
     /// Option volumes (boot data: sfx 0x400, music 0x2cc).
     pub sfx_option: i32,
     pub music_option: i32,
+    /// The Sound options page is open (`SoundOptionsMenu` 0x290538): group 2 (0x13e5a0) plays at the music volume
+    /// while it is, back to sfx·8/10 on its leave 0x290508 (the engine sets it from the page menu).
+    pub sound_page: bool,
     pub stats: AudioStats,
     /// Mode-2 scene audio: speech voice, music pause / resume, cutscene volumes ([`scene`]).
     pub scene: scene::SceneAudio,
@@ -590,6 +593,7 @@ impl AudioSystem {
             rng,
             sfx_option: 0x400,
             music_option: 0x2cc,
+            sound_page: false,
             stats: AudioStats::default(),
             scene: scene::SceneAudio::default(),
             play_log: None,
@@ -666,6 +670,7 @@ impl AudioSystem {
             owner_pos,
             sfx_option: self.sfx_option,
             music_option: self.music_option,
+            sound_page: self.sound_page,
             cutscene: self.scene.cutscene,
         };
         // The head of `sound_update`: the reverb command of this frame's changes, before the slots' commands.

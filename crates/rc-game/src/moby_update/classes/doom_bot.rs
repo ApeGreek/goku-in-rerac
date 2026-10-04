@@ -44,7 +44,7 @@
 //!
 //! Native `f32`; the rand draws are the game's. **Inferred [L]**: J +0x2c (the "arrived" distance), +0x34, +0x38
 //! (the walker flags) and +0x4c are BSS the bots never write (0); the gold bots (0x13e534: size, reach, the anim
-//! speed, class sound 4) are not mirrored (G-WPN-009); moving platforms (`0x2752c0`) are n/a (0x13f64c is never set);
+//! speed, class sound 4, the blast's colour shift) read the mirrored gold table (`Weapons::gold`); moving platforms (`0x2752c0`) are n/a (0x13f64c is never set);
 //! the debug prints and lines (`STUB_printf`, `0x2d5478`, `0x26e3e8` only feeds them and the arc test) have no effect;
 //! `+0xbc = 0xd` on a planned jump is written and read by nothing.
 
@@ -122,9 +122,13 @@ pub mod st {
 /// −1, gold)`.
 pub const BLAST: fx::Beam = fx::Beam { damage_r: 0.0, damage: 0.0, flash: 2.0, flash2: 1.0, flash_dist: 9.0, scale: 1.0, light: 15.0, streaks: 5, sparks: 2, puffs: 4, debris: 5, sound: -1, shake: true };
 
-/// 0x13e534 + 1 (the gold multiplier; not mirrored) and 0x13e534·0.5 + 1.
-const G: f32 = 1.0;
-const GH: f32 = 1.0;
+/// The gold Glove of Doom 0x13e534 (item 20, the byte as a number): `g` = 0x13e534 + 1 (size, speed, reach) and `gh` =
+/// 0x13e534·0.5 + 1 (the queries' heights and the hop), as `0x2d5c10` / `0x2d4718` read it each time.
+fn gold(w: &World) -> f32 { w.hero.weapons.gold.get(GLOVE as usize).copied().unwrap_or(0) as f32 }
+fn g(w: &World) -> f32 { gold(w) + 1.0 }
+fn gh(w: &World) -> f32 { gold(w) * 0.5 + 1.0 }
+/// The Glove of Doom's item id.
+const GLOVE: u8 = 20;
 
 fn in_box(q: V) -> bool { (0..3).all(|k| (2.0..=1021.0).contains(&q[k])) }
 fn pv4(v: V) -> [Pf; 4] { v.map(Pf::f) }
@@ -219,21 +223,21 @@ fn init(w: &mut World, id: MobyId) {
         let pvs = &mut w.mm(id).pvars;
         for b in &mut pvs[pv::R..pv::R + 0x40] { *b = 0; }
     }
-    let j7 = G * 0.01 * f;
-    set_jf(w, id, 2, G * 0.25);
-    set_jf(w, id, 3, G * 0.25);
+    let j7 = g(w) * 0.01 * f;
+    set_jf(w, id, 2, g(w) * 0.25);
+    set_jf(w, id, 3, g(w) * 0.25);
     set_jf(w, id, 16, f * 0.01);
     set_jf(w, id, 7, j7);
     set_jf(w, id, 15, f * 0.02);
     set_jf(w, id, 17, f * 0.045);
     set_rf(w, id, r::GRAVITY, DT2 * 29.7);
     c::set_pf(w, id, pv::TURN_V, f * 0.2);
-    set_rf(w, id, r::MAX_SPEED, G * 0.1);
+    set_rf(w, id, r::MAX_SPEED, g(w) * 0.1);
     c::set_pf(w, id, pv::SPEED, j7);
     set_jf(w, id, 8, 0.3);
     set_jf(w, id, 9, 2.7);
     set_jf(w, id, 6, 0.0);
-    c::set_pf(w, id, pv::TOP, f * 0.066 * GH);
+    c::set_pf(w, id, pv::TOP, f * 0.066 * gh(w));
     c::set_pu8(w, id, pv::R + r::SEQ_LAND, 4);
     c::set_pu8(w, id, pv::R + r::SEQ_WIND, 2);
     c::set_pu8(w, id, pv::R + r::SEQ_AIR, 3);
@@ -247,7 +251,7 @@ fn init(w: &mut World, id: MobyId) {
     set_target(w, id, None);
     w.mm(id).state = st::DROP;
     c::set_pi32(w, id, pv::PATIENCE, 0);
-    c::set_pf(w, id, pv::TOP, f * 0.1 * GH);
+    c::set_pf(w, id, pv::TOP, f * 0.1 * gh(w));
     load_j(w, id);
     load_r(w, id);
     let t5 = w.ticks(5);
@@ -261,10 +265,10 @@ fn init(w: &mut World, id: MobyId) {
 /// centre is brought back 0.2 down.
 fn sphere(w: &World, id: MobyId, flags: u32, at: Option<V>) -> Option<crate::collision_query::CollOutput> {
     let q = at.unwrap_or_else(|| c::pos(w, id));
-    let centre = [q[0], q[1], q[2] + GH * 0.2, q[3]];
-    let mut o = w.coll_sphere(pv4(centre), Pf::f(GH * 0.1999), flags, Some(id))?;
+    let centre = [q[0], q[1], q[2] + gh(w) * 0.2, q[3]];
+    let mut o = w.coll_sphere(pv4(centre), Pf::f(gh(w) * 0.1999), flags, Some(id))?;
     let pc = o.pushed_centre.unwrap_or([centre[0], centre[1], centre[2]]);
-    o.pushed_centre = Some([pc[0], pc[1], pc[2] - GH * 0.2]);
+    o.pushed_centre = Some([pc[0], pc[1], pc[2] - gh(w) * 0.2]);
     Some(o)
 }
 
@@ -607,14 +611,15 @@ pub fn update(w: &mut World, id: MobyId) {
     if w.get_hit(id, 0x80_0001, false).is_some() { w.mm(id).state = st::EXPLODE; }
     let cs = w.class_scale(CLASS).to_f32();
     {
+        let (g, gh) = (g(w), gh(w));
         let m = w.mm(id);
-        m.scale += (cs * G - m.scale) * 0.05;
-        m.anim.speed = if matches!(m.anim.seq_a, 0 | 6 | 7) { GH / G } else { 1.0 };
+        m.scale += (cs * g - m.scale) * 0.05;
+        m.anim.speed = if matches!(m.anim.seq_a, 0 | 6 | 7) { gh / g } else { 1.0 };
     }
     if w.m(id).state != st::EXPLODE {
-        c::set_pi32(w, id, pv::J, (G * 183.296) as i32 + 1);
+        c::set_pi32(w, id, pv::J, (g(w) * 183.296) as i32 + 1);
         set_jf(w, id, 12, 0.0);
-        set_jf(w, id, 1, G * 0.198 + 0.02);
+        set_jf(w, id, 1, g(w) * 0.198 + 0.02);
         if w.m(id).state == st::INIT { init(w, id); }
         if w.m(id).state == st::PARKED {
             if c::pi32(w, id, pv::OWNER) != 0 && in_box(c::pos(w, id)) { return; }
@@ -673,7 +678,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 w.mm(id).state = st::NEAR;
                 let t3 = w.ticks(3);
                 c::blend_to(w, id, 7, 0, t3);
-                c::set_pf(w, id, pv::TOP, SPEED * 0.1 * GH);
+                c::set_pf(w, id, pv::TOP, SPEED * 0.1 * gh(w));
             }
             save_r(w, id);
             End::Check
@@ -682,7 +687,7 @@ pub fn update(w: &mut World, id: MobyId) {
             let mut vel = c::pv4(w, id, pv::VEL);
             vel[2] -= DT2 * 9.0;
             load_j(w, id);
-            let r = walker::move_collide(w, id, G * 0.7, radius(w, id), jf(w, id, 12), &mut vel, 0);
+            let r = walker::move_collide(w, id, g(w) * 0.7, radius(w, id), jf(w, id, 12), &mut vel, 0);
             if r & 2 != 0 {
                 vel[2] = 0.0;
                 vel = c::scale(vel, 0.5);
@@ -706,7 +711,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 w.mm(id).state = st::NEAR;
                 let t10 = w.ticks(10);
                 c::blend_to(w, id, 7, 0, t10);
-                c::set_pf(w, id, pv::TOP, SPEED * 0.1 * GH);
+                c::set_pf(w, id, pv::TOP, SPEED * 0.1 * gh(w));
             }
             End::Bounds
         }
@@ -768,7 +773,7 @@ fn face_motion(w: &mut World, id: MobyId) {
 /// State 0xe: the drop out of the canister (module doc).
 fn drop_out(w: &mut World, id: MobyId) {
     let q = c::pos(w, id);
-    if let Some(o) = w.coll_sphere(pv4(q), Pf::f(G * 0.5), 1, Some(id)) {
+    if let Some(o) = w.coll_sphere(pv4(q), Pf::f(g(w) * 0.5), 1, Some(id)) {
         if o.moby.is_some_and(|m| w.m(m).o_class == CLASS) {
             let pc = o.pushed_centre.unwrap_or([q[0], q[1], q[2]]);
             let mut d = [pc[0] - q[0], pc[1] - q[1], pc[2] - q[2], 0.0];
@@ -782,7 +787,7 @@ fn drop_out(w: &mut World, id: MobyId) {
     let mut vel = c::pv4(w, id, pv::VEL);
     vel[2] -= DT2 * 9.0;
     load_j(w, id);
-    let r = walker::move_collide(w, id, G * 0.7, radius(w, id), jf(w, id, 12), &mut vel, 0);
+    let r = walker::move_collide(w, id, g(w) * 0.7, radius(w, id), jf(w, id, 12), &mut vel, 0);
     if r & 2 != 0 {
         vel[2] = 0.0;
         vel = c::scale(vel, 0.5);
@@ -801,23 +806,23 @@ fn chase(w: &mut World, id: MobyId) -> End {
     if let Some(t) = target(w, id).filter(|&t| !dead(w, t)) {
         let tp = w.m(t).position;
         let mut tz = tp[2];
-        let mut reach = GH;
+        let mut reach = gh(w);
         if let Some(rec) = crate::targeting::record(w.m(t)) {
             let pvs = &w.m(t).pvars;
-            reach = GH + pvs[rec + 0x0a] as f32 * 0.125;
+            reach = gh(w) + pvs[rec + 0x0a] as f32 * 0.125;
             tz += p::ff(pvs, rec + 0x10);
         }
         let me = c::pos(w, id);
-        if c::dist3(me, tp) < reach && w.coll_sphere(pv4(me), Pf::f(GH), 1, Some(id)).is_some() {
+        if c::dist3(me, tp) < reach && w.coll_sphere(pv4(me), Pf::f(gh(w)), 1, Some(id)).is_some() {
             w.mm(id).state = st::EXPLODE;
             return End::Bounds;
         }
-        if c::dist2(me, tp) < reach * 0.5 && (tz - (me[2] + GH * 0.1)).abs() < reach * 0.5 {
+        if c::dist2(me, tp) < reach * 0.5 && (tz - (me[2] + gh(w) * 0.1)).abs() < reach * 0.5 {
             load_r(w, id);
             solve_jump(w, id, tp);
             save_r(w, id);
             c::set_pv4(w, id, pv::POINT, tp);
-            c::set_pf(w, id, pv::TOP, SPEED * 0.066 * GH);
+            c::set_pf(w, id, pv::TOP, SPEED * 0.066 * gh(w));
             if w.m(id).anim.seq_b != 0 {
                 let t2 = w.ticks(2);
                 w.anim_blend(id, 0, 0, t2);
@@ -826,12 +831,12 @@ fn chase(w: &mut World, id: MobyId) -> End {
         }
     }
     let me = c::pos(w, id);
-    let eye = [me[0], me[1], me[2] + G * 0.3, me[3]];
+    let eye = [me[0], me[1], me[2] + g(w) * 0.3, me[3]];
     if w.rng.randi(4) == 0 {
         let t = search(w, id, eye, true);
         set_target(w, id, t);
     }
-    c::set_pf(w, id, pv::TOP, f * 0.1 * GH);
+    c::set_pf(w, id, pv::TOP, f * 0.1 * gh(w));
     w.mm(id).state = st::NEAR;
     let mut clear = 0.0f32;
     let back = radius(w, id);
@@ -839,7 +844,7 @@ fn chase(w: &mut World, id: MobyId) -> End {
     if tgt.is_none() {
         let h = w.rng.randf(-PI, PI);
         if w.rng.randi(4) == 0 {
-            let hd = hop(w, id, h, f32::from_bits(0x3fec_8b1f), 4.0, G * 0.35, 4.0, back, me, None, &mut clear);
+            let hd = hop(w, id, h, f32::from_bits(0x3fec_8b1f), 4.0, g(w) * 0.35, 4.0, back, me, None, &mut clear);
             c::set_pf(w, id, pv::HEADING, hd);
         } else {
             clear = 5.0;
@@ -849,7 +854,7 @@ fn chase(w: &mut World, id: MobyId) -> End {
         if !ok {
             set_target(w, id, None);
             w.mm(id).state = st::WALK_LO;
-            c::set_pf(w, id, pv::TOP, f * 0.0273 * GH);
+            c::set_pf(w, id, pv::TOP, f * 0.0273 * gh(w));
             return End::Bounds;
         }
     }
@@ -859,14 +864,14 @@ fn chase(w: &mut World, id: MobyId) -> End {
             w.mm(id).state = st::FAR;
             let t10 = w.ticks(10);
             c::blend_to(w, id, 6, 0, t10);
-            c::set_pf(w, id, pv::TOP, f * 0.0273 * GH);
+            c::set_pf(w, id, pv::TOP, f * 0.0273 * gh(w));
         }
         Some(t) => {
             let tp = w.m(t).position;
             if w.rng.randi(4) == 0 && plan_jump(w, id, tp, true) {
                 let tp = w.m(t).position;
                 c::set_pv4(w, id, pv::POINT, tp);
-                c::set_pf(w, id, pv::TOP, f * 0.066 * GH);
+                c::set_pf(w, id, pv::TOP, f * 0.066 * gh(w));
                 if w.m(id).anim.seq_b != 0 {
                     let t2 = w.ticks(2);
                     w.anim_blend(id, 0, 0, t2);
@@ -881,18 +886,18 @@ fn chase(w: &mut World, id: MobyId) -> End {
                     let t0 = w.ticks(0);
                     w.anim_blend(id, 6, 0, t0);
                 }
-                c::set_pf(w, id, pv::TOP, f * 0.0273 * GH);
+                c::set_pf(w, id, pv::TOP, f * 0.0273 * gh(w));
             }
             if d < 8.0 || d <= 20.0 {
                 w.mm(id).state = st::NEAR;
                 let t10 = w.ticks(10);
                 c::blend_to(w, id, 7, 0, t10);
-                c::set_pf(w, id, pv::TOP, f * 0.1 * GH);
+                c::set_pf(w, id, pv::TOP, f * 0.1 * gh(w));
             } else {
                 w.mm(id).state = st::FAR;
                 let t10 = w.ticks(10);
                 c::blend_to(w, id, 0, 0, t10);
-                c::set_pf(w, id, pv::TOP, f * 0.0273 * GH);
+                c::set_pf(w, id, pv::TOP, f * 0.0273 * gh(w));
             }
             if w.rng.randi(4) == 0 {
                 let yaw = c::yaw(w, id);
@@ -929,7 +934,7 @@ fn walk(w: &mut World, id: MobyId, mut clear: f32) -> End {
     let mut ahead = c::scale(vel, 5.0);
     ahead[2] = 0.0;
     let q = c::pos(w, id);
-    let from = [q[0], q[1], q[2] + G * 0.15, q[3]];
+    let from = [q[0], q[1], q[2] + g(w) * 0.15, q[3]];
     let to = c::add(from, ahead);
     let tgt = target(w, id);
     let bits = match w.coll_line(pv4(from), pv4(to), 6, Some(id)) {
@@ -961,7 +966,7 @@ fn walk(w: &mut World, id: MobyId, mut clear: f32) -> End {
     if bits & 2 != 0 || clear < 4.0 {
         let pt = c::pv4(w, id, pv::POINT);
         if plan_jump(w, id, pt, false) {
-            c::set_pf(w, id, pv::TOP, SPEED * 0.066 * GH);
+            c::set_pf(w, id, pv::TOP, SPEED * 0.066 * gh(w));
             if w.m(id).anim.seq_b != 0 {
                 let t2 = w.ticks(2);
                 w.anim_blend(id, 0, 0, t2);
@@ -989,11 +994,15 @@ fn walk(w: &mut World, id: MobyId, mut clear: f32) -> End {
 fn explode(w: &mut World, id: MobyId) {
     let q = c::pos(w, id);
     if in_box(q) {
-        fx::beam_explosion(w, &BLAST, Some(id), q);
-        let centre = [q[0], q[1], q[2] + G * 0.5, q[3]];
-        let list = sphere_mobys_in(w.table, w.svc, w.classes, Pf::f(GH), pvq(centre), 0x15, Some(id), None);
+        // The last argument is the gold byte: the gold bots' colour shift.
+        let shift = gold(w) as u8;
+        fx::beam_explosion_shift(w, &BLAST, Some(id), q, shift);
+        let centre = [q[0], q[1], q[2] + g(w) * 0.5, q[3]];
+        let list = sphere_mobys_in(w.table, w.svc, w.classes, Pf::f(gh(w)), pvq(centre), 0x15, Some(id), None);
         attack::area_push(w, &list, q, id, 3.0, 1.0, 1.0, None, 0x1_0000, 2, 3);
-        w.play_sound(0, 0, id);
+        // Class sound 0, or 4 for the gold bots.
+        let snd = if gold(w) == 0.0 { 0 } else { 4 };
+        w.play_sound(snd, 0, id);
     }
     w.delete_moby(id);
 }

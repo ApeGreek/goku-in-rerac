@@ -433,7 +433,7 @@ mod tests {
     fn stubs_own_no_ported_state() {
         for (id, s) in STATES.iter().enumerate() {
             if s.ported {
-                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons | Crank | Scripted | Bodies), "state {id:#x} ported in {:?}", s.module);
+                assert!(matches!(s.module, Ground | Walk | Air | Jump | Melee | Swim | Ledge | Damage | Stance | Surface | Boots | Packs | Swingshot | Weapons | Crank | Scripted | Bodies | Hoverboard), "state {id:#x} ported in {:?}", s.module);
             }
         }
     }

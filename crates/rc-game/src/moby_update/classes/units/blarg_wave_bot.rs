@@ -285,9 +285,10 @@ fn hits(w: &mut World, id: MobyId) {
     let res = damage::resolve(w, id, hit, pv::D, 0, 4);
     if res.out5 != 1 && st(w, id) != 0x10 {
         if w.svc.level == 10 && hit.and_then(|h| h.attacker).is_some_and(|a| w.m(a).o_class == 0x31a) {
-            let f = crate::moby_update::story::flag_index(0x13_d419);
-            if crate::moby_update::story::flag(w, f) == 0 {
-                crate::moby_update::story::set_flag(w, f, 1);
+            // Skill point 0x13d419 (the skill-point table 0x13d408, not the global flags).
+            let k = crate::moby_update::story::skill_index(0x13_d419);
+            if !crate::moby_update::story::skill_point(w, k) {
+                crate::moby_update::story::set_skill_point(w, k);
                 crate::cinematic::show_banner(w, 0x53d6, -1);
             }
         }

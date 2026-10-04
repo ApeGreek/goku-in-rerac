@@ -40,11 +40,11 @@
 //! states 5 / 6 (the port has no writer of the game's list; the order of equally old decoys could differ); the owner
 //! is "the hand holds the Decoy Glove" (the glove is not a table moby); a decoy on a moving platform does not ride
 //! it (`FUN_002752c0`, 0x13f64c: never set in the port); the burst's debris (`0x2c4c20`) and the pop's type-5 puffs
-//! are records only (particle type 5: G-PRT-001); the gold decoy (0x13e539) is not mirrored.
+//! are records only (particle type 5: G-PRT-001); the gold decoy (0x13e539: its burst's colour shift and area hit) reads the mirrored gold table.
 
 use crate::moby_runtime::{MobyId, MobyTable};
 use crate::moby_update::creature::{self as c, flash, fx, walker, V};
-use crate::moby_update::services::{pvar as p, World};
+use crate::moby_update::services::{pvar as p, HitTemplate, World};
 use crate::ps2v::Pf;
 use crate::targeting as tg;
 use std::f32::consts::PI;
@@ -477,7 +477,15 @@ fn burst(w: &mut World, id: MobyId) {
     for _ in 0..3 { w.rng.randf(-0.5, 0.5); }
     let b = fx::Beam { damage_r: 0.0, damage: 0.0, flash: 4.0, flash2: 3.0, flash_dist: 9.0, scale: 1.0, light: 12.0, streaks: 0, sparks: 0, puffs: 0, debris: 1, sound: 2, shake: true };
     let p = c::pos(w, id);
-    fx::beam_explosion(w, &b, Some(id), p);
+    // The gold decoy (class 1900 and 0x13e539, item 25; 0 for the normal class 0xcb): the burst's colour shift, then an
+    // area hit of 3·gold (damage 2·gold, flags 0x810000, type 2 / 1 [L: the second byte is a pointer's low byte]).
+    let gold = if w.m(id).o_class == GOLD_CLASS { w.hero.weapons.gold.get(DECOY_GLOVE as usize).copied().unwrap_or(0) } else { 0 };
+    fx::beam_explosion_shift(w, &b, Some(id), p, gold);
+    if gold != 0 {
+        let g = gold as f32;
+        let tmpl = HitTemplate { attacker: Some(id), flags: 0x81_0000, b18: 2, b19: 1, h1a: w.m(id).o_class as u16, damage: Pf::f(g + g), ..Default::default() };
+        w.sphere_mobys(Pf::f(g * 3.0), p.map(Pf::f), 0x10, Some(id), Some(&tmpl));
+    }
     w.delete_moby(id);
 }
 

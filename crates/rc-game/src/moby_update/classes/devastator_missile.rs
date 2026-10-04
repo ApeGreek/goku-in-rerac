@@ -21,7 +21,7 @@
 //! else toward the pvar aim; spring turns `0x26cef0(2π·dt², π·dt²)` at most 360°/s with a target, 270°/s without. The
 //! path is tested (`CollLine_Fix(old, new, 0, Ratchet, tmpl)`: push along the step, 1, 5627.97; flags 0x830000;
 //! damage 3; type 3 / 1; class 153): nothing — its life out or past +0x48 from Ratchet (2D) → deleted without
-//! exploding (the gold missile explodes instead: not ported); a face → explode (1); Ratchet → through; its owner →
+//! exploding (the gold missile explodes instead); a face → explode (1); Ratchet → through; its owner →
 //! ignored; another moby → explode (2). Out of the positive octant → deleted.
 //!
 //! **The explosion**: the mobys in a sphere of 2 (×(gold + 1)) are hit (`0x26f8f8`: damage 3, flags 0x830000, type
@@ -34,8 +34,11 @@
 //! (template 0x20a9b0, the Bomb Glove's values); deleted. Heavy frame loads (above 0.9) thin it (a third of the
 //! streaks and puffs, half the rings, shorter lives, no last flash, no light) and the trail (every other tick).
 //!
-//! The trail: [`trail`] (types 44 / 21). **Not ported**: the gold missile's re-targeting (`0x2c5778`) and its second and
-//! third blasts. Native `f32`; the game's draws in its order.
+//! The trail: [`trail`] (types 44 / 21). **The gold missile** (0x13e52b, item 11): its blast ×2 with the colours shifted
+//! (`0x270fa8`), green flashes and the gold light (0x20aa00); at its life's end it explodes; after a blast it bounces off
+//! and seeks a new target ([`retarget`], `0x2c5778`), up to three blasts while its timer +0x44 runs. [L] A blast without
+//! a face bounces off (0, 0, 1) (the game reads the last collision's normal 0x174300). Native `f32`; the game's draws
+//! in its order.
 
 use crate::hero::guns::{add3, len3, reflect, scale3, sub3, with_len};
 use crate::moby_runtime::MobyId;
@@ -67,6 +70,9 @@ pub mod pv {
     pub const LEAD: usize = 0x38;
     pub const MOTION: usize = 0x3c;
     pub const MOTION0: usize = 0x3e;
+    /// The gold missile's blasts so far and the timer that clears them (`0x2c5b70`'s tail).
+    pub const BLASTS: usize = 0x40;
+    pub const BLAST_T: usize = 0x44;
     pub const RANGE: usize = 0x48;
 }
 
@@ -139,8 +145,8 @@ pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x80 { w.mm(id).pvars.resize(0x80, 0); }
     let (l0, l1) = fx::frame_load(w);
     let throttle = 0.9 < l0 || 0.9 < l1;
-    let gold = 0u8;
-    let g1 = gold as f32 + 1.0;
+    // The gold Devastator 0x13e52b (item 11).
+    let gold = w.hero.weapons.gold.get(11).copied().unwrap_or(0);
     // The speed toward the top speed.
     let speed = {
         let m = w.mm(id);
@@ -215,6 +221,7 @@ pub fn update(w: &mut World, id: MobyId) {
     let f4 = |a: [f32; 3]| [Pf::f(a[0]), Pf::f(a[1]), Pf::f(a[2]), Pf::ZERO];
     let owner = (p::i32(&w.m(id).pvars, pv::OWNER) as usize).checked_sub(1);
     let mut face: Option<([f32; 3], [f32; 3], [f32; 3])> = None;
+    let mut last_moby: Option<MobyId> = None;
     let mut kind = w.m(id).cmd;
     match sv::line_hit_in(w.table, w.svc, w.classes, w.coll, f4(pos0), f4(pos), 0, w.hero_moby, &tmpl) {
         None => {
@@ -225,9 +232,12 @@ pub fn update(w: &mut World, id: MobyId) {
                 let hero = w.hero_moby.map_or(pos0, |h| v3(w.m(h).position));
                 let d = ((pos[0] - hero[0]).powi(2) + (pos[1] - hero[1]).powi(2)).sqrt();
                 if out || p::ff(&w.m(id).pvars, pv::RANGE) < d {
-                    // Not gold: deleted without a blast.
-                    w.delete_moby(id);
-                    return;
+                    // Not gold: deleted without a blast; the gold missile explodes where it is.
+                    if gold == 0 {
+                        w.delete_moby(id);
+                        return;
+                    }
+                    kind = 1;
                 }
             }
         }
@@ -241,7 +251,8 @@ pub fn update(w: &mut World, id: MobyId) {
                 }
                 Some(m) if Some(m) == w.hero_moby => {}
                 Some(m) if Some(m) == owner => {}
-                Some(_) => {
+                Some(m) => {
+                    last_moby = Some(m);
                     kind = 2;
                     face = Some((h.point, edge, h.normal));
                 }
@@ -252,11 +263,98 @@ pub fn update(w: &mut World, id: MobyId) {
             }
         }
     }
-    if kind == 0 { return; }
+    if kind == 0 {
+        blast_timer(w, id);
+        return;
+    }
     let (edge, normal) = face.map_or(([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), |f| (f.1, f.2));
     let drift = with_len(reflect(dir, normal), DT + DT);
-    explode(w, id, kind, with_len(edge, 1.0), with_len(normal, 1.0), drift, throttle, g1);
-    w.delete_moby(id);
+    explode(w, id, kind, with_len(edge, 1.0), with_len(normal, 1.0), drift, throttle, gold);
+    let blasts = p::i32(&w.m(id).pvars, pv::BLASTS) + 1;
+    p::set_i32(&mut w.mm(id).pvars, pv::BLASTS, blasts);
+    if gold == 0 || blasts == 3 {
+        w.delete_moby(id);
+        return;
+    }
+    // The gold missile goes on (`0x2c5b70`'s tail): off the face it hit, the hit moby ignored from now on (as its
+    // owner), a new target (`0x2c5778`), class sound 1; three blasts at most while the timer +0x44 runs.
+    let hit_moby = if kind == 2 { last_moby } else { None };
+    let n = with_len(normal, 1.0);
+    let r = reflect(dir, n);
+    {
+        let m = w.mm(id);
+        m.cmd = 0;
+        p::set_i32(&mut m.pvars, pv::TARGET, 0);
+        m.rotation[2] = atan(r[0], r[1]);
+        m.rotation[1] = -atan((r[0] * r[0] + r[1] * r[1]).sqrt(), r[2]);
+        p::set_ff(&mut m.pvars, pv::YAW_VEL, 0.0);
+        p::set_ff(&mut m.pvars, pv::PITCH_VEL, 0.0);
+        for (q, nk) in m.position.iter_mut().zip(n) { *q += nk * 0.05; }
+        if let Some(h) = hit_moby { p::set_i32(&mut m.pvars, pv::OWNER, h as i32 + 1); }
+    }
+    if p::i32(&w.m(id).pvars, pv::BLAST_T) == 0 {
+        let t = w.ticks(90);
+        p::set_i32(&mut w.mm(id).pvars, pv::BLAST_T, t);
+    }
+    retarget(w, id, hit_moby);
+    w.play_sound(1, 0, id);
+    blast_timer(w, id);
+}
+
+/// The tail of `0x2c5b70` every tick: the blast timer +0x44 run out clears the gold missile's blast count.
+fn blast_timer(w: &mut World, id: MobyId) {
+    let mut t = p::i32(&w.m(id).pvars, pv::BLAST_T);
+    if crate::moby_update::creature::dec_timer_i32(&mut t) != 0 { p::set_i32(&mut w.mm(id).pvars, pv::BLASTS, 0); }
+    p::set_i32(&mut w.mm(id).pvars, pv::BLAST_T, t);
+}
+
+/// `0x2c5778(missile, pvars, skip)`: the gold missile's next target: over the target list, the live mobys but `skip`
+/// within 40 (3-D) of it, aimed at the record's height (+0x10; 0.5 without a record); a creature (class type 5) closer
+/// than 2.5 in front of Ratchet (60° of his facing, its pitch under 45°) ends the search; else the nearest one so far
+/// seen from the camera (`CollLine_Fix(camera, it, 6)` clear) and held by no other missile becomes the target: yaw /
+/// pitch toward it (and the comparison's), the lead on, the turn rates and the speed 0, the aim point and height.
+/// [L] The gold cone test (`2·asin(…) > gold·40° + 90°`) only feeds a value the game drops.
+fn retarget(w: &mut World, id: MobyId, skip: Option<MobyId>) {
+    let me = v3(w.m(id).position);
+    let mut best = 10_000.0f32;
+    let list = w.svc.targets.clone();
+    let hero = w.hero_moby.map(|h| (v3(w.m(h).position), w.m(h).rotation[2]));
+    for t in list {
+        if Some(t) == skip || w.table.mobys.get(t).is_none_or(|m| 0x80 <= m.state) { continue; }
+        let tm = w.m(t);
+        let rec = crate::targeting::record(tm);
+        let aim_h = rec.map_or(0.5, |r| p::ff(&tm.pvars, r + 0x10));
+        let tp = [tm.position[0], tm.position[1], tm.position[2] + aim_h];
+        let d = len3(sub3(tp, me));
+        if 40.0 < d { continue; }
+        let creature = w.classes.info(tm.o_class).is_some_and(|i| i.ty == 5);
+        if !creature { continue; }
+        let rel = sub3(tp, me);
+        let yaw = atan(rel[0], rel[1]);
+        let pitch = atan((rel[0] * rel[0] + rel[1] * rel[1]).sqrt(), rel[2]);
+        if d < 2.5 {
+            if let Some((hp, hy)) = hero {
+                let a = atan(tm.position[0] - hp[0], tm.position[1] - hp[1]);
+                if crate::moby_update::creature::diff_rots(hy, a) < std::f32::consts::FRAC_PI_3 && pitch.abs() < std::f32::consts::FRAC_PI_4 { return; }
+            }
+        }
+        if best < d { continue; }
+        let cam = [w.camera[0], w.camera[1], w.camera[2], Pf::ZERO];
+        let to = [Pf::f(tp[0]), Pf::f(tp[1]), Pf::f(tp[2]), Pf::ZERO];
+        if sv::line_hit_in(w.table, w.svc, w.classes, w.coll, cam, to, 6, Some(id), &HitTemplate::default()).is_some() { continue; }
+        if crate::hero::devastator::already_targeted(w.table, t) { continue; }
+        best = d;
+        let m = w.mm(id);
+        p::set_i32(&mut m.pvars, pv::TARGET, t as i32 + 1);
+        p::set_ff(&mut m.pvars, pv::YAW, yaw);
+        p::set_i32(&mut m.pvars, pv::LEAD, 1);
+        p::set_ff(&mut m.pvars, pv::PITCH, -pitch);
+        p::set_ff(&mut m.pvars, pv::YAW_VEL, 0.0);
+        p::set_ff(&mut m.pvars, pv::PITCH_VEL, 0.0);
+        p::set_ff(&mut m.pvars, pv::SPEED, 0.0);
+        p::set_v4f(&mut m.pvars, pv::AIM, [tp[0], tp[1], tp[2] - aim_h, 0.0]);
+        p::set_ff(&mut m.pvars, pv::AIM_H, aim_h);
+    }
 }
 
 /// The trail's constants: the first puff's alpha, grey and life (ticks), the second puff's life, the spark's size and
@@ -317,7 +415,10 @@ pub fn trail(w: &mut World, id: MobyId, step: [f32; 3], speed: f32, look: &Trail
 
 /// The explosion (module doc).
 #[allow(clippy::too_many_arguments)]
-fn explode(w: &mut World, id: MobyId, kind: u8, edge: [f32; 3], normal: [f32; 3], drift: [f32; 3], throttle: bool, g1: f32) {
+fn explode(w: &mut World, id: MobyId, kind: u8, edge: [f32; 3], normal: [f32; 3], drift: [f32; 3], throttle: bool, gold: u8) {
+    // The gold missile: sizes and speeds ×(gold + 1), every colour through `0x270fa8(c, gold)`.
+    let g1 = gold as f32 + 1.0;
+    let sh = |c: u32| fx::colour_shift(c, gold);
     let pos = w.m(id).position;
     let p3 = v3(pos);
     let tmpl = HitTemplate { dir: [Pf::ZERO, Pf::ZERO, Pf::ONE, Pf::b(0x45af_df66)], attacker: Some(id), flags: 0x83_0000, b18: 3, b19: 1, h1a: CLASS as u16, damage: Pf::f(3.0), w20: 1 };
@@ -341,7 +442,7 @@ fn explode(w: &mut World, id: MobyId, kind: u8, edge: [f32; 3], normal: [f32; 3]
         if 1.0 < len3(v) { v = with_len(v, DT * 8.0); }
         let (t60, t120) = (w.ticks(60), w.ticks(120));
         let life = w.rng.rand_range(t60, t120) - lower * 35;
-        let a = crate::particles::type15::Spawn { size: g1 * 40000.0, pos, vel: v4(v), c1: 0x4f00_7fff, c2: 0x1f00_007f, life, split: 1, def: -1, blend: -1 };
+        let a = crate::particles::type15::Spawn { size: g1 * 40000.0, pos, vel: v4(v), c1: sh(0x4f00_7fff), c2: sh(0x1f00_007f), life, split: 1, def: -1, blend: -1 };
         fx::part15(w, &a);
     }
     // The fireball toward the camera.
@@ -364,8 +465,8 @@ fn explode(w: &mut World, id: MobyId, kind: u8, edge: [f32; 3], normal: [f32; 3]
     for _ in 0..rings.max(0) {
         let s = w.rng.randf(8.0, 10.0);
         let speed = s * g1 * DT - slow * DT;
-        let c1 = COL_A[w.rng.randi(6) as usize];
-        let c2 = COL_B[w.rng.randi(6) as usize];
+        let c1 = sh(COL_A[w.rng.randi(6) as usize]);
+        let c2 = sh(COL_B[w.rng.randi(6) as usize]);
         let (t15, t20) = (w.ticks(15), w.ticks(20));
         let life = w.rng.rand_range(t15, t20) - lower * 7;
         let (t25, t30) = (w.ticks(25), w.ticks(30));
@@ -384,22 +485,25 @@ fn explode(w: &mut World, id: MobyId, kind: u8, edge: [f32; 3], normal: [f32; 3]
         let z = w.rng.randf(-1.0, 1.0);
         let s = w.rng.randf(0.0, 3.0);
         let vel = with_len([x, y, z], s * DT * g1);
-        let c1 = COL_A[w.rng.randi(6) as usize];
-        let c2 = COL_B[w.rng.randi(6) as usize];
+        let c1 = sh(COL_A[w.rng.randi(6) as usize]);
+        let c2 = sh(COL_B[w.rng.randi(6) as usize]);
         let (t20, t35) = (w.ticks(20), w.ticks(35));
         let life = w.rng.rand_range(t20, t35) - lower * 10;
         fx::part08(w, g1 * 200_000.0, pos, v4(vel), c1, c2, life);
     }
     // The flashes (FlashSpawn 0x2c20e0).
     let dv = v4(drift);
+    // The gold flashes: (0x3c, 0x7f, 0x3c), then red 0x20 for the third.
+    let rb = if gold == 0 { 0x7f } else { 0x3c };
     if l0(w) < 0.95 && 9.0 < d {
         let t = w.ticks(15);
-        super::debris::flash_spawn(w, g1 * 4.0, id, pos, dv, t, 0x7f, 0x7f, 0x7f, 0x20);
+        super::debris::flash_spawn(w, g1 * 4.0, id, pos, dv, t, rb, 0x7f, rb, 0x20);
         let t = w.ticks(24);
-        super::debris::flash_spawn(w, g1 * 4.0, id, pos, dv, t, 0x7f, 0x7f, 0x7f, 0x20);
+        super::debris::flash_spawn(w, g1 * 4.0, id, pos, dv, t, rb, 0x7f, rb, 0x20);
     }
     let t = w.ticks(20);
-    super::debris::flash_spawn(w, g1 * 4.0, id, pos, dv, t, 0x7f, 0x7f, 0, 0x30);
+    let r3 = if gold == 0 { 0x7f } else { 0x20 };
+    super::debris::flash_spawn(w, g1 * 4.0, id, pos, dv, t, r3, 0x7f, 0, 0x30);
     if !throttle {
         let t = w.ticks(19);
         super::debris::flash_spawn(w, g1 + g1, id, pos, dv, t, 0xff, 0xff, 0xff, 0x20);
@@ -408,7 +512,7 @@ fn explode(w: &mut World, id: MobyId, kind: u8, edge: [f32; 3], normal: [f32; 3]
     let t = w.ticks(25);
     w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp, ticks: t });
     w.play_sound(0, 0, id);
-    if !throttle { fx::light_spawn(w, &fx::LIGHT_BOMB, pos); }
+    if !throttle { fx::light_spawn(w, if gold == 0 { &fx::LIGHT_BOMB } else { &fx::LIGHT_GOLD }, pos); }
 }
 
 fn l0(w: &World) -> f32 { fx::frame_load(w).0 }

@@ -616,9 +616,10 @@ pub fn update(w: &mut World, id: MobyId) {
                 m.has_collision = false;
                 m.visible = 0;
                 m.mode |= 1;
-                let f = story::flag_index(0x13_d412);
-                if pi(w, id, pv::FIRED) == 0 && story::flag(w, f) == 0 {
-                    story::set_flag(w, f, 1);
+                // Skill point 0x13d412 (the skill-point table 0x13d408, not the global flags).
+                let k = story::skill_index(0x13_d412);
+                if pi(w, id, pv::FIRED) == 0 && !story::skill_point(w, k) {
+                    story::set_skill_point(w, k);
                     crate::cinematic::show_banner(w, 0x53d6, -1);
                 }
                 return;

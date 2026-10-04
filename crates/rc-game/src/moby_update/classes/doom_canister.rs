@@ -30,7 +30,7 @@
 //! Native `f32`; the rand draws are the game's. **Inferred [L]**: the owner is "the hand holds the Glove of Doom"
 //! (the glove is not a table moby); objects on moving platforms do not ride them (`0x275290` / `0x2752c0`, 0x13f64c:
 //! never set in the port); the pop's type-5 puffs are records only (type 5: G-PRT-001); the gold canister
-//! (0x13e534: half the class scale × 2, a sphere of 0.6) is not mirrored (G-WPN-009).
+//! (0x13e534: half the class scale × 2, a sphere of 0.6) reads the mirrored gold table (`Weapons::gold`).
 
 use crate::moby_runtime::{MobyId, MobyTable};
 use crate::moby_update::creature::{self as c, fx, V};
@@ -199,7 +199,8 @@ fn glow(w: &mut World, id: MobyId) {
 
 /// State 2 (module doc).
 fn fly(w: &mut World, id: MobyId) {
-    let gs = 1.0f32;
+    // 0x13e534 + 1: the gold canister grows to the full class scale and tests a sphere of 0.6.
+    let gs = w.hero.weapons.gold.get(20).copied().unwrap_or(0) as f32 + 1.0;
     let cs = w.class_scale(w.m(id).o_class).to_f32();
     if w.m(id).scale < cs * 0.5 * gs { w.mm(id).scale += cs * 0.05 * gs; }
     if c::dec_timer_pvar_i32(w, id, pv::PUFF_T) != 0 {

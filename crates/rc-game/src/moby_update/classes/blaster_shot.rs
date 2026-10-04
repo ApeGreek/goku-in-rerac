@@ -30,8 +30,9 @@
 //! ±1, rising `randf(0.01, 0.025)`, grey 0x606060 at alpha `rand_range(0x20, 0x80)` fading over
 //! `ticks(rand_range(50, 80))`, half of them ALPHA 0x44). The callers then delete it.
 //!
-//! **Not ported**: the gold Blaster's ricochets (0x13e52f is not mirrored; `0x2e2a18(shot, 1)`'s spark path is the
-//! gold one's). Native `f32`; the game's draws in its order.
+//! **The gold Blaster** (0x13e52f, item 15): a face hit (not surfaces 0, 1, 3, 4, 7, 0xb, 0xd) ricochets the shot off it
+//! (reflected, 0.05 out, the turn rates 0, the Blaster's class sound 4) up to gold + 5 times; then [`end`] with sparks.
+//! [L] The sound plays at the shot (the game plays it on the hand item). Native `f32`; the game's draws in its order.
 
 use crate::hero::fx::PartSpawn;
 use crate::hero::guns::{add3, len3, scale3, sub3, with_len};
@@ -46,6 +47,8 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 pub const UPDATE_FN: u32 = 0x2e2170;
 pub const CLASSES: [i16; 1] = [305];
+/// The Blaster's hand item class (0xa8).
+const BLASTER_CLASS: i16 = 0xa8;
 pub const CLASS: i16 = 305;
 /// gp−0x5338 (0x1618c8): the shot's x rotation; −π/2 (0x1618cc) is the model's pitch offset.
 const ROT_X: f32 = 0.0;
@@ -309,13 +312,39 @@ pub fn update(w: &mut World, id: MobyId) {
                 m.position = [h.point[0], h.point[1], h.point[2], m.position[3]];
             }
             impact_sparks(w, h.point, step, h.normal);
-            // Gold ricochets not ported (0x13e52f = 0): 0x2e2a18(shot, 0) and the delete.
-            finish(w, id);
-            return;
+            // The gold Blaster (0x13e52f, item 15): the shot ricochets up to gold + 5 times, never off surfaces 0, 1,
+            // 3, 4, 7, 0xb, 0xd; once it stops, it ends with sparks.
+            let gold = w.hero.weapons.gold.get(15).copied().unwrap_or(0);
+            if gold == 0 {
+                finish(w, id);
+                return;
+            }
+            let mut n = p::i32(&w.m(id).pvars, pv::BOUNCE) + 1;
+            if matches!(h.surface_id(), 0 | 1 | 3 | 4 | 7 | 0xb | 0xd) { n = 1000; }
+            p::set_i32(&mut w.mm(id).pvars, pv::BOUNCE, n);
+            if gold as i32 + 5 < n {
+                end(w, id, true);
+                w.delete_moby(id);
+                return;
+            }
+            let nn = with_len(h.normal, 1.0);
+            let r = crate::hero::guns::reflect(step, nn);
+            {
+                let m = w.mm(id);
+                m.rotation[2] = atan(r[0], r[1]);
+                m.rotation[1] = -atan((r[0] * r[0] + r[1] * r[1]).sqrt(), r[2]);
+                p::set_ff(&mut m.pvars, pv::YAW_VEL, 0.0);
+                p::set_ff(&mut m.pvars, pv::PITCH_VEL, 0.0);
+                m.position = [h.point[0] + nn[0] * 0.05, h.point[1] + nn[1] * 0.05, h.point[2] + nn[2] * 0.05, m.position[3]];
+            }
+            // The Blaster's class sound 4 (on the hand item 0xa8 in the game; at the shot here [L]).
+            if w.hero.items.slot.item.as_ref().is_some_and(|m| m.o_class == BLASTER_CLASS) { w.play_sound_as(4, 0, id, BLASTER_CLASS); }
+        } else {
+            // Water: its life cut to 3 ticks.
+            let t3 = w.ticks(3) as i16;
+            let m = w.mm(id);
+            if t3 < p::i16(&m.pvars, pv::LIFE) { p::set_i16(&mut m.pvars, pv::LIFE, t3); }
         }
-        let t3 = w.ticks(3) as i16;
-        let m = w.mm(id);
-        if t3 < p::i16(&m.pvars, pv::LIFE) { p::set_i16(&mut m.pvars, pv::LIFE, t3); }
     }
     // The model's pitch offset back.
     { let m = w.mm(id); m.rotation[1] = add_rot(m.rotation[1], PITCH_OFFSET); }

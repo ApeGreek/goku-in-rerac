@@ -200,6 +200,9 @@ pub struct AudioOut {
     last_report: u64,
     /// `RC_AUDIO_TRACE`.
     trace: bool,
+    /// `RC_AUDIO_SFX` / `RC_AUDIO_MUSIC` given: they win over the saved game's options ([`sync_options`]).
+    fixed_sfx: bool,
+    fixed_music: bool,
 }
 
 impl AudioOut {
@@ -292,8 +295,9 @@ impl Plugin for AudioOutPlugin {
         let ring = Arc::new(Ring::default());
         let mut system = AudioSystem::new(data);
         let option = |name: &str| std::env::var(name).ok().and_then(|v| v.trim().parse::<i32>().ok()).map(|v| v.clamp(0, 0x400));
-        if let Some(v) = option("RC_AUDIO_MUSIC") { system.music_option = v; }
-        if let Some(v) = option("RC_AUDIO_SFX") { system.sfx_option = v; }
+        let (fixed_music, fixed_sfx) = (option("RC_AUDIO_MUSIC"), option("RC_AUDIO_SFX"));
+        if let Some(v) = fixed_music { system.music_option = v; }
+        if let Some(v) = fixed_sfx { system.sfx_option = v; }
         let limit = wav_frames();
         let wav = std::env::var_os("RC_AUDIO_WAV").filter(|v| !v.is_empty()).map(|p| WavCapture { path: p.into(), frames: Vec::with_capacity(limit), limit, written: false });
         let trace = std::env::var("RC_AUDIO_TRACE").is_ok_and(|v| v.trim() == "1");
@@ -306,11 +310,12 @@ impl Plugin for AudioOutPlugin {
             println!("audio: RC_REVERB=0: no reverb output");
         }
         app.add_audio_source::<MixerStream>()
-            .insert_resource(AudioOut { system, ring, wav, done: 0, buf: Vec::new(), last_report: 0, trace })
+            .insert_resource(AudioOut { system, ring, wav, done: 0, buf: Vec::new(), last_report: 0, trace, fixed_sfx: fixed_sfx.is_some(), fixed_music: fixed_music.is_some() })
             .add_systems(Startup, start_output)
             // After the scene frame (which runs before the tick) and the tick, which a running scene suspends.
             .add_systems(FixedUpdate, scene_sound.after(crate::gameplay::GameTick))
             .add_systems(FixedUpdate, sync_underwater.before(crate::gameplay::GameTick))
+            .add_systems(FixedUpdate, sync_options.before(crate::gameplay::GameTick))
             .add_systems(PostUpdate, run_audio);
     }
 }
@@ -319,6 +324,20 @@ impl Plugin for AudioOutPlugin {
 fn sync_underwater(mut out: ResMut<AudioOut>, fog: Option<Res<crate::fog_state::FogState>>) {
     let flag = fog.is_some_and(|f| f.underwater_flag());
     if out.system.underwater != flag { out.system.underwater = flag; }
+}
+
+/// The saved game's sound options into the mixer every frame, as the game's `sound_update` resends the master volumes
+/// from them: effects 0x15edf0 and music 0x15edec (0..0x400; `voices::master_volumes`), and mono when the stereo option
+/// 0x15ede8 is 0 (`snd_SetPlaybackMode`). `RC_AUDIO_SFX` / `RC_AUDIO_MUSIC` keep their values.
+fn sync_options(mut out: ResMut<AudioOut>, gs: Option<Res<crate::gameplay::Persistent>>) {
+    let Some(gs) = gs else { return };
+    let g = &gs.0.global;
+    let (fixed_sfx, fixed_music) = (out.fixed_sfx, out.fixed_music);
+    let s = &mut out.system;
+    if !fixed_sfx && s.sfx_option != g.effects_volume.clamp(0, 0x400) { s.sfx_option = g.effects_volume.clamp(0, 0x400); }
+    if !fixed_music && s.music_option != g.music_volume.clamp(0, 0x400) { s.music_option = g.music_volume.clamp(0, 0x400); }
+    let mono = g.stereo & 0xff == 0;
+    if s.snd.vm.mono != mono { s.snd.vm.mono = mono; }
 }
 
 fn start_output(mut commands: Commands, out: Res<AudioOut>, mut streams: ResMut<Assets<MixerStream>>) {
