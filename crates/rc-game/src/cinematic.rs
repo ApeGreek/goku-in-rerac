@@ -71,6 +71,9 @@ pub enum CinematicCall {
     /// The follow camera's turn `0x313af0(rate, tolerance, dir)` called from a class update
     /// ([`crate::follow_camera::Camera::turn_toward`]).
     FollowTurnToward { rate: f32, tolerance: f32, dir: [f32; 3] },
+    /// The follow camera's turn toward a point `0x313b48(rate, tolerance, point)` called from a class update
+    /// ([`crate::follow_camera::Camera::turn_toward_point`]).
+    FollowTurnTowardPoint { rate: f32, tolerance: f32, point: [f32; 3] },
     /// The follow camera's look-height setter `0x3136c8(h, rate, add)` called from a class update
     /// ([`crate::follow_camera::Camera::set_look_height`]).
     FollowLookHeight { h: f32, rate: f32, add: bool },
@@ -277,6 +280,11 @@ pub fn follow_turn_toward(w: &mut World, rate: f32, tolerance: f32, dir: [f32; 3
     w.svc.cinematic.calls.push(CinematicCall::FollowTurnToward { rate, tolerance, dir });
 }
 
+/// `0x313b48(rate, tolerance, point)` from a class (the Fleet's help director 1470's look at its cuboids).
+pub fn follow_turn_toward_point(w: &mut World, rate: f32, tolerance: f32, point: [f32; 3]) {
+    w.svc.cinematic.calls.push(CinematicCall::FollowTurnTowardPoint { rate, tolerance, point });
+}
+
 /// `0x3136c8(h, rate, add)` from a class.
 pub fn follow_look_height(w: &mut World, h: f32, rate: f32, add: bool) { w.svc.cinematic.calls.push(CinematicCall::FollowLookHeight { h, rate, add }); }
 
@@ -463,6 +471,7 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
             CinematicCall::FollowDistance { dist, rate, base } => cam.set_distance(dist, rate, base),
             CinematicCall::FollowPivotHeight { h, rate } => cam.set_pivot_height(h, rate),
             CinematicCall::FollowTurnToward { rate, tolerance, dir } => cam.turn_toward(rate, tolerance, dir),
+            CinematicCall::FollowTurnTowardPoint { rate, tolerance, point } => cam.turn_toward_point(rate, tolerance, point),
             CinematicCall::FollowLookHeight { h, rate, add } => cam.set_look_height(h, rate, add),
             CinematicCall::FollowHSpring { k, d } => cam.set_h_spring(k, d),
             CinematicCall::FollowStickOff => cam.stick_off(),

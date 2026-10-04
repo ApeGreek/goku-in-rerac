@@ -277,6 +277,13 @@
 //! | U543 | 233 Quartu's flame drones (15): hover round Ratchet with a rider, spray flame streams; Clank's come back | level15 0x2c5630 | [`quartu_hover`] |
 //! | U545 | 491 Quartu's jet robots (15, Giant Clank's): fly in, shoot volleys, lunge and swipe, jump between paths | level15 0x2cf3a8 | [`quartu_jet_bot`] |
 //! | U539, U540 | 148, 255 Quartu's buildings and 154 its walls (15): knocked down by Giant Clank into burning bits and smoke | level15 0x2a7880, 0x2aa280 | [`quartu_building`] |
+//! | U612 | 1382 the Fleet's crew (17): alert, salute the Hologuise, chase and punch inside their area | level17 0x2eeb68, 0x2f0448 | [`fleet_crew`] |
+//! | U611 | 1380 the Fleet's lift pads (17): carry Ratchet between two heights, turning over for the Magneboots | level17 0x2ee2b0 | [`fleet_lift`] |
+//! | U606 | 835 the Fleet's floating mines (17): bob on the water, blow up when hit or touched, with a splash | level17 0x2dc3f8 | [`fleet_small`] |
+//! | U615 | 1470 the Fleet's help director (17): the barrier, Hydro-Pack and look hints; the dive and party skill points | level17 0x2f26d0 | [`help_fleet`] |
+//! | U616 | 1562 the Fleet's scene thrusters (17): the infobot thrusters on actor 2 in scenes 0 and 2 | level17 0x2f2e78 | [`fleet_small`] |
+//! | U614 | 1448 the Fleet's shuttle (17): Ratchet's ship flies him between its two landing spots on △ | level17 0x2f1940 | [`fleet_shuttle`] |
+//! | U617 | 1772 the Fleet's space backdrop (17): the death height on and off the fleet, the glowing lanes and nebulae | level17 0x2f3848, 0x2f32f0 | [`fleet_sky`] |
 //! | U480 | 1403 Gemlik's tracker, 1558 its scene thrusters (13) | level13 0x30bb70, 0x30bdf0 | [`gemlik_small`] |
 //! | U477 | 1270 Gemlik's tipping lift (13) | level13 0x30a6d8 | [`gemlik_lift`] |
 //! | U475 | 1262 Gemlik's stomper robots (13): the shockwave ring, the walk and swing, the knockback and death | level13 0x307e98, 0x3098d0 | [`gemlik_robot`] |
@@ -413,6 +420,12 @@ pub mod quartu_guard;
 pub mod quartu_hover;
 pub mod quartu_jet_bot;
 pub mod quartu_building;
+pub mod fleet_crew;
+pub mod fleet_sky;
+pub mod fleet_shuttle;
+pub mod fleet_small;
+pub mod help_fleet;
+pub mod fleet_lift;
 pub mod gemlik_small;
 pub mod gemlik_robot;
 pub mod gemlik_relay;
@@ -1143,6 +1156,15 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "U545 491", level: quartu_jet_bot::REFERENCE_LEVEL, func: quartu_jet_bot::UPDATE_FN, classes: &quartu_jet_bot::CLASSES, update: quartu_jet_bot::update, joints: &quartu_jet_bot::CLASSES },
     UnitPort { unit: "U539 148 255", level: quartu_building::REFERENCE_LEVEL, func: quartu_building::UPDATE_FN, classes: &quartu_building::CLASSES, update: quartu_building::update, joints: &[] },
     UnitPort { unit: "U540 154", level: quartu_building::REFERENCE_LEVEL, func: quartu_building::WALL_FN, classes: &quartu_building::WALL_CLASSES, update: quartu_building::wall_update, joints: &[] },
+    UnitPort { unit: "U612 1382", level: fleet_crew::REFERENCE_LEVEL, func: fleet_crew::UPDATE_FN, classes: &fleet_crew::CLASSES, update: fleet_crew::update, joints: &fleet_crew::CLASSES },
+    UnitPort { unit: "U612 1382 eyes", level: fleet_crew::REFERENCE_LEVEL, func: fleet_crew::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "U611 1380", level: fleet_lift::REFERENCE_LEVEL, func: fleet_lift::UPDATE_FN, classes: &fleet_lift::CLASSES, update: fleet_lift::update, joints: &[] },
+    UnitPort { unit: "U606 835", level: fleet_small::REFERENCE_LEVEL, func: fleet_small::MINE_FN, classes: &fleet_small::MINE_CLASSES, update: fleet_small::mine_update, joints: &[] },
+    UnitPort { unit: "U615 1470", level: help_fleet::REFERENCE_LEVEL, func: help_fleet::UPDATE_FN, classes: &help_fleet::CLASSES, update: help_fleet::update, joints: &[] },
+    UnitPort { unit: "U616 1562", level: fleet_small::REFERENCE_LEVEL, func: fleet_small::THRUSTERS_FN, classes: &fleet_small::THRUSTERS_CLASSES, update: fleet_small::thrusters_update, joints: &[] },
+    UnitPort { unit: "U614 1448", level: fleet_shuttle::REFERENCE_LEVEL, func: fleet_shuttle::UPDATE_FN, classes: &fleet_shuttle::CLASSES, update: fleet_shuttle::update, joints: &[] },
+    UnitPort { unit: "U617 1772", level: fleet_sky::REFERENCE_LEVEL, func: fleet_sky::UPDATE_FN, classes: &fleet_sky::CLASSES, update: fleet_sky::update, joints: &[] },
+    UnitPort { unit: "U617 1772 sky", level: fleet_sky::REFERENCE_LEVEL, func: fleet_sky::DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U552 1408", level: wave_mesh::DEFS[0].level, func: wave_mesh::DEFS[0].update, classes: &wave_mesh::CLASSES[0], update: wave_mesh::UPDATES[0], joints: &[] },
     UnitPort { unit: "U552 1408 draw", level: wave_mesh::DEFS[0].level, func: wave_mesh::DEFS[0].draw, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "U552 1409", level: wave_mesh::DEFS[1].level, func: wave_mesh::DEFS[1].update, classes: &wave_mesh::CLASSES[1], update: wave_mesh::UPDATES[1], joints: &[] },
@@ -1395,6 +1417,8 @@ pub struct Globals {
     pub wave_meshes: Option<std::sync::Arc<wave_mesh::Meshes>>,
     /// The electrified water's bolt (`water_shock`, level15 0x1d3750.. / 0x161cc0..).
     pub water_shock: water_shock::Bolt,
+    /// The Fleet's sky's animation statics (`fleet_sky`, level17 0x1de040..).
+    pub fleet_sky: fleet_sky::Sky,
     /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
     /// during its cutaways): the points, to put back.
     pub parked_paths: std::collections::HashMap<usize, Vec<[u32; 4]>>,
@@ -1557,6 +1581,7 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
         Some((barrier_field::REFERENCE_LEVEL, barrier_field::DRAW_FN)) => barrier_field::fx_quad_groups(table, svc, id),
         Some((water_shock::REFERENCE_LEVEL, water_shock::DRAW_FN)) => water_shock::fx_quad_groups(table, svc, id),
         Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::fx_quad_groups(table, svc, id),
+        Some((fleet_sky::REFERENCE_LEVEL, fleet_sky::DRAW_FN)) => fleet_sky::fx_quad_groups(table, svc, id),
         Some((1, crate::shadows::BLOB_FN)) => {
             let quads = svc.blobs.1.iter().filter(|b| b.0 == id).map(|(_, b)| {
                 let (corners, st) = crate::shadows::blob_quad(b);
@@ -1586,6 +1611,7 @@ pub fn glow_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_upda
         Some((kalebo_trooper::REFERENCE_LEVEL, kalebo_trooper::GLOW_FN)) => kalebo_trooper::glow_quads(table, svc, id),
         Some((rilgar_trail_rider::REFERENCE_LEVEL, rilgar_trail_rider::GLOW_FN)) => rilgar_trail_rider::glow_quads(table, svc, id),
         Some((quartu_guard::REFERENCE_LEVEL, quartu_guard::DRAW_FN)) => quartu_guard::glow_quads(table, svc, id),
+        Some((fleet_crew::REFERENCE_LEVEL, fleet_crew::DRAW_FN)) => fleet_crew::glow_quads(table, svc, id),
         _ => Vec::new(),
     }
 }
@@ -1611,6 +1637,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((oltanis_lightning::REFERENCE_LEVEL, oltanis_lightning::DRAW_FN)) => oltanis_lightning::frame(w, id),
         Some((oltanis_zapper::REFERENCE_LEVEL, oltanis_zapper::DRAW_FN)) => oltanis_zapper::frame(w, id),
         Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::MASTER_DRAW_FN | oltanis_sentry::SPOT_FN)) => oltanis_sentry::frame(w, id),
+        Some((fleet_sky::REFERENCE_LEVEL, fleet_sky::DRAW_FN)) => fleet_sky::frame(w, id),
         Some((water_shock::REFERENCE_LEVEL, water_shock::DRAW_FN | water_shock::COUNTDOWN_FN)) => water_shock::frame(w, id),
         Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::frame(w, id),
         Some((oltanis_bolt::REFERENCE_LEVEL, oltanis_bolt::DRAW_FN)) => oltanis_bolt::frame(w, id),
