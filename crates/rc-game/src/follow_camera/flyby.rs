@@ -116,6 +116,9 @@ pub struct FlybyOut {
     pub hero_state: Option<i32>,
     /// 0x167358: the fade-out rate (`fun_001eda60` takes it off the fade each frame until 0).
     pub fade_rate: Option<f32>,
+    /// The race cameras' stores into the moby world and the hero block (classes 20 / 21, [`super::race`]), made
+    /// before the next moby loop.
+    pub race: super::race::RaceOut,
 }
 
 /// The engine words class 19 reads, given by the tick before the camera update.
@@ -133,7 +136,7 @@ impl Default for CamEngine {
 
 /// The level path `i` with each point's w its chord to the next (the last point's to the first) and the length of the
 /// first n − 1 chords (`0x2f5b58`'s loops).
-fn chords(v: Option<&rc_formats::volumes::Volumes>, i: i32) -> (Vec<[f32; 4]>, f32) {
+pub(super) fn chords(v: Option<&rc_formats::volumes::Volumes>, i: i32) -> (Vec<[f32; 4]>, f32) {
     let Some(src) = usize::try_from(i).ok().and_then(|i| v.and_then(|v| v.paths.get(i))) else { return (Vec::new(), 0.0) };
     let n = src.len();
     let mut out = src.clone();
@@ -151,8 +154,8 @@ fn chords(v: Option<&rc_formats::volumes::Volumes>, i: i32) -> (Vec<[f32; 4]>, f
 fn ticks(n: i32) -> i32 { crate::hero::physics::ticks(n) }
 
 impl Camera {
-    fn flyby_rec(&self, slot: usize) -> Option<FlybyRec> { self.level_cams.slots.get(slot).and_then(|s| s.flyby) }
-    fn flyby_rec_mut(&mut self, slot: usize) -> Option<&mut FlybyRec> { self.level_cams.slots.get_mut(slot).and_then(|s| s.flyby.as_mut()) }
+    pub(super) fn flyby_rec(&self, slot: usize) -> Option<FlybyRec> { self.level_cams.slots.get(slot).and_then(|s| s.flyby) }
+    pub(super) fn flyby_rec_mut(&mut self, slot: usize) -> Option<&mut FlybyRec> { self.level_cams.slots.get_mut(slot).and_then(|s| s.flyby.as_mut()) }
 
     /// A class's arming of the fly-by record `slot` (`0x2f5a50` and its copies: +0x38 = 1, +0x39 = 0).
     pub fn flyby_arm(&mut self, slot: usize) {
@@ -184,7 +187,7 @@ impl Camera {
 
     /// `0x2f5a78`: the header's cuboid, cylinder, sphere or path (the first one set) holds Ratchet's feet; without
     /// shapes: armed and not done.
-    fn flyby_region(&self, i: usize, inp: &CamInput) -> bool {
+    pub(super) fn flyby_region(&self, i: usize, inp: &CamInput) -> bool {
         use crate::moby_update::triggers::{point_in_cuboid, point_in_cylinder, point_in_path, point_in_sphere};
         let s = &self.level_cams.slots[i];
         let hd = s.header;
@@ -199,9 +202,17 @@ impl Camera {
 
     /// `0x2f5b58` (module doc): `prev` the camera being left.
     pub(super) fn flyby_init(&mut self, prev: ([[f32; 3]; 3], [f32; 3])) {
+        let Some(r) = self.flyby_begin(prev, 1, true) else { return };
+        if r.no_hold == 0 { self.flyby_out.hero_state = Some(0x72); }
+    }
+
+    /// The init shared with class 20's `0x314f00`: the record's +0x38 = `armed`, the D words, the FOV keys (`substitute`:
+    /// a key above 180° takes the current FOV, class 19 only), the paths' chords and lengths, the speed from the ticks,
+    /// the previous camera's rows and position. Returns the record as stored.
+    pub(super) fn flyby_begin(&mut self, prev: ([[f32; 3]; 3], [f32; 3]), armed: u8, substitute: bool) -> Option<FlybyRec> {
         let slot = self.class_cam.slot;
-        let Some(mut r) = self.flyby_rec(slot) else { return };
-        r.armed = 1;
+        let mut r = self.flyby_rec(slot)?;
+        r.armed = armed;
         let vols = self.level_cams.shapes_arc();
         let (cam_path, cam_len) = chords(vols.as_deref(), r.cam_path);
         let (look_path, look_len) = chords(vols.as_deref(), r.look_path);
@@ -211,7 +222,7 @@ impl Camera {
         let mut k = 0;
         for (j, q) in self.flyby_source(r.cam_path).iter().enumerate() {
             if 0.0 < q[3] && k < 8 {
-                st.degrees[k] = if 180.0 < q[3] { base_fov * 57.295_776 } else { q[3] };
+                st.degrees[k] = if substitute && 180.0 < q[3] { base_fov * 57.295_776 } else { q[3] };
                 st.keys[k] = j as i16;
                 k += 1;
             }
@@ -223,7 +234,7 @@ impl Camera {
         if let Some(rm) = self.flyby_rec_mut(slot) { *rm = r; }
         self.class_cam.rows = prev.0;
         self.class_cam.pos = prev.1;
-        if r.no_hold == 0 { self.flyby_out.hero_state = Some(0x72); }
+        Some(r)
     }
 
     /// The camera path's points as the level loaded them (their w the FOV keys before the chords overwrite them).
@@ -233,7 +244,7 @@ impl Camera {
     }
 
     /// The look point: the moby +0x28 plus the offset through the camera's rows, or `path_pt`.
-    fn flyby_look(&self, r: &FlybyRec, path_pt: [f32; 3]) -> [f32; 3] {
+    pub(super) fn flyby_look(&self, r: &FlybyRec, path_pt: [f32; 3]) -> [f32; 3] {
         let Ok(id) = usize::try_from(r.moby) else { return path_pt };
         let Some(m) = self.world.mobys.get(&id) else { return path_pt };
         let rows = self.class_cam.rows;
@@ -243,7 +254,7 @@ impl Camera {
     }
 
     /// The rows toward `look` about −gravity (`FastVecCross` pair, [`rows_about`]).
-    fn flyby_face(&mut self, look: [f32; 3], inp: &CamInput) {
+    pub(super) fn flyby_face(&mut self, look: [f32; 3], inp: &CamInput) {
         let g = to_f32x3(inp.hero.gravity_dir);
         let up = [-g[0], -g[1], -g[2]];
         let fwd = set_len(fsub(look, self.class_cam.pos), 1.0);

@@ -352,6 +352,11 @@ impl rc_game::tick::MobySystem for HeroWorld<'_, '_, '_, '_> {
     fn game_mode(&self) -> i32 { self.world.game_mode() }
     fn board_world(&self, table: &MobyTable, board: MobyId) -> Option<rc_game::hero::hoverboard::BoardWorld> { self.world.board_world(table, board) }
     fn queue_board(&mut self, cmds: Vec<rc_game::hero::hoverboard::BoardCmd>) { self.world.queue_board(cmds) }
+    fn view_tan(&self) -> f32 { self.world.view_tan() }
+    fn set_view_tan(&mut self, v: f32) { self.world.set_view_tan(v) }
+    fn set_letterbox(&mut self, on: bool) { self.world.set_letterbox(on) }
+    fn queue_hero_state(&mut self, state: i32) { self.world.queue_hero_state(state) }
+    fn queue_race(&mut self, out: rc_game::follow_camera::race::RaceOut) { self.world.queue_race(out) }
     fn fade(&self) -> f32 { self.world.fade() }
     fn set_fade(&mut self, v: f32) { self.world.set_fade(v) }
 }

@@ -56,6 +56,7 @@ pub mod board;
 pub mod class_cam;
 pub mod cuboid;
 pub mod flyby;
+pub mod race;
 pub mod focus;
 pub mod level;
 pub mod rail;
@@ -315,6 +316,10 @@ pub struct CamWorld {
     pub mobys: std::collections::BTreeMap<usize, focus::CamMoby>,
     /// The class-18 regions' moby groups (`0x1abcc0[g]`, list order).
     pub groups: std::collections::BTreeMap<i32, Vec<usize>>,
+    /// The race cameras' rail bots (classes 20 / 21, [`race`]): their rails and marks.
+    pub race: std::collections::BTreeMap<usize, race::RaceMoby>,
+    /// Class 20's race mobys' groups (list order).
+    pub race_groups: std::collections::BTreeMap<usize, Vec<usize>>,
 }
 
 /// Which shake record a request writes: 0x167260 moves the camera along its up row, 0x167270 along its forward row.

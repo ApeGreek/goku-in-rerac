@@ -1,5 +1,5 @@
-//! **The level-class cameras that become current** (classes 3, 1, 14 and 8: [`super::rail`], [`super::cuboid`],
-//! [`super::board`]) and the
+//! **The level-class cameras that become current** (classes 3, 1, 14, 8, 19, 20 and 21: [`super::rail`], [`super::cuboid`],
+//! [`super::board`], [`super::flyby`], [`super::race`]) and the
 //! part of the camera switch `FUN_0020d110` they share with every other camera: the blend by the new camera's record
 //! (pvar +0x1d) and the old camera's +0x7e. Spec: docs/plan/player_controller.md §15.
 //!
@@ -39,9 +39,10 @@ use super::cuboid::{CLASS_FIXED, CLASS_SIDE};
 use super::level::CLASS_FOLLOW;
 use super::rail::CLASS_RAIL;
 use super::board::CLASS_BOARD;
+use super::race::{CLASS_INTRO, CLASS_RACE};
 
 /// The level classes the port runs as a current camera through this module.
-pub const CLASS_CAMS: [i32; 5] = [CLASS_RAIL, CLASS_FIXED, CLASS_SIDE, CLASS_BOARD, super::flyby::CLASS_FLYBY];
+pub const CLASS_CAMS: [i32; 7] = [CLASS_RAIL, CLASS_FIXED, CLASS_SIDE, CLASS_BOARD, super::flyby::CLASS_FLYBY, CLASS_INTRO, CLASS_RACE];
 
 /// `0x20d110`'s rates blend rate with UpdateCam +0x78 = −1 (`0.018`; the level-1 copy path's 0.01 is separate).
 const BLEND_RATE: f32 = 0.018;
@@ -72,8 +73,10 @@ pub struct ClassCam {
     pub side: super::cuboid::SideState,
     /// Class 8's D words.
     pub board: super::board::BoardCamState,
-    /// Class 19's D words.
+    /// Class 19's D words (class 20's too).
     pub flyby: super::flyby::FlybyState,
+    /// Class 21's D words.
+    pub race: super::race::RaceState,
 }
 
 impl Camera {
@@ -181,6 +184,8 @@ impl Camera {
             CLASS_SIDE => self.side_init(inp),
             CLASS_BOARD => self.board_init(inp, prev),
             super::flyby::CLASS_FLYBY => self.flyby_init(prev),
+            CLASS_INTRO => self.intro_init(prev),
+            CLASS_RACE => self.race_init(inp),
             _ => {}
         }
         self.class_cam.prev_pos = self.class_cam.pos;
@@ -259,6 +264,7 @@ impl Camera {
             CLASS_RAIL => self.rail_pre(inp),
             CLASS_FIXED => self.fixed_pre(inp),
             CLASS_SIDE => self.side_pre(inp),
+            CLASS_RACE => self.race_pre(inp),
             _ => {}
         }
     }
@@ -271,6 +277,8 @@ impl Camera {
             CLASS_SIDE => self.side_update(inp),
             CLASS_BOARD => self.board_update(inp),
             super::flyby::CLASS_FLYBY => self.flyby_update(inp),
+            CLASS_INTRO => self.intro_update(inp),
+            CLASS_RACE => self.race_update(inp),
             _ => {}
         }
     }

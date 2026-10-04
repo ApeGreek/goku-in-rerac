@@ -124,10 +124,12 @@ pub struct CameraPorts {
     pub board: bool,
     /// Class 19's four functions and its region test are level 10's (the armed fly-by, [`super::flyby`]).
     pub flyby: bool,
+    /// Classes 20 and 21's functions and helpers are level 14's (Oltanis's grind race, [`super::race`]).
+    pub race: bool,
 }
 
 impl Default for CameraPorts {
-    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true, board: true, flyby: true } }
+    fn default() -> Self { CameraPorts { region: true, swing: true, placed: true, focus: true, rail: true, fixed: true, side: true, board: true, flyby: true, race: true } }
 }
 
 impl CameraPorts {
@@ -138,7 +140,7 @@ impl CameraPorts {
     /// level's overlay; a class whose reference is missing is not run).
     pub fn from_overlays(target: &LevelOverlay, reference: &dyn Fn(u32) -> Option<Arc<LevelOverlay>>) -> CameraPorts {
         let Some(level01) = reference(1) else {
-            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false, board: false, flyby: false };
+            return CameraPorts { region: false, swing: false, placed: false, focus: false, rail: false, fixed: false, side: false, board: false, flyby: false, race: false };
         };
         let rel = rc_formats::level_overlay::Relocation::new(&level01, target);
         let region = target.camvtbl().iter().find(|e| e.class == CLASS_REGION).is_some_and(|e| {
@@ -197,7 +199,9 @@ impl CameraPorts {
         let side = four(cuboid::CLASS_SIDE, 3, cuboid::SIDE_FNS, &cuboid::SIDE_HELPERS);
         let board = four(super::board::CLASS_BOARD, 5, super::board::BOARD_FNS, &super::board::BOARD_HELPERS);
         let flyby = four(super::flyby::CLASS_FLYBY, 10, super::flyby::FLYBY_FNS, &super::flyby::FLYBY_HELPERS);
-        CameraPorts { region, swing, placed, focus, rail, fixed, side, board, flyby }
+        use super::race as rc;
+        let race = four(rc::CLASS_INTRO, 14, rc::INTRO_FNS, &rc::INTRO_HELPERS) && four(rc::CLASS_RACE, 14, rc::RACE_FNS, &[]);
+        CameraPorts { region, swing, placed, focus, rail, fixed, side, board, flyby, race }
     }
 
     /// Whether the port runs `class` as a current camera (the follow, first-person, script and type-6 cameras always).
@@ -210,6 +214,7 @@ impl CameraPorts {
             super::cuboid::CLASS_SIDE => self.side,
             super::board::CLASS_BOARD => self.board,
             super::flyby::CLASS_FLYBY => self.flyby,
+            super::race::CLASS_INTRO | super::race::CLASS_RACE => self.race,
             _ => false,
         }
     }
@@ -237,8 +242,12 @@ pub struct Slot {
     pub side: Option<SideView>,
     /// Class 8's block with its run-time word ([`super::board`]).
     pub board: Option<super::board::BoardRec>,
-    /// Class 19's block with its run-time words +0x38 / +0x39 / +0x3c ([`super::flyby`]).
+    /// Class 19's block with its run-time words +0x38 / +0x39 / +0x3c ([`super::flyby`]); class 20's too.
     pub flyby: Option<super::flyby::FlybyRec>,
+    /// Class 20's words past class 19's ([`super::race`]).
+    pub intro: Option<super::race::IntroRec>,
+    /// Class 21's block with its run-time words +0x20, +0x30, +0x32 ([`super::race`]).
+    pub race: Option<super::race::RaceRec>,
 }
 
 /// The level's camera slots and the follow camera's lock words.
@@ -281,8 +290,11 @@ impl LevelCameras {
                 let rail_cam = if c.record.class == super::rail::CLASS_RAIL { RailCamera::parse(p).map(super::rail::RailSlot::new) } else { None };
                 let side = if c.record.class == super::cuboid::CLASS_SIDE { SideView::parse(p) } else { None };
                 let board = if c.record.class == super::board::CLASS_BOARD { super::board::BoardRec::parse(p) } else { None };
-                let flyby = if c.record.class == super::flyby::CLASS_FLYBY { super::flyby::FlybyRec::parse(p) } else { None };
-                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side, board, flyby }
+                let class = c.record.class;
+                let flyby = if class == super::flyby::CLASS_FLYBY || class == super::race::CLASS_INTRO { super::flyby::FlybyRec::parse(p) } else { None };
+                let intro = if class == super::race::CLASS_INTRO { super::race::IntroRec::parse(p) } else { None };
+                let race = if class == super::race::CLASS_RACE { super::race::RaceRec::parse(p) } else { None };
+                Slot { record: c.record, header, region, placed, focus, rail, rail_cam, side, board, flyby, intro, race }
             })
             .collect();
         LevelCameras {
@@ -471,6 +483,8 @@ impl Camera {
                     let best_class = best.map_or(cur, |(c, _)| c);
                     self.flyby_hook(i, best_class, best_now, inp)
                 }
+                super::race::CLASS_INTRO if self.level_cams.ports.race => self.intro_hook(i, best_now, inp),
+                super::race::CLASS_RACE if self.level_cams.ports.race => self.race_hook(i, best_now),
                 // The script and type-6 cameras' hooks answer 0; they are switched in by their calls (+0x7d is not
                 // set by the port's `CameraScript`, which switches directly). Class 3's hook `0x315dd8` answers 0.
                 _ => 0,

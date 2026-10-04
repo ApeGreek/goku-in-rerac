@@ -143,7 +143,7 @@ pub(crate) fn cos_interp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 /// `0x26cc00(p1, p2, p3, p4, t)`.
-fn hermite(p1: f32, p2: f32, p3: f32, p4: f32, t: f32) -> f32 {
+pub(super) fn hermite(p1: f32, p2: f32, p3: f32, p4: f32, t: f32) -> f32 {
     let f = (p4 - p3) - (p1 - p2);
     f * t * t * t + ((p1 - p2) - f) * t * t + (p3 - p1) * t + p2
 }

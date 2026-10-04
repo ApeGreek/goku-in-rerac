@@ -11,7 +11,7 @@
 //! * 3 / 4: past key time 3 it slides from the rise path's start to the rail's (`0x2d64d0`, over `ticks(60)`);
 //!   the animation wrapped → 4 (sequence 0 in 10, speed 1); the slide done → 5 (`ticks(120)`).
 //! * 5: rides the rail at 12 a tick (`0x2d7198`).
-//! * 6 (set by the rail camera's `0x2d6570`, with Ratchet put on the rail: G-HERO-027): the chase (`0x2d67e8`): it
+//! * 6 (set by the race start `0x2d6570`, the intro camera's (class 20), with Ratchet put on the rail): the chase (`0x2d67e8`): it
 //!   keeps 9 behind Ratchet's nearest point on the rail, closing to 3 ahead as he nears mark A, springing onto it
 //!   (0.01 / 0.2) and facing along the rail; its command byte runs the attack: 5 waits +0x1c8 → 1; 1 the rest pose
 //!   (the head's frame in joint 5's) and `ticks(140)` → 2; 2 the head turns to the point 1..14 ahead on the rail and
@@ -29,8 +29,9 @@
 //! | `0x2d6358` / `0x2d64d0` / `0x2d7198` | rail setup, the slide, the ride | [`setup`], [`slide`], [`update`] |
 //! | `0x2d67e8` | the chase | [`chase`] |
 //! | `0x2d7490` / `0x2d71f0` | the tail and its draw | [`tail`], [`fx_quad_groups`] |
+//! | `0x2d6570` | the race start (the bots' part; Ratchet's is the camera's: `crate::follow_camera::race`) | [`race_start`] |
+//! | `0x315d48` (camera class 21) | the attack calls: the commands 1 / 5 and the waits +0x1c8 | [`bot_call`] |
 //!
-//! [L] The state-6 entry (`0x2d6570`) is the rail camera's (camera classes 19 / 20, G-HERO-027), ported with it.
 //! The draw is built from the camera the frame part saw (+0x210).
 
 use super::oltanis_arcs::{self as arcs, billboard};
@@ -104,6 +105,84 @@ fn path_pts(w: &World, i: i32) -> Option<Vec<[f32; 4]>> {
 }
 fn nearest(pts: &[[f32; 4]], p: c::V) -> Cursor { spline::nearest(pts, false, 20.0, 5.0, 0.0, [p[0], p[1], p[2]]).map(|(_, k)| k).unwrap_or_default() }
 fn chords(pts: &[[f32; 4]], from: i32, to: i32) -> f32 { (from.max(0)..to.max(0)).filter_map(|i| pts.get(i as usize)).map(|q| q[3]).sum() }
+
+/// The race cameras' stores of the last camera update (`crate::follow_camera::race::RaceOut`), in order: Ratchet's
+/// `HeroTeleport`, the race start, an attack call, Ratchet's head turn.
+pub fn camera_stores(w: &mut World) {
+    for out in std::mem::take(&mut w.svc.camera_race) {
+        if let Some(t) = out.teleport { crate::cinematic::hero_teleport(w, t.pos, [0.0, 0.0, t.yaw], t.state, false); }
+        if let Some(st) = out.start { race_start(w, st); }
+        if let Some(cl) = out.call { bot_call(w, cl); }
+        if let Some(hd) = out.head { w.hero_fields_mut().head_look = Some(hd); }
+    }
+}
+
+/// `0x2d6570` (the intro camera's end): Ratchet on his rail at the start (the camera found the place), then the race
+/// moby's group's first three members: state 6, facing from the race moby to Ratchet, 9 behind his cursor along their
+/// rails, the chase spring's velocity cleared, +0xf8 = 2k, +0xfc = 2k + 1 (no reader), their light freed.
+pub fn race_start(w: &mut World, st: crate::follow_camera::race::RaceStart) {
+    if st.moby >= w.table.mobys.len() { return; }
+    let (cur, hp) = match st.hero {
+        Some((cur, place)) => {
+            crate::cinematic::hero_teleport(w, place.pos, [0.0, 0.0, place.yaw], place.state, false);
+            w.hero_fields_mut().rail_cursor = Some((cur.seg, cur.t));
+            (cur, place.pos)
+        }
+        None => { let p = super::hero_pos(w); (w.hero.boots.cur, [p[0], p[1], p[2]]) }
+    };
+    let origin = c::pos(w, st.moby);
+    let ids = crate::moby_update::scheduler::group_ids(w, w.m(st.moby).group);
+    for (k, &id) in ids.iter().take(3).enumerate() {
+        w.mm(id).state = 6;
+        c::set_yaw(w, id, c::atan(hp[0] - origin[0], hp[1] - origin[1]));
+        let mut at = cur;
+        if let Some(r) = rail(w, id) {
+            let (q, _) = spline::advance(&r, false, -BEHIND0, &mut at);
+            let m = w.mm(id);
+            m.position = [q[0], q[1], q[2], m.position[3]];
+        }
+        c::set_pi32(w, id, o::SEG, at.seg);
+        c::set_pf(w, id, o::T, at.t);
+        w.mm(id).pvars[o::VEL..o::VEL + 0x10].fill(0);
+        c::set_pi32(w, id, 0xf8, 2 * k as i32);
+        c::set_pi32(w, id, 0xfc, 2 * k as i32 + 1);
+        let l = c::pi32(w, id, o::LIGHT);
+        if l != -1 {
+            if let Ok(i) = usize::try_from(l) { w.svc.point_lights.free(i); }
+            c::set_pi32(w, id, o::LIGHT, -1);
+        }
+    }
+}
+
+/// An attack call of the race camera (`0x315d48`): the bot on Ratchet's rail attacks now (command 1); from the second
+/// call another waits (command 5, +0x1c8 = `ticks(80)`), from the third the one behind it 45 and the last 110 ticks.
+/// With B on his rail a coin (`0x260050(2)`) picks C or A to wait first.
+pub fn bot_call(w: &mut World, cl: crate::follow_camera::race::BotCall) {
+    let n = cl.calls;
+    let first = if n == 3 { 0x2d } else { 0x50 };
+    let cmd = |w: &mut World, k: usize, v: u8, rest: Option<i32>| {
+        let Some(id) = cl.bots[k].filter(|&id| id < w.table.mobys.len()) else { return };
+        w.mm(id).cmd = v;
+        if let Some(t) = rest {
+            let t = w.ticks(t);
+            c::set_pi32(w, id, o::REST_T, t);
+        }
+    };
+    let (on, a, b) = match cl.on {
+        0 => (0, 1, 2),
+        2 => (2, 1, 0),
+        _ if n > 0 && w.rng.randi(2) == 0 => (1, 2, 0),
+        _ => (1, 0, 2),
+    };
+    cmd(w, on, 1, None);
+    if n <= 0 { return; }
+    if n != 2 {
+        cmd(w, a, 5, Some(first));
+    } else {
+        cmd(w, a, 5, Some(0x2d));
+        cmd(w, b, 5, Some(0x6e));
+    }
+}
 
 /// `0x2d6358`: the cursor 0, the marks' segments on the rail, the span between them.
 pub fn setup(w: &mut World, id: MobyId) {

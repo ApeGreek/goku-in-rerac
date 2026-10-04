@@ -1051,7 +1051,7 @@ camera turned along the trigger cuboid's x row at 8° a tick, distance 7, pivot 
 `cinematic::follow_turn_toward` / `follow_distance` / `follow_pivot_height` / `follow_look_height`.
 
 **The classes the port does not run** (a choice of one is logged in `LevelCameras::wanted`; specs for their ports):
-* **Class 19, the armed fly-by** (L10 hook 0x2f65f8, init 0x2f5b58, update 0x2f5f18, pre 0x2f66c0 (empty), arm
+* **Class 19, the armed fly-by**: ported 2026-10-04 (`follow_camera/flyby.rs`; the spec below kept). (L10 hook 0x2f65f8, init 0x2f5b58, update 0x2f5f18, pre 0x2f66c0 (empty), arm
   0x2f5a50; copies on 13, 14, 15). Records: 10 #4 / #9, 13 #0, 14 #3 / #7, 15 #3 (priority 6, blend 0, kind 3; no
   shapes). The arm (`0x2f5a50(slot)`: +0x38 = 1, +0x39 = 0) is called by units 343 / 344 (L10 1421 / 1424), 415
   (L13 388, through 0x2e9a48 → 0x2e97e0), 451 / 458 (L14 921 / 1352), 490 (L15 1430) — none ported. Hook: +0x39 (done)
@@ -1068,13 +1068,13 @@ camera turned along the trigger cuboid's x row at 8° a tick, distance 7, pivot 
   +0.05 to 1, then phase 3: the FOV back, +0x39 = 1, 0x167358 = 0.05, +0x7e = 4 (a cut), the letterbox off, +0x4c = 0
   → `SetState(0, 1)`; +0x40 ≠ 0 keeps it running. Needs: a gameplay fade and FOV (the camera view's tangent), the
   arming classes. G-HERO-027.
-* **Classes 20 / 21, the level-14 grind race** (20: L14 hook 0x315920 (a class-19-like hook: +0x38 done → −1; the
-  best releasing or Ratchet grinding (group 0xf) → the region test (cuboid 3), group +0x48 = 0xf → 1), init 0x314f00
-  (class 19's init with +0x38 = 3 and `HeroTeleport` 0x2284f8 to cuboid +0x54's centre in state 0x72), update 0x315290
-  (class 19's fly-by without the fades; its end: the FOV back, 0x1675d8 = 0.25, +0x7e = 4, the letterbox off, the race
-  start `0x2d6570(moby +0x50)` (puts Ratchet on its rail, state 0x28), the camera 10 ahead on his rail, 2 up); 21: the
-  race camera over three grind paths +0x34 / +0x38 / +0x3c (their cumulative lengths in 0x1f6c80 / 0x1f7c20 /
-  0x1f8bc0)). G-LVL-007.
+* **Classes 20 / 21, the level-14 grind race**: ported 2026-10-04 (`follow_camera/race.rs`, its coverage table in the
+  module doc; the race start's bot half and the attack calls in `units::oltanis_rail_bot`). 20 is class 19's fly-by
+  without the fades (its FOV eased, `CosInterp`), holding Ratchet in cuboid +0x54 (0x72); its end starts the race
+  (`0x2d6570`: Ratchet on his rail at the bot's mark, the bots 9 behind in state 6) and cuts to 21, which orbits him by
+  a 28-row table keyed on the share of his rail behind him (yaw / pitch / distance / tilts sprung, a facing override by
+  rail), turns his head back in stage 1 (head record targets 20° / −120°) and calls the bots' attacks (commands 1 / 5).
+  Its stores reach the moby world before the next moby loop (`RaceOut`). G-LVL-007.
 * **Class 8, the hoverboard camera**: ported 2026-10-01 (`follow_camera/board.rs`, its coverage table in the module doc).
 * **Class 22** (L15 0x2f8ba8): class 18's modes 1 / 2 for giant Clank (body 2). G-HERO-005.
 

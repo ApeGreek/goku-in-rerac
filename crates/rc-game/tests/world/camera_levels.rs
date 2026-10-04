@@ -195,5 +195,6 @@ fn ported_camera_classes_every_level() {
         assert_eq!(p.placed, has(23), "level {n}: class 23 is level 00's code");
         assert_eq!(p.focus, has(18), "level {n}: class 18 is level 02's code");
         assert_eq!(p.flyby, has(19), "level {n}: class 19 is level 10's code");
+        assert_eq!(p.race, has(20) && has(21), "level {n}: classes 20 / 21 are level 14's code");
     }
 }

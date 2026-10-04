@@ -867,6 +867,9 @@ pub struct Services {
     /// The camera shake requests this tick's class updates made (their stores into 0x167260 / 0x167270), in order;
     /// taken by the tick and applied to the camera before the hero update ([`World::shake_camera`]).
     pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
+    /// The race cameras' stores of the last camera update (`crate::follow_camera::race::RaceOut`), made before the next
+    /// moby loop (`classes::units::oltanis_rail_bot::camera_stores`).
+    pub camera_race: Vec<crate::follow_camera::race::RaceOut>,
     /// The frame's draw-callback lists 0x21afe0 / 0x21b198 ([`crate::moby_update::classes::draw_callbacks`]).
     pub draw_callbacks: crate::moby_update::classes::draw_callbacks::DrawCallbacks,
     /// The glove reticle draw callbacks (`0x2c23c0` and its copies `0x2bf420` / `0x2d8e28`, list 1) registered by the
@@ -978,6 +981,7 @@ impl Services {
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
             hero_writes: None,
             camera_shakes: Vec::new(),
+            camera_race: Vec::new(),
             draw_callbacks: Default::default(),
             reticles: Default::default(),
             targets: Vec::new(),
@@ -1177,6 +1181,11 @@ pub struct HeroFields {
     pub hydro_full: Option<bool>,
     /// A class's store of 0x14162a (`Hero::wall_spline`: the spline the capsule pass keeps Ratchet off): Pokitaru's 361.
     pub wall_spline: Option<i16>,
+    /// A store of Ratchet's rail cursor 0x13f8b4 / 0x13f8b8 (segment, units along it): Oltanis's race start
+    /// (`crate::follow_camera::race`).
+    pub rail_cursor: Option<(i32, f32)>,
+    /// A store of Ratchet's head record (3) targets y / z (0x17aff4 / 0x17aff8 on level 14): the race camera's stage 1.
+    pub head_look: Option<[f32; 2]>,
 }
 
 /// `0x27fe88(p, out, centre, e_old, e_new)` (level09; level07's copy `0x288968`, the same code): `p` turned about
@@ -1273,6 +1282,8 @@ impl HeroFields {
             rail_radius: [None; 8],
             hydro_full: None,
             wall_spline: None,
+            rail_cursor: None,
+            head_look: None,
         }
     }
 
@@ -1338,6 +1349,12 @@ impl HeroFields {
         if let Some(v) = self.rail_reach { h.f51a = v; }
         if let Some(v) = self.hydro_full { h.gadgets.hydro_full = v; }
         if let Some(v) = self.wall_spline { h.wall_spline = v; }
+        if let Some((seg, t)) = self.rail_cursor { h.boots.cur = crate::spline::Cursor { seg, t }; }
+        if let Some([y, z]) = self.head_look {
+            let r = &mut h.idle.joints[crate::hero::idle::joint::HEAD];
+            r.target[1] = y;
+            r.target[2] = z;
+        }
         if let Some(b) = self.board { h.board.moby = Some(b); }
         h.board.boost_timer += self.board_boost;
         if let Some(p) = self.pose {
@@ -2227,6 +2244,7 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     fn set_view_tan(&mut self, v: f32) { self.svc.borrow_mut().view_tan_x = v; }
     fn set_letterbox(&mut self, on: bool) { self.svc.borrow_mut().creatures.cutscene = on; }
     fn queue_hero_state(&mut self, state: i32) { self.svc.borrow_mut().cinematic.calls.push(crate::cinematic::CinematicCall::HeroState { state, play: true }); }
+    fn queue_race(&mut self, out: crate::follow_camera::race::RaceOut) { self.svc.borrow_mut().camera_race.push(out); }
     fn run_list(&self, table: &MobyTable, camera: V4) -> Option<Vec<MobyId>> {
         Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
     }

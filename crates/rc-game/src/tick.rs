@@ -156,6 +156,8 @@ pub trait MobySystem {
     fn set_letterbox(&mut self, _on: bool) {}
     /// A `SetState(state, 1)` on Ratchet from outside the moby loop (the camera), made before the next hero update.
     fn queue_hero_state(&mut self, _state: i32) {}
+    /// The race cameras' stores (`crate::follow_camera::race::RaceOut`), made before the next moby loop.
+    fn queue_race(&mut self, _out: crate::follow_camera::race::RaceOut) {}
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -543,6 +545,30 @@ impl Game {
             for id in flyby { add(id); }
             self.camera.world.mobys = mobys;
             self.camera.world.groups = groups;
+            // The race cameras' rail bots (classes 20 / 21: crate::follow_camera::race): class 20's race moby's group
+            // and class 21's bots, their rails (pvar +0x60) and their marks paths' first points (+0x88).
+            let (mut race, mut race_groups) = (std::collections::BTreeMap::new(), std::collections::BTreeMap::new());
+            let mut bots: Vec<usize> = Vec::new();
+            for s in &self.camera.level_cams.slots {
+                if let Some(id) = s.intro.and_then(|r| usize::try_from(r.moby).ok()).filter(|&id| id < self.mobys.mobys.len()) {
+                    let g = self.mobys.mobys[id].group;
+                    let ids = hooks.world.as_deref().map(|w| w.group(g)).unwrap_or_default();
+                    bots.extend(&ids);
+                    race_groups.insert(id, ids);
+                }
+                if let Some(r) = s.race { bots.extend(r.bots.iter().filter_map(|&b| usize::try_from(b).ok())); }
+            }
+            if !bots.is_empty() {
+                let vols = hooks.world.as_deref().and_then(|w| w.volumes());
+                for id in bots {
+                    let Some(m) = self.mobys.mobys.get(id) else { continue };
+                    let word = |o: usize| m.pvars.get(o..o + 4).map_or(-1, |b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                    let mark0 = usize::try_from(word(0x88)).ok().and_then(|i| vols.as_deref()?.paths.get(i)?.first().map(|q| [q[0], q[1], q[2]]));
+                    race.insert(id, crate::follow_camera::race::RaceMoby { rail: word(0x60), mark0 });
+                }
+            }
+            self.camera.world.race = race;
+            self.camera.world.race_groups = race_groups;
         }
         // The camera's queries see the table after the hero's write-back (Ratchet re-registered).
         let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
@@ -562,6 +588,7 @@ impl Game {
             if let Some(on) = out.letterbox { w.set_letterbox(on); }
             if let Some(t) = out.tan { w.set_view_tan(t); }
             if let Some(s) = out.hero_state { w.queue_hero_state(s); }
+            if !out.race.is_empty() { w.queue_race(out.race); }
             if self.fade_rate != 0.0 {
                 let f = w.fade() - self.fade_rate;
                 if f <= 0.0 {
