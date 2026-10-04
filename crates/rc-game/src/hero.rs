@@ -276,9 +276,11 @@ pub struct Hero {
     pub cap_bottom_target: Pf,
     pub cap_radius_target: Pf,
     pub cap_radius: Pf,
-    /// 0x13f58c: moby hit by the capsule (never in this port); 0x13f590; 0x13f5a4/5a5; 0x13f5a7 capsule hit this tick.
+    /// 0x13f58c: the moby the capsule resolve last pushed Ratchet out of (CollOutput +0x18, `physics::capsule_try`);
+    /// 0x13f590 (`wall_moby`): the moby behind the wall the wall check `0x232978` pushed him off this tick (cleared by
+    /// `HeroMotionUpdate`); 0x13f5a4/5a5; 0x13f5a7 capsule hit this tick.
     pub cap_moby: Option<usize>,
-    pub f590: i32,
+    pub wall_moby: Option<usize>,
     pub f5a4: u8,
     pub f5a5: u8,
     pub cap_hit: u8,
@@ -524,7 +526,7 @@ impl Hero {
             contact_normal: v, contact_point: v,
             cap_top: Pf::b(0x3f4c_cccd), cap_bottom: Pf::b(0x3f33_3333), cap_top_target: Pf::b(0x3f4c_cccd),
             cap_bottom_target: Pf::b(0x3f33_3333), cap_radius_target: Pf::b(0x3ee6_6666), cap_radius: Pf::b(0x3ee6_6666),
-            cap_moby: None, f590: 0, f5a4: 0, f5a5: 0, cap_hit: 0,
+            cap_moby: None, wall_moby: None, f5a4: 0, f5a5: 0, cap_hit: 0,
             ground_normal: [z, z, Pf::ONE, z], gravity_dir: [z, z, -Pf::ONE, z], ground_point: v,
             ground_z: z, height: z, slope: z, pitch: z, roll: z, slope_yaw: z,
             ground_moby: None, grounded_ticks: 0, f654: z, f658: 0, f65a: 0, air_ticks: 0,
@@ -676,7 +678,7 @@ impl Hero {
         // 0x231ed8: magnitude of LAST tick's stick.
         let l = crate::pad::len2(self.stick[0], self.stick[1]);
         self.stick_mag = if Pf::ONE < l { Pf::ONE } else { l };
-        self.f590 = 0;
+        self.wall_moby = None;
         self.stick = [env.pad.lx, env.pad.ly];
         if crate::pad::len2(self.stick[0], self.stick[1]) < Pf::b(0x3e80_0000) {
             let b = env.pad.raw;

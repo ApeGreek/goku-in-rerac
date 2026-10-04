@@ -67,8 +67,8 @@
 //! | `0x2e3a90`: 10 clumps from pos jittered 0.5 (`0x2747a0`), 0.55 up (0xb: speeds × 0.55, 0.2 lower), `randf(1, 5)` out and `randf(2, 5)` up per second plus half the knockback velocity, the phase-B velocity falling 20·dt² over `ticks(30)`; 8 type-2 blobs each (r = `randf(0.5, 1.5)`, sizes 0.125·r / 0.065·r, jitter 0.2 / 0.5·dt, colours 0x8000eeee–0x8000ff90 / 0xffee, `ticks(10)`, `ticks(30)`, `randf(5, 25)`) | the death sparks | [`sparks`] (`fx::part02`) |
 //! | reaction table level10 0x1dde28 (the shared no-op table) | no Suck Cannon reaction | the Suck Cannon's shot is a weapon hit |
 //!
-//! Native `f32`; the rand draws at the game's points. [L]: the capsule contact word 0x13f590 has no port (only
-//! `Hero::cap_moby`, 0x13f58c, never filled: G-HERO-033); a target moby with no position reads Ratchet's.
+//! Native `f32`; the rand draws at the game's points. the contact words are `Hero::wall_moby` (0x13f590) and `Hero::cap_moby`
+//! (0x13f58c); a target moby with no position reads Ratchet's.
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::crate_::{is_crate, set_death_bits};
@@ -343,7 +343,7 @@ fn tick(w: &mut World, id: MobyId) {
     } else if state(w, id) != st::SLEEP {
         c::set_pf(w, id, pv::RANGE, k::RANGE);
     } else {
-        let touch = w.hero.cap_moby == Some(id);
+        let touch = w.hero.wall_moby == Some(id) || w.hero.cap_moby == Some(id);
         c::set_pf(w, id, pv::RANGE, if touch { 6.0 } else { 0.0 });
         if clank(w) { wake(w, id); }
     }

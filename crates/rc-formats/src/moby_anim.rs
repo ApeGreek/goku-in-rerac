@@ -418,10 +418,18 @@ pub fn hard_cut(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i32) -
 /// the moby's current snapshot frame (read when key A is one) and receives the new one. Returns false,
 /// changing nothing, when the class has no sequence `seq`.
 pub fn set_sequence(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i32, blend_ticks: i32, snapshot_frame: &mut Option<MobyFrame>) -> bool {
+    set_sequence_ex(s, class, seq, frame, blend_ticks, snapshot_frame, false)
+}
+
+/// `MobyAnimBlendEx` 0x26c7a8 (boot `0x2130d8`): [`set_sequence`] whose snapshot is also taken when no blend runs
+/// with `force` (its flag 4). Its flags 1 / 2 (the snapshot's 0x100 / 0x200: skip the pose-layer lists) change nothing
+/// here (the port's snapshots carry no layers). [L] The frame is clamped as the plain blend does (the game passes it
+/// through; every caller passes 0).
+pub fn set_sequence_ex(s: &mut AnimState, class: &MobyAnimClass, seq: u8, frame: i32, blend_ticks: i32, snapshot_frame: &mut Option<MobyFrame>, force: bool) -> bool {
     let Some(q) = class.sequence(seq) else { return false };
     let fc = q.header.frame_count as i32;
     let b = if frame < fc { frame } else { fc - 1 } as u8;
-    if s.t > 0.025 {
+    if s.t > 0.025 || force {
         // find_or_allocate_id_slot: the port always has a slot (the game falls back to "A unchanged").
         if let Some(f) = snapshot(class, s, snapshot_frame.as_ref()) {
             *snapshot_frame = Some(f);

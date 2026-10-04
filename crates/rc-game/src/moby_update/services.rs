@@ -1732,6 +1732,18 @@ impl<'a> World<'a> {
         ok
     }
 
+    /// `MobyAnimBlendEx(m, seq, frame, ticks, flags)` 0x26c7a8 (boot `0x2130d8`): [`World::anim_blend`] that also
+    /// snapshots the current pose when no blend runs with flag 4 (`rc_formats::moby_anim::set_sequence_ex`).
+    pub fn anim_blend_ex(&mut self, id: MobyId, seq: u8, frame: i32, ticks: i32, flags: u32) -> bool {
+        let o = self.table.mobys[id].o_class;
+        let Some(class) = self.classes.anim(o) else { return false };
+        if self.svc.snapshots.len() <= id { self.svc.snapshots.resize(id + 1, None); }
+        let snap = &mut self.svc.snapshots[id];
+        let ok = rc_formats::moby_anim::set_sequence_ex(&mut self.table.mobys[id].anim, class, seq, frame, ticks, snap, flags & 4 != 0);
+        if ok { crate::moby_update::anim_sound::after_sequence_change(&mut self.table.mobys[id], class); }
+        ok
+    }
+
     /// `MobyBuildMatrix` 0x265bd8 on one moby.
     pub fn build_matrix(&mut self, id: MobyId) { self.svc.build_matrix_in(self.table, self.classes, id); }
 

@@ -657,6 +657,8 @@ impl Hero {
         }
         if !(SLOPE_MAX <= s) && sid != 8 && sid != 0xc { return; }
         let Some(o) = last else { return };
+        // 0x13f590 = the last line's moby (0x1742d8).
+        self.wall_moby = o.moby;
         let mut n = raw_normal(&o);
         n[2] = Pf::ZERO;
         let n = unit(n);

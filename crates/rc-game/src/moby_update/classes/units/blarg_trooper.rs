@@ -324,7 +324,7 @@ fn hits(w: &mut World, id: MobyId) {
     let sight = if alerted(w, id) {
         SIGHT + 6.0
     } else if s == 1 {
-        if w.hero.cap_moby == Some(id) || w.hero.f590 == id as i32 { 6.0 } else { 0.0 }
+        if w.hero.cap_moby == Some(id) || w.hero.wall_moby == Some(id) { 6.0 } else { 0.0 }
     } else {
         SIGHT
     };

@@ -150,8 +150,8 @@ fn tick(w: &mut World, id: MobyId) {
     let hit = w.get_hit(id, 0x33_0000, false);
     w.mm(id).hit_slot = 0xff;
     // 0x13f58c / 0x13f590: the moby Ratchet's capsule last pushed out of (player_controller.md, the capsule resolve);
-    // the port's hero does not fill them yet (`Hero::cap_moby` stays None; gaps.md G-HERO-033), so this is false.
-    let contact = w.hero.cap_moby == Some(id) || c::pi32(w, id, pv::TOUCHED) != 0;
+    // `Hero::cap_moby` and `Hero::wall_moby`.
+    let contact = w.hero.cap_moby == Some(id) || w.hero.wall_moby == Some(id) || c::pi32(w, id, pv::TOUCHED) != 0;
     let blast = if contact {
         LARGE
     } else {

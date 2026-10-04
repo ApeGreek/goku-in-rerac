@@ -48,8 +48,8 @@
 //! The tail (it or its gun drawn): the gun; the look yaws negated when mirrored; the look-ats (0.018, 0.3 on list 5;
 //! 0.024, 0.3 on list 6).
 //!
-//! Read from the level12 decomp. [L] The blends here are `MobyAnimBlendEx(…, 5)` (a forced snapshot) in the game, a
-//! plain blend in the port; the game runs the rest of the update on a moby its tick just deleted (inside +0x290): the
+//! Read from the level12 decomp. The blends here are `MobyAnimBlendEx(…, 5)` (a forced snapshot, `World::anim_blend_ex`).
+//! [L] The game runs the rest of the update on a moby its tick just deleted (inside +0x290): the
 //! port stops there. Native `f32`.
 
 use crate::moby_runtime::{mode, MobyId};
@@ -124,7 +124,7 @@ fn blend(w: &mut World, id: MobyId, seq: u8, n: i32) {
     let a = w.m(id).anim;
     if a.seq_b != seq && a.seq_a == a.seq_b {
         let t = w.ticks(n);
-        w.anim_blend(id, seq, 0, t);
+        w.anim_blend_ex(id, seq, 0, t, 5);
     }
 }
 

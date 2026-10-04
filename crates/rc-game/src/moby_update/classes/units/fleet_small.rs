@@ -18,7 +18,7 @@
 //! | `0x2f2e78` | 1562 | [`thrusters_update`] |
 //!
 //! [L] Ratchet's capsule touch skips the sphere query, so the game tests a stale hit moby 0x174758 (the last query's);
-//! the port takes the touch as a blast. 0x13f590 is not kept by the port (only 0x13f58c, `Hero::cap_moby`).
+//! the port takes the touch as a blast. The words are `Hero::cap_moby` (0x13f58c) and `Hero::wall_moby` (0x13f590).
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::classes::bomb_water::{part34, water_level};
@@ -66,7 +66,7 @@ pub fn mine_update(w: &mut World, id: MobyId) {
             let tmpl = HitTemplate { attacker: Some(id), flags: 0x1_0001, damage: Pf::ONE, ..Default::default() };
             let mut centre = c::pos(w, id);
             centre[2] += 0.75;
-            if w.hero.cap_moby != Some(id) {
+            if w.hero.cap_moby != Some(id) && w.hero.wall_moby != Some(id) {
                 let list = w.sphere_mobys_list(Pf::ONE, pv(centre), 0x10, Some(id), Some(&tmpl));
                 let Some(&first) = list.first() else { return };
                 if !not_mine(w, Some(first)) { return; }

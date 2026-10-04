@@ -420,7 +420,7 @@ fn idle(w: &mut World, id: MobyId, hit: Option<HitRecord>, contact: bool) {
     let class = w.m(id).o_class;
     if class == TNT {
         let h = w.hero;
-        let touched = h.cap_moby == Some(id) || (h.ground_moby == Some(id) && h.air_ticks == 0) || contact;
+        let touched = h.cap_moby == Some(id) || h.wall_moby == Some(id) || (h.ground_moby == Some(id) && h.air_ticks == 0) || contact;
         if touched {
             let m = w.mm(id);
             m.cmd = 0;
