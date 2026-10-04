@@ -67,6 +67,8 @@ pub struct Game {
     pub options: GameOptions,
     /// `0x15f638`: the level's death height (gameplay header +0x28).
     pub death_z: Pf,
+    /// 0x167358: the fade-out rate (camera class 19's end; `fun_001eda60`).
+    pub fade_rate: f32,
     /// The item definitions and classes of the hand items (None: no hand item is created, as before the
     /// melee port).
     pub item_data: Option<ItemData>,
@@ -147,6 +149,13 @@ pub trait MobySystem {
     /// The global fade 0x15f3fc (the moby loop's `cinematic::Cinematic::fade`) and its store.
     fn fade(&self) -> f32 { 0.0 }
     fn set_fade(&mut self, _v: f32) {}
+    /// The view's tangent 0x16cf70 (`Services::view_tan_x`) and its store (`UpdateViewContext` after it).
+    fn view_tan(&self) -> f32 { 0.63 }
+    fn set_view_tan(&mut self, _v: f32) {}
+    /// The letterbox 0x15f404 (`creature::Globals::cutscene`).
+    fn set_letterbox(&mut self, _on: bool) {}
+    /// A `SetState(state, 1)` on Ratchet from outside the moby loop (the camera), made before the next hero update.
+    fn queue_hero_state(&mut self, _state: i32) {}
 }
 
 /// Callbacks for the subsystems ported elsewhere.
@@ -188,7 +197,7 @@ impl Game {
         let hero = Hero::init_from_moby(&mut mobys.mobys[hero_moby], coll, &mut rng);
         let pad = PadState::default();
         let camera = Camera::new(&CamInput { hero: &hero, pad: &pad, coll, mobys: None, hero_moby: None }, options.camera);
-        Game { pad, mobys, hero_moby, hero, camera, rng, counter: 0, options, death_z: Pf::f(death_z), item_data: None, item_globals: ItemGlobals::default(), camera_paused: false, grind_paths: Default::default(), cheat_patterns: Default::default(), cheat_toggled: None }
+        Game { pad, mobys, hero_moby, hero, camera, rng, counter: 0, options, death_z: Pf::f(death_z), fade_rate: 0.0, item_data: None, item_globals: ItemGlobals::default(), camera_paused: false, grind_paths: Default::default(), cheat_patterns: Default::default(), cheat_toggled: None }
     }
 
     /// The end of the level load (`LoadLevelCoreData` 0x258128): `0x15f5cc++` right after
@@ -529,16 +538,40 @@ impl Game {
             }
             // The follow camera's scripted focus moby (0x16735c, `0x3111d8`): its state and position.
             if let Some(id) = self.camera.focus_moby { add(id); }
+            // The fly-bys' mobys (camera class 19's +0x28: crate::follow_camera::flyby).
+            let flyby: Vec<usize> = self.camera.level_cams.slots.iter().filter_map(|s| s.flyby).filter_map(|r| usize::try_from(r.moby).ok()).collect();
+            for id in flyby { add(id); }
             self.camera.world.mobys = mobys;
             self.camera.world.groups = groups;
         }
         // The camera's queries see the table after the hero's write-back (Ratchet re-registered).
         let scene = hooks.world.as_deref_mut().and_then(|w| w.scene(&self.mobys));
+        // The engine words the level cameras read (crate::follow_camera::flyby).
+        if let Some(w) = hooks.world.as_deref() { self.camera.engine = crate::follow_camera::flyby::CamEngine { fade: w.fade(), tan: w.view_tan() }; }
         let camera = {
             let mobys = scene.as_ref().map(OwnedScene::scene);
             self.camera.update(&CamInput { hero: &self.hero, pad: &self.pad, coll, mobys: mobys.as_ref(), hero_moby })
         };
         drop(scene);
+        // Camera class 19's stores (the fade, the letterbox, the view's tangent, Ratchet's state, the fade-out rate) and
+        // `fun_001eda60`: the fade-out rate 0x167358 taken off the fade until it is 0.
+        let out = std::mem::take(&mut self.camera.flyby_out);
+        if let Some(r) = out.fade_rate { self.fade_rate = r; }
+        if let Some(w) = hooks.world.as_deref_mut() {
+            if let Some(f) = out.fade { w.set_fade(f); }
+            if let Some(on) = out.letterbox { w.set_letterbox(on); }
+            if let Some(t) = out.tan { w.set_view_tan(t); }
+            if let Some(s) = out.hero_state { w.queue_hero_state(s); }
+            if self.fade_rate != 0.0 {
+                let f = w.fade() - self.fade_rate;
+                if f <= 0.0 {
+                    self.fade_rate = 0.0;
+                    w.set_fade(0.0);
+                } else {
+                    w.set_fade(f);
+                }
+            }
+        }
         // `Camera_handleCollWithHero`'s camera moby (class 1007): created while the follow camera is current (+0x30 =
         // 0xff, mode |= 0x41, at the camera, `MobyBuildMatrix`), deleted otherwise (crate::follow_camera::camera_moby).
         if let (Some(call), Some(w)) = (self.camera.cam_moby_call.take(), hooks.world.as_deref_mut()) {

@@ -331,12 +331,9 @@ pub fn sink_update(w: &mut World, id: MobyId) {
     crate::moby_update::triggers::carry_riders(&mut w.mm(id).pvars, 0x60, delta, rot, rot_new);
 }
 
-/// The fly-by camera record `k` armed (`0x2f5a50`: its pvar +0x38 = 1, +0x39 = 0): camera class 19 is not run by
-/// the port (G-HERO-027), logged.
-fn arm_flyby(w: &mut World, k: i32) {
-    let _ = k;
-    w.svc.unported("orxon 1421 / 1424: the fly-by camera's arming 0x2f5a50 (camera class 19, G-HERO-027)");
-}
+/// The fly-by camera record `k` armed (`0x2f5a50`: its pvar +0x38 = 1, +0x39 = 0; camera class 19,
+/// `crate::follow_camera::flyby`).
+fn arm_flyby(w: &mut World, k: i32) { crate::cinematic::flyby_arm(w, k); }
 
 const SWING: f32 = f32::from_bits(0x3fb2_b8c2);
 

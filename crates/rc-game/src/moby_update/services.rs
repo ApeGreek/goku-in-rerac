@@ -2223,6 +2223,10 @@ impl crate::tick::MobySystem for SharedServices<'_, '_> {
     fn queue_board(&mut self, cmds: Vec<crate::hero::hoverboard::BoardCmd>) { self.svc.borrow_mut().board.cmds.extend(cmds); }
     fn fade(&self) -> f32 { self.svc.borrow().cinematic.fade }
     fn set_fade(&mut self, v: f32) { self.svc.borrow_mut().cinematic.fade = v; }
+    fn view_tan(&self) -> f32 { self.svc.borrow().view_tan_x }
+    fn set_view_tan(&mut self, v: f32) { self.svc.borrow_mut().view_tan_x = v; }
+    fn set_letterbox(&mut self, on: bool) { self.svc.borrow_mut().creatures.cutscene = on; }
+    fn queue_hero_state(&mut self, state: i32) { self.svc.borrow_mut().cinematic.calls.push(crate::cinematic::CinematicCall::HeroState { state, play: true }); }
     fn run_list(&self, table: &MobyTable, camera: V4) -> Option<Vec<MobyId>> {
         Some(crate::moby_update::scheduler::build_active_list(table, camera, &self.svc.borrow().groups).0)
     }

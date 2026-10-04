@@ -292,7 +292,9 @@ pub fn riser_update(w: &mut World, id: MobyId) {
             let t = w.ticks(0x78);
             c::set_pi32(w, id, 4, t);
             c::set_pf(w, id, 8, 1.0 / t as f32);
-            w.svc.unported("oltanis 1352: the camera record's arming 0x314168 (a fly-by, camera class 19, G-HERO-027)");
+            // 0x314168: the camera record +0x10 armed (a fly-by, camera class 19).
+            let rec = c::pi32(w, id, 0x10);
+            crate::cinematic::flyby_arm(w, rec);
         }
         2 => {
             c::dec_timer_pvar_i32(w, id, 4);

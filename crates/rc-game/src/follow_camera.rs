@@ -55,6 +55,7 @@ pub mod camera_moby;
 pub mod board;
 pub mod class_cam;
 pub mod cuboid;
+pub mod flyby;
 pub mod focus;
 pub mod level;
 pub mod rail;
@@ -295,6 +296,10 @@ pub struct Camera {
     /// 0x167354: the camera moby (class 1007, [`camera_moby`]) and this tick's request to the moby world for it.
     pub cam_moby: Option<usize>,
     pub cam_moby_call: Option<camera_moby::Call>,
+    /// The engine words the level cameras read (the fade 0x15f3fc, the view's tangent 0x16cf70), given by the tick, and
+    /// those class 19 writes this tick ([`flyby`]).
+    pub engine: flyby::CamEngine,
+    pub flyby_out: flyby::FlybyOut,
 }
 
 /// The moby-world facts the camera code reads beyond the collision queries, fed by the tick before each camera

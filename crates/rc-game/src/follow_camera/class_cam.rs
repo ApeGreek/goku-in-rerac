@@ -41,7 +41,7 @@ use super::rail::CLASS_RAIL;
 use super::board::CLASS_BOARD;
 
 /// The level classes the port runs as a current camera through this module.
-pub const CLASS_CAMS: [i32; 4] = [CLASS_RAIL, CLASS_FIXED, CLASS_SIDE, CLASS_BOARD];
+pub const CLASS_CAMS: [i32; 5] = [CLASS_RAIL, CLASS_FIXED, CLASS_SIDE, CLASS_BOARD, super::flyby::CLASS_FLYBY];
 
 /// `0x20d110`'s rates blend rate with UpdateCam +0x78 = −1 (`0.018`; the level-1 copy path's 0.01 is separate).
 const BLEND_RATE: f32 = 0.018;
@@ -72,6 +72,8 @@ pub struct ClassCam {
     pub side: super::cuboid::SideState,
     /// Class 8's D words.
     pub board: super::board::BoardCamState,
+    /// Class 19's D words.
+    pub flyby: super::flyby::FlybyState,
 }
 
 impl Camera {
@@ -178,6 +180,7 @@ impl Camera {
             }
             CLASS_SIDE => self.side_init(inp),
             CLASS_BOARD => self.board_init(inp, prev),
+            super::flyby::CLASS_FLYBY => self.flyby_init(prev),
             _ => {}
         }
         self.class_cam.prev_pos = self.class_cam.pos;
@@ -267,6 +270,7 @@ impl Camera {
             CLASS_FIXED => self.fixed_update(inp),
             CLASS_SIDE => self.side_update(inp),
             CLASS_BOARD => self.board_update(inp),
+            super::flyby::CLASS_FLYBY => self.flyby_update(inp),
             _ => {}
         }
     }

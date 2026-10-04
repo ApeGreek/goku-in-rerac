@@ -96,6 +96,11 @@ pub enum CinematicCall {
     FocusRecord { record: usize, distance: f32, pivot: f32 },
     /// `0x306338(slot)` (level18): a class-18 slot's record +0x50 = 1 (the region leaves this tick) ([`focus_suppress`]).
     FocusSuppress(usize),
+    /// A class arming the fly-by camera record `slot` (camera class 19: level10 `0x2f5a50`, level13 `0x316f20`, level14
+    /// `0x314168`, level15 `0x2f78b8`; [`crate::follow_camera::Camera::flyby_arm`]) or ending it (level13 `0x316f48`,
+    /// level14 `0x314190`; [`crate::follow_camera::Camera::flyby_end`]).
+    FlybyArm(usize),
+    FlybyEnd(usize),
     /// `0x3135b8(m)` (level14): the Swingshot camera, when current (class 7), looks along moby `m` (D+0x80 = 1, D+0x84 =
     /// m: its yaw, `yaw`), its look height and height 2, distance 7 ([`swing_follow`]).
     SwingFollow { yaw: f32 },
@@ -310,6 +315,11 @@ pub fn focus_record(w: &mut World, record: usize, distance: f32, pivot: f32) {
 /// `0x306338(slot)`: a class-18 record's +0x50 = 1 for this tick.
 pub fn focus_suppress(w: &mut World, record: usize) { w.svc.cinematic.calls.push(CinematicCall::FocusSuppress(record)); }
 
+/// The fly-by camera record `slot` armed / ended from a class (camera class 19, [`CinematicCall::FlybyArm`]); a
+/// negative record (none) is ignored.
+pub fn flyby_arm(w: &mut World, slot: i32) { if let Ok(s) = usize::try_from(slot) { w.svc.cinematic.calls.push(CinematicCall::FlybyArm(s)); } }
+pub fn flyby_end(w: &mut World, slot: i32) { if let Ok(s) = usize::try_from(slot) { w.svc.cinematic.calls.push(CinematicCall::FlybyEnd(s)); } }
+
 /// A Swingshot target's hint call (`0x2eb3d0` reset / `0x2eb4c0` offer), applied to the camera before its update.
 pub fn look_hint(w: &mut World, c: crate::follow_camera::swing::HintCall) { w.svc.cinematic.calls.push(CinematicCall::LookHint(c)); }
 
@@ -458,6 +468,8 @@ pub fn apply_camera_calls(cam: &mut crate::follow_camera::Camera, calls: &[Cinem
                 if !cam.script_active() { cam.camera_script(pos, euler, mode, ticks, collide, crate::hero::physics::to_f32x3(inp.hero.pos)) }
             }
             CinematicCall::CameraCurve { a, b } => cam.camera_script_curve(a, b),
+            CinematicCall::FlybyArm(s) => cam.flyby_arm(s),
+            CinematicCall::FlybyEnd(s) => cam.flyby_end(s),
             CinematicCall::ScriptSprings { pos, euler } => cam.camera_script_springs(pos, euler),
             CinematicCall::ScriptMode { mode, ticks } => cam.camera_script_mode(mode, ticks, crate::hero::physics::to_f32x3(inp.hero.pos)),
             CinematicCall::CameraTargets { pos, euler } => cam.camera_script_targets(pos, euler),

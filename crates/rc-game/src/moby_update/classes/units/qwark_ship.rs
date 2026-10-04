@@ -420,7 +420,9 @@ pub fn update(w: &mut World, id: MobyId) {
                 }
                 let l = pi(w, id, pvo::LIGHT);
                 if let Ok(i) = usize::try_from(l) { w.svc.point_lights.free(i); }
-                w.svc.unported("qwark 388: the crash camera's disarm 0x316f48 (camera class 19, G-HERO-027)");
+                // 0x316f48: the crash camera ended while it is current (camera class 19).
+                let rec = pi(w, id, pvo::CRASH_CAMERA);
+                crate::cinematic::flyby_end(w, rec);
                 w.delete_moby(id);
                 return;
             }
@@ -900,7 +902,9 @@ fn die(w: &mut World, id: MobyId) {
         m.mode |= mode::NO_UPDATE | mode::HIDDEN;
         m.visible = 0;
     }
-    w.svc.unported("qwark 388: the crash camera's arming 0x316f20 (camera class 19, G-HERO-027)");
+    // 0x316f20: the crash camera armed (camera class 19).
+    let rec = pi(w, id, pvo::CRASH_CAMERA);
+    crate::cinematic::flyby_arm(w, rec);
     w.mm(id).state = 7;
     set(w, id, pvo::SPEED, DT * 80.0);
     let t = w.ticks(600);

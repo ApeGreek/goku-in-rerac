@@ -393,7 +393,9 @@ pub fn dispenser_update(w: &mut World, id: MobyId) {
         }
         1 => {
             if story::flag(w, FLAG_DISPENSER) != 0 && c::dist2(super::hero_pos(w), c::pos(w, id)) < 3.0 && w.hero.mode == 0 {
-                w.svc.unported("quartu 1430: the fly-by camera's arming 0x2f78b8 (camera class 19, G-HERO-027)");
+                // 0x2f78b8: the fly-by camera record +0x00 armed (camera class 19).
+                let rec = c::pi32(w, id, 0x00);
+                crate::cinematic::flyby_arm(w, rec);
                 w.mm(id).state = 2;
             }
         }

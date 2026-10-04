@@ -41,7 +41,7 @@
 //! | `0x2fc0f0` / `0x2fc890` / `0x2fc9a0` / `0x2fc3e8` | 908 | [`fighter_update`] |
 //! | `0x2fd310` / `0x2fded0` | the jets | [`jet`] |
 //!
-//! [L] The fly-by camera records (`0x314168` / `0x314190`, camera class 19) are logged as unported (G-HERO-027).
+//! The fly-by camera record (`0x314168` / `0x314190`, camera class 19) through `cinematic::flyby_arm` / `flyby_end`.
 
 use crate::moby_runtime::MobyId;
 use crate::moby_update::creature::{self as c, fx};
@@ -197,7 +197,9 @@ fn follow(w: &mut World, id: MobyId) -> bool {
     c::set_pi32(w, id, o::SEG, cur.seg);
     c::set_pf(w, id, o::T, cur.t);
     if missile != 0 && (ended || w.camera_class != 0x13) {
-        if w.camera_class == 0x13 { w.svc.unported("oltanis 921: the fly-by camera record's end 0x314190 (camera class 19, G-HERO-027)"); }
+        // 0x314190: the fly-by record +0x90 ended while it is current (camera class 19).
+        let rec = c::pi32(w, id, 0x90);
+        crate::cinematic::flyby_end(w, rec);
         release(w, id, o::VOICE);
         w.delete_moby(id);
         return true;
@@ -423,7 +425,9 @@ fn arm(w: &mut World, id: MobyId, missile: Option<MobyId>) {
     set_hidden(w, id, false);
     w.mm(mi).mode &= 0xffbe;
     w.mm(id).state = 2;
-    w.svc.unported("oltanis 921: the fly-by camera record's arming 0x314168 (camera class 19, G-HERO-027)");
+    // 0x314168: the fly-by record +0x90 armed (camera class 19).
+    let rec = c::pi32(w, id, 0x90);
+    crate::cinematic::flyby_arm(w, rec);
     let tm = w.mm(t);
     tm.draw_dist = 0xff;
     tm.update_dist = 0xff;
