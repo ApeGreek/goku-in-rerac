@@ -489,7 +489,7 @@ pub(super) fn list_point(p: &moby_anim::Rows, rows: &[moby_anim::V4; 3], pos: [f
 ///   damage 1 (2 for the jump attack), class 0x47}, a 5-step sweep of lines between last tick's and this
 ///   tick's hand → head (`FUN_0026ebe8`) and a sphere of radius 0.35 (0.47 in 0x14) at the head − 0.085
 ///   (`coll_sphere_mobys`); the first hit of the swing plays the wrench's hit sound (counted).
-pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, _rng: &mut crate::rng::Rng) {
+pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut crate::rng::Rng) {
     hero.items.slot.swap = 0;
     if hero.items.slot.state == 3 { return; }
     let Some(class) = hero.items.slot.item.as_ref().and_then(|m| env.data.class(m.o_class)) else { return };
@@ -552,8 +552,10 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     let mut d = vsub(tip, hand);
     let l = len3(d);
     d = set_len3(d, l + Pf::b(0x3e2e_147b));
+    // The head's turn off the facing (f20: 0 when not measured).
+    let mut turn = Pf::ZERO;
     if hero.group != 0xf && st != 0x70 && st != 0x14 {
-        let turn = fast_diff_rots(yaw, fast_arctan(tip[0] - hero.pos[0], tip[1] - hero.pos[1]));
+        turn = fast_diff_rots(yaw, fast_arctan(tip[0] - hero.pos[0], tip[1] - hero.pos[1]));
         if HALF_PI < turn { window = false; }
         d = reach_by_facing(d, yaw);
     }
@@ -562,7 +564,7 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     hero.melee.tip_prev = tip_prev;
     hero.melee.hand = hand;
     hero.melee.tip = tip;
-    // (The wall-spark line of 0x13 after 10 ticks and the ground sparks of 0x14 at frame 27: not ported.)
+    wall_sparks(hero, table, env, hits, rng, &v, st, turn, aim);
     if !window { return; }
     let jump = st == 0x14;
     let (s, dmg) = if jump { (Pf::b(0x3fc6_6666), 2) } else { (Pf::ONE, 1) };
@@ -625,6 +627,49 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
             Some(m) => fast_arctan(hero.pos[0] - Pf::f(m.position[0]), hero.pos[1] - Pf::f(m.position[1])).to_f32(),
             None => fast_add_rotations(hero.rot[2], Pf::b(0x4049_0fdb)).to_f32(),
         };
+    }
+}
+
+/// The swing's wall line and the jump attack's ground line (`0x2be7d4..0x2be9e0`):
+/// * not in 0x2b / 0x70, the head within 70° of the facing (0 when not measured: the jump attack, grinding), more than
+///   10 ticks into the state, nothing hit yet this swing (0x13fdb4): a line (flags 2) from 0.5 above Ratchet 1.4 toward
+///   the head (its length by the facing, `0x2be110`); a hit on a surface (`CollType` ≠ 0) with no moby, a non-crate or
+///   the crate class 502 (`0x273228`) → hit, the class sound 2, the burst ([`super::fx::wrench_burst`]), a moby hit
+///   (damage 1, flags 0x10000, along the aim);
+/// * 0x14 with Ratchet's key time passing 27: the class sound 2, a line (flags 2) from 0.7 above the head to 0.9 below
+///   (`0x248d80`); a hit → the burst.
+#[allow(clippy::too_many_arguments)]
+fn wall_sparks(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut crate::rng::Rng, view: &AnimView, st: i32, turn: Pf, aim: Pf) {
+    let cam = env.camera.map_or([0.0; 3], |c| c.0);
+    let p = hero.pos;
+    if st != 0x2b && st != 0x70 && turn < Pf::b(0x3f9c_61aa) && ticks(10) < hero.timer && hero.melee.hit == 0 {
+        let a = [p[0], p[1], p[2] + Pf::b(0x3f00_0000), p[3]];
+        let tip = hero.melee.tip;
+        let y = fast_arctan(tip[0] - p[0], tip[1] - p[1]);
+        let k = Pf::b(0x3fb3_3333);
+        let v = reach_by_facing([fast_cos(y) * k, fast_sin(y) * k, Pf::ZERO, Pf::ZERO], hero.rot[2]);
+        let b = vadd(a, v);
+        if let Some(Some(pr)) = hits.probe_moby(table, a, b, 2, None) {
+            // `0x273228`: `FUN_00273278` (a live moby of class 500..540) false, or the class 502.
+            let crate_ok = |m: MobyId| table.mobys.get(m).is_none_or(|x| (x.o_class as i32 - 500) as u32 & 0xffff >= 0x29 || x.o_class == 0x1f6);
+            if pr.surface != 0 && pr.moby.is_none_or(crate_ok) {
+                hero.melee.hit = 1;
+                hero.fx.item_sounds.push(2);
+                super::fx::wrench_burst(hero, rng, pr.point, cam);
+                if let Some(m) = pr.moby {
+                    let dir = [fast_cos(aim), fast_sin(aim), Pf::ZERO, Pf::ZERO];
+                    let tmpl = HitTemplate { dir, attacker: None, flags: 0x1_0000, b18: 0, b19: 0, h1a: WRENCH_CLASS as u16, damage: Pf::ONE, w20: 1 };
+                    hits.deliver(table, m, &tmpl);
+                }
+            }
+        }
+    }
+    if st == 0x14 && super::comet::passed(view, 27.0) {
+        hero.fx.item_sounds.push(2);
+        let tip = hero.melee.tip;
+        let a = [tip[0], tip[1], tip[2] + Pf::b(0x3f33_3333), tip[3]];
+        let b = [tip[0], tip[1], tip[2] - Pf::b(0x3f66_6666), tip[3]];
+        if let Some(Some(pr)) = hits.probe_moby(table, a, b, 2, None) { super::fx::wrench_burst(hero, rng, pr.point, cam); }
     }
 }
 

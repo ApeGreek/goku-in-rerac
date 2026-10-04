@@ -89,6 +89,9 @@ pub enum PartSpawn {
     /// `PartType04Spawn` 0x27e538: a fire puff (the burns' fire, [`burn_fire`] / [`burn_bounce_fire`]); `rng` = the
     /// stream at its rotation draw (made at the call).
     Fire04 { spawn: type04::Spawn, rng: Rng },
+    /// `PartType19Spawn(pos, vel)` 0x281748: a streak (the wrench's hit burst, [`wrench_burst`]); `rng` = the stream at
+    /// its `randi(6)` (made at the call).
+    Streak19 { pos: [f32; 4], vel: [f32; 4], rng: Rng },
 }
 
 /// A moby the hero code created this tick (`CreateMoby` inside the hero update), with the creator's draws already made.
@@ -380,6 +383,40 @@ pub fn burn_bounce_fire(h: &mut Hero, rng: &mut Rng) {
     }
 }
 
+/// `0x2bdd20(item)`: the wrench's hit burst at `point` (0x1742e0, the last line test's): 20 streaks (type 19) and 10
+/// sparks (type 21: size 20000, colours 0x4f007fff → 0x1fffffff, `rand_range(ticks(10), ticks(20))` ticks), their
+/// directions `randf_sym(0, π)` off the elevation from the point to the camera `cam` (0x167240), negated, for both
+/// angles; the streaks 0.2 a tick from `randf(1, 3)` of that out, the sparks 0.05 a tick from the point jittered by
+/// `randf_sym(0, 0.1)` per axis. (The Comet-Strike's sparkles `0x2bdb18` after it, for a thrown wrench only, are not
+/// ported.)
+pub fn wrench_burst(h: &mut Hero, rng: &mut Rng, point: [f32; 3], cam: [f32; 3]) {
+    use crate::hero::physics::ticks;
+    use crate::moby_update::creature::add_rot;
+    use std::f32::consts::PI;
+    let d = [cam[0] - point[0], cam[1] - point[1], cam[2] - point[2]];
+    let xy = (d[0] * d[0] + d[1] * d[1]).sqrt();
+    let up = -crate::moby_update::creature::atan(xy, d[2]);
+    let w = h.pos[3].to_f32();
+    for _ in 0..20 {
+        let a = add_rot(rng.randf_sym(0.0, PI), up);
+        let b = add_rot(rng.randf_sym(0.0, PI), up);
+        let v = polar(0.2, b, a);
+        let s = rng.randf(1.0, 3.0);
+        let pos = [v[0] * s + point[0], v[1] * s + point[1], v[2] * s + point[2], w];
+        let at = reserve(rng, 1);
+        h.fx.parts.push(PartSpawn::Streak19 { pos, vel: v, rng: at });
+    }
+    for _ in 0..10 {
+        let pos = [point[0] + rng.randf_sym(0.0, 0.1), point[1] + rng.randf_sym(0.0, 0.1), point[2] + rng.randf_sym(0.0, 0.1), w];
+        let a = add_rot(rng.randf_sym(0.0, PI), up);
+        let b = add_rot(rng.randf_sym(0.0, PI), up);
+        let v = polar(f32::from_bits(0x3d4c_cccd), b, a);
+        let life = rng.rand_range(ticks(10), ticks(0x14));
+        let rot = rng.rand() as u8;
+        h.fx.parts.push(PartSpawn::Spark21 { size: 20000.0, pos, vel: v, c1: 0x4f00_7fff, c2: 0x1fff_ffff, life, split: 1, rot });
+    }
+}
+
 /// The particle hook's part: create the hero's queued spawns of this tick, in order (before `UpdateParts`).
 pub fn create_particles(h: &Hero, sys: &mut Particles) {
     sys.hero = crate::hero::physics::to_f32x3(h.pos);
@@ -405,6 +442,7 @@ pub fn create_one(sys: &mut Particles, s: &PartSpawn, gold: u8) {
         PartSpawn::Flame { len, pos, vel, flags, draws } => { type12::spawn(sys, len, pos, vel, flags, gold, &draws); }
         PartSpawn::Blob { spawn, mut rng } => { type02::spawn(sys, &mut rng, &spawn); }
         PartSpawn::Fire04 { spawn, mut rng } => { type04::spawn(sys, &mut rng, &spawn); }
+        PartSpawn::Streak19 { pos, vel, mut rng } => { crate::particles::type19::spawn19(sys, &mut rng, pos, vel); }
         PartSpawn::Ring45 { size, growth, pos, mut rng } => { type45::spawn45_on(sys, &mut rng, size, growth, pos, type45::HERO_WATER_LEVEL, u32::MAX); }
         PartSpawn::Ring46 { size, spin, pos, vel, mut rng } => { type46::spawn_on(sys, &mut rng, size, spin, pos, vel, type45::HERO_WATER_LEVEL); }
         PartSpawn::Drop35 { pos, vel, kind, life, mut rng } => { type35::spawn(sys, &mut rng, pos, vel, kind, life); }
