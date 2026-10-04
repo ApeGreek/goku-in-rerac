@@ -285,6 +285,19 @@ pub fn items_update(hero: &mut Hero, g: &mut ItemGlobals, table: &mut MobyTable,
     apply_pending_blend(hero, env.data);
     create_hand(hero, g, env);
     attach_hand(hero, table, anim, env);
+    // `0x2297b0` (after `HeroItemsAttach` and `0x249ea0`): the glow list, the hand item's glow word, Ratchet's glow
+    // word; then the drawer's dot on foot and its registration (`0x229400`, super::glow).
+    let shown = hero.f13f5 == 0;
+    super::glow::items_glow(hero, shown && hero.head_slot.state != 0, shown && hero.items.slot.state != 0);
+    if let Some(m) = table.mobys.get_mut(env.hero_moby) { m.glow = hero.glow.ratchet; }
+    if hero.mode == 0 {
+        hero.glow.dot = None;
+        super::glow::ratchet_dot(hero);
+        if !hero.glow.list.is_empty() || hero.glow.dot.is_some() {
+            let h = hero.clone();
+            hits.world(table, &h, rng, env.frame as u64, &mut |w| w.svc.draw_callbacks.register(crate::moby_update::classes::draw_callbacks::Callback::HeroGlow, env.hero_moby));
+        }
+    }
     slot_loop(hero, g, table, anim, rng, env, hits);
 }
 

@@ -80,6 +80,9 @@ pub enum Callback {
     /// body moby): three glow quads `0x2781d0(0.2, 0.08, point, 0x141634)` at the disguise's joint lists 0..2
     /// ([`DrawCallbacks::disguise`]); `rc-engine`'s fx_draw draws them. Draw only.
     DisguiseGlow,
+    /// The hero's draw callback `0x229440` on foot and in bodies 1 / 2: the glow list 0x141120 and the antenna dot
+    /// (`crate::hero::glow`; drawn by `rc-engine` fx_draw from the hero's state).
+    HeroGlow,
 }
 
 /// The lists (registration order).
@@ -211,7 +214,7 @@ pub fn run_frame(w: &mut World) {
                 w.svc.draw_callbacks.walloper_dim = Some(dim);
             }
             // Draw only: no game state, no `rand` (crate `rc-engine` fx_draw).
-            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) | Callback::UnitQuads(_) | Callback::ShipShadow | Callback::ShipTrail | Callback::DisguiseGlow => {}
+            Callback::NanotechGlow | Callback::ShipGlass | Callback::RipplePatches | Callback::VendorBeam | Callback::Sea(_) | Callback::UnitGlow(_) | Callback::UnitQuads(_) | Callback::ShipShadow | Callback::ShipTrail | Callback::DisguiseGlow | Callback::HeroGlow => {}
         }
     }
 }

@@ -76,14 +76,14 @@
 //! | +11 | `0x229158` | ported (`hologuise::squash` on the body moby) |
 //! | +12 | mode 1: record 25's scale = 0x15ee18; `0x2278c0` (0x15ee18 → 1.0, the glow pulse on the body moby) | ported ([`Bodies::scale18`], [`glow`]) |
 //! | +13 | mode 1: the antenna glow moby 0x4b4 created (scale ×1.7, glow 0x801432d7, 0x141650 = 0x301432d7) and placed at joint list 7 (0.0257 down its rows), its scale approaching 1.7 (×1.4 while flashing) | ported ([`after_update`]; 3.1 with the cheat 0x15edb3) |
-//! | +14 | mode 1, body shown: joint list 7's point → 0x1410d0; `0x229400`: the hero's draw callback `0x229440` | NOT ported (G-REN-005: the red dot glow quad) |
+//! | +14 | mode 1, body shown: joint list 7's point → 0x1410d0; `0x229400`: the hero's draw callback `0x229440` | ported (`super::glow::body_dot`, `Callback::HeroGlow`) |
 //! | +15 | mode 1: the glow phase 0x140978 (170°/s, 700°/s while the flash 0x14164c runs) and its colours by 0x14164e, tweened into the glow moby's +0x90 and 0x141650 | ported ([`after_update`]) |
 //! | +16 | mode 1: the rotor moby 0x47a created / placed at joint list 5 (rows: the joint's × Rz(−yaw)), its light = the body's; in 0x4f its sequence 1 (blend 10), else 0 (blend 17) | ported ([`after_update`]) |
 //! | +17 | mode 1: a command 0x141610 (the command menu): `PlayClassSound(cmd + 16, 0, hero)`, 0x14164e = cmd, 0x14164c = 57 | ported ([`Bodies::command`]; the menu that sets it: `menus::quick_select`'s command page) |
 //! | +18 | `0x25c4f8`: the map fog writer | ported by the engine (it reads the hero position) |
 //! | +19 | mode 2: cheat 0x15edb3 → record 28's scale = 0x15ee18 ·1.4 | ported (`update` tail, `crate::cheats`) |
 //! | +20 | mode 2: `0x2278c0`, `0x2061f0` (the pilot: Ratchet shown when the body is, sequence 0x81 over 10 ticks, his generic advance) | ported ([`glow`], [`after_update`]) |
-//! | +21 | mode 2, body shown: joint list 6's point → 0x1410d0, `0x229400` | NOT ported (G-REN-005) |
+//! | +21 | mode 2, body shown: joint list 6's point → 0x1410d0, `0x229400` | ported (`super::glow::body_dot`) |
 //! | +22 | mode 3 (the disguise's tint and glow points, 0x14162e; the cheat 0x15edb1's head record 30 (L01 0x17c04c) = 1.9) | ported (`hologuise::body_update`, record [`rec::R30`]) |
 //! | +23 | `0x22a260`: the hero shadow; `0x26be04`: the hero lighting | ported by the engine on the hero moby ([`Hero::hero_moby`]) |
 //! | HeroTickStateTimer | mode 2: 0x140986 (the beam's lockout) counted down | ported (`post_move`) |
@@ -611,6 +611,22 @@ pub fn after_update(
         });
     }
     if h.mode == body::GIANT { giant::after_update(h, table, ratchet, body, anim, hits, rng, counter); }
+    // HeroUpdateAlt +14 / +21: the body shown → joint list 7 (Clank) / 6 (Giant Clank)'s point into 0x1410d0 and the
+    // hero's draw callback `0x229440` registered (`0x229400`): the antenna dot (super::glow).
+    if h.mode == body::CLANK || h.mode == body::GIANT {
+        h.glow.dot = None;
+        let shown = table.mobys.get(body).is_some_and(|m| m.mode & crate::moby_runtime::mode::HIDDEN == 0);
+        if shown {
+            let list = if h.mode == body::CLANK { 7 } else { 6 };
+            let hero = h.clone();
+            let mut point = None;
+            hits.world(table, &hero, rng, counter, &mut |w| {
+                point = Some(w.joint_point(body, list));
+                w.svc.draw_callbacks.register(crate::moby_update::classes::draw_callbacks::Callback::HeroGlow, body);
+            });
+            if let Some(p) = point { super::glow::body_dot(h, p); }
+        }
+    }
     // The hits the states queued, on the moby world (`0x26e830`, `coll_sphere_mobys`).
     let pending = std::mem::take(&mut h.bodies.hits);
     if !pending.is_empty() {

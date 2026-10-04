@@ -39,7 +39,7 @@
 //! | transitions 0x61 | wrapped: lockout 0x140986 = ticks(301), → 0x5a | ported |
 //! | transitions 0x62 | wrapped → the death fade | ported |
 //! | hit intake (body 2) | flag bit 2, energy −= damage (≥ 0); flag 4 or no energy → 0x5d, `0x2a9be0` (the beam deleted), on the ground the knockback (7, 3.5)·dt | ported (`damage::hit_intake`, [`beam_end`]) |
-//! | HeroUpdateAlt mode 2 | `0x2278c0` (the glow), `0x2061f0` (the pilot) | ported (`super::glow`, [`after_update`]); the cheat's head scale: NOT ported (G-SAV-006); joint list 6's point and the draw callback: NOT ported (G-REN-005) |
+//! | HeroUpdateAlt mode 2 | `0x2278c0` (the glow), `0x2061f0` (the pilot) | ported (`super::glow`, [`after_update`]); the cheat's head scale: NOT ported (G-SAV-006); joint list 6's point and the draw callback: ported (`super::super::glow::body_dot`) |
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::assign_op_pattern)]
 
 use super::super::common::blend;

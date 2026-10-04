@@ -43,6 +43,7 @@ pub mod boots;
 pub mod damage;
 pub mod fx;
 pub mod gadgets;
+pub mod glow;
 mod ledge;
 pub mod packs;
 pub mod platform;
@@ -475,6 +476,8 @@ pub struct Hero {
     pub walloper: walloper::Walloper,
     /// The other bodies' fields (Clank's health, Giant Clank's energy, the body moby; [`bodies`], G-HERO-005).
     pub bodies: bodies::Bodies,
+    /// The glow sprites and the hand item's glow word ([`glow`]: `0x2297b0`, the draw callback `0x229440`).
+    pub glow: glow::HeroGlow,
     /// The Hoverboard's block 0x13fa10..0x13fc1f and its globals ([`hoverboard`], levels 5 / 16).
     pub board: hoverboard::Board,
     /// The cheat bytes 0x15edb0 as the hero code reads them (the tick copies `GameOptions::cheats` in; `crate::cheats`).
@@ -547,7 +550,7 @@ impl Hero {
             owned: Owned::default(), back_slot: idle::BackSlot::default(), feet_slot: idle::ItemSlot::default(), head_slot: idle::ItemSlot::default(), worn: worn::Worn::default(), packs: packs::Packs::default(), wall_ahead: [0.0; 2], edge: (false, 0.0, 0.0), boots: boots::Boots::default(),
             gadgets: gadgets::Gadgets::default(), swing: swingshot::Swing::default(), fx: fx::HeroFx::default(),
             f13f5: 0, f13ff: 0, weapons: weapons::Weapons::default(), comet: comet::Comet::default(), loop_in: Default::default(),
-            joint_targets: Default::default(), help: Default::default(), walloper: Default::default(), bodies: bodies::Bodies::default(),
+            joint_targets: Default::default(), help: Default::default(), walloper: Default::default(), bodies: bodies::Bodies::default(), glow: glow::HeroGlow::default(),
             cheats: Default::default(), cheat_moves: Default::default(), board: hoverboard::Board::default(),
         }
     }

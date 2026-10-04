@@ -49,8 +49,8 @@
 //! Ratchet's hit flash) colours his glow packets.
 //!
 //! **Clank's antenna glow** (class 1204, `HeroItemsAttach` 0x22fec0: [`place_antenna`]) on Clank's joint list 6, its
-//! +0x90 pulsing (ticks(120)). Not modelled: the red dot of the hero's draw callback `0x229440` (a glow quad at the
-//! antenna point while the Heli- or Thruster-Pack is ready: G-REN-005).
+//! +0x90 pulsing (ticks(120)). The red dot over it (the hero's draw callback `0x229440`) and the other hero glow sprites
+//! are `rc_game::hero::glow`'s, drawn by crate::fx_draw at the points [`MobyAttach::glow_point`] gives.
 //!
 //! **Which entities may show.** The port keeps an entity set for every class that can be in the hand (every gadget
 //! class of the level) or on the back (the three packs), where the game has only the slots' mobys. So this module is
@@ -130,6 +130,8 @@ struct Item {
     /// Its glow word +0x90 when the game writes one (Clank's pulse, `Back::clank_color`) and the one last uploaded.
     glow: Option<u32>,
     glow_written: Option<u32>,
+    /// Its class joint lists 0 / 1's chains (the hero's glow sprites sit at their points, `rc_game::hero::glow`).
+    lists: [Vec<u8>; 2],
 }
 
 #[derive(Resource)]
@@ -155,6 +157,30 @@ pub struct MobyAttach {
 }
 
 impl MobyAttach {
+    /// Where a hero glow sprite sits (`rc_game::hero::glow::At`), from the items as last placed; None when its item
+    /// is not shown.
+    pub fn glow_point(&self, at: rc_game::hero::glow::At) -> Option<[f32; 3]> {
+        use rc_game::hero::glow::At;
+        let shown = |slot: Slot| self.items.iter().find(|i| i.attach.slot == slot && i.visible);
+        let list = |item: &Item, k: u8| -> Option<[f32; 3]> {
+            let chain = item.lists.get(k as usize).filter(|c| !c.is_empty())?;
+            let p = moby_anim::evaluate_chains_posed(&item.anim, &item.state, item.snapshot.as_ref(), &[chain.as_slice()], &[], &item.mods);
+            let w = moby_anim::attach_matrix(p.first()?, &item.rows, item.position, item.scale);
+            Some([w[3][0], w[3][1], w[3][2]])
+        };
+        match at {
+            At::Point(p) => Some(p),
+            At::Hand(k) => list(shown(Slot::Hand)?, k),
+            At::Head(k) => list(shown(Slot::Head)?, k),
+            At::HandLocal(v) => {
+                let i = shown(Slot::Hand)?;
+                let r = rows_f32(&i.rows);
+                Some(std::array::from_fn(|c| v[0] * r[0][c] + v[1] * r[1][c] + v[2] * r[2][c] + i.position[c]))
+            }
+            At::Antenna(dz) => shown(Slot::Antenna).map(|i| [i.position[0], i.position[1], i.position[2] + dz]),
+        }
+    }
+
     /// Ratchet's moby+0xc0.. rows and +0x10 position after the hero's write-back (crate::gameplay moves him;
     /// without it they stay the placed instance's). Read by the next `update`.
     pub fn set_host(&mut self, rows: [V4; 3], position: [f32; 3]) {
@@ -336,7 +362,13 @@ fn build(
     let mut items = Vec::new();
     let mut palette_len = 0u32;
     let mut geometry = Vec::new();
+    // Joint lists 0 / 1 of each class (from its gadget-table blob, else the level core's).
+    let lists_of = |o: i32, c: &rc_formats::moby::MobyClass| -> [Vec<u8>; 2] {
+        let blob = gadgets.iter().find(|g| g.moby.o_class == o).map(|g| g.blob.clone()).or_else(|| crate::interact_render::class_blob(o).ok());
+        std::array::from_fn(|l| blob.as_ref().and_then(|b| gadget::joint_list(b, &c.header, l).ok()).map(|(a, _)| a).unwrap_or_default())
+    };
     for (name, class, ac, attach) in specs {
+        let lists = lists_of(class.o_class, &class.class);
         let slots = (ac.joint_count as u32).max(ExtraMobys::max_skinned_joint(&class) as u32 + 1).max(1);
         // CreateMoby: init_moby_instance's state; the wrench then blends to sequence 1 (FUN_0022f3c0).
         let mut state = AnimState::spawn(&ac);
@@ -348,7 +380,7 @@ fn build(
         let scale = class.class.header.scale * if attach.slot == Slot::Antenna { 1.3 } else { 1.0 };
         items.push(Item {
             name, o_class: class.o_class as i16, visible, shown: None, attach, anim: ac, state, snapshot, scale,
-            base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(), mods: Vec::new(), glow: None, glow_written: None,
+            base: palette_len, slots, rows: [[0; 4]; 3], position: [0.0; 3], entities: Vec::new(), mods: Vec::new(), glow: None, glow_written: None, lists,
         });
         palette_len += slots;
         geometry.push(class);
@@ -548,6 +580,11 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
             let det = (p.game.hero.items.slot.id == rc_game::hero::metal_detector::METAL_DETECTOR).then_some(g.detector.glow);
             (g.hand_mods.clone(), det)
         });
+        // The glowing hand items' word +0x90 (`0x2297b0`, rc_game::hero::glow), for the item in hand.
+        let hand_glow = play.as_ref().and_then(|p| {
+            let gl = &p.game.hero.glow;
+            (gl.hand_id == p.game.hero.items.slot.id).then_some(gl.hand_word).flatten()
+        });
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
             item.visible = hand_shows(item.o_class, h.as_ref(), fp, hand_off);
             if let Some(m) = h.as_ref().filter(|m| m.o_class == item.o_class) {
@@ -557,6 +594,7 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
                 item.position = m.position;
                 item.mods = mods.clone();
                 if detector.is_some() { item.glow = detector; }
+                if hand_glow.is_some() { item.glow = hand_glow; }
             }
         }
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hook) {

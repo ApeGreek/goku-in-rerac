@@ -774,6 +774,7 @@ fn draw_list1(
     mut materials: ResMut<Assets<FxPrimMaterial>>,
     mut vis: Query<&mut Visibility>,
     scene: Option<Res<crate::scene_render::SceneRuntime>>,
+    attach: Option<Res<crate::moby_attach::MobyAttach>>,
 ) {
     let Some(cam_t) = cams.iter().next() else { return };
     let counter = play.as_deref().map(|p| p.game.counter);
@@ -860,6 +861,21 @@ fn draw_list1(
                         let Some((pts, rgba)) = cbs.disguise else { continue };
                         let mut b = PrimBuf::default();
                         for pt in pts { glow_quad(&mut b, 0.2, 0.08, pt, rgba, cam); }
+                        out.push(FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b });
+                    }
+                    // The hero's draw callback `0x229440` (rc_game::hero::glow): on foot the antenna dot then the glow list,
+                    // in bodies 1 / 2 their dot; each sprite where its item sits as last placed (crate::moby_attach).
+                    Callback::HeroGlow => {
+                        let g = &p.game.hero.glow;
+                        let at = |a: rc_game::hero::glow::At| match a {
+                            rc_game::hero::glow::At::Point(pt) => Some(pt),
+                            other => attach.as_deref().and_then(|m| m.glow_point(other)),
+                        };
+                        let mut b = PrimBuf::default();
+                        let list: &[rc_game::hero::glow::Sprite] = if p.game.hero.mode == 0 { &g.list } else { &[] };
+                        for s in g.dot.iter().chain(list) {
+                            if let Some(pt) = at(s.at) { glow_quad(&mut b, s.size, s.pull, pt, s.rgba, cam); }
+                        }
                         out.push(FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b });
                     }
                     // The Trespasser lock's minigame is 2-D: crate::scene_render draws it.
