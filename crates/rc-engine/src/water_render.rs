@@ -572,7 +572,10 @@ fn draw(
     }
     let Some(cam_t) = cams.iter().next() else { return };
     let cam = game_eye(cam_t).to_array();
-    let clip_from_world = GameProjection::default().get_clip_from_view() * cam_t.to_matrix().inverse();
+    // The view's tangent as the game's camera writes it (0x16cf70: Gemlik's ship widens it), as the main camera's.
+    let tan = play.as_deref().map_or(crate::game_camera::TAN_HALF_FOV_X, |p| p.svc.view_tan_x);
+    let proj = GameProjection { tan_x: tan, tan_y: tan * crate::game_camera::NTSC_Y_RATIO, ..GameProjection::default() };
+    let clip_from_world = proj.get_clip_from_view() * cam_t.to_matrix().inverse();
     // The ripple module and whether its callback was registered this tick (the moby system's; else the fallback).
     let mut fallback = st.fallback.take();
     let (mut sim, registered) = match play.as_deref_mut() {

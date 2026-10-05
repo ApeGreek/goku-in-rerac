@@ -219,12 +219,17 @@ pub const SCREEN_TAN: [f32; 2] = [0.63, 0.63 * 0.775];
 
 /// `FUN_00218838`'s projection of a world point for a camera at `eye` with rows (forward, left, up), in screen pixels
 /// (None behind the eye): camera x = −left (right), y = −up (down), z = forward.
-pub fn project(eye: [f32; 3], rows: [[f32; 3]; 3], p: [f32; 3]) -> Option<[f32; 2]> {
+pub fn project(eye: [f32; 3], rows: [[f32; 3]; 3], p: [f32; 3]) -> Option<[f32; 2]> { project_tan(eye, rows, p, SCREEN_TAN[0]) }
+
+/// [`project`] with the view's horizontal half-angle tangent `tan_x` (0x16cf70, `Services::view_tan_x`: Gemlik's ship
+/// widens it; the vertical one is `tan_x · 0.775`).
+pub fn project_tan(eye: [f32; 3], rows: [[f32; 3]; 3], p: [f32; 3], tan_x: f32) -> Option<[f32; 2]> {
     let d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
     let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
     let (z, x, y) = (dot(rows[0]), -dot(rows[1]), -dot(rows[2]));
     if z <= 0.0 { return None; }
-    Some([SCREEN[0] * 0.5 + x / z * (SCREEN[0] * 0.5 / SCREEN_TAN[0]), SCREEN[1] * 0.5 + y / z * (SCREEN[1] * 0.5 / SCREEN_TAN[1])])
+    let tan_y = tan_x * (SCREEN_TAN[1] / SCREEN_TAN[0]);
+    Some([SCREEN[0] * 0.5 + x / z * (SCREEN[0] * 0.5 / tan_x), SCREEN[1] * 0.5 + y / z * (SCREEN[1] * 0.5 / tan_y)])
 }
 
 /// `FUN_0020f838` draw mode 2 (`fun_001f5ab0(x, y, w, w, angle, 0.5, 0.5, 0x3f, 0x3f, tex, …)`): the sprite's corners in

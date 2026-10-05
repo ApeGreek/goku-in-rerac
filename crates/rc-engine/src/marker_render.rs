@@ -7,7 +7,7 @@
 //! Ratchet's hold 0x72 (the draw empties the list).
 
 use crate::hud_render::{Prim, Tex};
-use rc_game::targeting::{marker_corners, project, MARKER_UV};
+use rc_game::targeting::{marker_corners, project_tan, MARKER_UV};
 
 /// The markers of the tick that just ran as 2D primitives (game pixels, the camera of that tick).
 pub fn prims(play: &crate::gameplay::Play) -> Vec<Prim> {
@@ -20,7 +20,7 @@ pub fn prims(play: &crate::gameplay::Play) -> Vec<Prim> {
     for m in g.hero.weapons.markers.of_tick(tick) {
         let c = match m.at {
             None => [rc_game::targeting::SCREEN[0] * 0.5, rc_game::targeting::SCREEN[1] * 0.5],
-            Some(p) => match project(eye, rows, p) {
+            Some(p) => match project_tan(eye, rows, p, play.svc.view_tan_x) {
                 Some(c) => c,
                 None => continue,
             },
