@@ -112,7 +112,7 @@ pub struct Element {
     pub fade_in: i16,
     pub fade_out: i16,
     pub wait: i16,
-    /// The alpha the last draw computed (0..127; the port's renderer draws it).
+    /// The alpha the last draw computed (0..127; the port's renderer draws [`drawn`]'s).
     pub alpha: i32,
 }
 
@@ -320,37 +320,55 @@ fn particle(w: &mut World, id: MobyId, c: &[[f32; 4]; 4]) {
 
 /// The draw callback `0x2fe080`'s state part (see the module doc), run by `draw_callbacks::run_frame`.
 pub fn draw_callback(w: &mut World, id: MobyId) {
-    use crate::moby_update::services::fast_dec_timer_s16 as dec;
     let range = FireFieldState::range(&w.m(id).pvars);
     for i in range {
         let f = &mut w.svc.fire_fields;
-        let (inv_in, inv_out, out_ticks) = (f.inv_fade_in, f.inv_fade_out, f.fade_out_ticks);
+        let k = f.step_consts();
         let Some(e) = f.elems.get_mut(i) else { break };
-        let s = e.scroll - e.speed * SPEED;
-        e.scroll = if s <= -8.0 { s + 8.0 } else { s };
-        if e.kind != 0 { continue; }
-        let alpha = if e.fade_in != 0 {
-            dec(&mut e.fade_in);
-            Some(((1.0 - e.fade_in as f32 * inv_in) * ALPHA_FULL) as i32)
-        } else if e.fade_out != 0 {
-            if dec(&mut e.fade_out) != 0 { None } else { Some((e.fade_out as f32 * inv_out * ALPHA_FULL) as i32) }
-        } else {
-            if dec(&mut e.wait) != 0 { e.fade_out = out_ticks as i16; }
-            Some(ALPHA_STEADY)
-        };
-        match alpha {
-            Some(a) => e.alpha = a,
-            None => {
-                // The fade-out ended: a new element (drawn this frame at alpha 0) and a new mirror flag.
-                respawn(w, id, i as i32);
-                let m = w.rng.randi(2) as u8;
-                if let Some(e) = w.svc.fire_fields.elems.get_mut(i) {
-                    e.mirror = m;
-                    e.alpha = 0;
-                }
+        if !step(k, e) {
+            // The fade-out ended: a new element (drawn this frame at alpha 0) and a new mirror flag.
+            respawn(w, id, i as i32);
+            let m = w.rng.randi(2) as u8;
+            if let Some(e) = w.svc.fire_fields.elems.get_mut(i) {
+                e.mirror = m;
+                e.alpha = 0;
             }
         }
     }
+}
+
+/// The element as the next [`draw_callback`] draws it (the renderer's view: the PS2 updates the element in the draw
+/// and draws the result). A respawning element draws at alpha 0, so its new draws do not matter here.
+pub fn drawn(f: &FireFieldState, e: &Element) -> Element {
+    let mut e = *e;
+    if !step(f.step_consts(), &mut e) { e.alpha = 0; }
+    e
+}
+
+/// The step's constants: 1 / fade-in ticks, 1 / fade-out ticks, fade-out ticks.
+type StepConsts = (f32, f32, i32);
+
+impl FireFieldState {
+    fn step_consts(&self) -> StepConsts { (self.inv_fade_in, self.inv_fade_out, self.fade_out_ticks) }
+}
+
+/// One element's step in `0x2fe080` (scroll, then a flame's life cycle). False: the fade-out ended (a respawn).
+fn step((inv_in, inv_out, out_ticks): StepConsts, e: &mut Element) -> bool {
+    use crate::moby_update::services::fast_dec_timer_s16 as dec;
+    let s = e.scroll - e.speed * SPEED;
+    e.scroll = if s <= -8.0 { s + 8.0 } else { s };
+    if e.kind != 0 { return true; }
+    e.alpha = if e.fade_in != 0 {
+        dec(&mut e.fade_in);
+        ((1.0 - e.fade_in as f32 * inv_in) * ALPHA_FULL) as i32
+    } else if e.fade_out != 0 {
+        if dec(&mut e.fade_out) != 0 { return false; }
+        (e.fade_out as f32 * inv_out * ALPHA_FULL) as i32
+    } else {
+        if dec(&mut e.wait) != 0 { e.fade_out = out_ticks as i16; }
+        ALPHA_STEADY
+    };
+    true
 }
 
 /// `TextureScrollUpdate` (0x2ba658), class 809.

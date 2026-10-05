@@ -9,8 +9,9 @@
 //! part of every registered callback in [`run_frame`] at the start of the next tick's moby loop
 //! (`Scheduler::tick`): on the PS2 that is the end of the frame render, and nothing between it and the moby loop
 //! draws from the stream (the pad read and the free-slot pass do not), so the draws land at the game's place.
-//! The renderer draws the current tick's registrations with the state as the last [`run_frame`] left it (one frame
-//! behind the PS2's draw-time update: the fade and the scroll lag by one step, invisible at 60 fps).
+//! The renderer draws the current tick's registrations with the state the next [`run_frame`] gives them where that
+//! step has no `rand` (the fire fields: `super::fire_field::drawn`); the other state parts are drawn as the last
+//! [`run_frame`] left them.
 //!
 //! Frame pacing: the PS2 drains the lists once per rendered frame, so on a lag frame with a catch-up tick (two
 //! ticks, one frame) it runs the last tick's callbacks once. The port runs them once per tick, which keeps the

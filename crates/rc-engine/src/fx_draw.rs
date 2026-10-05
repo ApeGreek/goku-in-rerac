@@ -41,8 +41,8 @@
 //! TEX1 bilinear, ALPHA 0x44. The near / far state ([`GlassFade`], 2026-10-02): outside scenes (game mode 0) the ST
 //! follows the camera only while it is within 16 of the ship in x and y; farther, it stays as it was, and coming back
 //! it fades from that frozen ST to the live one over `ticks(60)` (level 00's ship 530 draws through its own copy
-//! `0x2d19b0`, the same tables and draw, which tests the distance in every game mode). Not modelled: the mode-6 space
-//! scenes with `0x13e050 == 4` (FX 1 instead of 0x15, `crate::flight_render`), which freeze the ST [L].
+//! `0x2d19b0`, the same tables and draw, which tests the distance in every game mode). The mode-6 space scenes with
+//! `0x13e050 == 4` (`crate::flight_render`) use FX 1 instead of 0x15 and never draw live: the first draw's ST stays.
 //!
 //! **The glow quad** (level01 `0x2781d0`, [`glow_quad`]): the engine's shared soft-glow billboard, called by class draw
 //! callbacks and the hero's glow drawer: the vendor's four glow points (`0x2ba9c0`), the mouse 1818's glow sprites

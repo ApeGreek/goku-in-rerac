@@ -119,6 +119,10 @@ pub struct FlightRender {
     card_icons: Option<[Arc<Texture>; 2]>,
     /// 0x15f3f8 for the card icon's turn: one per flight frame.
     vsync: i64,
+    /// The canopy glass's near / far state (`ShipDrawCallback`'s globals 0x1604a4.., the boot data's first-draw 1:
+    /// the first flight draw sets the ST, later ones keep it). Reset with each flight [L: whether the boot data is
+    /// fresh for every flight].
+    glass: crate::fx_draw::GlassFade,
 }
 
 /// Marks the flight's sky shells.
@@ -244,6 +248,7 @@ fn draw_fx(
     f.slots.layer = Some(layer);
     let fog = fog.map(|g| g.uniform).unwrap_or_else(|| TfragFog::new(&level.0.fog));
     let (mut planet, mut groups) = (Vec::new(), Vec::new());
+    if !f.active { f.glass = Default::default(); }
     if let (Some(d), true, Some(cam_t)) = (f.draw.as_ref(), f.active, cams.iter().next()) {
         if f.fx_dest != Some(d.dest) {
             f.fx = fx_for(d.dest);
@@ -269,8 +274,9 @@ fn draw_fx(
             }
             if let (Some((o_class, m)), Some(t)) = (d.glass, level.0.water.fx.ship_glass.as_ref()) {
                 if let Some(g) = t.of(o_class) {
-                    let mut grp = crate::fx_draw::ship_glass_prims(g, &m, cam, true, &mut crate::fx_draw::GlassFade::default());
-                    // `ShipDrawCallback` in mode 6 sub 4: FX 1 (the flight bank's) instead of 0x15.
+                    // `ShipDrawCallback` in mode 6 sub 4: never live (the ST of the first draw stays), FX 1 (the
+                    // flight bank's) instead of 0x15.
+                    let mut grp = crate::fx_draw::ship_glass_prims(g, &m, cam, false, &mut f.glass);
                     grp.fx = FLIGHT_GLASS_FX;
                     groups.push(grp);
                 }

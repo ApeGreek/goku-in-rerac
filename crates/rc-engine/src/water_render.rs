@@ -813,7 +813,7 @@ fn basis_point(b: &[[f32; 3]; 3], t: [f32; 3], v: [f32; 3]) -> [f32; 3] {
 
 /// The three groups of one registered field: flames (0x48), smoke elements (0x44), smoke curtain (0x44, if P+0x42 = 0).
 fn fire_field_groups(t: &FireFieldTables, state: &rc_game::moby_update::classes::fire_field::FireFieldState, pv: &[u8], pos: [f32; 3], cub: &[[f32; 4]; 4], scroll_u: f32, cam: [f32; 3]) -> [PrimBuf; 3] {
-    use rc_game::moby_update::classes::fire_field::{cuboid_point, FireFieldState};
+    use rc_game::moby_update::classes::fire_field::{cuboid_point, drawn, FireFieldState};
     use rc_game::moby_update::services::pvar as p;
     let bases = fire_field_bases(cam, pos);
     let rgb = p::u32(pv, 0x38) & 0xff_ffff;
@@ -821,7 +821,9 @@ fn fire_field_groups(t: &FireFieldTables, state: &rc_game::moby_update::classes:
     let smoke_a = pv[0x5c] as u32;
     let mut out: [PrimBuf; 3] = Default::default();
     for i in FireFieldState::range(pv) {
-        let Some(e) = state.elems.get(i) else { break };
+        // The element as this frame's callback leaves it (the PS2 steps it in the draw; the port's step runs at
+        // the next tick's start, rc_game's draw_callbacks).
+        let Some(e) = state.elems.get(i).map(|e| drawn(state, e)) else { break };
         let b = &bases[(e.mirror != 0) as usize];
         let tr = cuboid_point(cub, e.pos);
         let corner = |v: [f32; 4]| basis_point(b, tr, [v[0], v[1] * e.width, v[2] * e.height]);
