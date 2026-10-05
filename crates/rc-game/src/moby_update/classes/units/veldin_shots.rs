@@ -63,7 +63,8 @@
 //! | address | what it does | ported / not |
 //! |---|---|---|
 //! | 0 | `FastDecTimer(+0x28)` out → `DeleteMoby` (no aim this tick) | the charge | [`beam_update`] |
-//! | 1 | d = +0x00 − position; `0x2ea598`; +0x10 = position + `rand_vec(2·+0x24, 2·+0x24)`; `0x2eacd8`, `0x2eaea0`, `RegisterDrawCallback2(0x2eb9f8)` | the flight | [`beam_update`] (the strands and the draws: NOT ported, G-REN-033) |
+//! | 1 | d = +0x00 − position; `0x2ea598`; +0x10 = position + `rand_vec(2·+0x24, 2·+0x24)`; `0x2eacd8`, `0x2eaea0`, `RegisterDrawCallback2(0x2eb9f8)` | the flight | [`beam_update`] |
+//! | `0x2eacd8` / `0x2eaea0` / `0x2eb9f8` | the strands: the set-up (once per level load; also 0x1620d8 = `ticks(90)` and gp−0x4b24 = 0, read by nothing), the sim and the draw of the Tesla Claw's chain as a level effect, from the beam's position onto +0x10 (the glow at the beam: 0x307f7f7f, then the strands' colour with alpha 0) | the lightning around the beam | `super::tesla_bolt` ([`strands_frame`], [`strand_quads`]) |
 //! | | |d| < 70·dt → `0x2ea800`, deleted; else position += d at 70·dt; two `0x25bbf0(2, 5, 1, the boss, ·, 0x10001, 0, 1, 0)` (at it and on the ground below); `FastDecTimer(+0x34)` out → `Approach(0, 0.2, &+0x24)`, 0 → deleted | | [`beam_update`] |
 //! | | `RegisterDrawCallback(0x2ea1f8)` | the core's draw: four additive camera-facing quads (FX 8 / 11 / 20 / 20) | [`core_quads`] (`Callback::UnitQuads`) |
 //! | `0x2ea598` | 3 sparks: v1 = `rand_vec(6·dt, 12·dt)`, v2 = v1·0.1, v2.z −= `randf(2·dt, 4·dt)`; phases `randf(1, 5)`, `randf(20, 30)`, `randf(30, 45)` (scaled, truncated); sizes `randf(0.5, 0.333)`, `randf(0.333, 0.2)`; at `randf(0, 1)` of d (60·dt long); colours `tween(0x80807060, 0x80807000)` / `(0x80805020, 0x80802010)`; def 53 | | [`beam_sparks`] |
@@ -94,6 +95,8 @@ pub const BEAM_FN: u32 = 0x2e_9e70;
 pub const FLASH_FN: u32 = 0x2f_b548;
 /// 983's core draw `0x2ea1f8` (`RegisterDrawCallback`, list 1).
 pub const CORE_DRAW_FN: u32 = 0x2e_a1f8;
+/// 983's strands' draw `0x2eb9f8` (`RegisterDrawCallback2`, list 2).
+pub const STRAND_DRAW_FN: u32 = 0x2e_b9f8;
 pub const LOB: i16 = 0x234;
 pub const RING: i16 = 0x270;
 pub const AURA: i16 = 0x274;
@@ -619,6 +622,24 @@ pub fn core_quads(table: &crate::moby_runtime::MobyTable, _svc: &crate::moby_upd
     }).collect()
 }
 
+/// `0x2eb9f8`'s frame part: the scroll step and the glow's two `rand` draws (`super::tesla_bolt::frame`).
+pub fn strands_frame(w: &mut World, _id: MobyId) {
+    let mut b = std::mem::take(&mut w.svc.units.veldin_strands);
+    super::tesla_bolt::frame(w, &mut b, true);
+    w.svc.units.veldin_strands = b;
+}
+
+/// `0x2eb9f8`: the strands' strips and the glow at the beam (`0x2ec130`: 0.1 / 0.35 across plus the frame's jitters;
+/// the second quad's colour is the strands' with alpha 0, as the game's gp−0x4bac).
+pub fn strand_quads(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, id: MobyId) -> Vec<FxQuads> {
+    let b = &svc.units.veldin_strands;
+    let Some(m) = table.mobys.get(id) else { return Vec::new() };
+    let mut q = super::tesla_bolt::strips(b);
+    let sizes = [0.1 + b.glow[0], 0.35 + b.glow[1]];
+    q.extend(super::tesla_bolt::glow(b, [m.position[0], m.position[1], m.position[2]], sizes, [super::tesla_bolt::GLOW_WHITE, b.t.chain.color]));
+    super::tesla_bolt::groups(q)
+}
+
 /// `0x2ea0f0(boss, p, n)` (module doc).
 pub fn beam_new(w: &mut World, boss: MobyId, p: c::V, n: i32) -> Option<MobyId> {
     let id = w.create_moby(BEAM)?;
@@ -744,7 +765,16 @@ pub fn beam_update(w: &mut World, id: MobyId) {
             let r = 2.0 * c::pf(w, id, beam_pv::T);
             let rv = w.rng.rand_vec(r, r);
             c::set_pv4(w, id, beam_pv::HEAD, c::add([rv[0], rv[1], rv[2], 0.0], p));
-            // `0x2eacd8` / `0x2eaea0` (the strands) and `RegisterDrawCallback2(0x2eb9f8)`: NOT ported (G-REN-033).
+            // `0x2eacd8` / `0x2eaea0`: the strands from here onto the head; `RegisterDrawCallback2(0x2eb9f8)`.
+            let (from, head) = (v3(p), v3(c::pv4(w, id, beam_pv::HEAD)));
+            let mut b = std::mem::take(&mut w.svc.units.veldin_strands);
+            super::tesla_bolt::reset(&mut b, from, head);
+            super::tesla_bolt::build(w, &mut b, from, head, head);
+            w.svc.units.veldin_strands = b;
+            if let Some(r) = super::row(REFERENCE_LEVEL, STRAND_DRAW_FN) {
+                w.svc.draw_callbacks.register2(Callback::UnitFrame(r), id);
+                w.svc.draw_callbacks.register2(Callback::UnitQuads(r), id);
+            }
             let speed = 70.0 * DT;
             if dist < speed {
                 impact(w, id);

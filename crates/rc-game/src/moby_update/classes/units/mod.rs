@@ -415,6 +415,7 @@ pub mod oltanis_sentry;
 pub mod quartu_small;
 pub mod wave_mesh;
 pub mod barrier_field;
+pub mod tesla_bolt;
 pub mod water_shock;
 pub mod quartu_guard;
 pub mod quartu_hover;
@@ -1058,6 +1059,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "628 aura", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::AURA_FN, classes: &veldin_shots::AURA_CLASSES, update: veldin_shots::aura_update, joints: &[] },
     UnitPort { unit: "628 aura bands", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::AURA_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "983 beam core", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::CORE_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "983 beam strands", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::STRAND_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "983 beam", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::BEAM_FN, classes: &veldin_shots::BEAM_CLASSES, update: veldin_shots::beam_update, joints: &[] },
     UnitPort { unit: "1898 flash", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::FLASH_FN, classes: &veldin_shots::FLASH_CLASSES, update: veldin_shots::flash_update, joints: &[] },
     UnitPort { unit: "U123 822", level: kerwan_train::REFERENCE_LEVEL, func: kerwan_train::UPDATE_FN, classes: &kerwan_train::CLASSES, update: kerwan_train::update, joints: &kerwan_train::JOINTS },
@@ -1418,6 +1420,8 @@ pub struct Globals {
     pub wave_meshes: Option<std::sync::Arc<wave_mesh::Meshes>>,
     /// The electrified water's bolt (`water_shock`, level15 0x1d3750.. / 0x161cc0..).
     pub water_shock: water_shock::Bolt,
+    /// The Veldin boss beam's strands (`veldin_shots`, level18 0x1d9d00.. / 0x161fe8..).
+    pub veldin_strands: tesla_bolt::Bolt,
     /// The Fleet's sky's animation statics (`fleet_sky`, level17 0x1de040..).
     pub fleet_sky: fleet_sky::Sky,
     /// Paths a class emptied by zeroing their point count (the game's header word; Blarg's boss 1051 parks its arena
@@ -1592,6 +1596,7 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
         }
         Some((super::burning_wreck::REFERENCE_LEVEL, super::burning_wreck::DRAW_FN)) => super::burning_wreck::fx_quads(table, svc, id).into_iter().collect(),
         Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::CORE_DRAW_FN)) => veldin_shots::core_quads(table, svc, id),
+        Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::STRAND_DRAW_FN)) => veldin_shots::strand_quads(table, svc, id),
         Some((veldin_finale_fx::REFERENCE_LEVEL, f)) if [veldin_finale_fx::FLASH_FN, veldin_finale_fx::GLOW_FN, veldin_finale_fx::BEAM_FN, veldin_finale_fx::MORPH_FN].contains(&f) => veldin_finale_fx::fx_quad_groups(svc, f),
         _ => fx_quads(table, svc, i, id).into_iter().collect(),
     }
@@ -1641,6 +1646,7 @@ pub fn frame_callback(w: &mut World, i: u16, id: MobyId) {
         Some((oltanis_sentry::REFERENCE_LEVEL, oltanis_sentry::MASTER_DRAW_FN | oltanis_sentry::SPOT_FN)) => oltanis_sentry::frame(w, id),
         Some((fleet_sky::REFERENCE_LEVEL, fleet_sky::DRAW_FN)) => fleet_sky::frame(w, id),
         Some((water_shock::REFERENCE_LEVEL, water_shock::DRAW_FN | water_shock::COUNTDOWN_FN)) => water_shock::frame(w, id),
+        Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::STRAND_DRAW_FN)) => veldin_shots::strands_frame(w, id),
         Some((oltanis_rail_bot::REFERENCE_LEVEL, oltanis_rail_bot::DRAW_FN)) => oltanis_rail_bot::frame(w, id),
         Some((oltanis_bolt::REFERENCE_LEVEL, oltanis_bolt::DRAW_FN)) => oltanis_bolt::frame(w, id),
         Some((oltanis_wind::REFERENCE_LEVEL, oltanis_wind::DRAW_FN)) => oltanis_wind::frame(w, id),

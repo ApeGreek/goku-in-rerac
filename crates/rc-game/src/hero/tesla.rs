@@ -72,6 +72,9 @@ pub const BLUE: u32 = 0x7f_2020;
 pub const FX_CORE: usize = 14;
 pub const FX_GLOW: usize = 16;
 pub const FX_CLAW: usize = 0xb;
+/// The core strips' half width (gp−0x55d4): the strip helper `0x2d0748` reads it for every strip, whatever its
+/// caller passes.
+pub const CORE_W: f32 = 0.05;
 /// The hum and the lock / dud sounds.
 pub const HUM: i32 = 4;
 pub const LOCK_SOUND: i32 = 1;
@@ -674,19 +677,19 @@ pub fn strip_colored(out: &mut Vec<BeamQuad>, pts: &[[f32; 3]], n: usize, w: [f3
 }
 
 /// The draw callback `0x2d05d8` for the chain as the last update left it, seen from `eye`: the scroll step (−0.3 a
-/// tick, wrapped at −8), the main chain (0x80 / 0x40, widths 0.05 / 0.4, lengthened 0.9), the second (0x10 / 0x20, 0.1 /
-/// 0.3, 0.1), the four arcs (their alphas, 0.1 / 0.3, 0.2) and the claw's glow (`0x2d0d18`: FX 0xb, two quads facing
+/// tick, wrapped at −8), the main chain (0x80 / 0x40, widths 0.05 / 0.4, lengthened 0.9), the second (0x10 / 0x20,
+/// 0.05 / 0.3, 0.1), the four arcs (their alphas, 0.05 / 0.3, 0.2; the core's width is the helper's [`CORE_W`]) and the claw's glow (`0x2d0d18`: FX 0xb, two quads facing
 /// the eye 0.3 toward it from the start, 0.1 and 0.35 across (each + `randf_sym(0, 0.1)` / `(0, 0.05)` in the game:
 /// the draw's own jitter is not reproduced [L]), 0x307f7f7f and the strips' colour).
 pub fn beam_quads(t: &Tesla, eye: [f32; 3], gravity: [f32; 3]) -> Vec<BeamQuad> {
     let c = &t.chain;
     let mut out = Vec::new();
     let n = (t.count.max(0) as usize).min(POINTS);
-    strip(&mut out, &c.main, n, 0.05, 0.4, 0.9, 0x80, 0x40, c.color, c.scroll, eye);
-    strip(&mut out, &c.second, n, 0.1, 0.3, 0.1, 0x10, 0x20, c.color, c.scroll, eye);
+    strip(&mut out, &c.main, n, CORE_W, 0.4, 0.9, 0x80, 0x40, c.color, c.scroll, eye);
+    strip(&mut out, &c.second, n, CORE_W, 0.3, 0.1, 0x10, 0x20, c.color, c.scroll, eye);
     for k in 0..4 {
         let a = c.arc_alpha[k].max(0) as u32;
-        strip(&mut out, &c.arcs[k], 5, 0.1, 0.3, 0.2, a, a, c.color, c.scroll, eye);
+        strip(&mut out, &c.arcs[k], 5, CORE_W, 0.3, 0.2, a, a, c.color, c.scroll, eye);
     }
     // The claw's glow: a quad facing the eye.
     let toward = add3(t.start, with_len(sub3(eye, t.start), 0.3));

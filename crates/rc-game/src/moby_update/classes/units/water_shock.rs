@@ -43,12 +43,11 @@
 //!
 //! [L] The bolt's chain is one global set (as the game's); the gold flag of the colour reads the Tesla Claw's.
 
-use super::{FxQuad, FxQuads};
-use crate::hero::tesla::{self, Tesla, POINTS};
+use super::FxQuads;
+use crate::hero::tesla;
 use crate::moby_runtime::{MobyId, MobyTable};
-use crate::moby_update::classes::blaster_shot::rotate;
 use crate::moby_update::classes::draw_callbacks::Callback;
-use crate::moby_update::creature::{self as c, fx, SPEED};
+use crate::moby_update::creature::{self as c, fx};
 use crate::moby_update::services::{pv, HitTemplate, Services, World};
 use crate::moby_update::story;
 use crate::point_lights::PointLight;
@@ -95,18 +94,11 @@ const FLOOR_SWITCH: i16 = 0x33e;
 const SWITCH: i16 = 0x49b;
 const SOUND_CLASS: i16 = 0x28f;
 /// gp−0x4ff4 / −0x4ff0: the wave's amplitude at the start and the end.
-const WAVE_AMP: [f32; 2] = [0.03, 0.03];
 const COUNTDOWN_CENTRE: (i32, i32) = (250, 350);
 const COUNTDOWN_RGBA: [u32; 2] = [0x80c0_c0c0, 0x8040_40ff];
 
-/// The bolt (the game's globals 0x1d3750.. / 0x161cc0..): the Tesla Claw's chain record.
-#[derive(Clone, Debug, Default)]
-pub struct Bolt {
-    pub t: Tesla,
-    /// The camera the draw's frame part saw.
-    pub eye: [f32; 3],
-    pub gravity: [f32; 3],
-}
+/// The bolt (the game's globals 0x1d3750.. / 0x161cc0..): the Tesla Claw's chain as a level effect.
+pub use super::tesla_bolt::Bolt;
 
 fn bolt<'a>(w: &'a mut World<'_>) -> &'a mut Bolt { &mut w.svc.units.water_shock }
 fn link(w: &World, v: i32) -> Option<MobyId> { usize::try_from(v).ok().filter(|&m| m < w.table.mobys.len()) }
@@ -118,7 +110,6 @@ fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] +
 fn scale(a: [f32; 3], k: f32) -> [f32; 3] { a.map(|x| x * k) }
 fn len(a: [f32; 3]) -> f32 { (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt() }
 fn unit(a: [f32; 3], l: f32) -> [f32; 3] { let n = len(a); if n == 0.0 { a } else { scale(a, l / n) } }
-fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] }
 fn body(w: &World) -> [f32; 3] { let b = w.hero.body_point; [b[0].to_f32(), b[1].to_f32(), b[2].to_f32()] }
 
 /// `0x2d9570(m)`: a switch 1179 in state 2.
@@ -430,148 +421,21 @@ fn register(w: &mut World, id: MobyId, f: u32) {
     }
 }
 
-/// `0x2d79e8`: the chain set up on the first bolt (straight from the start toward the end in 20 steps of 15/20).
+/// `0x2d79e8`: the chain set up on the first bolt (`super::tesla_bolt::reset`; the scroll cleared with it).
 pub fn reset(w: &mut World, id: MobyId) {
     let (s, e) = (v3(w, id, o::START), v3(w, id, o::END));
     let b = bolt(w);
     b.t.start = s;
     b.t.end = e;
-    if !b.t.chain.reset { return; }
-    b.t.chain.reset = false;
-    b.t.chain.scroll = 0.0;
-    let step = unit(sub(e, s), 15.0 / 20.0);
-    b.t.chain.main[0] = s;
-    for i in 0..POINTS - 1 { b.t.chain.main[i + 1] = add(b.t.chain.main[i], step); }
-    b.t.chain.zoff = [0.0; POINTS + 1];
-    b.t.chain.side = [[0.0; 3]; POINTS];
-    b.t.chain.zoff2 = [0.0; 22];
-    b.t.chain.arc_timer = [-1; 4];
-    b.t.chain.phase = [0.0; 3];
+    if super::tesla_bolt::reset(b, s, e) { b.t.chain.scroll = 0.0; }
 }
 
-/// `0x2d7bb0`: the chain, the arcs and the sparks (module doc).
-#[allow(clippy::too_many_lines)]
+/// `0x2d7bb0`: the chain, the arcs and the sparks (`super::tesla_bolt::build`).
 pub fn build(w: &mut World, id: MobyId) {
-    let gold = w.hero.weapons.gold[3] != 0;
     let (start, end, aim) = (v3(w, id, o::START), v3(w, id, o::END), v3(w, id, o::AIM));
-    let grav = crate::hero::physics::to_f32x3(w.hero.gravity_dir);
-    let cam = crate::hero::physics::to_f32x3(w.camera);
-    let mut seg = len(sub(start, aim)) * 0.05;
-    let mut ch = std::mem::take(&mut bolt(w).t.chain);
-    ch.phase[0] = c::add_rot(ch.phase[0], f32::from_bits(0x3eb2_b8c2));
-    ch.phase[1] = c::sub_rot(ch.phase[1], f32::from_bits(0x3f4d_87ac));
-    ch.phase[2] = c::add_rot(ch.phase[2], f32::from_bits(0x3d56_7770));
-    ch.color = if gold { 0x7f_2040 } else { 0x7f_2020 };
-    let mut dirn = unit(sub(end, start), 1.0);
-    let side = cross(grav, dirn);
-    dirn = rotate(dirn, f32::from_bits(0x3e32_b8c2), side);
-    let mut step = scale(dirn, seg);
-    ch.main[0] = start;
-    ch.second[0] = start;
-    for i in 1..POINTS {
-        let fi = i as f32;
-        let amp = WAVE_AMP[0] + (WAVE_AMP[1] - WAVE_AMP[0]) * fi * 0.05;
-        let wave = amp * c::add_rot(ch.phase[0] + fi * f32::from_bits(0x3c8e_fa35), 0.0).sin() + w.rng.randf_sym(0.0, 0.1);
-        let old = ch.zoff[i];
-        ch.zoff[i] = wave;
-        ch.main[i][2] -= old;
-        let (a, b) = (w.rng.rand_angle(), w.rng.rand_angle());
-        let mut r = fx::polar(seg, a, b);
-        r[2] *= 0.5;
-        let d: [f32; 3] = std::array::from_fn(|k| step[k] + (r[k] - step[k]) * f32::from_bits(0x3e19_999a));
-        let l = len(d);
-        if l == 0.0 {
-            ch.main[i] = ch.main[i - 1];
-        } else {
-            let d = scale(d, seg / l);
-            ch.main[i] = add(ch.main[i - 1], d);
-            step = d;
-        }
-        ch.main[i][2] += wave;
-        let rel = sub(ch.main[i], ch.main[i - 1]);
-        let to = sub(aim, ch.main[i]);
-        let l = len(to);
-        if l != 0.0 {
-            let k = if i == 19 { seg = l; 0.5 } else if i < 16 { 0.1 } else { seg = l / (19 - i) as f32; 0.5 };
-            let to = scale(to, seg / l);
-            step = add(step, scale(sub(to, step), k));
-        }
-        if i < 10 {
-            let p2 = c::add_rot(ch.phase[1] + fi * f32::from_bits(0x3f7e_adae), 0.0);
-            let p3 = c::add_rot(ch.phase[2] + fi * f32::from_bits(0x3e56_7750), 0.0);
-            let s3 = 0.8 * p3.sin();
-            ch.second[i] = ch.main[i];
-            let z2 = s3 * p2.sin() + w.rng.randf_sym(0.0, 0.1);
-            ch.zoff2[i] = z2;
-            ch.second[i][2] += z2;
-            let ang = c::add_rot(c::atan(rel[0], rel[1]), std::f32::consts::FRAC_PI_2);
-            let rr = 0.5 * p2.cos();
-            ch.side[i - 1] = [ang.cos() * rr, ang.sin() * rr, 0.0];
-            ch.second[i] = add(ch.second[i], ch.side[i - 1]);
-        } else {
-            ch.second[i] = ch.main[i];
-            ch.second[i][2] += ch.zoff2[21 - i];
-            ch.second[i] = add(ch.second[i], ch.side[20 - i]);
-        }
-    }
-    let side_n = unit(cross(grav, dirn), 1.0);
-    let up = unit(grav, 1.0);
-    for k in 0..4 {
-        let (base, al) = if k < 2 { (start, 0.4) } else { (end, 0.5) };
-        let mut t = ch.arc_timer[k];
-        let fired = crate::hero::guns::dec16(&mut t);
-        ch.arc_timer[k] = t;
-        if !fired {
-            let mut d = [[0.0f32; 3]; 4];
-            for (j, dj) in d.iter_mut().enumerate() {
-                let r = sub(ch.arcs[k][j + 1], ch.arcs[k][j]);
-                *dj = [r[0] + w.rng.randf_sym(0.0, 0.1), r[1] + w.rng.randf_sym(0.0, 0.1), r[2] + w.rng.randf_sym(0.0, 0.1)];
-            }
-            ch.arcs[k][0] = base;
-            for (j, dj) in d.iter().enumerate() { ch.arcs[k][j + 1] = add(ch.arcs[k][j], *dj); }
-            let tv = ch.arc_timer[k] as i32;
-            let dd = (tv - [4, 2, 4, 2][k]).abs() as f32;
-            ch.arc_alpha[k] = ((1.0 - dd / w.ticks(15) as f32) * 32.0) as i32 as i16;
-        } else {
-            ch.arc_timer[k] = w.ticks([8, 4, 8, 4][k]) as i16;
-            ch.arc_alpha[k] = 0;
-            let a = w.rng.randf_sym(f32::from_bits(0x3f06_0a92), f32::from_bits(0x3f86_0a92));
-            let b = w.rng.randf(-f32::from_bits(0x3f86_0a92), f32::from_bits(0x3e32_b8c2));
-            let mut v = scale(dirn, al);
-            v = rotate(v, b, side_n);
-            v = rotate(v, a, up);
-            ch.arcs[k][0] = base;
-            ch.arcs[k][1] = add(base, v);
-            let mut sign = 1.0f32;
-            for j in 0..3 {
-                let cc = sub(ch.arcs[k][j + 1], cam);
-                let ang = w.rng.randf(f32::from_bits(0x3e32_b8c2), f32::from_bits(0x3f75_be0b)) * sign;
-                sign = -sign;
-                v = rotate(v, ang, cc);
-                ch.arcs[k][j + 2] = add(ch.arcs[k][j + 1], v);
-            }
-        }
-    }
-    let col = ch.color | 0x7f00_0000;
-    bolt(w).t.chain = ch;
-    let a = w.rng.randf_sym(f32::from_bits(0x3f06_0a92), f32::from_bits(0x3f86_0a92));
-    let b = w.rng.randf(-f32::from_bits(0x3f06_0a92), f32::from_bits(0x3f86_0a92));
-    let mut v = scale(dirn, 0.09 * SPEED);
-    v = rotate(v, b, side_n);
-    v = rotate(v, a, up);
-    let mut spin = w.rng.rand_range(1, 8);
-    if w.rng.randi(2) != 0 { spin = -spin; }
-    let f = w.rng.randf(0.2, 0.6);
-    let life = w.ticks(15);
-    let vel = pv([v[0], v[1], v[2], 0.0]);
-    let sp = pv([start[0], start[1], start[2], 0.0]);
-    w.part53(Pf::f(f * 0.3), Pf::f(f), Pf::ZERO, sp, life, col, 0, spin as i8, vel);
-    w.part53(Pf::f(f * 0.15), Pf::f(f * 0.5), Pf::ZERO, sp, life, 0x307f_7f7f, 0, -spin as i8, vel);
-    let mut spin = w.rng.rand_range(1, 8);
-    if w.rng.randi(2) != 0 { spin = -spin; }
-    let f = w.rng.randf(0.15, 3.0);
-    let life = w.ticks(12);
-    w.part53(Pf::f(f * 0.1), Pf::f(f), Pf::ZERO, pv([aim[0], aim[1], aim[2], 0.0]), life, col, 0, spin as i8, pv([0.0; 4]));
+    let mut b = std::mem::take(bolt(w));
+    super::tesla_bolt::build(w, &mut b, start, end, aim);
+    *bolt(w) = b;
 }
 
 /// The draws' frame part: the camera kept; the bolt's draw steps its scroll; the countdown's text.
@@ -583,15 +447,9 @@ pub fn frame(w: &mut World, id: MobyId) {
         }
         return;
     }
-    let eye = crate::hero::physics::to_f32x3(w.camera);
-    let g = crate::hero::physics::to_f32x3(w.hero.gravity_dir);
-    let b = bolt(w);
-    b.eye = eye;
-    b.gravity = g;
-    b.t.count = POINTS as i16;
-    let s = &mut b.t.chain.scroll;
-    *s -= 0.3 * SPEED;
-    if *s <= -8.0 { *s += 8.0; }
+    let mut b = std::mem::take(bolt(w));
+    super::tesla_bolt::frame(w, &mut b, false);
+    *bolt(w) = b;
 }
 
 /// `0x2d77c0`: the countdown (pushed by [`frame`] in state 3).
@@ -600,13 +458,5 @@ pub fn countdown_draw(w: &mut World, id: MobyId) { frame(w, id) }
 /// Level15 `0x2d8710`: the bolt as the Tesla Claw's strips and glow (additive).
 pub fn fx_quad_groups(_table: &MobyTable, svc: &Services, _id: MobyId) -> Vec<FxQuads> {
     let b = &svc.units.water_shock;
-    let mut groups: Vec<FxQuads> = Vec::new();
-    for q in tesla::beam_quads(&b.t, b.eye, b.gravity) {
-        let quad = FxQuad { corners: q.corners, st: q.st, rgba: q.rgba };
-        match groups.iter_mut().find(|g| g.fx == q.fx) {
-            Some(g) => g.quads.push(quad),
-            None => groups.push(FxQuads { fx: q.fx, additive: true, subtract: false, quads: vec![quad] }),
-        }
-    }
-    groups
+    super::tesla_bolt::groups(tesla::beam_quads(&b.t, b.eye, b.gravity))
 }
