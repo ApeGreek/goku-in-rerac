@@ -73,6 +73,7 @@ mod scene_render;
 mod sea_render;
 mod screen_canvas;
 mod shadow_render;
+mod pre_shadow;
 mod shrub_billboard;
 mod shrub_light;
 mod shrub_render;
@@ -156,6 +157,7 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(moby_attach::MobyAttachPlugin)
     // The moby shadows: the game's shadow rules and a native shadow-volume pass (crate::shadow_render).
     .add_plugins(shadow_render::ShadowPlugin)
+    .add_plugins(pre_shadow::PreShadowPlugin)
     .insert_resource(spawn)
     .add_plugins(tie_render::TieRenderPlugin)
     .add_plugins(shrub_render::ShrubRenderPlugin)

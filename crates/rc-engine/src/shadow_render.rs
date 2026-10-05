@@ -115,6 +115,10 @@ pub struct ShadowVolumes {
     pub deferred: std::collections::HashSet<usize>,
 }
 
+/// The render-world set of the shadow pass (crate::pre_shadow draws before it).
+#[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ShadowPassSet;
+
 /// The camera whose view gets the shadow pass (the main world camera).
 #[derive(Component, Clone, Copy, Default, ExtractComponent)]
 pub struct ShadowCamera;
@@ -138,7 +142,7 @@ impl Plugin for ShadowPlugin {
             .init_resource::<ShadowGpu>()
             .add_systems(RenderStartup, init_pipelines)
             .add_systems(Render, prepare.in_set(RenderSystems::PrepareResources))
-            .add_systems(Core3d, shadow_pass.after(main_opaque_pass_3d).before(main_transparent_pass_3d).in_set(Core3dSystems::MainPass));
+            .add_systems(Core3d, shadow_pass.after(main_opaque_pass_3d).before(main_transparent_pass_3d).in_set(Core3dSystems::MainPass).in_set(ShadowPassSet));
     }
 }
 

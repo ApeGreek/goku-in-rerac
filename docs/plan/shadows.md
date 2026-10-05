@@ -430,7 +430,8 @@ frame's. Checked: every frame of Novalis scene 5 (240..560) and level 2 scene 1 
   (the casters `shadow_render::collect` kept, or mode 0x800; `moby_render::CasterTwin`): the driven statics, the dynamic
   slots and Ratchet. [L] read one frame late; the metal passes, Clank / the wrench / the packs and the scene actors
   keep the class rule.
-* Risk 5 stays: the RGB-only halves of world alpha tests and billboard pass 2 are drawn after the resolve (not darkened).
+* ~~Risk 5~~ (2026-10-05): the RGB-only halves of the world's alpha tests and billboard pass 2 are drawn right after the
+  opaque pass, before the shadow pass, as the game draws them with the world (crate::pre_shadow), so shadows darken them.
 * ~~The joint-modifier list (+0x64) is not in the port's pose~~: ported 2026-09-28 (hero_gameplay.md §7); all 21
   records of Ratchet's posed list match RAM to 3.05e-5, and the shadows pose every caster with its `Moby::joint_mods`
   (Ratchet also with his weapon arm layers).
