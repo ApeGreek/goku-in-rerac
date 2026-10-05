@@ -11,9 +11,6 @@
 //! - `digest-baseline`: the only command that writes the baseline, for a human who has decided a digest change is
 //!   intended (or a job with none, before its first edit); it prints what changed.
 //!
-//! - `--no-game-data` (all three; CI): the tests run as without `extracted/` and the ones that skip for lack of game data
-//!   are listed as SKIPPED ([`NoGameData`]); the digest and the sweep do not run.
-//!
 //! All of them set `RC_AUDIO=0`, run from the repo root and use cargo-nextest when it is installed (`cargo nextest`
 //! answers), else `cargo test`. Both runners get `--workspace --features rc-engine/dev` spelled out ([`NEXTEST`],
 //! [`CARGO_TEST`]; there is no Cargo test alias), so they share the dev (dynamic) Bevy build. These commands are the
@@ -127,8 +124,6 @@ struct Opts {
     sel: Sel,
     /// After `--`: passed to the runner as is.
     extra: Vec<OsString>,
-    /// `--no-game-data` (CI): run as on a machine without `extracted/` and list the tests that skipped ([`NoGameData`]).
-    no_game_data: bool,
 }
 
 fn parse(argv: &[OsString]) -> Result<Opts, String> {
@@ -149,7 +144,6 @@ fn parse(argv: &[OsString]) -> Result<Opts, String> {
             Some("--exact") => o.sel.exact = true,
             Some("--ignored") => o.sel.ignored = true,
             Some("--nocapture" | "--no-capture") => o.sel.nocapture = true,
-            Some("--no-game-data") => o.no_game_data = true,
             Some(s) if s.starts_with('-') => return Err(format!("unknown option {s}")),
             Some(s) => o.names.push(s.to_string()),
             None => return Err(format!("unexpected argument {a:?}")),
@@ -350,10 +344,8 @@ pub fn quick(argv: &[OsString]) -> ExitCode {
     if !o.tests.is_empty() { eprintln!("error: --test is an option of test-job (`cargo xtask test-job --test <binary>`)"); return ExitCode::from(2); }
     let r = runner(&o);
     if r == Runner::CargoTest && !o.names.is_empty() { eprintln!("xtask: no nextest: running every crate's unit tests (a single crate would rebuild)"); }
-    let mut steps = quick_steps(r, o.names.first().map(String::as_str), &o.sel);
-    let ngd = match NoGameData::setup(&o, &mut steps) { Ok(n) => n, Err(c) => return c };
+    let steps = quick_steps(r, o.names.first().map(String::as_str), &o.sel);
     let ok = run_all(&steps, &o.extra);
-    if let Some(n) = &ngd { n.report(); }
     done(ok)
 }
 
@@ -373,14 +365,12 @@ pub fn job(argv: &[OsString]) -> ExitCode {
         }
     }
     let r = runner(&o);
-    let mut steps = job_steps(r, &areas, &o.tests, &o.sel);
-    let ngd = match NoGameData::setup(&o, &mut steps) { Ok(n) => n, Err(c) => return c };
+    let steps = job_steps(r, &areas, &o.tests, &o.sel);
     let mut ok = run_all(&steps, &o.extra);
     // A targeted run (a name filter, only the ignored tests) is not the guard set: the digest runs only in a plain job.
     if areas.iter().any(|a| a.name == "shared") && o.sel.filters.is_empty() && !o.sel.ignored {
-        if ngd.is_some() { eprintln!("xtask: SKIPPED the NO_IDLE hero digest (--no-game-data: it needs extracted/)"); } else { ok = digest_check() && ok; }
+        ok = digest_check() && ok;
     }
-    if let Some(n) = &ngd { n.report(); }
     done(ok)
 }
 
@@ -435,68 +425,12 @@ pub fn full(argv: &[OsString]) -> ExitCode {
     let o = match opts(argv) { Ok(o) => o, Err(c) => return c };
     if !o.names.is_empty() { eprintln!("error: test-full takes no areas"); return ExitCode::from(2); }
     if !o.tests.is_empty() || !o.sel.is_empty() { eprintln!("error: test-full runs everything; for a targeted run use test-job / test-quick"); return ExitCode::from(2); }
-    let mut steps = full_steps(runner(&o));
-    let ngd = match NoGameData::setup(&o, &mut steps) { Ok(n) => n, Err(c) => return c };
+    let steps = full_steps(runner(&o));
     let ok = run_all(&steps, &o.extra);
-    if let Some(n) = ngd {
-        // CI: no game data, so no digest; and no sweep (a fresh runner's target/ is small and cargo-sweep absent).
-        eprintln!("xtask: SKIPPED the NO_IDLE hero digest (--no-game-data: it needs extracted/)");
-        n.report();
-        return done(ok);
-    }
     let digest = digest_check();
     // Keep target/ under the limit; a refused or failed sweep never fails the test run.
     if !crate::sweep::run(&crate::sweep::Opts::default()) { eprintln!("xtask: warning: the target/ sweep did not run (above); the test result stands"); }
     done(ok && digest)
-}
-
-/// `--no-game-data`: how the tests run on a machine without game data (CI has no disc and never gets one). Every step
-/// gets `RC_EXTRACTED` = an empty folder (and `RC_DATA_DIR` cleared), so the data-needing tests take their "no
-/// `extracted/`" early return even where the tree exists, and `RC_NO_GAME_DATA_LOG` = a log to which each test that
-/// asks for the data root appends its name (`rc_formats::test_data::note_data_request`). [`NoGameData::report`] then
-/// lists those tests as SKIPPED (on GitHub Actions also as a warning annotation and in the step summary): a skip is
-/// never a silent pass. The runner still reports them as passed; the list says which passes checked no game data.
-struct NoGameData { log: PathBuf }
-
-impl NoGameData {
-    /// Without `--no-game-data`: `Ok(None)`, steps untouched. Else prepares `target/no-game-data/` and the steps' env.
-    fn setup(o: &Opts, steps: &mut [Step]) -> Result<Option<NoGameData>, ExitCode> {
-        if !o.no_game_data { return Ok(None); }
-        let dir = repo_root().join("target/no-game-data");
-        let (empty, log) = (dir.join("empty"), dir.join("data-requests.log"));
-        let _ = std::fs::remove_dir_all(&empty);
-        if let Err(e) = std::fs::create_dir_all(&empty).and_then(|_| std::fs::write(&log, "")) {
-            eprintln!("error: cannot prepare {}: {e}", dir.display());
-            return Err(ExitCode::FAILURE);
-        }
-        for s in steps.iter_mut() {
-            s.env.extend([("RC_EXTRACTED", empty.display().to_string()), ("RC_DATA_DIR", String::new()), ("RC_NO_GAME_DATA_LOG", log.display().to_string())]);
-        }
-        eprintln!("xtask: --no-game-data: the data root is the empty folder {}; tests that need game data skip and are listed at the end", empty.display());
-        Ok(Some(NoGameData { log }))
-    }
-
-    /// The tests that asked for the data root, `<binary> <test>`, sorted and once each.
-    fn skipped(&self) -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_to_string(&self.log).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(String::from).collect();
-        v.sort();
-        v.dedup();
-        v
-    }
-
-    fn report(&self) {
-        let t = self.skipped();
-        eprintln!("xtask: --no-game-data: {} test(s) SKIPPED for lack of game data: they asked for the data root (an empty folder) and returned early; the runner counts them as passed, but they checked nothing that needs extracted/:", t.len());
-        for l in &t { eprintln!("  SKIPPED {l}"); }
-        if std::env::var_os("GITHUB_ACTIONS").is_some() {
-            // Workflow commands go to stdout.
-            println!("::warning title=Tests skipped without game data::{} test(s) need extracted/ and were skipped (no game data on CI); the list is in this step's log.", t.len());
-            if let Some(p) = std::env::var_os("GITHUB_STEP_SUMMARY") {
-                let body = format!("### {} test(s) skipped: no game data\n\n<details><summary>List</summary>\n\n```\n{}\n```\n</details>\n\n", t.len(), t.join("\n"));
-                let _ = std::fs::OpenOptions::new().create(true).append(true).open(p).and_then(|mut f| std::io::Write::write_all(&mut f, body.as_bytes()));
-            }
-        }
-    }
 }
 
 fn area_names() -> String { AREAS.iter().map(|a| a.name).collect::<Vec<_>>().join(", ") }
@@ -511,7 +445,6 @@ mod tests {
     fn parses_names_flags_and_extra() {
         let o = parse(&os(&["hero", "--cargo-test", "ui", "--", "--nocapture", "x"])).unwrap();
         assert_eq!(o, Opts { cargo_test: true, names: vec!["hero".into(), "ui".into()], extra: os(&["--nocapture", "x"]), ..Opts::default() });
-        assert!(parse(&os(&["--no-game-data"])).unwrap().no_game_data);
         assert!(parse(&os(&["--bogus"])).is_err());
     }
 

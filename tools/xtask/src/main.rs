@@ -60,8 +60,6 @@ RC_AUDIO=0; cargo-nextest when installed, else `cargo test --workspace --feature
       --nocapture         show the tests' output
     Options of the test commands:
       --cargo-test        use `cargo test --workspace --features rc-engine/dev` even when nextest is installed
-      --no-game-data      run as on a machine without extracted/ (CI): the data root is an empty folder, and the
-                          tests that need game data skip and are listed as SKIPPED at the end; no digest, no sweep
       -- <args>           passed on as is: to nextest, or to the test binaries under cargo test
   help
       This list.";

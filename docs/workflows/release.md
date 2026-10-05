@@ -52,14 +52,10 @@ in a macOS `.app`; when neither exists (`cargo dev`, `target/*/rerac`) it uses t
 
 ## GitHub Actions (`.github/workflows/`)
 
-Both run on `macos-14` (Apple Silicon, the tested platform; `release.yml` also on `windows-latest`), install stable
-Rust with rustup and cache with `Swatinem/rust-cache`.
+Only releases run on GitHub (no CI on pushes: checks and tests run locally, `docs/workflows/testing.md`). The release
+workflow builds on `macos-14` (Apple Silicon, the tested platform) and `windows-latest`, installs stable Rust with
+rustup and caches with `Swatinem/rust-cache`.
 
-* **`ci.yml`** (push to `main`, pull requests): `cargo check-all`, `cargo clippy-all`, then
-  `cargo xtask test-full --no-game-data`. The runner has no disc and no `extracted/`, and never gets one. With
-  `--no-game-data` the data root is an empty folder: the tests that need game data take their early return, and xtask
-  lists each of them as SKIPPED (in the log, as a warning annotation and in the job summary), so none of them passes
-  silently. The hero digest needs game data and does not run. The same command works locally (`tools/xtask/README.md`).
 * **`release.yml`** (push of a `v*` tag; or by hand with `workflow_dispatch`, input `tag`: an existing tag to release
   again, or empty to only build the packages as workflow artifacts): one build job per platform runs
   `tools/package/package.sh` (directly: on Windows a bare `bash` from `cargo xtask package` can be WSL's) and checks
