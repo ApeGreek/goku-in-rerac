@@ -65,7 +65,7 @@
 //! | 0 | `FastDecTimer(+0x28)` out → `DeleteMoby` (no aim this tick) | the charge | [`beam_update`] |
 //! | 1 | d = +0x00 − position; `0x2ea598`; +0x10 = position + `rand_vec(2·+0x24, 2·+0x24)`; `0x2eacd8`, `0x2eaea0`, `RegisterDrawCallback2(0x2eb9f8)` | the flight | [`beam_update`] (the strands and the draws: NOT ported, G-REN-033) |
 //! | | |d| < 70·dt → `0x2ea800`, deleted; else position += d at 70·dt; two `0x25bbf0(2, 5, 1, the boss, ·, 0x10001, 0, 1, 0)` (at it and on the ground below); `FastDecTimer(+0x34)` out → `Approach(0, 0.2, &+0x24)`, 0 → deleted | | [`beam_update`] |
-//! | | `RegisterDrawCallback(0x2ea1f8)` | the core's draw | NOT ported (G-REN-033) |
+//! | | `RegisterDrawCallback(0x2ea1f8)` | the core's draw: four additive camera-facing quads (FX 8 / 11 / 20 / 20) | [`core_quads`] (`Callback::UnitQuads`) |
 //! | `0x2ea598` | 3 sparks: v1 = `rand_vec(6·dt, 12·dt)`, v2 = v1·0.1, v2.z −= `randf(2·dt, 4·dt)`; phases `randf(1, 5)`, `randf(20, 30)`, `randf(30, 45)` (scaled, truncated); sizes `randf(0.5, 0.333)`, `randf(0.333, 0.2)`; at `randf(0, 1)` of d (60·dt long); colours `tween(0x80807060, 0x80807000)` / `(0x80805020, 0x80802010)`; def 53 | | [`beam_sparks`] |
 //! | `0x2ea800` | the flash 1898 (`0x2fb5e0(pos, ticks(30), 0x80806060, 0x801010)`); `PlayClassSound(0x10, 0)` as 0x58e; 100 sparks (`polar(randf(10, 30)·dt, rand_angle, randf(±20°))`, v2 = v1·0.02, v2.z += 2·`randf(0.8, 1.2)`·dt, sizes 0.25, colours 0x60c08010 / 0x50c08010, `ticks(30 / 30 / 240)·randf(0.8, 1.2)`, def 53); 50 TNT sparks (`PartType11Spawn(1.2e6, randf(20, 50)·dt, …)`, `polar(·, rand_angle, randf(60°, 80°))`, at `randf(0, 10)` round, colours of the tables 0x1d9c70 / 0x1d9c88, `ticks(rand_range(30, 60))` ×2); three flashes (`FlashSpawn(10 / 15 / 25, …, ticks(30), 0x10, 0x40, 0xc0, 0x40 / 0x20)`); the camera shake 0.35 for `ticks(45)` | the impact | [`impact`] |
 //! | `0x2ea0f0(boss, p, n)` | `CreateMoby(0x3d7)`: update 0xff; position; +0x20 boss, +0x28 5, +0x34 n, +0x24 0 | | [`beam_new`] |
@@ -92,6 +92,8 @@ pub const AURA_FN: u32 = 0x2d_c260;
 pub const AURA_DRAW_FN: u32 = 0x2d_c4b8;
 pub const BEAM_FN: u32 = 0x2e_9e70;
 pub const FLASH_FN: u32 = 0x2f_b548;
+/// 983's core draw `0x2ea1f8` (`RegisterDrawCallback`, list 1).
+pub const CORE_DRAW_FN: u32 = 0x2e_a1f8;
 pub const LOB: i16 = 0x234;
 pub const RING: i16 = 0x270;
 pub const AURA: i16 = 0x274;
@@ -581,12 +583,46 @@ pub mod beam_pv {
     pub const SPIN_B: usize = 0x30;
     pub const LIFE: usize = 0x34;
     pub const SIZE: usize = 0x38;
+    /// The port's: the camera position the core draw faces (0x1677c0), kept by the update [L: last tick's].
+    pub const CAM: usize = 0x40;
+    pub const LEN: usize = 0x50;
+}
+
+/// gp−0x4d1c..−0x4d10 (level18 0x161ee4..): the core's ALPHA bytes A / B / C / D = Cs, 0, As, Cd (additive); its
+/// colours 0x161ef8.. (quad 0 tweened in from alpha 0 by +0x24) and FX 0x161f08..; the quads' corners (y, z) in the
+/// plane facing the camera (0x1d9b70: half sizes 2, 1, 3, 3) and their ST (0x1d9b50).
+const CORE_RGBA: [u32; 4] = [0x7040_2000, 0x7060_6010, 0x7080_4010, 0x7080_4010];
+const CORE_FX: [usize; 4] = [8, 11, 20, 20];
+const CORE_HALF: [f32; 4] = [2.0, 1.0, 3.0, 3.0];
+const CORE_ST: [[f32; 2]; 4] = [[1.0, 0.0], [1.0, 1.0], [0.0, 0.0], [0.0, 1.0]];
+
+/// `0x2ea1f8`: the core, four additive quads at the beam's position facing the camera (Euler (roll, −pitch, yaw) to it:
+/// rolls 0, 0, +0x2c, +0x30), their y / z rows scaled by +0x24, `FastDrawQuadReal` each.
+pub fn core_quads(table: &crate::moby_runtime::MobyTable, _svc: &crate::moby_update::Services, id: MobyId) -> Vec<FxQuads> {
+    let Some(m) = table.mobys.get(id).filter(|m| m.o_class == BEAM && m.pvars.len() >= beam_pv::LEN) else { return Vec::new() };
+    let pf = |o: usize| sv::pvar::ff(&m.pvars, o);
+    let p = [m.position[0], m.position[1], m.position[2]];
+    let cam = [pf(beam_pv::CAM), pf(beam_pv::CAM + 4), pf(beam_pv::CAM + 8)];
+    let yaw = c::atan(cam[0] - p[0], cam[1] - p[1]);
+    let dxy = ((cam[0] - p[0]).powi(2) + (cam[1] - p[1]).powi(2)).sqrt();
+    let pitch = -c::atan(dxy, cam[2] - p[2]);
+    let s = pf(beam_pv::T);
+    let rolls = [0.0, 0.0, pf(beam_pv::SPIN_A), pf(beam_pv::SPIN_B)];
+    (0..4).map(|k| {
+        let r = crate::moby_update::triggers::euler_matrix([rolls[k], pitch, yaw]);
+        let (ry, rz) = (r[1].map(|v| v as f32 * s), r[2].map(|v| v as f32 * s));
+        let h = CORE_HALF[k];
+        let corner = |y: f32, z: f32| std::array::from_fn(|i| p[i] + ry[i] * y + rz[i] * z);
+        let corners = [corner(h, -h), corner(-h, -h), corner(h, h), corner(-h, h)];
+        let rgba = if k == 0 { crate::hud::tween_color(s, CORE_RGBA[0] & 0x00ff_ffff, CORE_RGBA[0]) } else { CORE_RGBA[k] };
+        FxQuads { fx: CORE_FX[k], additive: true, subtract: false, quads: vec![FxQuad { corners, st: CORE_ST, rgba: [rgba; 4] }] }
+    }).collect()
 }
 
 /// `0x2ea0f0(boss, p, n)` (module doc).
 pub fn beam_new(w: &mut World, boss: MobyId, p: c::V, n: i32) -> Option<MobyId> {
     let id = w.create_moby(BEAM)?;
-    if w.m(id).pvars.len() < beam_pv::SIZE { w.mm(id).pvars.resize(0x40, 0); }
+    if w.m(id).pvars.len() < beam_pv::LEN { w.mm(id).pvars.resize(beam_pv::LEN, 0); }
     w.mm(id).update_dist = 0xff;
     w.mm(id).position = p;
     c::set_pi32(w, id, beam_pv::BOSS, boss as i32 + 1);
@@ -734,7 +770,12 @@ pub fn beam_update(w: &mut World, id: MobyId) {
         }
         _ => {}
     }
-    // `RegisterDrawCallback(0x2ea1f8)`: NOT ported (G-REN-033).
+    // `RegisterDrawCallback(0x2ea1f8)` ([`core_quads`], facing the camera of this tick).
+    if w.m(id).pvars.len() >= beam_pv::LEN {
+        let cam = w.camera.map(|x| x.to_f32());
+        c::set_pv4(w, id, beam_pv::CAM, [cam[0], cam[1], cam[2], 0.0]);
+        if let Some(r) = super::row(REFERENCE_LEVEL, CORE_DRAW_FN) { w.svc.draw_callbacks.register(Callback::UnitQuads(r), id); }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------

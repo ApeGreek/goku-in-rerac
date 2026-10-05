@@ -1057,6 +1057,7 @@ pub const PORTS: &[UnitPort] = &[
     UnitPort { unit: "624 ring", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::RING_FN, classes: &veldin_shots::RING_CLASSES, update: veldin_shots::ring_update, joints: &[] },
     UnitPort { unit: "628 aura", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::AURA_FN, classes: &veldin_shots::AURA_CLASSES, update: veldin_shots::aura_update, joints: &[] },
     UnitPort { unit: "628 aura bands", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::AURA_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
+    UnitPort { unit: "983 beam core", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::CORE_DRAW_FN, classes: &[], update: empty::update, joints: &[] },
     UnitPort { unit: "983 beam", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::BEAM_FN, classes: &veldin_shots::BEAM_CLASSES, update: veldin_shots::beam_update, joints: &[] },
     UnitPort { unit: "1898 flash", level: veldin_shots::REFERENCE_LEVEL, func: veldin_shots::FLASH_FN, classes: &veldin_shots::FLASH_CLASSES, update: veldin_shots::flash_update, joints: &[] },
     UnitPort { unit: "U123 822", level: kerwan_train::REFERENCE_LEVEL, func: kerwan_train::UPDATE_FN, classes: &kerwan_train::CLASSES, update: kerwan_train::update, joints: &kerwan_train::JOINTS },
@@ -1590,6 +1591,7 @@ pub fn fx_quad_groups(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_
             vec![FxQuads { fx: 0, additive: false, subtract: false, quads }]
         }
         Some((super::burning_wreck::REFERENCE_LEVEL, super::burning_wreck::DRAW_FN)) => super::burning_wreck::fx_quads(table, svc, id).into_iter().collect(),
+        Some((veldin_shots::REFERENCE_LEVEL, veldin_shots::CORE_DRAW_FN)) => veldin_shots::core_quads(table, svc, id),
         Some((veldin_finale_fx::REFERENCE_LEVEL, f)) if [veldin_finale_fx::FLASH_FN, veldin_finale_fx::GLOW_FN, veldin_finale_fx::BEAM_FN, veldin_finale_fx::MORPH_FN].contains(&f) => veldin_finale_fx::fx_quad_groups(svc, f),
         _ => fx_quads(table, svc, i, id).into_iter().collect(),
     }
