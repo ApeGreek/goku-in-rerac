@@ -243,6 +243,7 @@ impl Plugin for GameplayPlugin {
                 (
                     upload.before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate).before(bevy::asset::AssetEventSystems),
                     write_visible.after(moby_render::update_moby_occlusion).after(upload),
+                    caster_order.before(moby_render::update_moby_occlusion),
                 ),
             );
     }
@@ -560,6 +561,8 @@ pub struct Play {
     frozen_hint: bool,
     /// Ratchet's entities hidden (his moby's mode bit 1: the first-person view hides him, `HeroSyncMoby`).
     ratchet_hidden: bool,
+    /// His caster draws' order as last set (crate::moby_render `queue_late`; None: as spawned, late).
+    ratchet_late: Option<bool>,
     /// The instances a death reload made spawn that the level's load did not (their entities still hidden): shown by
     /// [`show_reloaded`].
     reload_shown: Vec<usize>,
@@ -1359,6 +1362,7 @@ fn setup(
         dynamic,
         sounds: HashMap::new(),
         ratchet_hidden: false,
+        ratchet_late: None,
         reload_shown: Vec::new(),
         arm_joints,
         help_vag: None,
@@ -1419,6 +1423,17 @@ fn hero_level_setup(hero: &mut Hero, back: Option<&BackPacks>, level: u32) {
     hero.idle.level = level as i32;
 }
 
+/// MobyProc's deferral of the scheduler-driven static mobys (crate::shadow_render's casters of the last frame, or
+/// mode 0x800): their caster draws after the shadow pass ([`moby_render::CasterTwin`]).
+fn caster_order(play: Option<Res<Play>>, shadows: Option<Res<crate::shadow_render::ShadowVolumes>>, occl: Option<ResMut<MobyOcclusion>>) {
+    let (Some(p), Some(mut occl)) = (play, occl) else { return };
+    let table = &p.game.mobys;
+    for &(id, ii, _) in &p.driven {
+        let Some(m) = table.mobys.get(id) else { continue };
+        occl.set_late(ii, shadows.as_ref().is_some_and(|s| s.deferred.contains(&id)) || m.mode & 0x800 != 0);
+    }
+}
+
 /// The table → the renderer for the scheduler-driven static mobys (module doc): placement, light block (for
 /// changed rows / ambient / light word), hide, anim state and snapshot.
 fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut MobyOcclusion, mut anim: Option<&mut MobyAnim>) {
@@ -1445,7 +1460,7 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
             }
         }
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
-        occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73, draw_dist: Some(m.draw_dist) });
+        occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73, draw_dist: Some(m.draw_dist), late: None });
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
             a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()), &m.joint_mods);
         }
@@ -2094,9 +2109,12 @@ fn upload(
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
     mut point_lights: ResMut<moby_render::PointLightFrame>,
+    shadows: Option<Res<crate::shadow_render::ShadowVolumes>>,
 ) {
     let Some(mut p) = play else { return };
     if p.uploaded == Some(p.game.counter) { return; }
+    let none = std::collections::HashSet::new();
+    let deferred = shadows.as_deref().map_or(&none, |s| &s.deferred);
     // The point-light bank after the tick (MobyProc merges it into the mobys' third light, moby_render).
     let lights: Vec<_> = p.svc.point_lights.active().copied().collect();
     if point_lights.0 != lights { point_lights.0 = lights.clone(); }
@@ -2119,8 +2137,14 @@ fn upload(
     for &e in &p.entities {
         if let Ok(mut tr) = transforms.get_mut(e) { *tr = t; }
     }
+    // MobyProc's deferral (crate::shadow_render): his draws after the shadow pass only while he casts.
+    let (late, hero_mode) = (deferred.contains(&p.hero_id) || hm.mode & 0x800 != 0, hm.mode);
+    if p.ratchet_late != Some(late) {
+        p.ratchet_late = Some(late);
+        moby_render::queue_late(&mut commands, p.entities.clone(), late);
+    }
     // Hidden in first person (mode bit 1, `HeroSyncMoby` 0x229f20 → 0x2486c0).
-    let hidden = hm.mode & rc_game::moby_runtime::mode::HIDDEN != 0;
+    let hidden = hero_mode & rc_game::moby_runtime::mode::HIDDEN != 0;
     if hidden != p.ratchet_hidden {
         p.ratchet_hidden = hidden;
         let v = if hidden { Visibility::Hidden } else { Visibility::Inherited };
@@ -2133,7 +2157,7 @@ fn upload(
         (crate::game_camera::game_eye(t), crate::moby_lod::camera_rows(fwd, left, up))
     });
     let tan_x = crate::game_camera::projection_tan_x(projs.iter().next());
-    upload_dynamic(&mut p, lv, cam, tan_x, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0);
+    upload_dynamic(&mut p, lv, cam, tan_x, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0, deferred);
 }
 
 /// moby+0x00 (the sphere centre, integer units) in game units; the position when the moby has no sphere.
@@ -2159,6 +2183,7 @@ fn upload_dynamic(
     images: &mut Assets<Image>,
     materials: &mut Assets<MobyMaterial>,
     point_lights: &[rc_game::point_lights::PointLight],
+    deferred: &std::collections::HashSet<usize>,
 ) {
     let m = &lv.mobys;
     let table = &p.game.mobys;
@@ -2200,7 +2225,7 @@ fn upload_dynamic(
         d.visible[slot] = ci.is_some() as u8;
         d.shown[slot] = ci;
         let model = moby_render::extra_model(rows3(&mo.rows), mo.scale, pos3(mo));
-        let look = pick.map(|(ci, alpha, fading, shine, e)| (&m.classes[ci], moby_render::SlotLook { model, alpha, fading, mode: mo.mode, glow: mo.glow, shine, e }));
+        let look = pick.map(|(ci, alpha, fading, shine, e)| (&m.classes[ci], moby_render::SlotLook { model, alpha, fading, mode: mo.mode, glow: mo.glow, shine, e, late: deferred.contains(&id) || mo.mode & 0x800 != 0 }));
         d.extra.show_slot(commands, lv, slot as u32, look, meshes, images, materials, buffers);
         let Some(ci) = ci else { continue };
         drawn += 1;

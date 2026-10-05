@@ -270,6 +270,27 @@ fn part_pass(part: &Part, p: GsPass) -> GsPass {
     }
 }
 
+/// A shadow caster's Z-writing draw in both orders: `late` (the deferred moby, drawn after the shadow pass) and
+/// `early` (`MobyProc` drew the moby with the others: mode 0x400 off or no live shadow this frame, so other casters'
+/// shadows fall on it). Which one is used follows the moby ([`set_late`]).
+#[derive(Component, Clone)]
+pub struct CasterTwin {
+    pub early: Handle<MobyMaterial>,
+    pub late: Handle<MobyMaterial>,
+}
+
+/// Points the caster draws among `entities` at their late or early material (a queued command: groups spawned this
+/// frame included).
+pub fn queue_late(commands: &mut Commands, entities: Vec<Entity>, late: bool) {
+    commands.queue(move |world: &mut World| {
+        for e in entities {
+            let Some(t) = world.get::<CasterTwin>(e).cloned() else { continue };
+            let want = if late { t.late } else { t.early };
+            if world.get::<MeshMaterial3d<MobyMaterial>>(e).is_some_and(|m| m.0 != want) { world.entity_mut(e).insert(MeshMaterial3d(want)); }
+        }
+    });
+}
+
 impl From<&MobyMaterial> for GsPass {
     fn from(m: &MobyMaterial) -> Self { m.pass }
 }
@@ -433,7 +454,8 @@ impl MatCache {
     fn new(proto: MatProto) -> Self { MatCache { proto, images: HashMap::new(), mats: HashMap::new(), batches: HashSet::new() } }
 
     /// One entity per (part, GS pass of `blend`), tagged `tag`, at `transform` (only its translation matters: the
-    /// Transparent3d sort key; the shader places the vertices from the record).
+    /// Transparent3d sort key; the shader places the vertices from the record). A caster's Z-writing draws get both
+    /// orders ([`CasterTwin`]) and start `late` or early.
     #[allow(clippy::too_many_arguments)]
     fn spawn(
         &mut self,
@@ -441,6 +463,7 @@ impl MatCache {
         level: &LoadedLevel,
         parts: &[Part],
         blend: MobyBlend,
+        late: bool,
         transform: Transform,
         tag: u32,
         visibility: Visibility,
@@ -451,24 +474,15 @@ impl MatCache {
         let mut out = Vec::new();
         for part in parts {
             let (image, texel) = self.images.entry(part.texture).or_insert_with(|| moby_image(level, part.texture, images)).clone();
-            for pass in blend.passes(texel, part.mult_alpha).into_iter().map(|p| part_pass(part, p)) {
-                let proto = &self.proto;
-                let mat = self
-                    .mats
-                    .entry((part.texture, pass))
-                    .or_insert_with(|| {
-                        materials.add(MobyMaterial {
-                            texture: image.clone(),
-                            fog: proto.fog,
-                            instances: proto.instances.clone(),
-                            palette: proto.palette.clone(),
-                            normal_table: proto.normal_table.clone(),
-                            cpu_colors: proto.cpu_colors.clone(),
-                            lods: proto.lods.clone(),
-                            pass,
-                        })
-                    })
-                    .clone();
+            for base in blend.passes(texel, part.mult_alpha) {
+                let pass = part_pass(part, base);
+                // The same draw not deferred: only a caster's Z-writing passes differ (caster_pass).
+                let early = if part.caster && caster_pass(base) != base { base } else { pass };
+                let twin = (early != pass).then(|| CasterTwin { early: self.material(part.texture, early, &image, materials), late: self.material(part.texture, pass, &image, materials) });
+                let mat = match &twin {
+                    Some(t) => if late { t.late.clone() } else { t.early.clone() },
+                    None => self.material(part.texture, pass, &image, materials),
+                };
                 self.batches.insert((part.mesh.id(), mat.id()));
                 let mut e = commands.spawn((
                     Mesh3d(part.mesh.clone()),
@@ -481,10 +495,31 @@ impl MatCache {
                 ));
                 // Effect draws (display-byte blending) are drawn by crate::display_blend's effect pass.
                 if pass.state().display { e.insert(crate::display_blend::DisplayEffect); }
+                if let Some(t) = twin { e.insert(t); }
                 out.push(e.id());
             }
         }
         out
+    }
+
+    /// The material of (texture, GS pass), made once.
+    fn material(&mut self, texture: usize, pass: GsPass, image: &Handle<Image>, materials: &mut Assets<MobyMaterial>) -> Handle<MobyMaterial> {
+        let proto = &self.proto;
+        self.mats
+            .entry((texture, pass))
+            .or_insert_with(|| {
+                materials.add(MobyMaterial {
+                    texture: image.clone(),
+                    fog: proto.fog,
+                    instances: proto.instances.clone(),
+                    palette: proto.palette.clone(),
+                    normal_table: proto.normal_table.clone(),
+                    cpu_colors: proto.cpu_colors.clone(),
+                    lods: proto.lods.clone(),
+                    pass,
+                })
+            })
+            .clone()
     }
 }
 
@@ -1007,7 +1042,7 @@ fn spawn_mobys(
                 if blend == MobyBlend::Fading && !lod_on { continue; }
                 let vis = if !low && blend == MobyBlend::Plain { Visibility::Inherited } else { Visibility::Hidden };
                 let name = format!("moby {ii} class {} {} {blend:?}", inst.o_class, if low { "low" } else { "high" });
-                let ents = cache.spawn(commands, level, list, blend, transform, ii as u32, vis, &name, images, materials);
+                let ents = cache.spawn(commands, level, list, blend, true, transform, ii as u32, vis, &name, images, materials);
                 st.group_entities[(low as usize) * 2 + (blend == MobyBlend::Fading) as usize] += ents.len();
                 st.entities += ents.len();
                 d.groups.insert(GroupKey { low, blend }, ents);
@@ -1065,7 +1100,7 @@ fn spawn_mobys(
         }
         draws.push(d);
     }
-    let shown = draws.iter().map(|d| d.input.map(|_| Shown { group: GroupKey { low: false, blend: MobyBlend::Plain }, metal: false })).collect();
+    let shown = draws.iter().map(|d| d.input.map(|_| Shown { group: GroupKey { low: false, blend: MobyBlend::Plain }, metal: false, late: true })).collect();
     let n_inst = m.instances.len();
     st.batches = cache.batches.len() + metal_batches;
     st.images = cache.images.len() + metal_imgs.len();
@@ -1074,7 +1109,7 @@ fn spawn_mobys(
         instances: inst_buffer.clone(),
         driven_hidden: vec![false; n_inst],
         records_dirty: false,
-        look: m.placed.iter().map(|p| p.map_or(MobyLook { alpha: 0x80, mode: 0, glow: 0, shine_distance: 0, draw_dist: None }, |p| MobyLook::of_class(&m.classes[p.class]))).collect(),
+        look: m.placed.iter().map(|p| p.map_or(MobyLook { alpha: 0x80, mode: 0, glow: 0, shine_distance: 0, draw_dist: None, late: None }, |p| MobyLook::of_class(&m.classes[p.class]))).collect(),
         moved: vec![false; n_inst],
         lit_by_point: vec![false; n_inst],
         class_parts: parts.into_iter().map(|(ci, (high, low, _))| (ci, [high.0, low])).collect(),
@@ -1136,6 +1171,8 @@ struct GroupKey {
 struct Shown {
     group: GroupKey,
     metal: bool,
+    /// Its caster draws late ([`MobyLook::late`]).
+    late: bool,
 }
 
 /// What MobyProc reads from a moby besides its placement: +0x23 (alpha), +0x34 (mode bits: the blend, [`MobyBlend`], and
@@ -1149,6 +1186,9 @@ pub struct MobyLook {
     /// +0x32, the draw distance MobyProc reads (`InitMobyInstance` sets it from the instance's; updates rewrite it:
     /// the convoys' 0x200). None: the instance's own (an undriven static).
     pub draw_dist: Option<i16>,
+    /// Deferred by `MobyProc` (mode 0x400 with a live shadow, or 0x800): a caster's draws after the shadow pass
+    /// ([`CasterTwin`]). None: as its class (deferred when it has a shadow block; an undriven static).
+    pub late: Option<bool>,
 }
 
 impl MobyLook {
@@ -1164,6 +1204,7 @@ impl MobyLook {
             glow: h.glow_rgba as u32,
             shine_distance: if h.metal_count > 0 { moby_lod::SHINE_DISTANCE } else { 0 },
             draw_dist: None,
+            late: None,
         }
     }
 }
@@ -1252,6 +1293,7 @@ pub fn update_moby_occlusion(
         inp.shine_distance = look.shine_distance;
         if let Some(dd) = look.draw_dist { inp.draw_distance = dd as i32; }
         let k = s.anim_index[ii];
+        let late = look.late.unwrap_or(true);
         let (want, pick, sphere) = if s.driven_hidden[ii] {
             (None, None, None)
         } else if mask.as_ref().is_some_and(|m| !s.bits[ii].visible(m)) {
@@ -1280,12 +1322,12 @@ pub fn update_moby_occlusion(
                     let metal = s.metal_on && p.shine > 0 && !d.metal.is_empty() && !hidden;
                     hist[4 + (p.low_lod as usize) * 2 + (group.blend != MobyBlend::Plain) as usize] += 1;
                     if metal { hist[8] += 1; }
-                    (Some(Shown { group, metal }), Some(p), Some((sphere, eye, rows)))
+                    (Some(Shown { group, metal, late }), Some(p), Some((sphere, eye, rows)))
                 }
             }
         } else {
             let blend = MobyBlend::pick(mode, false, inp.alpha);
-            (Some(Shown { group: GroupKey { low: false, blend }, metal: false }), None, None)
+            (Some(Shown { group: GroupKey { low: false, blend }, metal: false, late }), None, None)
         };
         let (alpha, flags, shine, e) = match (pick, want) {
             (Some(p), Some(w)) => {
@@ -1315,7 +1357,7 @@ pub fn update_moby_occlusion(
                 let parts = s.class_parts.get(&d.class).map(|p| &p[w.group.low as usize][..]).unwrap_or(&[]);
                 let name = format!("moby {ii} class {} {} {:?}", d.class, if w.group.low { "low" } else { "high" }, w.group.blend);
                 let t = Transform::from_translation(d.translation);
-                let ents = s.cache.spawn(&mut commands, &level.0, parts, w.group.blend, t, ii as u32, Visibility::Hidden, &name, &mut images, &mut materials);
+                let ents = s.cache.spawn(&mut commands, &level.0, parts, w.group.blend, w.late, t, ii as u32, Visibility::Hidden, &name, &mut images, &mut materials);
                 d.groups.insert(w.group, ents);
             }
         }
@@ -1345,6 +1387,10 @@ pub fn update_moby_occlusion(
                     }
                 }
             }
+        }
+        // The caster draws' order of the group shown (a group spawned this frame starts in it).
+        if let Some(w) = want.filter(|w| was.is_none_or(|v| v.group != w.group || v.late != w.late)) {
+            if let Some(ents) = d.groups.get(&w.group) { queue_late(&mut commands, ents.clone(), w.late); }
         }
         let (on, before) = (want.is_some_and(|w| w.metal), was.is_some_and(|w| w.metal));
         if on != before {
@@ -1646,6 +1692,8 @@ pub struct ExtraMobys {
     /// slot shows.
     slot_metal: HashMap<(u32, i32), Vec<Entity>>,
     slot_metal_shown: HashMap<u32, i32>,
+    /// The caster order each slot's shown group has ([`queue_late`]).
+    slot_late: HashMap<u32, bool>,
 }
 
 /// What a slot of an extra record set shows ([`ExtraMobys::show_slot`]).
@@ -1662,6 +1710,8 @@ pub struct SlotLook {
     /// MobyProc's shine alpha (0: no metal pass; crate::moby_lod, from moby+0x73) and the sphere-map basis E.
     pub shine: u8,
     pub e: [[f32; 3]; 3],
+    /// Deferred by `MobyProc` ([`MobyLook::late`]): a caster's draws after the shadow pass.
+    pub late: bool,
 }
 
 /// A metal entity of an extra instance: where update_extra_metal reads its placement and writes its shine.
@@ -1704,6 +1754,7 @@ impl ExtraMobys {
             slot_shown: HashMap::new(),
             slot_metal: HashMap::new(),
             slot_metal_shown: HashMap::new(),
+            slot_late: HashMap::new(),
         }
     }
 
@@ -1728,7 +1779,7 @@ impl ExtraMobys {
         materials: &mut Assets<MobyMaterial>,
     ) -> Vec<Entity> {
         let parts = self.parts.entry(class.o_class).or_insert_with(|| build_parts(class, &class.class.high_lod, false, glow_from(class, false), meshes).0).clone();
-        let mut out = self.cache.spawn(commands, level, &parts, MobyBlend::Plain, transform, slot, Visibility::Inherited, &format!("{name} class {}", class.o_class), images, materials);
+        let mut out = self.cache.spawn(commands, level, &parts, MobyBlend::Plain, true, transform, slot, Visibility::Inherited, &format!("{name} class {}", class.o_class), images, materials);
         // The shine pass, its gate and basis written each frame by update_extra_metal.
         if moby_lod::metal_enabled() {
             let tracked = ExtraMetal { slot, records: self.instances.clone(), lods: self.lods.clone(), sphere: class.class.header.bsphere };
@@ -1868,12 +1919,14 @@ impl ExtraMobys {
             if want_key != was_key || was.is_none_or(|w| w.1 != at) {
                 for &e in ents { commands.entity(e).insert((Visibility::Inherited, t)); }
             }
+            if want_key != was_key || self.slot_late.get(&slot) != Some(&look.late) { queue_late(commands, ents.clone(), look.late); }
         } else {
             let parts = self.parts.entry(oc).or_insert_with(|| build_parts(class, &class.class.high_lod, false, glow_from(class, false), meshes).0).clone();
             let name = format!("dynamic moby slot {slot} class {oc} {blend:?}");
-            let ents = self.cache.spawn(commands, level, &parts, blend, t, slot, Visibility::Inherited, &name, images, materials);
+            let ents = self.cache.spawn(commands, level, &parts, blend, look.late, t, slot, Visibility::Inherited, &name, images, materials);
             self.slot_ents.insert(key, ents);
         }
+        self.slot_late.insert(slot, look.late);
         if want_metal.is_some() {
             if let Some(ents) = self.slot_metal.get(&(slot, oc)) {
                 if want_metal != was_metal || was.is_none_or(|w| w.1 != at) {
@@ -1963,7 +2016,16 @@ impl MobyOcclusion {
     /// What MobyProc reads from static instance `ii` this tick ([`MobyLook`]): its vertex alpha, blend mode, glow and
     /// shine distance.
     pub fn look(&mut self, ii: usize, look: MobyLook) {
-        if let Some(l) = self.look.get_mut(ii) { *l = look; }
+        if let Some(l) = self.look.get_mut(ii) {
+            let late = l.late;
+            *l = look;
+            if look.late.is_none() { l.late = late; }
+        }
+    }
+
+    /// Whether instance `ii`'s caster draws come after the shadow pass this frame ([`MobyLook::late`]).
+    pub fn set_late(&mut self, ii: usize, late: bool) {
+        if let Some(l) = self.look.get_mut(ii) { l.late = Some(late); }
     }
 
     /// The `MobyAnim` instance of gameplay instance `ii` (None without geometry).

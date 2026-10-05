@@ -94,7 +94,7 @@ pub fn rotation_rows(rot: [f32; 3]) -> [V4; 3] {
 }
 
 /// Rows for an instance: [`rotation_rows`], then mode bit 0x8000 negates row 1's xyz
-/// (`vsub.xyz vf21, vf0, vf21` in `fun_0020def8`). Mode 0x100 (keep the stored rows) is not modelled.
+/// (`vsub.xyz vf21, vf0, vf21` in `fun_0020def8`). Mode 0x100 (keep the stored rows) is a run-time rule (`rc_game` scheduler, `KEEP_ROWS`).
 pub fn instance_rows(rot: [f32; 3], mode: u16) -> [V4; 3] {
     let mut rows = rotation_rows(rot);
     if mode & 0x8000 != 0 {

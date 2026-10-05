@@ -110,6 +110,9 @@ pub struct ShadowGame {
 pub struct ShadowVolumes {
     pub tris: Arc<Vec<[f32; 3]>>,
     pub debug: bool,
+    /// The mobys `MobyProc` deferred as casters this frame (their draws after the shadow pass: crate::moby_render
+    /// `CasterTwin`; read the next frame [L]).
+    pub deferred: std::collections::HashSet<usize>,
 }
 
 /// The camera whose view gets the shadow pass (the main world camera).
@@ -236,6 +239,7 @@ pub fn collect(
     let t0 = std::time::Instant::now();
     let clear = |out: &mut ShadowVolumes| {
         if !out.tris.is_empty() { out.tris = Arc::new(Vec::new()); }
+        out.deferred.clear();
     };
     let (Some(play), Some(sg), Some(cam)) = (play, game, cams.iter().next()) else { return clear(&mut out) };
     if !settings.enabled { return clear(&mut out); }
@@ -270,6 +274,8 @@ pub fn collect(
         list.push(Deferred { id, size, bytes: volume::caster_bytes(block) });
     }
     let n = volume::fitting(list.iter().map(|c| c.bytes));
+    out.deferred.clear();
+    out.deferred.extend(list[..n].iter().map(|c| c.id));
     let mut tris = Vec::new();
     for c in &list[..n] {
         let m = &table.mobys[c.id];

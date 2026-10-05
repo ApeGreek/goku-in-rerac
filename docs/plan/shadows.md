@@ -426,9 +426,10 @@ every scene frame after it), so shadow and model share one pose every frame and 
 frame's. Checked: every frame of Novalis scene 5 (240..560) and level 2 scene 1 (20..420) against a shadows-off run, no single-frame pops left; two runs identical; gameplay shots unchanged.
 
 **Not done / known differences.**
-* Casters are chosen by class (a shadow block) for the late draw; the game defers by the run-time mode bits
-  0xc00 (e.g. Ratchet without 0x400 on the water surface is drawn early there). Only visible where another caster's
-  shadow would fall on such a moby.
+* ~~Casters are chosen by class for the late draw~~ (2026-10-05): the late draw follows `MobyProc`'s deferral per moby
+  (the casters `shadow_render::collect` kept, or mode 0x800; `moby_render::CasterTwin`): the driven statics, the dynamic
+  slots and Ratchet. [L] read one frame late; the metal passes, Clank / the wrench / the packs and the scene actors
+  keep the class rule.
 * Risk 5 stays: the RGB-only halves of world alpha tests and billboard pass 2 are drawn after the resolve (not darkened).
 * ~~The joint-modifier list (+0x64) is not in the port's pose~~: ported 2026-09-28 (hero_gameplay.md §7); all 21
   records of Ratchet's posed list match RAM to 3.05e-5, and the shadows pose every caster with its `Moby::joint_mods`
