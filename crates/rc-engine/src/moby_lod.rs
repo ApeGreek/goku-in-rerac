@@ -134,7 +134,9 @@ pub fn moby_proc(v: [f32; 3], r: f32, inp: &ProcInput) -> Result<ProcPick, Cull>
 /// [`moby_proc`] with the view's horizontal half-angle tangent `tan_x` (`UpdateViewContext` writes the frustum planes
 /// vf20 / vf22 from it: a flown ship's wider view culls less at the sides).
 pub fn moby_proc_view(v: [f32; 3], r: f32, inp: &ProcInput, tan_x: f32) -> Result<ProcPick, Cull> {
-    let dd = inp.draw_distance.min(DRAW_DISTANCE_CAP);
+    // The cap 0x15fff0: 500, 0x90 in the Visibomb's view (crate::visibomb_view::SHORT_FAR).
+    let cap = if crate::visibomb_view::SHORT_FAR.load(std::sync::atomic::Ordering::Relaxed) { crate::visibomb_view::SHORT_MOBY_CAP } else { DRAW_DISTANCE_CAP };
+    let dd = inp.draw_distance.min(cap);
     // vf19.y = itof0(dd << 10) − r; vf1.xy = (vz + r, vz − r); vf3 = vf19 − vf1 (vf19.x = n).
     let far = ((dd.wrapping_shl(10)) as f32 - r) - (v[2] - r);
     let near = NEAR - (v[2] + r);

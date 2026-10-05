@@ -15,9 +15,12 @@
 //! * **The range static** (`0x302438`, the range limiter 832's draw on list 2): its quads into the HUD's static layer
 //!   ([`statics`]).
 //!
-//! Not modelled: the far distances at 144 units (tfrag 0x160f80, tie 0x160fe0, shrub 0x1604a4, moby 0x15fff0: fully
-//! fogged beyond 128 during the flight; they matter in the orbit after the blast, G-REN-029), the particle far 80
-//! (`UpdateFog` rewrites 500 at the end of the same frame: no effect).
+//! * **The far distances** (`0x2cb338`, back at `0x2cb458(m, 1)`): the tie cap 0x160fe0 and the moby cap 0x15fff0 at 144
+//!   units ([`SHORT_FAR`], read by `crate::tie_lod` and `crate::moby_lod`; they matter in the orbit after the blast).
+//!
+//! Not modelled [L]: the shrub cap 0x1604a4 (the shrubs cull on the GPU from a distance baked at the load) and the
+//! liquid / environment meshes' 0x160f80 (no far cap in the port), both fully fogged beyond 128 during the flight; the
+//! particle far 80 (`UpdateFog` rewrites 500 at the end of the same frame: no effect).
 
 use crate::gameplay::Play;
 use crate::hud_render::{Hud2dHook, HudBuild};
@@ -110,9 +113,22 @@ impl FullscreenMaterial for MissileViewOverlay {
 
 pub struct VisibombViewPlugin;
 
+/// The missile view's far distances are on (`visibomb::View::short_far`), set at the start of every frame.
+pub static SHORT_FAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The caps of [`SHORT_FAR`]: 144.0 (0x43100000) and 0x90.
+pub const SHORT_TIE_CAP: f32 = 144.0;
+pub const SHORT_MOBY_CAP: i32 = 0x90;
+
+fn short_far(play: Option<Res<Play>>) {
+    let on = play.as_deref().is_some_and(|p| p.svc.visibomb.view.short_far);
+    SHORT_FAR.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 impl Plugin for VisibombViewPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::gs_post::GsPostPlugin::<MissileViewOverlay>::default())
+            .add_systems(First, short_far)
             .add_systems(Update, (sky, statics.after(crate::menu_render::MenuPrims).before(HudBuild)))
             .add_systems(PostUpdate, overlay);
     }
