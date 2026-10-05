@@ -4,7 +4,7 @@
 //! **Update**: gone with its owner (the owner's state byte 0, or 0xf0.. deleted) → `DeleteMoby`; the owner's hidden bit
 //! (mode bit 0: the first-person view hides the item) copied; hidden and not animated (mode |= 0x41) while the slot has
 //! been ready for less than 25 ticks; the class's texture scroll steps by −0xc0 (wrapping in 0..0x1000:
-//! `FUN_00263d90(class, 0, d)`, kept at +0x04; the renderer does not scroll moby textures yet); scale = class scale ×
+//! `FUN_00263d90(class, 0, d)`, kept at +0x04; drawn by `rc-engine` as the record's ST offset); scale = class scale ×
 //! 0.5 (+0x0c) × `randf(0.5, 1)` (one draw a tick); its spin +0x44 += 0.5 rad (`FUN_002731d0`: the angle wrapped).
 //! The owner writes its rows and position every tick (the item update). Standard `f32`.
 //!

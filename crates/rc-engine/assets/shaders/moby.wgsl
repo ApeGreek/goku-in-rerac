@@ -121,7 +121,9 @@ fn vertex(v: MobyVertex) -> MobyVertexOutput {
     let pi = vec3<i32>(s16(i32(sp.x)), s16(i32(sp.y)), s16(i32(sp.z)));
     let world = ((*inst).model * vec4<f32>(vec3<f32>(pi), 1.0)).xyz;
     out.position = position_world_to_clip(world);
-    out.uv = v.uv;
+    // A class texture scroll (misc.w: s | t << 16, s16 in 1/4096: `FUN_00263d90`'s offset on the class's STs).
+    let scroll = (*inst).misc.w;
+    out.uv = v.uv + vec2<f32>(f32(s16(i32(scroll & 0xffffu))), f32(s16(i32(scroll >> 16u)))) / 4096.0;
 
     let mode = (*inst).misc.y;
     if (mode == 1u) {

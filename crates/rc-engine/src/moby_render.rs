@@ -790,6 +790,13 @@ fn write_record(out: &mut Vec<u8>, model: &Mat4, g: &GpuLights, misc: [u32; 4]) 
 }
 const RECORD_SIZE: usize = 208;
 
+/// A class texture scroll on a record (`misc.w`: s | t << 16, s16 each in 1/4096 of the texture: the offset
+/// `FUN_00263d90(class, s, t)` has added to every vertex ST of the class's packets; the Pyrocitor's pilot flame 179).
+pub fn set_uv_scroll(rec: &mut [u8], s: i16, t: i16) {
+    let w = (s as u16 as u32) | (t as u16 as u32) << 16;
+    rec[RECORD_SIZE - 4..RECORD_SIZE].copy_from_slice(&w.to_le_bytes());
+}
+
 /// A moby texture as an image (repeat, bilinear), with the raw GS alpha like tfrag_render; [`GREY`] is the
 /// reserved 0x80808080 texture (clamp, as CLAMP_1 = 5 for −1 blocks; the texture is uniform anyway).
 fn moby_image(level: &LoadedLevel, tex: usize, images: &mut Assets<Image>) -> (Handle<Image>, AlphaRange) {

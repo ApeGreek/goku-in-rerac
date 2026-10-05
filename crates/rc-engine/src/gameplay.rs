@@ -2208,6 +2208,12 @@ fn upload_dynamic(
         let lights = m.lighting.as_ref().map(|l| light::moby_lights(&rows, &l.bank, mo.light, [mo.ambient[0], mo.ambient[1], mo.ambient[2]], 0x80));
         let mut rec = moby_render::extra_record(&model, lights.as_ref(), slot as u32 * d.pal_slots);
         moby_render::write_point_light(&mut rec, moby_render::point_light_merge(point_lights, sphere_centre(mo), &rows3(&mo.rows)));
+        // The pilot flame's class texture scroll (rc_game::moby_update::classes::pyro_glow, +0x04) [L: kept per moby; the
+        // game's is the class's, stepped by each flame].
+        if mo.o_class == rc_game::moby_update::classes::pyro_glow::CLASS {
+            let o = rc_game::hero::pyrocitor::glow_pv::SCROLL;
+            if let Some(b) = mo.pvars.get(o..o + 4) { moby_render::set_uv_scroll(&mut rec, 0, i32::from_le_bytes([b[0], b[1], b[2], b[3]]) as i16); }
+        }
         let at = slot * moby_render::EXTRA_RECORD_SIZE;
         if d.records[at..at + rec.len()] != rec[..] {
             d.records[at..at + rec.len()].copy_from_slice(&rec);
