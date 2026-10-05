@@ -36,6 +36,7 @@ mod disc_source;
 mod fly_cam;
 mod fx_draw;
 mod fog_state;
+mod screen_tint;
 mod game_camera;
 mod gameplay;
 mod gs_state;
@@ -173,6 +174,7 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(reactive_render::ReactivePlugin)
     .add_plugins(sky_stars::SkyStarsPlugin)
     .add_plugins(fog_state::FogStatePlugin)
+    .add_plugins(screen_tint::ScreenTintPlugin)
     .add_plugins(visibomb_view::VisibombViewPlugin)
     .add_plugins(hud_render::HudPlugin)
     // The game tick (hero, pad, follow camera) driving Ratchet and the view; RC_PLAY=0 keeps the fly camera only.

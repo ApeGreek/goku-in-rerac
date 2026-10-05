@@ -218,3 +218,37 @@ pub fn run_frame(w: &mut World) {
         }
     }
 }
+
+/// A full-screen tint of this frame (G-REN-030): GS RGBA (A: 0x80 = 1.0) and the low byte of the ALPHA_1 register it is
+/// drawn with (0x44 the normal blend `(Cs − Cd)·As + Cd`; 0x42 `Cd − Cs·As`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScreenTint {
+    pub rgba: u32,
+    pub alpha: u8,
+}
+
+/// The frame's full-screen tints in the game's draw order: the list-2 callbacks' `emit_rgba_draw_packet` 0x21bc50 (after
+/// the ties; ALPHA 0x44 from `ReplayHudGsState`): Hoven's turret 1267's red screen (`0x304d98`), Quartu / the Fleet's
+/// alarm 408 (`0x2cbd88`, while its fade is up); then `DrawWorld`'s `draw_fogged_fullscreen_sprite(0x15f330)` after the
+/// shrubs (Giant Clank's beam 0x5f3's screen record: drawn while +0x00 (0x15f330) is set and its RGBA's alpha is not 0, in
+/// the ALPHA of its packet 0x15f338 when that is not 0).
+pub fn screen_tints(table: &crate::moby_runtime::MobyTable, svc: &crate::moby_update::Services, counter: u64) -> Vec<ScreenTint> {
+    use super::units::{giant_beam, hoven_turret, quartu_alarm};
+    let mut out = Vec::new();
+    let turret = super::units::row(hoven_turret::REFERENCE_LEVEL, hoven_turret::TINT_FN);
+    for &(cb, id) in &svc.draw_callbacks.list2 {
+        if let Callback::UnitQuads(i) = cb {
+            if Some(i) == turret {
+                if let Some(rgba) = hoven_turret::tint(table, svc, id) { out.push(ScreenTint { rgba, alpha: 0x44 }); }
+            }
+        }
+    }
+    if let Some(rgba) = quartu_alarm::tint(svc, counter) { out.push(ScreenTint { rgba, alpha: 0x44 }); }
+    let f = giant_beam::screen_flash(svc);
+    if f.flash != 0 && f.rgba & 0xff00_0000 != 0 {
+        let alpha = if f.packet != 0 { f.packet as u8 } else { 0x44 };
+        out.push(ScreenTint { rgba: f.rgba, alpha });
+    }
+    out
+}
+
