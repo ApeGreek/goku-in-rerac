@@ -29,12 +29,14 @@
 //!   wrench's joint list 1 (else list 0) through the hero's hit path (`coll_sphere_mobys`, template flags 0x10000,
 //!   damage 1, dir = its flight direction ·1.2 (−0.37 on the way back), +0x1a = 0x13fdcc + 1): crates break; the
 //!   first hit of 30 ticks plays the wrench's hit sound.
+//! * **The bolts it brings back** (`0x2bdfb8`, [`collect`]): each tick on the way back, before the move, the first
+//!   moby of the run list within 2.7 of the wrench that is a bolt (class type 0x13) starts flying to Ratchet
+//!   (`0x2bcb90(randf(−30, 30)°, 0)`), or an ammo pickup (`0x2732b8`) is collected (`0x2db850`).
 //!
 //! Native `f32` for the flight (the moby side); the state code keeps the hero block's PS2 float type at its
 //! boundary. The after-images of 0x140b00 (`0x277400` / `0x277428` at the throw,
 //! `0x277508` each flight tick, `0x277740` at the catch) are `crate::afterimage`'s. **Not ported**: the look stance's aiming beam `0x20fb60`, the wall-hit sparks
-//! `0x2bdd20` / hit sparkles `0x2bdb18` (particle types 0x2d / 0x35 records; their draws are not made), the bolts
-//! the returning wrench collects `0x2bdfb8`, the hit-record checks of the hit sound (`FUN_002711f8` records of the
+//! `0x2bdd20` / hit sparkles `0x2bdb18` (particle types 0x2d / 0x35 records; their draws are not made), the hit-record checks of the hit sound (`FUN_002711f8` records of the
 //! same throw, target type 0x14), and the world line's moby part (the port's line is the world mesh: a non-crate
 //! moby does not bounce the wrench; it is still hit by the sphere).
 
@@ -259,7 +261,7 @@ pub fn throw_wrench(h: &mut Hero, env: &Env, _from_check: bool) {
 }
 
 /// The wrench's update with +0x20 = 10 / 11 (`0x2be1c0`; the slot loop calls it for the wrench's row).
-pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink) {
+pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut crate::rng::Rng) {
     let Some(class) = hero.items.slot.item.as_ref().and_then(|m| env.data.class(m.o_class)).cloned() else { return };
     hero.items.slot.swap = 2;
     // 0x277508(0x140b00, 0): the after-images follow the wrench as its last update left it (crate::afterimage).
@@ -305,6 +307,12 @@ pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         }
     }
     let old = pos;
+    if it.mstate == BACK {
+        // 0x2bdfb8 at the wrench's height-corrected position, before the move.
+        it.position = pos;
+        collect(hero, table, env, hits, rng, pos);
+    }
+    let it = hero.items.slot.item.as_mut().unwrap();
     let mut catch_exit = false;
     let mut arrived = false;
     let f = &mut it.flight;
@@ -393,6 +401,40 @@ pub fn thrown_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
         hero.items.hit_sounds += 1;
         hero.fx.item_sounds.push(super::melee::wrench_hit_sound(table, hit));
     }
+}
+
+/// `0x2bdfb8(wrench)`: the run list (0x15ffe4) in order, up to a deleted moby; the first within 2.7 of the wrench at `at`
+/// that is a bolt (class type 0x13) flying off to Ratchet (`0x2bcb90(randf(−30, 30)·π/180, 0)`) or an ammo pickup
+/// (`0x2732b8`) collected (`0x2db850`) ends the walk. Their writes to Ratchet's block (the ammo) are applied at once,
+/// as the Suck Cannon's vacuum does.
+fn collect(hero: &mut Hero, table: &mut MobyTable, env: &ItemEnv, hits: &mut dyn HitSink, rng: &mut crate::rng::Rng, at: [f32; 3]) {
+    use crate::moby_runtime::state;
+    use crate::moby_update::classes::{bolt, pickup};
+    let cam = env.camera.map_or([0.0; 3], |c| c.0);
+    let mut writes = None;
+    hits.world(table, &*hero, rng, env.frame as u64, &mut |w| {
+        w.camera = [cam[0], cam[1], cam[2], 1.0].map(Pf::f);
+        let list = crate::moby_update::scheduler::build_active_list(w.table, w.camera, &w.svc.groups).0;
+        for m in list {
+            let st = w.m(m).state;
+            if st == state::DELETED || st == state::DELETED_STATIC { break; }
+            let o = w.m(m).o_class;
+            let bolt = w.m(m).has_class && w.classes.info(o).map(|i| i.ty) == Some(0x13);
+            if !bolt && !super::suck_cannon::PICKUP_CLASSES.contains(&o) { continue; }
+            let p = w.m(m).position;
+            if 2.7 <= len3f(sub3([p[0], p[1], p[2]], at)) { continue; }
+            let taken = if bolt {
+                let a = w.rng.randf(-30.0, 30.0) * 0.017_453_292;
+                bolt::start_fly(w, m, Pf::f(a), Pf::ZERO)
+            } else {
+                pickup::collect(w, m)
+            };
+            if taken { break; }
+        }
+        let now = w.counter;
+        writes = w.svc.hero_writes.take_if(|(c, _)| *c == now).map(|(_, f)| f);
+    });
+    if let Some(f) = writes { f.apply(hero); }
 }
 
 /// The whoosh's slot released (`release_voice_slot(0x14156c)` when it still plays Ratchet's sound; −1).
@@ -537,12 +579,12 @@ mod tests {
         let mut back_at = None;
         let mut home_at = None;
         // The first tick starts the whoosh (the flush then stores its slot).
-        thrown_update(&mut h, &mut table, &anim, &env, &mut NoHits);
+        thrown_update(&mut h, &mut table, &anim, &env, &mut NoHits, &mut Rng::new());
         assert_eq!(h.fx.item_voices, vec![SoundCmd::Loop { n: WHOOSH_SLOT, sound: WHOOSH_SOUND }]);
         h.fx.item_voices.clear();
         h.packs.loops[WHOOSH_SLOT] = 7;
         for t in 1..200 {
-            thrown_update(&mut h, &mut table, &anim, &env, &mut NoHits);
+            thrown_update(&mut h, &mut table, &anim, &env, &mut NoHits, &mut Rng::new());
             let it = h.items.slot.item.as_ref().unwrap();
             far = far.max(it.position[0] - 410.0);
             if back_at.is_none() && it.mstate == BACK { back_at = Some(t); }

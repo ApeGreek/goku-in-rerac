@@ -496,7 +496,7 @@ pub fn wrench_update(hero: &mut Hero, table: &mut MobyTable, anim: &dyn AnimCtl,
     let st = hero.state;
     // Thrown (+0x20 = 10 / 11): the flight (super::comet); other non-zero states do nothing.
     match hero.items.slot.item.as_ref().map_or(0, |m| m.mstate) {
-        super::comet::OUT | super::comet::BACK => return super::comet::thrown_update(hero, table, anim, env, hits),
+        super::comet::OUT | super::comet::BACK => return super::comet::thrown_update(hero, table, anim, env, hits, rng),
         _ => {}
     }
     {
