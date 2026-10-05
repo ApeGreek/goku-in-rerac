@@ -720,7 +720,10 @@ fn transition_frame(
             (StepState::New, Step::SetLevel) => {
                 // The branch's saved-game writes and 0x15ed84 = dest; the load of dest starts (read_file_entry_with_retry).
                 if let Some(g) = gs.as_deref_mut() { g.0.apply_transition(tr.plan.dest); }
-                if tr.plan.dest >= 0 { change.start_load(tr.plan.dest as u32); }
+                if tr.plan.dest >= 0 {
+                    let dest = tr.plan.dest as u32;
+                    change.start_load(dest, crate::gameplay::level_spawn_save(gs.as_deref().map(|g| &g.0), dest));
+                }
                 true
             }
             (StepState::New, Step::Flight) => {
@@ -759,7 +762,8 @@ fn transition_frame(
                 // again behind it for the menus' data; the title world itself is drawn over it (crate::title_world).
                 println!("travel: DoSpaceTransition(−1): the front end over level {:02} (crate::saves)", crate::level_load::level_index());
                 crate::saves::set_front_end_active(true);
-                change.start_load(crate::level_load::level_index());
+                let index = crate::level_load::level_index();
+                change.start_load(index, crate::gameplay::level_spawn_save(gs.as_deref().map(|g| &g.0), index));
                 tr.state = StepState::New;
                 tr.step += 1;
                 tr.plan.steps.insert(tr.step, Step::Enter);

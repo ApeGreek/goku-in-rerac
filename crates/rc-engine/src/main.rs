@@ -125,7 +125,10 @@ fn main() -> anyhow::Result<()> {
     // The one level load (the boot's and every runtime level change's, crate::level_switch): the level data, the loader's
     // ship and the load-time update pass (crate::moby_spawn; RC_SPAWN_RULES=0 skips it), the fog zones and the
     // underwater test (crate::fog_state).
-    let level_switch::LevelBundle { mut level, spawn, fog: fog_state, .. } = level_switch::load_bundle(&root, index)?;
+    // The boot's game state first: the level's spawn test reads its save bits (crate::gameplay::level_spawn_save).
+    let boot = gameplay::boot_state(&root, index);
+    let save = gameplay::level_spawn_save(boot.as_ref().map(|(gs, _)| gs), index);
+    let level_switch::LevelBundle { mut level, spawn, fog: fog_state, .. } = level_switch::load_bundle(&root, index, &save)?;
     let t = &level.timings;
     let bg = level.background;
     println!(
@@ -182,7 +185,7 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(visibomb_view::VisibombViewPlugin)
     .add_plugins(hud_render::HudPlugin)
     // The game tick (hero, pad, follow camera) driving Ratchet and the view; RC_PLAY=0 keeps the fly camera only.
-    .add_plugins(gameplay::GameplayPlugin)
+    .add_plugins(gameplay::GameplayPlugin { boot: std::sync::Mutex::new(boot) })
     .add_plugins(menu_render::MenuPlugin)
     .add_plugins((screen_canvas::CanvasPlugin, vendor_render::VendorRenderPlugin))
     // The Gadgets / Weapons pages' 3D Ratchet and item preview (crate::menu_models, on crate::screen_canvas).

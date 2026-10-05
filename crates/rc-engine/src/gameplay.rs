@@ -150,59 +150,78 @@ fn give_items() -> Option<Vec<usize>> {
 /// `RC_PLAY` (default on; `0` = fly camera only).
 pub fn enabled() -> bool { !std::env::var("RC_PLAY").is_ok_and(|v| v.trim() == "0") }
 
-pub struct GameplayPlugin;
+/// The boot's game state: a direct boot into level `index` (`load_game_state`) with the debug grants applied. Built
+/// once, before the boot's level load (its spawn bits, [`level_spawn_save`]), and handed to [`GameplayPlugin`].
+pub fn boot_state(root: &std::path::Path, index: u32) -> Option<(GameState, SessionState)> {
+    let (mut gs, mut sess) = match load_game_state(root, index) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("game state: not built ({e:#}); the tick uses the boot option defaults");
+            return None;
+        }
+    };
+    // RC_GIVE_HYDROPACK=1: own the Hydro-Pack (item 4) from the start (debug).
+    if std::env::var("RC_GIVE_HYDROPACK").is_ok_and(|v| v.trim() == "1") {
+        gs.global.owned[rc_game::hero::swim::ITEM_HYDRO_PACK] = 1;
+        println!("game state: RC_GIVE_HYDROPACK=1: Hydro-Pack owned");
+    }
+    // RC_GIVE_ITEMS=<id>,<id>,...: own those items (decimal or 0x hex ids, docs/plan/gadgets.md §6) from the
+    // start (debug, rc_game::inventory::debug_grant); unless RC_GIVE_ITEMS_EQUIP=0, the last back, feet
+    // and head item among them are the saved items of their slots (equipped[3 / 1 / 2]: Clank wears the
+    // pack, Ratchet the boots / head item), and the last hand item is requested into the hand. Without the
+    // variable nothing is granted: the state is the game's.
+    // RC_GIVE_BOLTS=<n>: start with n bolts (debug; e.g. to buy at the vendor).
+    if let Some(n) = std::env::var("RC_GIVE_BOLTS").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
+        gs.global.bolts = n;
+        println!("game state: RC_GIVE_BOLTS: {n} bolts");
+    }
+    // RC_UNLOCK_PLANETS=<p>,<p>,...: those planets unlocked (`UnlockPlanet` 0x2756d0: 0x13dd40 and the map order
+    // 0x13d510) from the start (debug): the ship's planet page lists them (rc_game::travel).
+    if let Ok(v) = std::env::var("RC_UNLOCK_PLANETS") {
+        let ps: Vec<usize> = v.split(',').filter_map(|t| t.trim().parse().ok()).filter(|&p: &usize| p < 20).collect();
+        for &p in &ps { gs.unlock_planet(p); }
+        println!("game state: RC_UNLOCK_PLANETS: planets {ps:?} unlocked (map order {:?})", gs.global.map_order);
+    }
+    // RC_GAME_BEATEN=1: the game-beaten flag (save chunk 31) set (debug): the pause menu's Goodies entry (0x2917d8).
+    if std::env::var("RC_GAME_BEATEN").is_ok_and(|v| v.trim() == "1") {
+        gs.global.game_beaten = 1;
+        println!("game state: RC_GAME_BEATEN=1: Goodies on the pause menu");
+    }
+    if let Some(ids) = give_items() {
+        use rc_game::inventory::{debug_grant, GrantEquip};
+        // With the ammo `GiveItem` grants (the item record's +0x12), so a given weapon can fire.
+        let tables = crate::disc_source::read_path(root, &root.join("boot/SCUS_971.99")).ok()
+            .zip(crate::disc_source::level_file(root, index, "overlay.bin").ok())
+            .and_then(|(elf, ov)| ItemTables::load(&elf, &ov).ok());
+        let mode = if std::env::var("RC_GIVE_ITEMS_EQUIP").is_ok_and(|v| v.trim() == "0") { GrantEquip::None } else { GrantEquip::LastPerSlot };
+        let [hand, feet, head, back] = debug_grant(&mut gs, &mut sess, &ids, tables.as_ref(), mode);
+        println!("game state: RC_GIVE_ITEMS: items {ids:?} owned ({mode:?}): saved back {back:?} / feet {feet:?} / head {head:?}, hand request {hand:?}");
+    }
+    let g = &gs.global;
+    println!(
+        "game state: direct boot into level {index:02} (new game → Veldin start → transition): level {}, HP {}/{}, wrench held {}, \
+         equipped {:?}, quick select {:?}, bolts {}; options {:?}",
+        g.level, sess.hp, g.max_hp, g.wrench_held, &g.equipped[..1], g.quick_select, g.bolts, gs.options()
+    );
+    Some((gs, sess))
+}
+
+/// The save bits the loader's spawn test reads for `level` (`scheduler::spawn_save` of its level section; a level
+/// never visited, or no game state: all zero). The one source for the renderer's level load (crate::moby_spawn,
+/// through crate::level_switch) and the game's moby table, so both create the same instances.
+pub fn level_spawn_save(state: Option<&GameState>, level: u32) -> rc_formats::moby_spawn::SpawnSave {
+    state.and_then(|s| s.levels.get(level as usize)).map(scheduler::spawn_save).unwrap_or_default()
+}
+
+/// The game tick; `boot` is the boot's game state ([`boot_state`]), taken by `build`.
+pub struct GameplayPlugin {
+    pub boot: std::sync::Mutex<Option<(GameState, SessionState)>>,
+}
 
 impl Plugin for GameplayPlugin {
     fn build(&self, app: &mut App) {
-        let (root, index) = (crate::level_load::extracted_root(), crate::level_load::level_index());
-        match load_game_state(&root, index) {
-            Ok((mut gs, mut sess)) => {
-                // RC_GIVE_HYDROPACK=1: own the Hydro-Pack (item 4) from the start (debug).
-                if std::env::var("RC_GIVE_HYDROPACK").is_ok_and(|v| v.trim() == "1") {
-                    gs.global.owned[rc_game::hero::swim::ITEM_HYDRO_PACK] = 1;
-                    println!("game state: RC_GIVE_HYDROPACK=1: Hydro-Pack owned");
-                }
-                // RC_GIVE_ITEMS=<id>,<id>,...: own those items (decimal or 0x hex ids, docs/plan/gadgets.md §6) from the
-                // start (debug, rc_game::inventory::debug_grant); unless RC_GIVE_ITEMS_EQUIP=0, the last back, feet
-                // and head item among them are the saved items of their slots (equipped[3 / 1 / 2]: Clank wears the
-                // pack, Ratchet the boots / head item), and the last hand item is requested into the hand. Without the
-                // variable nothing is granted: the state is the game's.
-                // RC_GIVE_BOLTS=<n>: start with n bolts (debug; e.g. to buy at the vendor).
-                if let Some(n) = std::env::var("RC_GIVE_BOLTS").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
-                    gs.global.bolts = n;
-                    println!("game state: RC_GIVE_BOLTS: {n} bolts");
-                }
-                // RC_UNLOCK_PLANETS=<p>,<p>,...: those planets unlocked (`UnlockPlanet` 0x2756d0: 0x13dd40 and the map order
-                // 0x13d510) from the start (debug): the ship's planet page lists them (rc_game::travel).
-                if let Ok(v) = std::env::var("RC_UNLOCK_PLANETS") {
-                    let ps: Vec<usize> = v.split(',').filter_map(|t| t.trim().parse().ok()).filter(|&p: &usize| p < 20).collect();
-                    for &p in &ps { gs.unlock_planet(p); }
-                    println!("game state: RC_UNLOCK_PLANETS: planets {ps:?} unlocked (map order {:?})", gs.global.map_order);
-                }
-                // RC_GAME_BEATEN=1: the game-beaten flag (save chunk 31) set (debug): the pause menu's Goodies entry (0x2917d8).
-                if std::env::var("RC_GAME_BEATEN").is_ok_and(|v| v.trim() == "1") {
-                    gs.global.game_beaten = 1;
-                    println!("game state: RC_GAME_BEATEN=1: Goodies on the pause menu");
-                }
-                if let Some(ids) = give_items() {
-                    use rc_game::inventory::{debug_grant, GrantEquip};
-                    // With the ammo `GiveItem` grants (the item record's +0x12), so a given weapon can fire.
-                    let tables = crate::disc_source::read_path(&root, &root.join("boot/SCUS_971.99")).ok()
-                        .zip(crate::disc_source::level_file(&root, index, "overlay.bin").ok())
-                        .and_then(|(elf, ov)| ItemTables::load(&elf, &ov).ok());
-                    let mode = if std::env::var("RC_GIVE_ITEMS_EQUIP").is_ok_and(|v| v.trim() == "0") { GrantEquip::None } else { GrantEquip::LastPerSlot };
-                    let [hand, feet, head, back] = debug_grant(&mut gs, &mut sess, &ids, tables.as_ref(), mode);
-                    println!("game state: RC_GIVE_ITEMS: items {ids:?} owned ({mode:?}): saved back {back:?} / feet {feet:?} / head {head:?}, hand request {hand:?}");
-                }
-                let g = &gs.global;
-                println!(
-                    "game state: direct boot into level {index:02} (new game → Veldin start → transition): level {}, HP {}/{}, wrench held {}, \
-                     equipped {:?}, quick select {:?}, bolts {}; options {:?}",
-                    g.level, sess.hp, g.max_hp, g.wrench_held, &g.equipped[..1], g.quick_select, g.bolts, gs.options()
-                );
-                app.insert_resource(Persistent(gs)).insert_resource(Session(sess));
-            }
-            Err(e) => eprintln!("game state: not built ({e:#}); the tick uses the boot option defaults"),
+        if let Some((gs, sess)) = self.boot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            app.insert_resource(Persistent(gs)).insert_resource(Session(sess));
         }
         if !enabled() {
             println!("gameplay: RC_PLAY=0: fly camera only, no game tick");
@@ -577,8 +596,8 @@ pub struct Play {
     ratchet_hidden: bool,
     /// His caster draws' order as last set (crate::moby_render `queue_late`; None: as spawned, late).
     ratchet_late: Option<bool>,
-    /// The instances a death reload (or a loaded save's spawn bits) made spawn that the level's load did not (their
-    /// entities still hidden): shown by [`show_reloaded`].
+    /// The instances a death reload made spawn that the level's load did not (their entities still hidden): shown by
+    /// [`show_reloaded`].
     reload_shown: Vec<usize>,
     /// The weapon arm layers' joints (Ratchet's joint lists 12 / 13, `rc_game::hero::weapons::ARM_LISTS`).
     arm_joints: [Vec<u8>; 2],
@@ -936,7 +955,7 @@ fn moby_table(lv: &crate::level_load::LoadedLevel, classes: &mut ClassTable, shi
     let m = &lv.mobys;
     let n_inst = ship.unwrap_or(m.instances.len());
     let insts = &m.instances[..n_inst];
-    let mut save = state.and_then(|s| s.levels.get(level as usize)).map(scheduler::spawn_save).unwrap_or_default();
+    let mut save = level_spawn_save(state, level);
     // The death reload (G-CLS-030): this visit's bits as the loader reads them again, `0x1ba950` (the death bits),
     // `0x1bbb04` (the per-id flags: the collected placed bolts) and the persistent death bits written this visit.
     if let Some(v) = visit { scheduler::add_visit_bits(&mut save, v, level); }
@@ -1321,16 +1340,6 @@ fn setup(
     }
     let hero_k = occl.anim_index(hero_ii);
     if let (Some(a), Some(k)) = (anim.as_mut(), hero_k) { a.pending[k] = None; }
-    // The renderer's load (crate::moby_spawn) ran the spawn test with a first visit's zero save bytes; a loaded save's
-    // bits make the loader create instances that test rejected (a later mission's enemies): their entities are still
-    // hidden, so they are shown as a death reload's are ([`show_reloaded`]).
-    let save_shown: Vec<usize> = if spawn.as_ref().is_some_and(|s| s.enabled) {
-        let first_visit = rc_formats::moby_spawn::loader_spawns(&m.instances[..ship_ii.unwrap_or(m.instances.len())], &mut Default::default());
-        statics.moby_to_instance.iter().copied().filter(|&ii| first_visit.get(ii).is_some_and(|t| !t.spawn)).collect()
-    } else {
-        Vec::new()
-    };
-    if !save_shown.is_empty() { println!("gameplay: {} instances created by the save's spawn bits (hidden by the first-visit test) shown", save_shown.len()); }
 
     // The static mobys the table drives (a class with a Rust port), and the dynamic slots.
     let driven: Vec<(MobyId, usize, Option<usize>)> = (0..n_static)
@@ -1405,7 +1414,7 @@ fn setup(
         sounds: HashMap::new(),
         ratchet_hidden: false,
         ratchet_late: None,
-        reload_shown: save_shown,
+        reload_shown: Vec::new(),
         arm_joints,
         help_vag: None,
         help_debug: std::env::var("RC_HUD_HELP").ok().and_then(|v| v.trim().parse().ok()),

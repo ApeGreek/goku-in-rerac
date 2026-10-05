@@ -67,9 +67,9 @@ pub struct LevelBundle {
 
 /// Loads level `index` (its data, the loader's moby spawn pass, the fog zones): the one load path of the boot and of
 /// every change.
-pub fn load_bundle(root: &std::path::Path, index: u32) -> anyhow::Result<LevelBundle> {
+pub fn load_bundle(root: &std::path::Path, index: u32, save: &rc_formats::moby_spawn::SpawnSave) -> anyhow::Result<LevelBundle> {
     let mut level = crate::level_load::load_level(root, index)?;
-    let spawn = crate::moby_spawn::apply_load_pass(root, index, &mut level)?;
+    let spawn = crate::moby_spawn::apply_load_pass(root, index, &mut level, save)?;
     let fog = crate::fog_state::FogState::new(crate::fog_state::load(root, index)?, &level.fog);
     Ok(LevelBundle { index, level, spawn, fog })
 }
@@ -90,10 +90,10 @@ struct Load {
 
 impl LevelChange {
     /// `read_file_entry_with_retry(level)` and the async loader: level `index` loads on a worker thread.
-    pub fn start_load(&mut self, index: u32) {
+    pub fn start_load(&mut self, index: u32, save: rc_formats::moby_spawn::SpawnSave) {
         if self.load.as_ref().is_some_and(|l| l.index == index) { return; }
         let root: PathBuf = crate::level_load::extracted_root();
-        let t = std::thread::Builder::new().name(format!("level {index:02} load")).spawn(move || load_bundle(&root, index));
+        let t = std::thread::Builder::new().name(format!("level {index:02} load")).spawn(move || load_bundle(&root, index, &save));
         let (thread, result) = match t {
             Ok(h) => (Some(h), None),
             Err(e) => (None, Some(Err(anyhow::anyhow!("cannot start the level loader thread: {e}")))),

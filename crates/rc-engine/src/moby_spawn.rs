@@ -3,7 +3,8 @@
 //! `rc_formats::moby_spawn`, applied without porting the update functions.
 //!
 //! * [`apply_load_pass`] (before the app starts, on the loaded level): runs the loader's spawn test
-//!   (`rc_formats::moby_spawn::loader_spawns`, a first visit's save bytes; a rejected instance is hidden),
+//!   (`rc_formats::moby_spawn::loader_spawns` with the level's save bits, `crate::gameplay::level_spawn_save`, the
+//!   ones the game's moby table reads; a rejected instance is hidden),
 //!   computes every created instance's `SpawnState` from its pvars (`rc_formats::gameplay::parse_pvars_spawned`:
 //!   moby links through the instance → moby map), the level's splines and a ground
 //!   probe; writes the moved positions into the instance records (the renderer builds its model matrices
@@ -131,7 +132,7 @@ impl SpawnEnv for Env<'_> {
 }
 
 /// Computes the load-pass result, moves instances, appends the ship. Prints per-class counts.
-pub fn apply_load_pass(root: &Path, index: u32, level: &mut LoadedLevel) -> Result<MobySpawn> {
+pub fn apply_load_pass(root: &Path, index: u32, level: &mut LoadedLevel, save: &moby_spawn::SpawnSave) -> Result<MobySpawn> {
     let m = &mut level.mobys;
     let empty = MobyAnimClass { joint_count: 0, skeleton: vec![], rest: vec![], parent_word: vec![], sequences: vec![] };
     let by_class: BTreeMap<i32, usize> = m.classes.iter().enumerate().map(|(i, c)| (c.o_class, i)).collect();
@@ -142,10 +143,10 @@ pub fn apply_load_pass(root: &Path, index: u32, level: &mut LoadedLevel) -> Resu
         return Ok(MobySpawn { enabled: false, states, ship: None });
     }
     let gameplay = rc_data::level_gameplay(root, index).context("decompressing gameplay_ntsc")?;
-    // The loader's spawn test with a direct boot's save bytes (a first visit on a new game: all zero, what
-    // crate::gameplay's game state has; that module repeats the test with the game state itself). Records it
-    // rejects are not created: hidden here; the pvar moby links and moby positions use the runtime indices.
-    let tests = moby_spawn::loader_spawns(&m.instances, &mut moby_spawn::SpawnSave::default());
+    // The loader's spawn test with the level's save bits (`crate::gameplay::level_spawn_save`: the same ones the game's
+    // moby table is built with). Records it rejects are not created: hidden here; the pvar moby links and moby
+    // positions use the runtime indices.
+    let tests = moby_spawn::loader_spawns(&m.instances, &mut save.clone());
     let spawned: Vec<bool> = tests.iter().map(|t| t.spawn).collect();
     let pvars = gameplay::parse_pvars_spawned(&gameplay, &spawned).context("parsing pvars")?;
     let env = Env {
@@ -209,7 +210,7 @@ pub fn apply_load_pass(root: &Path, index: u32, level: &mut LoadedLevel) -> Resu
                 m.instances.push(inst);
                 level.occlusion.objects.moby.push(OcclBits::ALWAYS);
                 let n = tests.len();
-                let hidden = moby_spawn::ship_hidden_on_arrival(&m.instances[..n], &tests, &moby_spawn::SpawnSave::default().missions);
+                let hidden = moby_spawn::ship_hidden_on_arrival(&m.instances[..n], &tests, &save.missions);
                 states.push(moby_spawn::ship_state(ship_class, &m.anim[ci], hidden));
                 ship = Some(m.instances.len() - 1);
                 println!(
