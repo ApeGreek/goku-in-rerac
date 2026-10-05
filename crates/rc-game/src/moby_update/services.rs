@@ -1222,6 +1222,11 @@ pub struct HeroPose {
 pub enum HeroCall {
     /// `SetState(id, play)` 0x23cf98.
     SetState { id: i32, play: bool },
+    /// The rest of a class's `HeroTeleport` 0x2368e0 ([`crate::cinematic::hero_teleport`]) at the position and yaw its
+    /// `pose` stored: the hero side's [`Hero::teleport`] (airborne, the platform carry dropped, the motion block
+    /// cleared, the weapon put away, `SetState(state, 1)` unless −1, the ground probe). The camera reset is the
+    /// class side's call.
+    Teleport { state: i32 },
     /// `SetAnim(blend, seq, frame)` 0x247a90 (`blend` = `(float)ticks(n)`), as the hero code's own
     /// ([`Hero::set_anim`]).
     SetAnim { blend: f32, seq: u8, frame: i32 },
@@ -1377,6 +1382,10 @@ impl HeroFields {
         for call in self.calls.iter().flatten() {
             match *call {
                 HeroCall::SetState { id, play } => { h.set_state(c, id, play); }
+                HeroCall::Teleport { state } => {
+                    let (p, r) = (h.pos.map(|x| x.to_f32()), h.rot.map(|x| x.to_f32()));
+                    h.teleport(c, p, r, state, false);
+                }
                 HeroCall::SetAnim { blend, seq, frame } => h.set_anim(c.anim, c.rng, pf(blend), seq, frame),
                 HeroCall::Death => crate::hero::damage::death_fade(h),
                 HeroCall::WalkTo { point, yaw, release } => {

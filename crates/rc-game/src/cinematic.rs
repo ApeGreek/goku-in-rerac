@@ -255,15 +255,18 @@ pub fn letterbox(w: &mut World, on: bool) { w.svc.creatures.cutscene = on; }
 /// `SetState(state, play)` on Ratchet.
 pub fn hero_state(w: &mut World, state: i32, play: bool) { w.hero_fields_mut().call(HeroCall::SetState { id: state, play }); }
 
-/// `HeroTeleport(pos, euler, state, reset_cam)` 0x2368e0: position and Euler stored, the motion block cleared,
-/// `SetState(state, 1)` (unless −1), the underwater flag 0x167494 = Ratchet's group is 0x11 (under water), and with
-/// `reset_cam` the follow camera reset behind him. Only the yaw of the
-/// Euler is kept (the port's hero block has no pitch / roll of his own; every Novalis caller passes 0 for them).
+/// `HeroTeleport(pos, euler, state, reset_cam)` 0x2368e0: position and yaw stored, the motion block cleared, then the
+/// hero side's [`crate::hero::Hero::teleport`] at them (`HeroCall::Teleport`: airborne, **the platform carry dropped**,
+/// the weapon put away, `SetState(state, 1)` unless −1, the ground probe), the underwater flag 0x167494 = Ratchet's
+/// group is 0x11 (under water), and with `reset_cam` the follow camera reset behind him. Only the yaw of the Euler is
+/// kept (the port's hero block has no pitch / roll of his own; every Novalis caller passes 0 for them). Without the
+/// carry drop a teleport off a moving carrier was carried again by the carrier's move of that tick (Kerwan's train
+/// arrival threw Ratchet off the map).
 pub fn hero_teleport(w: &mut World, pos: [f32; 3], euler: [f32; 3], state: i32, reset_cam: bool) {
     let f = w.hero_fields_mut();
     f.clear_motion();
     f.pose = Some(HeroPose { pos, yaw: euler[2], target_yaw: euler[2] });
-    if state != -1 { f.call(HeroCall::SetState { id: state, play: true }); }
+    f.call(HeroCall::Teleport { state });
     // `0x167494 = (0x1413dc == 0x11)` after the SetState (the group of the state it sets: applied with the camera).
     w.svc.water.underwater_store = Some((w.counter, crate::water::world::UnderwaterStore::HeroGroup));
     if reset_cam { w.svc.cinematic.calls.push(CinematicCall::CameraResetBehindHero); }
