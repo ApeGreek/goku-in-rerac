@@ -1114,6 +1114,7 @@ fn spawn_mobys(
         class_parts: parts.into_iter().map(|(ci, (high, low, _))| (ci, [high.0, low])).collect(),
         cache,
         bits: level.occlusion.objects.moby.clone(),
+        loader_bits: level.occlusion.objects.moby.clone(),
         anim_index,
         draws,
         shown,
@@ -1229,6 +1230,8 @@ pub struct MobyOcclusion {
     cache: MatCache,
     records_dirty: bool,
     bits: Vec<OcclBits>,
+    /// The loader's words (`bits` as resolved at load), what a moby +0x36 of 0 stands for.
+    loader_bits: Vec<OcclBits>,
     anim_index: Vec<Option<usize>>,
     draws: Vec<InstanceDraws>,
     shown: Vec<Option<Shown>>,
@@ -2040,6 +2043,13 @@ fn update_extra_metal(
 }
 
 impl MobyOcclusion {
+    /// Moby +0x36 of static instance `ii` (`MobyProc` tests it): 0, the game's "unchanged", is the loader's word for
+    /// the instance; any other value (0x7f80 for a creature revived or moved elsewhere, a thrown crate) is used as is.
+    pub fn set_occlusion_word(&mut self, ii: usize, word: u16) {
+        let w = if word == 0 { self.loader_bits.get(ii).copied() } else { Some(OcclBits(word)) };
+        if let (Some(b), Some(w)) = (self.bits.get_mut(ii), w) { *b = w; }
+    }
+
     /// What MobyProc reads from static instance `ii` this tick ([`MobyLook`]): its vertex alpha, blend mode, glow and
     /// shine distance.
     pub fn look(&mut self, ii: usize, look: MobyLook) {

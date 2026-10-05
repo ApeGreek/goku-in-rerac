@@ -1485,6 +1485,9 @@ fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut M
             }
         }
         occl.drive(ii, pos3(m), rows3(&m.rows), m.scale, lights.as_ref(), hidden);
+        // Moby +0x36, the occlusion word MobyProc tests: the game keeps 0 for "the loader's word" (the renderer
+        // resolved it per instance) and writes 0x7f80 for a creature revived or moved elsewhere, a thrown crate, …
+        occl.set_occlusion_word(ii, m.occlusion);
         occl.look(ii, moby_render::MobyLook { alpha: m.alpha, mode: m.mode, glow: m.glow, shine_distance: m.b73, draw_dist: Some(m.draw_dist), late: None });
         if let (Some(a), Some(k)) = (anim.as_deref_mut(), k) {
             a.drive(k, m.anim, p.svc.snapshots.get(id).and_then(|s| s.as_ref()), &m.joint_mods);
