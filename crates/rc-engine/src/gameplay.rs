@@ -577,8 +577,8 @@ pub struct Play {
     ratchet_hidden: bool,
     /// His caster draws' order as last set (crate::moby_render `queue_late`; None: as spawned, late).
     ratchet_late: Option<bool>,
-    /// The instances a death reload made spawn that the level's load did not (their entities still hidden): shown by
-    /// [`show_reloaded`].
+    /// The instances a death reload (or a loaded save's spawn bits) made spawn that the level's load did not (their
+    /// entities still hidden): shown by [`show_reloaded`].
     reload_shown: Vec<usize>,
     /// The weapon arm layers' joints (Ratchet's joint lists 12 / 13, `rc_game::hero::weapons::ARM_LISTS`).
     arm_joints: [Vec<u8>; 2],
@@ -1263,11 +1263,18 @@ fn setup(
     let missions = LevelMissions::fresh_load(level_index, level_save);
     let mut sched = Scheduler::new();
     let rng0 = game.rng;
+    // Ratchet's owned items and ammo from the save before the load pass (the tick copies them in again every frame).
+    if let Some(gs) = &state {
+        game.hero.owned.0 = gs.0.global.owned;
+        game.hero.weapons.ammo = gs.0.global.ammo;
+    }
     let n_load = {
         let hero = game.hero.clone();
+        let inv = load_inventory(&svc, item_data.as_ref(), state.as_ref().map(|s| s.0.global.vendor), &hero);
         // view None: the view before the level's first render (all zero: FastBSphereCheck culls, type06).
         let mut ext = Externals { level: level_index, emitters: &emitters, view: None };
         let mut w = World::new(&mut game.mobys, &hero, &mut game.rng, &classes, &mut svc, game.counter);
+        w.inventory = &inv;
         w.camera = game.camera.out.pos;
         w.coll = Some(coll);
         w.particles = particles.as_deref_mut().map(|p| &mut p.sys);
@@ -1314,6 +1321,16 @@ fn setup(
     }
     let hero_k = occl.anim_index(hero_ii);
     if let (Some(a), Some(k)) = (anim.as_mut(), hero_k) { a.pending[k] = None; }
+    // The renderer's load (crate::moby_spawn) ran the spawn test with a first visit's zero save bytes; a loaded save's
+    // bits make the loader create instances that test rejected (a later mission's enemies): their entities are still
+    // hidden, so they are shown as a death reload's are ([`show_reloaded`]).
+    let save_shown: Vec<usize> = if spawn.as_ref().is_some_and(|s| s.enabled) {
+        let first_visit = rc_formats::moby_spawn::loader_spawns(&m.instances[..ship_ii.unwrap_or(m.instances.len())], &mut Default::default());
+        statics.moby_to_instance.iter().copied().filter(|&ii| first_visit.get(ii).is_some_and(|t| !t.spawn)).collect()
+    } else {
+        Vec::new()
+    };
+    if !save_shown.is_empty() { println!("gameplay: {} instances created by the save's spawn bits (hidden by the first-visit test) shown", save_shown.len()); }
 
     // The static mobys the table drives (a class with a Rust port), and the dynamic slots.
     let driven: Vec<(MobyId, usize, Option<usize>)> = (0..n_static)
@@ -1388,7 +1405,7 @@ fn setup(
         sounds: HashMap::new(),
         ratchet_hidden: false,
         ratchet_late: None,
-        reload_shown: Vec::new(),
+        reload_shown: save_shown,
         arm_joints,
         help_vag: None,
         help_debug: std::env::var("RC_HUD_HELP").ok().and_then(|v| v.trim().parse().ok()),
@@ -1538,6 +1555,14 @@ fn publish_anim(p: &mut Play, anim: Option<&mut MobyAnim>) {
     a.snapshots[k] = p.ratchet.snapshot.clone();
 }
 
+/// The item tables a load pass reads (the tick's, `w.inventory`): the price records, the vendor list 0x15edd0, the item
+/// slot types and Ratchet's owned items and ammo (0x13d4c0 / 0x13d428). The classes' inits test them there (Helga
+/// leaves once the Swingshot is owned); without them every item read as not owned.
+fn load_inventory(svc: &rc_game::moby_update::services::Services, item_data: Option<&ItemData>, vendor: Option<[u8; 12]>, hero: &Hero) -> rc_game::moby_update::classes::pickup::ItemTables {
+    let slots: Vec<i32> = item_data.map_or_else(Vec::new, |d| d.defs.iter().map(|d| d.slot).collect());
+    rc_game::moby_update::classes::pickup::ItemTables::new(&svc.interact.tables.shop.records, vendor.unwrap_or([0xff; 12])).with_slots(&slots).with_hero(hero)
+}
+
 /// The death reload's moby side (`LoadLevelCoreData(0, 1)` after the death flag 0x141401, G-CLS-030): the loader's
 /// instance loop and spawn test run again, now with this visit's bits (`scheduler::add_visit_bits`: the death bits
 /// 0x1ba950, the per-id flags 0x1bbb04, the death bits set this visit), so every placed moby restarts from its record
@@ -1608,13 +1633,15 @@ fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, state: Option
 
 /// The death reload's end (`LoadLevelCoreData` after `0x29adc8`): the talk cooldown 0x179590 = 0, the load pass on the
 /// respawned hero (counter 0, `InitLevelRenderGlobals` reset it), then `0x15f5cc++`.
-fn reload_load_pass(p: &mut Play, coll: &rc_formats::collision::Collision, particles: Option<&mut ParticleSim>) {
+fn reload_load_pass(p: &mut Play, coll: &rc_formats::collision::Collision, particles: Option<&mut ParticleSim>, vendor: Option<[u8; 12]>) {
     p.svc.interact.cooldown = 0;
     let mut sched = Scheduler::new();
     let n_load = {
         let hero = p.game.hero.clone();
+        let inv = load_inventory(&p.svc, p.item_data.as_ref(), vendor, &hero);
         let mut ext = Externals { level: p.level, emitters: &p.emitters, view: None };
         let mut w = World::new(&mut p.game.mobys, &hero, &mut p.game.rng, &*p.classes, &mut p.svc, p.game.counter);
+        w.inventory = &inv;
         w.camera = p.game.camera.out.pos;
         w.coll = Some(coll);
         w.particles = particles.map(|ps| &mut ps.sys);
@@ -1766,7 +1793,7 @@ fn tick(
         death_reload(p, lv, state.as_deref().map(|s| &s.0), occl.as_deref_mut(), anim.as_deref_mut(), particles.as_deref_mut());
         respawn(p, coll, class, lv.death_z, state.as_deref_mut().map(|s| &mut s.0), session.as_deref_mut().map(|s| &mut s.0));
         if checkpoint { rc_game::moby_update::visit::restore(&mut p.game.mobys, &p.svc.save.checkpoint_visit); }
-        reload_load_pass(p, coll, particles.as_deref_mut());
+        reload_load_pass(p, coll, particles.as_deref_mut(), state.as_deref().map(|s| s.0.global.vendor));
         if let Some(a) = audio.as_deref_mut() { a.system().death_reload(checkpoint); }
         println!("gameplay: death reload done: respawned at {}", if checkpoint { "the checkpoint" } else { "the uid-0 moby" });
     }
