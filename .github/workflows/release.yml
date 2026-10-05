@@ -1,4 +1,4 @@
-# Release: builds the version package with `cargo xtask package` and publishes it as a GitHub Release
+# Release: builds the version packages (tools/package/package.sh, macOS and Windows) and publishes them as a GitHub Release
 # (docs/workflows/release.md). Cut a release by pushing a tag `vX.Y.Z[-pre]`; X.Y.Z must equal the workspace version.
 name: Release
 
@@ -23,8 +23,22 @@ env:
   SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
 
 jobs:
-  release:
-    runs-on: macos-14 # Apple Silicon, the tested platform
+  # One package per platform. macOS Apple Silicon is the tested one; Windows x64 is built the same way and has never
+  # been run (fail-fast is off and the release job only requires the macOS package).
+  build:
+    name: Build ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            platform: macos-14
+          - name: Windows x64 (untested)
+            platform: windows-latest
+    runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        shell: bash # Git Bash on Windows
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,8 +53,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Release build of rerac + rerac-extract, then the allow-listed folder and its zip in dist/ (tools/package).
-      - name: cargo xtask package
-        run: cargo xtask package
+      # The script directly, not `cargo xtask package`: on Windows a bare `bash` can resolve to WSL's.
+      - name: Package
+        run: bash tools/package/package.sh
 
       - name: Find the package
         id: pkg
@@ -62,14 +77,41 @@ jobs:
       - name: Upload the package (workflow artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: rerac-package
+          name: rerac-package-${{ matrix.platform }}
           path: |
             ${{ steps.pkg.outputs.zip }}
             ${{ steps.pkg.outputs.manifest }}
 
+  release:
+    name: Publish release
+    needs: build
+    # Runs even when the untested Windows build failed; the check below decides.
+    if: ${{ !cancelled() && (github.event_name == 'push' || inputs.tag != '') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+
+      - name: Collect the packages
+        id: assets
+        run: |
+          mac="$(ls packages/rerac-package-macos-14/*macos-arm64.zip 2>/dev/null || true)"
+          if [ -z "$mac" ]; then
+            echo "::error::The macOS package is missing; nothing is released."
+            exit 1
+          fi
+          files="$mac $(ls packages/rerac-package-macos-14/*/rerac-manifest.json)"
+          win="$(ls packages/rerac-package-windows-latest/*windows-x86_64.zip 2>/dev/null || true)"
+          if [ -n "$win" ]; then files="$files $win"; else echo "::warning::No Windows package in this release."; fi
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+
       # Notes: the CHANGELOG.md section `## <tag>`, else the tag's annotation.
       - name: Release notes
-        if: env.TAG != ''
         run: |
           awk -v h="## $TAG" '$0 == h { on = 1; next } on && /^## / { exit } on { print }' CHANGELOG.md > notes.md
           if ! grep -q '[^[:space:]]' notes.md; then
@@ -79,24 +121,23 @@ jobs:
           cat notes.md
 
       - name: GitHub Release
-        if: env.TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          FILES: ${{ steps.assets.outputs.files }}
         run: |
           pre=""
           case "$TAG" in *-alpha*|*-beta*|*-rc*) pre="--prerelease" ;; esac
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" "${{ steps.pkg.outputs.zip }}" "${{ steps.pkg.outputs.manifest }}" --clobber
+            gh release upload "$TAG" $FILES --clobber
             gh release edit "$TAG" --notes-file notes.md $pre
           else
-            gh release create "$TAG" "${{ steps.pkg.outputs.zip }}" "${{ steps.pkg.outputs.manifest }}" \
-              --verify-tag --title "ReRAC $TAG" --notes-file notes.md $pre
+            gh release create "$TAG" $FILES --verify-tag --title "ReRAC $TAG" --notes-file notes.md $pre
           fi
 
       # Optional: tell the site (re-rac/re-rac.github.io) to rebuild. Runs only when the repository secret
       # SITE_DISPATCH_TOKEN exists (a token allowed to create repository_dispatch events on the site repo).
       - name: Notify the site
-        if: env.TAG != '' && env.SITE_DISPATCH_TOKEN != ''
+        if: env.SITE_DISPATCH_TOKEN != ''
         run: |
           GH_TOKEN="$SITE_DISPATCH_TOKEN" gh api repos/re-rac/re-rac.github.io/dispatches \
             -f event_type=release-published -f "client_payload[tag]=$TAG" \

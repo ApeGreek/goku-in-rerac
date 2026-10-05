@@ -52,8 +52,8 @@ in a macOS `.app`; when neither exists (`cargo dev`, `target/*/rerac`) it uses t
 
 ## GitHub Actions (`.github/workflows/`)
 
-Both run on `macos-14` (Apple Silicon, the tested platform), install stable Rust with rustup and cache with
-`Swatinem/rust-cache`.
+Both run on `macos-14` (Apple Silicon, the tested platform; `release.yml` also on `windows-latest`), install stable
+Rust with rustup and cache with `Swatinem/rust-cache`.
 
 * **`ci.yml`** (push to `main`, pull requests): `cargo check-all`, `cargo clippy-all`, then
   `cargo xtask test-full --no-game-data`. The runner has no disc and no `extracted/`, and never gets one. With
@@ -61,9 +61,12 @@ Both run on `macos-14` (Apple Silicon, the tested platform), install stable Rust
   lists each of them as SKIPPED (in the log, as a warning annotation and in the job summary), so none of them passes
   silently. The hero digest needs game data and does not run. The same command works locally (`tools/xtask/README.md`).
 * **`release.yml`** (push of a `v*` tag; or by hand with `workflow_dispatch`, input `tag`: an existing tag to release
-  again, or empty to only build the package as a workflow artifact): `cargo xtask package`, then a check that the tag
-  matches the workspace version, then a GitHub Release for the tag, with `rerac-<version>-macos-arm64.zip` (the
-  launcher picks this asset) and `rerac-manifest.json`. It is marked a prerelease when the tag contains `-alpha`,
+  again, or empty to only build the packages as workflow artifacts): one build job per platform runs
+  `tools/package/package.sh` (directly: on Windows a bare `bash` from `cargo xtask package` can be WSL's) and checks
+  that the tag matches the workspace version; then one release job publishes `rerac-<version>-macos-arm64.zip`,
+  `rerac-<version>-windows-x86_64.zip` (UNTESTED: built, never run; left out with a warning if its job failed) and the
+  macOS `rerac-manifest.json`. The launcher picks the zip for its OS and CPU. A missing macOS package stops the
+  release. It is marked a prerelease when the tag contains `-alpha`,
   `-beta` or `-rc`. The notes are the tag's `CHANGELOG.md` section, else the tag's annotation. Permissions:
   `contents: write`.
 

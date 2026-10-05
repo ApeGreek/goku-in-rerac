@@ -109,8 +109,8 @@ want="{\"name\":\"rerac\",\"version\":\"$version\",\"game\":\"rac1\",\"data_form
 
 case "$os" in
   macos) (cd "$dist" && ditto -c -k --keepParent "$name" "$name.zip") ;;
-  windows) powershell.exe -NoProfile -Command \
-             "Compress-Archive -Path '$(cygpath -w "$out")' -DestinationPath '$(cygpath -w "$dist/$name.zip")'" ;;  # UNTESTED
+  # Windows' own bsdtar writes a standard zip ('/' separators); PowerShell 5.1's Compress-Archive writes '\'.
+  windows) (cd "$dist" && "$(cygpath "$SYSTEMROOT")/System32/tar.exe" -a -c -f "$name.zip" "$name") ;;  # UNTESTED
   linux) (cd "$dist" && zip -qry "$name.zip" "$name") ;;  # UNTESTED; needs `zip`
 esac
 
