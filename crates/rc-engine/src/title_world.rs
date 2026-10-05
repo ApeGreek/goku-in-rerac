@@ -304,7 +304,7 @@ fn spawn(
     }
     rt.scene = Some(TitleScene::new(d.scene.clone()));
     // level_init_read_settings: the fog and the background colour are the title's (until the next level change).
-    commands.insert_resource(crate::fog_state::FogState::new(crate::fog_state::FogLevelData { zones: d.zones.clone(), mesh: None }, &lv.fog));
+    commands.insert_resource(crate::fog_state::FogState::new(crate::fog_state::FogLevelData { zones: d.zones.clone(), mesh: None, lights: Default::default() }, &lv.fog));
     let bg = lv.background;
     commands.insert_resource(ClearColor(Color::srgb_u8(bg[0], bg[1], bg[2])));
     // The boot's sound bank and defs (the level's sounds were stopped for the front end).

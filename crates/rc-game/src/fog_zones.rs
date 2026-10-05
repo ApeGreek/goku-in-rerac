@@ -163,6 +163,50 @@ pub fn hero_light(zone: &FogZone, t: f32) -> Option<(u32, [u8; 4])> {
     Some((word, colour))
 }
 
+/// `0x26bcf4(pos, &d2)`: the static point light whose 2-D circle holds `pos` (the grid cell `(y >> 4)·64 + (x >> 4)`
+/// of the section, its list walked in order; VU: `d = p − light`, `d2 = dx² + dy²`, inside when `d2 − light.w` is
+/// negative): the light's index and `d2`. A cell without a list, an empty list or a position off the grid: none.
+pub fn static_light(s: &rc_formats::gameplay::StaticLights, pos: [f32; 3]) -> Option<(usize, f32)> {
+    let (cx, cy) = ((pos[0] as i32 as u32) >> 4, (pos[1] as i32 as u32) >> 4);
+    let cell = *s.grid.get((cy.checked_mul(64)?.checked_add(cx)?) as usize)? as usize;
+    if cell == 0 || !cell.is_multiple_of(4) { return None; }
+    let n = *s.grid.get(cell / 4)? as usize;
+    let p = pos.map(|v| Pf::f(v).0);
+    for k in 0..n {
+        let i = *s.grid.get(cell / 4 + 1 + k)? as usize;
+        let l = s.lights.get(i)?;
+        let c = l.pos.map(|v| Pf::f(v).0);
+        let (dx, dy) = (sub(p[0], c[0]), sub(p[1], c[1]));
+        let d2 = add(mul(dx, dx), mul(dy, dy));
+        if neg(sub(d2, c[3])) { return Some((i, crate::ps2v::to_f32(d2))); }
+    }
+    None
+}
+
+/// `HeroEnvLighting` 0x26be04 on the hero moby at `pos`: a fog zone holding him with flags & 1 sets his colour +0x80
+/// (`base`) and light word +0x38 ([`hero_light`]); then his ambient +0x3c = +0x80, plus (bytewise saturating, all four
+/// bytes) the static light holding him ([`static_light`]) at `(255 − cvt(d2 / r2 · 255))`·colour >> 8.
+pub fn hero_env_lighting(zones: Option<&FogZones>, lights: &rc_formats::gameplay::StaticLights, pos: [f32; 3], base: &mut [u8; 4], light: &mut u32, ambient: &mut [u8; 4]) {
+    if let Some((i, t)) = zones.and_then(|z| lookup(z, pos)) {
+        if let Some((word, colour)) = zones.and_then(|z| z.zones.get(i)).and_then(|z| hero_light(z, t)) {
+            *base = colour;
+            *light = word;
+        }
+    }
+    let Some((i, d2)) = static_light(lights, pos) else {
+        *ambient = *base;
+        return;
+    };
+    let l = lights.lights[i];
+    let k = ((Pf::f(d2) / Pf::f(l.pos[3])) * Pf::b(K255)).to_i32();
+    let a = 0xff - k;
+    let c = l.rgba.to_le_bytes();
+    *ambient = std::array::from_fn(|j| {
+        let add = ((c[j] as i32 * a) as u32 & 0xffff) >> 8;
+        (base[j] as u32 + (add & 0xff)).min(255) as u8
+    });
+}
+
 /// The underwater flag `0x167494` and its per-camera-update test `0x20e9f0`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UnderwaterState {
@@ -233,6 +277,27 @@ impl UnderwaterState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hero_ambient_from_base_and_static_light() {
+        use rc_formats::gameplay::{StaticLight, StaticLights};
+        // One light at (40, 40), r² = 16, red 0x80 alpha 0; cell (2, 2) lists it.
+        let mut grid = vec![0u32; 4096 + 2];
+        grid[2 * 64 + 2] = 4096 * 4;
+        grid[4096] = 1;
+        grid[4097] = 0;
+        let lights = StaticLights { lights: vec![StaticLight { pos: [40.0, 40.0, 0.0, 16.0], rgba: 0x0000_0080 }], grid };
+        let (mut base, mut light, mut amb) = ([0x30, 0x30, 0x30, 0], 0u32, [0u8; 4]);
+        // At the centre: k = 0, a = 255: 0x80·255 >> 8 = 0x7f added to red.
+        hero_env_lighting(None, &lights, [40.0, 40.0, 5.0], &mut base, &mut light, &mut amb);
+        assert_eq!(amb, [0x30 + 0x7f, 0x30, 0x30, 0]);
+        // 2 units off (d² = 4): k = cvt(4/16·255) = 63, a = 192: 0x80·192 >> 8 = 0x60.
+        hero_env_lighting(None, &lights, [42.0, 40.0, 5.0], &mut base, &mut light, &mut amb);
+        assert_eq!(amb[0], 0x30 + 0x60);
+        // Outside the circle: the base.
+        hero_env_lighting(None, &lights, [45.0, 40.0, 5.0], &mut base, &mut light, &mut amb);
+        assert_eq!(amb, base);
+    }
     use rc_formats::gameplay::FogZoneSide;
 
     fn bytes(v: [u32; 3]) -> [u8; 3] { v.map(|x| x as u8) }

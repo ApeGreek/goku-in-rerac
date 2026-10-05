@@ -53,6 +53,7 @@ pub struct FogSet;
 pub struct FogLevelData {
     pub zones: FogZones,
     pub mesh: Option<Collision>,
+    pub lights: rc_formats::gameplay::StaticLights,
 }
 
 /// Reads the level's fog zones (gameplay section 0x80) and collision mesh.
@@ -77,13 +78,16 @@ pub fn load(root: &Path, index: u32) -> Result<FogLevelData> {
         if mesh.is_some() { "loaded" } else { "missing" },
         t0.elapsed().as_secs_f64() * 1e3
     );
-    Ok(FogLevelData { zones, mesh })
+    let lights = rc_formats::gameplay::parse_static_lights(&gameplay).context("parsing static point lights")?;
+    Ok(FogLevelData { zones, mesh, lights })
 }
 
 /// The game state behind the fog: the level fog globals, the underwater flag and look.
 #[derive(Resource)]
 pub struct FogState {
     zones: FogZones,
+    /// The level's static point lights and their grid (0x15fb80 / 0x15fbc0: `HeroEnvLighting`).
+    lights: rc_formats::gameplay::StaticLights,
     mesh: Option<Collision>,
     /// 0x15f444..0x15f454.
     level: FogGlobals,
@@ -110,6 +114,7 @@ impl FogState {
         FogState {
             zones: data.zones,
             mesh: data.mesh,
+            lights: data.lights,
             level: level_fog.globals(),
             underwater: UnderwaterState::default(),
             look: UnderwaterLook::default(),
@@ -160,6 +165,7 @@ impl Plugin for FogStatePlugin {
         app.add_plugins(crate::gs_post::GsPostPlugin::<UnderwaterTint>::default())
             .configure_sets(PostUpdate, FogSet.before(crate::occlusion::OcclusionSet))
             .add_systems(PostUpdate, update_fog_state.in_set(FogSet))
+            .add_systems(FixedUpdate, hero_env_lighting.after(crate::gameplay::GameTick))
             .add_systems(
                 PostUpdate,
                 (
@@ -182,6 +188,19 @@ impl Plugin for FogStatePlugin {
             }
         }
     }
+}
+
+/// `HeroEnvLighting` 0x26be04 (every hero update, after the map fog writer): Ratchet's light word +0x38 and ambient
+/// +0x3c from the fog zone and the static point light holding him (`rc_game::fog_zones::hero_env_lighting`), which
+/// the renderer and the classes copying his lighting read. Run after each gameplay tick.
+fn hero_env_lighting(state: Option<Res<FogState>>, play: Option<ResMut<crate::gameplay::Play>>) {
+    let (Some(state), Some(mut play)) = (state, play) else { return };
+    let g = &mut play.game;
+    let pos = g.hero.position();
+    let Some(m) = g.mobys.mobys.get_mut(g.hero_moby) else { return };
+    let base = g.hero.env_base.get_or_insert(m.ambient);
+    let zones = state.zones_enabled.then_some(&state.zones);
+    fog_zones::hero_env_lighting(zones, &state.lights, pos, base, &mut m.light, &mut m.ambient);
 }
 
 type MainCamera<'w, 's> = Query<'w, 's, (Entity, &'static Transform, Option<&'static UnderwaterTint>), With<FlyCam>>;

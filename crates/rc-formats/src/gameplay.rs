@@ -423,6 +423,44 @@ pub fn parse_fog_zones(gameplay: &[u8]) -> Result<FogZones> {
     Ok(FogZones { circles, zones })
 }
 
+/// One of the level's static point lights (section `point_lights`, 0x20 bytes from +0x10; the loader's pointer
+/// 0x15fb80): position (x, y, z) and its squared radius (w), the colour +0x10 (bytes r, g, b, a).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StaticLight {
+    pub pos: [f32; 4],
+    pub rgba: u32,
+}
+
+/// The level's static point lights and their grid (section `point_light_grid`, the loader's pointer 0x15fbc0): 64 × 64
+/// cells of 16 units (word `(y >> 4)·64 + (x >> 4)`: the byte offset in the section of the cell's list `s32 count,
+/// count × s32 light index`, 0 = none), kept as the section's words.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StaticLights {
+    pub lights: Vec<StaticLight>,
+    pub grid: Vec<u32>,
+}
+
+/// Reads the sections `point_lights` (`s32 count, pad[3]`, then the records) and `point_light_grid`; absent ones give
+/// none.
+pub fn parse_static_lights(gameplay: &[u8]) -> Result<StaticLights> {
+    let secs = sections(gameplay)?;
+    let range = |n: &str| secs.iter().find(|s| s.0 == n).map(|s| s.1.clone());
+    let mut out = StaticLights::default();
+    if let Some(r) = range("point_lights") {
+        let b = Buf(&gameplay[r.clone()]);
+        let n = b.i32(0)?.max(0) as usize;
+        for k in 0..n {
+            let o = 0x10 + 0x20 * k;
+            let f = |j: usize| b.u32(o + 4 * j).map(f32::from_bits);
+            out.lights.push(StaticLight { pos: [f(0)?, f(1)?, f(2)?, f(3)?], rgba: b.u32(o + 0x10)? });
+        }
+    }
+    if let Some(r) = range("point_light_grid") {
+        out.grid = gameplay[r].as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
