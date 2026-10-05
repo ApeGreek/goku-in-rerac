@@ -1778,12 +1778,32 @@ impl ExtraMobys {
         images: &mut Assets<Image>,
         materials: &mut Assets<MobyMaterial>,
     ) -> Vec<Entity> {
+        let (mut out, metal) = self.spawn_split(commands, level, class, slot, transform, name, meshes, images, materials);
+        out.extend(metal);
+        out
+    }
+
+    /// [`Self::spawn`] with the high-LOD entities and the metal entities apart.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_split(
+        &mut self,
+        commands: &mut Commands,
+        level: &LoadedLevel,
+        class: &LevelMobyClass,
+        slot: u32,
+        transform: Transform,
+        name: &str,
+        meshes: &mut Assets<Mesh>,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<MobyMaterial>,
+    ) -> (Vec<Entity>, Vec<Entity>) {
         let parts = self.parts.entry(class.o_class).or_insert_with(|| build_parts(class, &class.class.high_lod, false, glow_from(class, false), meshes).0).clone();
-        let mut out = self.cache.spawn(commands, level, &parts, MobyBlend::Plain, true, transform, slot, Visibility::Inherited, &format!("{name} class {}", class.o_class), images, materials);
+        let out = self.cache.spawn(commands, level, &parts, MobyBlend::Plain, true, transform, slot, Visibility::Inherited, &format!("{name} class {}", class.o_class), images, materials);
         // The shine pass, its gate and basis written each frame by update_extra_metal.
+        let mut metal = Vec::new();
         if moby_lod::metal_enabled() {
             let tracked = ExtraMetal { slot, records: self.instances.clone(), lods: self.lods.clone(), sphere: class.class.header.bsphere };
-            out.extend(self.spawn_metal(commands, level, class, slot, transform, Visibility::Inherited, name, Some(tracked), meshes, images));
+            metal = self.spawn_metal(commands, level, class, slot, transform, Visibility::Inherited, name, Some(tracked), meshes, images);
         }
         // The glow list: a fresh moby of the class glows in the class colour (`InitMobyInstance`, crate::moby_lod).
         let glow = moby_lod::class_glow_word(class.class.header.glow_rgba);
@@ -1793,7 +1813,28 @@ impl ExtraMobys {
                 set_lod_bytes(&mut world.resource_mut::<Assets<ShaderBuffer>>(), &h, slot as usize, 12, &glow.to_le_bytes());
             });
         }
-        out
+        (out, metal)
+    }
+
+    /// The low-LOD entities of `class` for record `slot` (shown: the caller hides them; empty without a low LOD): MobyProc's
+    /// LOD pick shows them instead of the high ones (crate::moby_lod).
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_low(
+        &mut self,
+        commands: &mut Commands,
+        level: &LoadedLevel,
+        class: &LevelMobyClass,
+        slot: u32,
+        transform: Transform,
+        name: &str,
+        meshes: &mut Assets<Mesh>,
+        images: &mut Assets<Image>,
+        materials: &mut Assets<MobyMaterial>,
+    ) -> Vec<Entity> {
+        if class.class.low_lod.is_empty() { return Vec::new(); }
+        let identity = class.class.header.low_lod_joint_count == 0;
+        let parts = build_parts(class, &class.class.low_lod, identity, glow_from(class, true), meshes).0;
+        self.cache.spawn(commands, level, &parts, MobyBlend::Plain, true, transform, slot, Visibility::Inherited, &format!("{name} class {} low", class.o_class), images, materials)
     }
 }
 

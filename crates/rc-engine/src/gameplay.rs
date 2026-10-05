@@ -221,6 +221,7 @@ impl Plugin for GameplayPlugin {
             crate::level_switch::LevelUnload,
             (
                 crate::level_switch::remove::<Play>,
+                despawn_lod_parents,
                 crate::level_switch::remove::<AmmoTable>,
                 crate::level_switch::remove::<HeldWeapon>,
                 crate::level_switch::remove::<PlayView>,
@@ -251,6 +252,14 @@ impl Plugin for GameplayPlugin {
 
 #[derive(Resource)]
 struct PlayScript(Option<Script>);
+
+/// The parent of one of Ratchet's LOD sets (`Play::ratchet_lods`; no mesh, so despawned here at a level change).
+#[derive(Component)]
+struct RatchetLod;
+
+fn despawn_lod_parents(mut commands: Commands, q: Query<Entity, With<RatchetLod>>) {
+    for e in &q { commands.entity(e).despawn(); }
+}
 
 /// The set of the gameplay tick system (crate::menu_render runs its frame after it).
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -521,6 +530,11 @@ pub struct Play {
     spawn_moby: Moby,
     extra: ExtraMobys,
     entities: Vec<Entity>,
+    /// The parents of his high- and low-LOD entities (all in `entities` with the metal ones): MobyProc's LOD pick
+    /// shows one set; `ratchet_low` is empty without a low LOD.
+    ratchet_lods: [Entity; 2],
+    ratchet_has_low: bool,
+    ratchet_lod_low: bool,
     uploaded: Option<u64>,
     /// The moby loop: scheduler state, the class table (shared with the hero's per-tick collision scene), the
     /// services it owns.
@@ -1270,7 +1284,15 @@ fn setup(
     let mut extra = ExtraMobys::new(lv, vec![0; moby_render::EXTRA_RECORD_SIZE], crate::moby_anim::identity_palette(slots), &mut buffers);
     let hm = &game.mobys.mobys[hero_id];
     let t = Transform::from_matrix(moby_render::extra_model(rows3(&hm.rows), placed.scale, [hm.position[0], hm.position[1], hm.position[2]]));
-    let entities = extra.spawn(&mut commands, lv, &m.classes[placed.class], 0, t, "Ratchet (play)", &mut meshes, &mut images, &mut materials);
+    let (ratchet_high, ratchet_metal) = extra.spawn_split(&mut commands, lv, &m.classes[placed.class], 0, t, "Ratchet (play)", &mut meshes, &mut images, &mut materials);
+    let ratchet_low = extra.spawn_low(&mut commands, lv, &m.classes[placed.class], 0, t, "Ratchet (play)", &mut meshes, &mut images, &mut materials);
+    let entities: Vec<Entity> = ratchet_high.iter().chain(&ratchet_metal).chain(&ratchet_low).copied().collect();
+    // The LOD sets under one parent each (identity transforms): the pick toggles the parents, so the scene / vendor /
+    // travel hides, which set the entities themselves, keep working.
+    let ratchet_lods = [
+        commands.spawn((RatchetLod, Transform::IDENTITY, Visibility::Inherited, Name::new("Ratchet LOD high"))).add_children(&ratchet_high).id(),
+        commands.spawn((RatchetLod, Transform::IDENTITY, Visibility::Hidden, Name::new("Ratchet LOD low"))).add_children(&ratchet_low).id(),
+    ];
     let mut hidden = 0;
     for (e, tag) in &gameplay_entities {
         if tag.0 as usize == hero_ii && !entities.contains(&e) {
@@ -1348,6 +1370,9 @@ fn setup(
         spawn_moby,
         extra,
         entities,
+        ratchet_lods,
+        ratchet_has_low: !ratchet_low.is_empty(),
+        ratchet_lod_low: false,
         uploaded: None,
         sched,
         classes: std::sync::Arc::new(classes),
@@ -2143,6 +2168,22 @@ fn upload(
         p.ratchet_late = Some(late);
         moby_render::queue_late(&mut commands, p.entities.clone(), late);
     }
+    let cam = cams.iter().next().map(|t| {
+        let [fwd, left, up] = crate::game_camera::game_rows(t);
+        (crate::game_camera::game_eye(t), crate::moby_lod::camera_rows(fwd, left, up))
+    });
+    let tan_x = crate::game_camera::projection_tan_x(projs.iter().next());
+    // MobyProc's LOD pick (crate::moby_lod: low past his class's lod_trans 32, about 44 units of view depth to his
+    // sphere's centre). [L] his culls and distance fade are not applied (he is always near the camera in play).
+    let hm = &p.game.mobys.mobys[p.hero_id];
+    let low = p.ratchet_has_low
+        && cam.is_some_and(|(eye, rows)| {
+            let h = &lv.mobys.classes[p.class].class.header;
+            let inp = crate::moby_lod::ProcInput { position: pos3(hm), rows: rows3(&hm.rows), scale: hm.scale, draw_distance: i32::MAX, lod_trans: h.lod_trans, shine_distance: 0, alpha: 0x80 };
+            let sphere = crate::moby_lod::world_sphere(&inp, crate::moby_lod::seq_sphere(class, &p.ratchet.state, h.bsphere));
+            let v = crate::moby_lod::view_centre(sphere, eye, &rows);
+            crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tan_x).is_ok_and(|q| q.low_lod)
+        });
     // Hidden in first person (mode bit 1, `HeroSyncMoby` 0x229f20 → 0x2486c0).
     let hidden = hero_mode & rc_game::moby_runtime::mode::HIDDEN != 0;
     if hidden != p.ratchet_hidden {
@@ -2150,13 +2191,14 @@ fn upload(
         let v = if hidden { Visibility::Hidden } else { Visibility::Inherited };
         for &e in &p.entities { commands.entity(e).insert(v); }
     }
+    if low != p.ratchet_lod_low {
+        p.ratchet_lod_low = low;
+        let vis = |on: bool| if on { Visibility::Inherited } else { Visibility::Hidden };
+        commands.entity(p.ratchet_lods[0]).insert(vis(!low));
+        commands.entity(p.ratchet_lods[1]).insert(vis(low));
+    }
     if let Some(mut buf) = buffers.get_mut(&p.extra.palette) { buf.data = Some(palette); }
     if let Some(mut buf) = buffers.get_mut(&p.extra.instances) { buf.data = Some(record); }
-    let cam = cams.iter().next().map(|t| {
-        let [fwd, left, up] = crate::game_camera::game_rows(t);
-        (crate::game_camera::game_eye(t), crate::moby_lod::camera_rows(fwd, left, up))
-    });
-    let tan_x = crate::game_camera::projection_tan_x(projs.iter().next());
     upload_dynamic(&mut p, lv, cam, tan_x, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0, deferred);
 }
 

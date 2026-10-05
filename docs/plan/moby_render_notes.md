@@ -141,9 +141,10 @@ two disc tests), `moby_render.rs`, `assets/shaders/moby.wgsl`, `assets/shaders/m
   (5,546 chrome + 14,612 glass); 8,478 entities (1,963 / 3,460 / 961 / 1,510 in the four groups, 584 metal), 269 meshes.
   At the Ratchet camera (`RC_PLAY=0`): 847 culled (62 draw distance, 528 near/behind, 257 frustum), 36 high (+14 fading),
   10 low (+12 fading), 9 metal. Wrench and Clank show the chrome map.
-- **Not modelled:** the snapshot sphere (seq A = 0xff: key B's sphere is used), mode 0x200 (additive ALPHA_1 0x48) and mode
-  bit 3 (no Novalis instance), the deferred/shadow path (0x400/0x800, `param_4`), the guard-band MSCAL 0x0e/0x0a choice
-  (the GPU clips), the moby Z offset 8388096 vs the tfrag 8388112 (16 Z units), draw distance/LOD/fade of extras.
+- **Not modelled:** the snapshot sphere (seq A = 0xff: key B's sphere is used), the guard-band MSCAL 0x0e/0x0a choice
+  (the GPU clips), the moby Z offset 8388096 vs the tfrag 8388112 (16 Z units), the extras' culls and distance fade.
+  Since modelled: mode 0x200 and bit 3 (§8, `MobyBlend::pick`), the deferred/shadow path per moby (2026-10-05,
+  `CasterTwin`), Ratchet's LOD pick (2026-10-05; the attachments' classes have no low LOD).
 
 ## 8. Translucent and additive mobys, and the point-light merge (2026-09-28)
 
