@@ -15,6 +15,7 @@
 //! | | the collected byte `0x1bb784[uid]` (level01's 0x1bbb04) or the death bit `0x14c190 + level·0x100` → state 3 and `fun_00212ed8(m, 1, 0)` unless in 3 | [`update`] (`creature::hard_cut`) |
 //! | | `MobyGetHitMessage(m, −1, 0)` (`0x248ea8` = `0x26f320`): an attacker (+0x20) and type +0x28 = 3, its bits clear → skill point 5 (`allocate_voice_for_bank_entry(1, 0, 0)`, `ShowBanner(0x53d6)`), `SpawnBeamExplosion(0, 0, 4, 2, 9, 1, 15, m, 0, pos + (0, 0, 1), 10, 3, 16, 0, 1, 1, −1, 0)`, state 3, sequence 1, the death bit and this visit's (0x1ba5d0 = level01's 0x1ba950) | [`update`] (`story::award_skill_point`, `fx::beam_explosion`) |
 //! | | +0xa4 = 0xff; 0x13d4cc (the Swingshot) owned and not in state 3 → no states | [`update`] |
+//! | (scene exit) | `NpcTalkRefresh(npc, talk, 1)` (`0x2ac608`, outside the class): the dialogue advances | [`update`] (`interact::poll_scene_end`) |
 //! | state 0 | +0x38 = Ratchet's moby's light words; → 1; `NpcTalkRegister(m, pvars)` (`0x254a58` = `0x27b480`); flag 25 set → talk +0x04 = 1, +0x36 = 2 | [`update`] (`interact::talk_register_at`) |
 //! | state 1 | `NpcTalkUpdate` (`0x254600` = `0x27b028`) → flag 25 = 1, `FUN_00251988(2.7, m)` (= `0x2783a8`), 2 | [`update`] (`interact::talk_update_at`, `interact::place_after_scene`) |
 //! | state 2 | game mode ≠ 2 → 1; talk +0x04 = 2 and +0x4c ≠ −1 → the checkpoint record `0x273ac0` (= `0x29ac10`) at the cuboid (+0x30, +0x70) | [`update`] (`checkpoint::record`) |
@@ -58,6 +59,9 @@ fn blown(w: &mut World, id: MobyId) {
 /// Level03 `0x2dbd90` (module doc).
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < SIZE { w.mm(id).pvars.resize(SIZE, 0); }
+    // The end of its scene (`NpcTalkRefresh(npc, talk, 1)` in the game's scene exit): the dialogue moves on to the
+    // next node. Without it the auto node replayed the same scene as soon as Ratchet was back in range.
+    interact::poll_scene_end(w, id);
     if w.m(id).visible != 0 {
         let cam = w.camera.map(|x| f32::from_bits(x.0));
         if c::dist3(c::pos(w, id), cam) < 26.0 {
