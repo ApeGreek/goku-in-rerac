@@ -442,6 +442,7 @@ fn draw(
     if st.drawn == Some(counter) { return; }
     st.drawn = Some(counter);
     let level_fog = fog.map(|f| f.uniform).unwrap_or_else(|| TfragFog::new(&level.0.fog));
+    let missile = crate::visibomb_view::missile_view(play.as_deref());
     let cam = game_eye(cam_t).to_array();
     let to_game = |v: Vec3| [v.x, -v.z, v.y];
     let rows = [to_game(*cam_t.forward()), to_game(*cam_t.left())];
@@ -487,14 +488,16 @@ fn draw(
                 if !anim(ga, st, &mut images) { continue; }
                 let r = &g.grid;
                 let lf = LevelFog { color: r.fog_rgb, near_dist: r.fog[0], far_dist: r.fog[1], near_intensity: r.fog[2], far_intensity: r.fog[3] };
+                // With 0x15f458 = 1 (the Visibomb's view) the set-up keeps the level fog and FOGCOL (`0x2c1978`).
+                let grid_fog = if missile { level_fog } else { TfragFog::new(&lf) };
                 let opaque = run.fix >= 0x61;
                 let prims = grid_prims(&g.grid, &g.module, gp.scale, run.z, if opaque { 0x80 } else { run.fix }, cam);
-                groups.push(Group { tex: Tex::Anim(ga), effect: (!opaque).then_some(Blend::Mix), fog: TfragFog::new(&lf), bias, prims });
+                groups.push(Group { tex: Tex::Anim(ga), effect: (!opaque).then_some(Blend::Mix), fog: grid_fog, bias, prims });
                 // Level 9's lava meshes (317's callback `0x2ef750`): the flows before the grid, the grid-textured ones
                 // after it with its image, fog and FIX.
                 for (j, set) in g.extras.iter().enumerate() {
                     let b = if set.before_grid { bias - 1.0 - j as f32 } else { bias + 1.0 + j as f32 };
-                    mesh_set_groups(&mut groups, set, counter, cam, &view, b, level_fog, Some((ga, run.fix, TfragFog::new(&lf))), [0.0; 2], &mut |a| anim(a, st, &mut images));
+                    mesh_set_groups(&mut groups, set, counter, cam, &view, b, level_fog, Some((ga, run.fix, grid_fog)), [0.0; 2], &mut |a| anim(a, st, &mut images));
                 }
             }
             (SeaKind::Ocean, SeaData::Ocean(t)) => {
@@ -520,6 +523,7 @@ fn draw(
                     grid_prims_into(&mut prims, r, &g.module, gs::aridia_ref::SCALE, r.origin[2], if opaque { 0x80 } else { g.fix }, cam);
                 }
                 let lf = LevelFog { color: g.fog_rgb, near_dist: g.fog[0], far_dist: g.fog[1], near_intensity: g.fog[2], far_intensity: g.fog[3] };
+                // (`0x2a4818` has no Visibomb-view branch: the record's fog always.)
                 groups.push(Group { tex: Tex::Anim(g.anim), effect: (!opaque).then_some(Blend::Mix), fog: TfragFog::new(&lf), bias, prims });
             }
             (SeaKind::Pool(pm), SeaData::Pool(d)) => {

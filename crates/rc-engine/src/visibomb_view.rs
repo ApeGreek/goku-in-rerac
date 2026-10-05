@@ -70,6 +70,9 @@ fn last_tick(p: &Play) -> u64 { p.game.counter.wrapping_sub(1) }
 /// `HudDraw` skips the HUD this frame (0x17e988).
 pub fn hud_off(play: Option<&Play>) -> bool { play.is_some_and(|p| p.svc.visibomb.hud_off_at == Some(last_tick(p))) }
 
+/// 0x15f458 = 1 this frame (the missile in flight): the liquid grids keep the level fog (crate::sea_render).
+pub fn missile_view(play: Option<&Play>) -> bool { play.is_some_and(|p| p.svc.visibomb.missile_view_at == Some(last_tick(p))) }
+
 /// The occlusion fallback 0x15f608 the last tick set for this frame (`Services::occlusion_fallback`; 0: none).
 pub fn occlusion_fallback(play: Option<&Play>) -> u8 {
     play.and_then(|p| p.svc.occlusion_fallback.filter(|&(t, _)| t == last_tick(p))).map_or(0, |(_, v)| v)

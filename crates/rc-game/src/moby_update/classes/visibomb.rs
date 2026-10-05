@@ -21,7 +21,7 @@
 //! the gun (at the point's height) to the point that hits (flags 0, Ratchet ignored) starts it exploding there
 //! (+0xbc = 1); 0x15f608 = 1 (the occlusion shows everything this frame); `force_help_message(6, 0)`.
 //!
-//! **Update** ([`update`], `0x2cbda8`), every tick: 0x15f608 = 1, 0x15f458 = 1 (no reader), the help box suspended
+//! **Update** ([`update`], `0x2cbda8`), every tick: 0x15f608 = 1, 0x15f458 = 1 (`Globals::missile_view_at`: the liquid grids keep the level fog that frame), the help box suspended
 //! (`0x225a28`), 0x17e988 = 1, `force_help_message(6, 0)`; the timer steps; ended ([`end_flight`]) when it reached
 //! −`ticks(100)`, when Ratchet is hurt, dead or held (states 0x16 / 0x3d / 0x72 / 0x65), in movement groups 2, 3, 4,
 //! 5, 7, 0xa, 0x10 or ≥ 0xd, or not on the ground (0x13f650 = 0). After the flight (timer < 0) the camera orbits the
@@ -150,6 +150,9 @@ pub struct Globals {
     pub missile: Option<MobyId>,
     /// 0x17e988 = 1 in the tick with this counter: `HudDraw` skips the HUD (and clears it) that frame.
     pub hud_off_at: Option<u64>,
+    /// 0x15f458 = 1 in the tick with this counter (`UpdateFog` clears it every frame): the liquid grids' set-up keeps the
+    /// level fog and its colour (`rc-engine` sea_render; level09 `0x2c1978`).
+    pub missile_view_at: Option<u64>,
     pub view: View,
     /// The range limiter's static (`0x302438`), the quads its draw made in the frame of `static_at`.
     pub static_quads: Vec<StaticDraw>,
@@ -389,6 +392,7 @@ pub fn fins(w: &mut World, id: MobyId) {
 pub fn update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x80 { w.mm(id).pvars.resize(0x80, 0); }
     frame_flags(w);
+    w.svc.visibomb.missile_view_at = Some(w.counter);
     let timer = p::i32(&w.m(id).pvars, pv::TIMER) - 1;
     p::set_i32(&mut w.mm(id).pvars, pv::TIMER, timer);
     let (state, group) = (w.hero.state, w.hero.group);
