@@ -867,6 +867,9 @@ pub struct Services {
     /// The camera shake requests this tick's class updates made (their stores into 0x167260 / 0x167270), in order;
     /// taken by the tick and applied to the camera before the hero update ([`World::shake_camera`]).
     pub camera_shakes: Vec<crate::follow_camera::ShakeRequest>,
+    /// The classes' screen-space sprites of the last ticks (`crate::targeting::ScreenSprite`; the engine draws the
+    /// last tick's).
+    pub screen_sprites: Vec<crate::targeting::ScreenSprite>,
     /// The race cameras' stores of the last camera update (`crate::follow_camera::race::RaceOut`), made before the next
     /// moby loop (`classes::units::oltanis_rail_bot::camera_stores`).
     pub camera_race: Vec<crate::follow_camera::race::RaceOut>,
@@ -981,6 +984,7 @@ impl Services {
             volumes: Arc::new(rc_formats::volumes::Volumes::default()),
             hero_writes: None,
             camera_shakes: Vec::new(),
+            screen_sprites: Vec::new(),
             camera_race: Vec::new(),
             draw_callbacks: Default::default(),
             reticles: Default::default(),

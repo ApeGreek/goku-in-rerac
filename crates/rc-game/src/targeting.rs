@@ -215,6 +215,27 @@ impl Markers {
 
 /// The game's screen (`UpdateViewContext`: 512 × 416, centre (256, 208), tangents 0.63 and 0.63·0.775 on NTSC).
 pub const SCREEN: [f32; 2] = [512.0, 416.0];
+
+/// A class's screen-space sprite of one frame (a draw callback's `0x203a38` sprite at the projection of a world point:
+/// the Veldin boss beam's flash 1898 `0x2fb690`): centred on `at`'s projection, `half` game pixels each way, FX `fx`,
+/// texel UVs per corner, one colour; blended (PRIM 0x154), drawn with the world's 2D overlays (`rc-engine`
+/// marker_render).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenSprite {
+    /// The tick that registered it.
+    pub tick: u64,
+    pub at: [f32; 3],
+    pub half: f32,
+    pub fx: u16,
+    pub uv: [[i32; 2]; 4],
+    pub rgba: u32,
+}
+
+/// The corners of a [`ScreenSprite`] centred on `c` in the order its draw sends them: (x + h, y − h), (x − h, y − h),
+/// (x + h, y + h), (x − h, y + h).
+pub fn screen_sprite_corners(c: [f32; 2], half: f32) -> [[f32; 2]; 4] {
+    [[c[0] + half, c[1] - half], [c[0] - half, c[1] - half], [c[0] + half, c[1] + half], [c[0] - half, c[1] + half]]
+}
 pub const SCREEN_TAN: [f32; 2] = [0.63, 0.63 * 0.775];
 
 /// `FUN_00218838`'s projection of a world point for a camera at `eye` with rows (forward, left, up), in screen pixels

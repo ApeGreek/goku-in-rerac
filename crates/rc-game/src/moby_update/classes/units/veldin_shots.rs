@@ -73,7 +73,7 @@
 //!
 //! **1898** `0x2fb548`: 0 → deleted; 1: `RegisterDrawCallback(0x2fb690)`, +0x00 += +0x04, past 2 → deleted. `0x2fb5e0(p, n,
 //! c1, c2)`: `CreateMoby(0x76a)`: position, +0x0c c2, +0x08 c1, +0x04 = 2/n, state 1, update 0xff. [`flash_update`],
-//! [`flash_new`] (the draw `0x2fb690`: NOT ported, G-REN-033).
+//! [`flash_new`] (the draw `0x2fb690`: [`flash_sprite`], drawn by `rc-engine` marker_render).
 
 use crate::moby_runtime::{mode, MobyId};
 use crate::moby_update::classes::draw_callbacks::Callback;
@@ -753,16 +753,41 @@ pub fn flash_new(w: &mut World, p: c::V, n: i32, c1: u32, c2: u32) -> Option<Mob
     Some(id)
 }
 
+/// gp−0x462c / −0x4628 / −0x4624..−0x4618 (level18 0x1625d4..): the flash's FX 11, its size 800 (GS pixels at t = 1)
+/// and its UVs (texels ×16: (0, 0), (0, 0x400), (0x400, 0), (0x400, 0x400)).
+const FLASH_FX: u16 = 11;
+const FLASH_SIZE: f32 = 800.0;
+const FLASH_UV: [[i32; 2]; 4] = [[0, 0], [0, 64], [64, 0], [64, 64]];
+
+/// The draw `0x2fb690` of 1898 (TEST 0x5380b around it): a screen sprite on its position's projection, `800·min(t, 1)`
+/// pixels each way, colour `tween(clamp(t − 1, 0, 1), +0x08, +0x0c)`.
+pub fn flash_sprite(w: &World, id: MobyId) -> crate::targeting::ScreenSprite {
+    let t = c::pf(w, id, 0);
+    let grow = t.min(1.0);
+    let fade = (t - 1.0).clamp(0.0, 1.0);
+    let rgba = crate::hud::tween_color(fade, c::pi32(w, id, 8) as u32, c::pi32(w, id, 0xc) as u32);
+    let p = c::pos(w, id);
+    let half = ((FLASH_SIZE * 16.0 * grow) as i32) as f32 / 16.0;
+    crate::targeting::ScreenSprite { tick: w.counter, at: [p[0], p[1], p[2]], half, fx: FLASH_FX, uv: FLASH_UV, rgba }
+}
+
 /// Level18 0x2fb548 (module doc).
 pub fn flash_update(w: &mut World, id: MobyId) {
     if w.m(id).pvars.len() < 0x10 { return; }
     match w.m(id).state {
         0 => w.delete_moby(id),
         1 => {
-            // `RegisterDrawCallback(0x2fb690)`: NOT ported (G-REN-033).
+            // `RegisterDrawCallback(0x2fb690)` (its draw after this update: [`flash_sprite`]).
             let t = c::pf(w, id, 0) + c::pf(w, id, 4);
             c::set_pf(w, id, 0, t);
-            if 2.0 < t { w.delete_moby(id); }
+            if 2.0 < t {
+                w.delete_moby(id);
+                return;
+            }
+            let s = flash_sprite(w, id);
+            let tick = w.counter;
+            w.svc.screen_sprites.retain(|x| x.tick == tick);
+            w.svc.screen_sprites.push(s);
         }
         _ => {}
     }
