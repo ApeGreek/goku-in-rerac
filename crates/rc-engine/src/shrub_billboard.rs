@@ -84,8 +84,9 @@ pub struct BillboardMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub texture: Handle<Image>,
-    #[uniform(2)]
-    pub fog: crate::game_camera::TfragFog,
+    #[storage(2, read_only)]
+    /// The shared fog buffer (crate::game_camera::fog_buffer).
+    pub fog: Handle<bevy::render::storage::ShaderBuffer>,
     #[uniform(3)]
     pub params: BillboardParams,
     /// One `BillboardInst` per billboard instance (see shrub_billboard.wgsl).
@@ -171,7 +172,6 @@ pub(crate) fn spawn_billboards(
     if std::env::var("RC_NO_BILLBOARDS").is_ok_and(|v| v.trim() == "1") { return; }
     let t0 = Instant::now();
     let shrubs: &LevelShrubs = &level.shrubs;
-    let fog = crate::game_camera::TfragFog::new(&level.fog);
     let sampler = ImageSamplerDescriptor {
         // CLAMP_1 = 5 from the pass-1 setup packet.
         address_mode_u: ImageAddressMode::ClampToEdge,
@@ -236,7 +236,7 @@ pub(crate) fn spawn_billboards(
     for d in &draws {
         for variant in 0..3u8 {
             let params = BillboardParams { misc: Vec4::new(variant as f32, d.mxl as f32, d.k, crate::game_camera::NEAR) };
-            let mat = materials.add(BillboardMaterial { texture: d.image.clone(), fog, params, instances: instances.clone(), variant });
+            let mat = materials.add(BillboardMaterial { texture: d.image.clone(), fog: crate::game_camera::fog_buffer(), params, instances: instances.clone(), variant });
             let mut e = commands.spawn((
                 Mesh3d(d.mesh.clone()),
                 MeshMaterial3d(mat),

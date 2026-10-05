@@ -59,8 +59,9 @@ pub struct TfragMaterial {
     #[sampler(1)]
     pub texture: Handle<Image>,
     /// Level fog as the VU/GS apply it (crate::game_camera::TfragFog).
-    #[uniform(2)]
-    pub fog: crate::game_camera::TfragFog,
+    #[storage(2, read_only)]
+    /// The shared fog buffer (crate::game_camera::fog_buffer).
+    pub fog: Handle<bevy::render::storage::ShaderBuffer>,
     /// VU qw666..669, the w slope, and this batch's TEX1 K / MXL.
     #[uniform(3)]
     pub lod: TfragLodUniform,
@@ -327,7 +328,6 @@ pub fn spawn_tfrags_on(
         level.tfrag_lod.block.unknown_8, level.tfrag_lod.block.lod_distances(), lod_base.k666, lod_base.k667, lod_base.k668, lod_base.k669
     );
 
-    let fog = crate::game_camera::TfragFog::new(&level.fog);
     let fallback = images.add(Image::new_fill(
         Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -396,7 +396,7 @@ pub fn spawn_tfrags_on(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(materials.add(TfragMaterial {
                     texture: image.clone(),
-                    fog,
+                    fog: crate::game_camera::fog_buffer(),
                     lod,
                     slots: slots.clone(),
                     vinfos: vinfos.clone(),

@@ -164,8 +164,9 @@ pub struct ShrubMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub texture: Handle<Image>,
-    #[uniform(2)]
-    pub fog: crate::game_camera::TfragFog,
+    #[storage(2, read_only)]
+    /// The shared fog buffer (crate::game_camera::fog_buffer).
+    pub fog: Handle<bevy::render::storage::ShaderBuffer>,
     #[uniform(3)]
     pub params: ShrubParams,
     /// One `ShrubInst` per gameplay instance (see shrub.wgsl), indexed by `MeshTag`.
@@ -570,7 +571,6 @@ fn spawn_shrubs_on(
     let sway_buffer = buffers.add(ShaderBuffer::new(&data, RenderAssetUsages::default()));
     let mut sway = ShrubSway { enabled: sway_enabled(), buffer: sway_buffer.clone(), len: n, instances: Vec::new(), last_tick: None, data };
 
-    let fog = crate::game_camera::TfragFog::new(&level.fog);
     let fallback = images.add(Image::new_fill(
         Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -637,7 +637,7 @@ fn spawn_shrubs_on(
                         .or_insert_with(|| {
                             materials.add(ShrubMaterial {
                                 texture: image.clone(),
-                                fog,
+                                fog: crate::game_camera::fog_buffer(),
                                 params: ShrubParams { misc: Vec4::new(list as f32, mxl as f32, crate::game_camera::NEAR, 0.0) },
                                 instances: inst_buffer.clone(),
                                 sway: sway_buffer.clone(),

@@ -50,7 +50,7 @@ struct TieInst {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var tex_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: TieFog;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<storage, read> fog: TieFog;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> params: TieParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> insts: array<TieInst>;
 

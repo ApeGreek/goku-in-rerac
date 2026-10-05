@@ -92,7 +92,7 @@ struct VInfo {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var tex: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var tex_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<uniform> fog: TfragFog;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var<storage, read> fog: TfragFog;
 @group(#{MATERIAL_BIND_GROUP}) @binding(3) var<uniform> lod: TfragLod;
 @group(#{MATERIAL_BIND_GROUP}) @binding(4) var<storage, read> slots: array<Slot>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var<storage, read> vinfos: array<VInfo>;

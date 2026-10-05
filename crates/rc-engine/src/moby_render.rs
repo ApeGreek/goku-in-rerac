@@ -221,8 +221,9 @@ pub struct MobyMaterial {
     #[sampler(1)]
     pub texture: Handle<Image>,
     /// The moby VU1 program writes F with the same fog lanes as the tfrag one (docs/plan/moby_render_notes.md).
-    #[uniform(2)]
-    pub fog: crate::game_camera::TfragFog,
+    #[storage(2, read_only)]
+    /// The shared fog buffer (crate::game_camera::fog_buffer).
+    pub fog: Handle<bevy::render::storage::ShaderBuffer>,
     /// `MobyInst` per gameplay instance, indexed by `MeshTag`.
     #[storage(3, read_only, visibility(vertex))]
     pub instances: Handle<ShaderBuffer>,
@@ -328,8 +329,9 @@ pub struct MobyMetalMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub texture: Handle<Image>,
-    #[uniform(2)]
-    pub fog: crate::game_camera::TfragFog,
+    #[storage(2, read_only)]
+    /// The shared fog buffer (crate::game_camera::fog_buffer).
+    pub fog: Handle<bevy::render::storage::ShaderBuffer>,
     #[storage(3, read_only, visibility(vertex))]
     pub instances: Handle<ShaderBuffer>,
     #[storage(4, read_only, visibility(vertex))]
@@ -433,7 +435,6 @@ impl MobyBlend {
 /// The buffers every material of one record set shares (moby.wgsl bindings 2..7).
 #[derive(Clone)]
 struct MatProto {
-    fog: crate::game_camera::TfragFog,
     instances: Handle<ShaderBuffer>,
     palette: Handle<ShaderBuffer>,
     normal_table: Handle<ShaderBuffer>,
@@ -510,7 +511,7 @@ impl MatCache {
             .or_insert_with(|| {
                 materials.add(MobyMaterial {
                     texture: image.clone(),
-                    fog: proto.fog,
+                    fog: crate::game_camera::fog_buffer(),
                     instances: proto.instances.clone(),
                     palette: proto.palette.clone(),
                     normal_table: proto.normal_table.clone(),
@@ -597,7 +598,7 @@ impl Plugin for MobyRenderPlugin {
                     .before(VisibilitySystems::VisibilityPropagate)
                     .before(bevy::asset::AssetEventSystems),
             )
-            .add_systems(PostUpdate, push_metal_fog.after(crate::fog_state::FogSet))
+
             // After moby_attach's PostUpdate upload of the extra records (read here).
             .add_systems(Last, update_extra_metal);
     }
@@ -983,9 +984,7 @@ fn spawn_mobys(
     if m.cpu_light && moby_anim::anim_enabled() { println!("mobys: RC_MOBY_CPU_LIGHT=1 draws the bind pose (the CPU colours are for the identity palette)"); }
     commands.insert_resource(MobyAnim::new(animate, anims, palette.clone(), palette_len));
 
-    let fog = crate::game_camera::TfragFog::new(&level.fog);
     let mut cache = MatCache::new(MatProto {
-        fog,
         instances: inst_buffer.clone(),
         palette: palette.clone(),
         normal_table: normal_table.clone(),
@@ -1062,7 +1061,7 @@ fn spawn_mobys(
                         .or_insert_with(|| {
                             metal_materials.add(MobyMetalMaterial {
                                 texture: image.clone(),
-                                fog,
+                                fog: crate::game_camera::fog_buffer(),
                                 instances: inst_buffer.clone(),
                                 palette: palette.clone(),
                                 normal_table: normal_table.clone(),
@@ -1429,16 +1428,6 @@ pub fn update_moby_occlusion(
     }
 }
 
-/// Keeps the metal materials' fog uniform equal to the frame's (crate::fog_state pushes the other materials).
-fn push_metal_fog(fog: Option<Res<crate::game_camera::GameFog>>, mut materials: ResMut<Assets<MobyMetalMaterial>>) {
-    let Some(fog) = fog else { return };
-    let want = fog.uniform;
-    let stale: Vec<AssetId<MobyMetalMaterial>> = materials.iter().filter(|(_, m)| m.fog != want).map(|(id, _)| id).collect();
-    for id in stale {
-        if let Some(mut m) = materials.get_mut(id) { m.fog = want; }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1678,7 +1667,6 @@ pub struct ExtraMobys {
     /// `MobyLod` per slot (vertex alpha from [`ExtraMobys::show_slot`], else 0x80; shine alpha and E written by
     /// update_extra_metal).
     lods: Handle<ShaderBuffer>,
-    fog: crate::game_camera::TfragFog,
     cache: MatCache,
     metal_images: HashMap<i32, (Handle<Image>, AlphaRange)>,
     /// High-LOD parts per class (`o_class`), built on first use.
@@ -1733,7 +1721,6 @@ impl ExtraMobys {
         };
         let slots = records.len() / RECORD_SIZE;
         let proto = MatProto {
-            fog: crate::game_camera::TfragFog::new(&level.fog),
             instances: buffers.add(ShaderBuffer::new(&records, RenderAssetUsages::default())),
             palette: buffers.add(ShaderBuffer::new(&palette, RenderAssetUsages::default())),
             normal_table: buffers.add(ShaderBuffer::new(&table_bytes, RenderAssetUsages::RENDER_WORLD)),
@@ -1745,7 +1732,6 @@ impl ExtraMobys {
             palette: proto.palette.clone(),
             normal_table: proto.normal_table.clone(),
             lods: proto.lods.clone(),
-            fog: proto.fog,
             cache: MatCache::new(proto),
             metal_images: HashMap::new(),
             parts: HashMap::new(),
@@ -1887,7 +1873,7 @@ impl ExtraMobys {
             for pass in metal_passes(texel_alpha) {
                 let mat = MobyMetalMaterial {
                     texture: image.clone(),
-                    fog: self.fog,
+                    fog: crate::game_camera::fog_buffer(),
                     instances: self.instances.clone(),
                     palette: self.palette.clone(),
                     normal_table: self.normal_table.clone(),

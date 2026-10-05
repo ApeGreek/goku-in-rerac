@@ -135,8 +135,9 @@ pub struct TieMaterial {
     #[texture(0)]
     #[sampler(1)]
     pub texture: Handle<Image>,
-    #[uniform(2)]
-    pub fog: crate::game_camera::TfragFog,
+    #[storage(2, read_only)]
+    /// The shared fog buffer (crate::game_camera::fog_buffer).
+    pub fog: Handle<bevy::render::storage::ShaderBuffer>,
     #[uniform(3)]
     pub params: TieParams,
     /// One `TieInst` per gameplay instance (see tie.wgsl), indexed by `MeshTag`.
@@ -428,7 +429,6 @@ fn spawn_ties_on(
     let tint = if crate::tie_lod::tint_enabled() { 1.0 } else { 0.0 };
 
     // Images (mip chain, raw GS alpha) and materials per (texture, wrap, blend).
-    let fog = crate::game_camera::TfragFog::new(&level.fog);
     let fallback = images.add(Image::new_fill(
         Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         TextureDimension::D2,
@@ -492,7 +492,7 @@ fn spawn_ties_on(
                     .or_insert_with(|| {
                         materials.add(TieMaterial {
                             texture: image.clone(),
-                            fog,
+                            fog: crate::game_camera::fog_buffer(),
                             params: TieParams { misc: Vec4::new(crate::game_camera::NEAR, mxl as f32, tint, 0.0) },
                             instances: inst_buffer.clone(),
                             lods: lod_buffer.clone(),

@@ -29,7 +29,7 @@
 
 use crate::determinism::FrameNumber;
 use crate::fly_cam::FlyCam;
-use crate::game_camera::{game_eye, GameFog, LevelFog, TfragFog};
+use crate::game_camera::{game_eye, GameFog, LevelFog};
 use crate::tfrag_render::game_to_bevy;
 use anyhow::{Context, Result};
 use bevy::core_pipeline::fullscreen_material::FullscreenMaterial;
@@ -165,18 +165,7 @@ impl Plugin for FogStatePlugin {
         app.add_plugins(crate::gs_post::GsPostPlugin::<UnderwaterTint>::default())
             .configure_sets(PostUpdate, FogSet.before(crate::occlusion::OcclusionSet))
             .add_systems(PostUpdate, update_fog_state.in_set(FogSet))
-            .add_systems(FixedUpdate, hero_env_lighting.after(crate::gameplay::GameTick))
-            .add_systems(
-                PostUpdate,
-                (
-                    push_fog::<crate::tfrag_render::TfragMaterial>,
-                    push_fog::<crate::tie_render::TieMaterial>,
-                    push_fog::<crate::moby_render::MobyMaterial>,
-                    push_fog::<crate::shrub_render::ShrubMaterial>,
-                    push_fog::<crate::shrub_billboard::BillboardMaterial>,
-                )
-                    .after(FogSet),
-            );
+            .add_systems(FixedUpdate, hero_env_lighting.after(crate::gameplay::GameTick));
         if let Ok(v) = std::env::var("RC_CAM_PATH") {
             let mut parts = v.split(';').map(crate::parse_cam);
             match (parts.next().flatten(), parts.next().flatten()) {
@@ -310,38 +299,6 @@ fn update_fog_state(
         (Some(w), _) => { commands.entity(entity).insert(w); }
         (None, Some(_)) => { commands.entity(entity).remove::<UnderwaterTint>(); }
         (None, None) => {}
-    }
-}
-
-/// A material with the shared fog uniform (binding 2).
-trait FogUniform: Asset {
-    fn fog(&mut self) -> &mut TfragFog;
-    fn fog_ref(&self) -> &TfragFog;
-}
-
-macro_rules! fog_uniform {
-    ($($t:ty),*) => {$(
-        impl FogUniform for $t {
-            fn fog(&mut self) -> &mut TfragFog { &mut self.fog }
-            fn fog_ref(&self) -> &TfragFog { &self.fog }
-        }
-    )*};
-}
-fog_uniform!(
-    crate::tfrag_render::TfragMaterial,
-    crate::tie_render::TieMaterial,
-    crate::moby_render::MobyMaterial,
-    crate::shrub_render::ShrubMaterial,
-    crate::shrub_billboard::BillboardMaterial
-);
-
-/// Writes the frame's fog uniform into every material of type `M` whose uniform differs (also catches
-/// materials created after a fog change, e.g. `moby_render::ExtraMobys`).
-fn push_fog<M: FogUniform>(fog: Res<GameFog>, mut materials: ResMut<Assets<M>>) {
-    let want = fog.uniform;
-    let stale: Vec<AssetId<M>> = materials.iter().filter(|(_, m)| *m.fog_ref() != want).map(|(id, _)| id).collect();
-    for id in stale {
-        if let Some(mut m) = materials.get_mut(id) { *m.fog() = want; }
     }
 }
 

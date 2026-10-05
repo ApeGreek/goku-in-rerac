@@ -68,6 +68,23 @@ impl GameFog {
     pub fn new(fog: LevelFog, particle_far12: i32) -> Self { GameFog { fog, uniform: TfragFog::new(&fog), particle_far12 } }
 }
 
+/// The frame's fog ([`GameFog::uniform`]) in one storage buffer every world material binds (tfrags, ties, shrubs,
+/// shrub billboards, mobys and their metal pass: binding 2): a fog change rewrites these 32 bytes instead of every
+/// material (a material change makes Bevy rebuild its bind group, thousands of them per frame during a fog
+/// zone's cross-fade).
+static FOG_BUFFER: std::sync::OnceLock<Handle<bevy::render::storage::ShaderBuffer>> = std::sync::OnceLock::new();
+
+/// The shared fog buffer ([`FOG_BUFFER`]) for a new material.
+pub fn fog_buffer() -> Handle<bevy::render::storage::ShaderBuffer> { FOG_BUFFER.get().cloned().expect("GameCameraPlugin creates the fog buffer") }
+
+fn fog_bytes(f: &TfragFog) -> Vec<u8> { f.color.to_array().iter().chain(&f.params.to_array()).flat_map(|v| v.to_le_bytes()).collect() }
+
+/// Rewrites the shared fog buffer when the frame's fog changes.
+fn upload_fog(fog: Res<GameFog>, mut buffers: ResMut<Assets<bevy::render::storage::ShaderBuffer>>) {
+    if !fog.is_changed() { return; }
+    if let Some(mut b) = FOG_BUFFER.get().and_then(|h| buffers.get_mut(h)) { b.data = Some(fog_bytes(&fog.uniform)); }
+}
+
 impl Plugin for GameCameraPlugin {
     fn build(&self, app: &mut App) {
         let (k656, k661) = self.fog.vu_constants();
@@ -76,7 +93,11 @@ impl Plugin for GameCameraPlugin {
             self.fog.color, self.fog.near_intensity, self.fog.near_dist, self.fog.far_intensity, self.fog.far_dist,
             if std::env::var("RC_FOG").is_ok_and(|v| v.trim() == "0") { " (disabled by RC_FOG=0)" } else { "" }
         );
-        app.insert_resource(GameFog::new(self.fog, rc_game::fog_zones::PARTICLE_FAR12)).add_systems(Update, (letterbox, print_game_camera));
+        let fog = GameFog::new(self.fog, rc_game::fog_zones::PARTICLE_FAR12);
+        let buf = bevy::render::storage::ShaderBuffer::new(&fog_bytes(&fog.uniform), bevy::asset::RenderAssetUsages::default());
+        let h = app.world_mut().resource_mut::<Assets<bevy::render::storage::ShaderBuffer>>().add(buf);
+        let _ = FOG_BUFFER.set(h);
+        app.insert_resource(fog).add_systems(Update, (letterbox, print_game_camera)).add_systems(PostUpdate, upload_fog.before(bevy::asset::AssetEventSystems));
     }
 }
 
