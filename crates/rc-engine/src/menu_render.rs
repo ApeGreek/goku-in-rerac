@@ -659,7 +659,7 @@ fn menu_frame(
             let mirror = gs.options().mirror;
             play.game.pad.update(Some(&input.bytes()), mirror);
             let inp = MenuInput::from_pad(&play.game.pad, true);
-            let env = MenuEnv { vsync, b13f4: 0, pal: false };
+            let env = MenuEnv { vsync, b13f4: play.game.hero.mode, pal: false };
             let mut start_fade = None;
             let mut freeze_req: Option<u32> = None;
             if rt.post_fade.is_some() {
@@ -1133,7 +1133,7 @@ fn freeze_frame(rt: &mut MenuRt, mm: &mut MenuMode, play: &mut Play, gs: &mut rc
     if f.prev == 3 {
         if let Some(m) = rt.menu.as_mut() {
             saves_in(m, play);
-            m.draw(&rt.assets, gs, &MenuEnv { vsync, b13f4: 0, pal: false }, &mut play.game.rng, &mut rt.draws);
+            m.draw(&rt.assets, gs, &MenuEnv { vsync, b13f4: play.game.hero.mode, pal: false }, &mut play.game.rng, &mut rt.draws);
             saves_out(m);
         }
     }
@@ -1248,7 +1248,7 @@ fn front_end_frame(
     play.game.pad.update(Some(&input.bytes()), mirror);
     let pressed = play.game.pad.pressed;
     let inp = MenuInput::from_pad(&play.game.pad, true);
-    let env = MenuEnv { vsync, b13f4: 0, pal: false };
+    let env = MenuEnv { vsync, b13f4: play.game.hero.mode, pal: false };
     // The level under the front end stays silent (`snd_PauseAllSoundsInGroup(0x1d)`, `music_Pause`) [L: the boot has its
     // own sound bank and title music, G-SAV-012].
     if !fer.paused {
