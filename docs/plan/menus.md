@@ -526,11 +526,11 @@ sub-pages (`crates/rc-game/src/menus/pause/port.rs`, `PageMenu::install_port_pag
   disc's ids are 0..21500); "off" is the game's 20315. Records use addresses 0x7f00_xxxx, which no EE pointer can hold.
 * **Rows** (`port::ENTRIES`, one entry per option): Anti-aliasing: off / 2x / 4x / 8x → `render_settings::RenderSettings::msaa`
   (engine `menu_render.rs` syncs the row with the resource around each menu tick; a change is applied by
-  `render_settings::apply` and saved). Shadows: on / off. Aspect ratio: 4:3 / 16:9, Resolution: Window / 416p / 832p / 1248p /
-  1664p and Fullscreen: off / on → `display::DisplaySettings` (the game frame every camera renders into, presented
-  on black at the window's size; keys `aspect` / `resolution` / `fullscreen` in the settings file). 16:9 is Hor+: the
-  world projection's x tangent is the game's × 4/3 and culling reads the live projection; the 512×416 screen maps to
-  the frame's centred 4:3 box, the HUD layer is 85 game px wider on each side (its left/right-anchored slots move out,
+  `render_settings::apply` and saved). Shadows: on / off. Aspect ratio: 4:3 / 16:10 / 16:9, Resolution: Window / 416p / 720p /
+  1080p / 1440p / 2160p and Fullscreen: off / on → `display::DisplaySettings` (the game frame every camera renders into, presented
+  on black at the window's size; keys `aspect` / `resolution` / `fullscreen` in the settings file). 16:10 / 16:9 are Hor+: the
+  world projection's x tangent is the game's × 6/5 / × 4/3 and culling reads the live projection; the 512×416 screen maps to
+  the frame's centred 4:3 box, the HUD layer is 51 / 85 game px wider on each side (its left/right-anchored slots move out,
   primitives spanning the screen stretch) and the menu pages stay clipped to the box (`Prim::boxed`). The world is not re-rendered under the menu (the snapshot is shown), so the new
   setting is visible from the first gameplay frame after the close.
 * **Device support**: the row offers only the sample counts the GPU can use for every multisampled world attachment

@@ -60,14 +60,16 @@ pub mod text {
     pub const SHADOWS: i32 = -0x120;
     pub const RESOLUTION: i32 = -0x130;
     pub const RES_WINDOW: i32 = -0x131;
-    pub const RES_1: i32 = -0x132;
-    pub const RES_2: i32 = -0x133;
-    pub const RES_3: i32 = -0x134;
-    pub const RES_4: i32 = -0x135;
+    pub const RES_416: i32 = -0x132;
+    pub const RES_720: i32 = -0x133;
+    pub const RES_1080: i32 = -0x134;
+    pub const RES_1440: i32 = -0x135;
+    pub const RES_2160: i32 = -0x136;
     pub const FULLSCREEN: i32 = -0x140;
     pub const ASPECT: i32 = -0x150;
     pub const ASPECT_4_3: i32 = -0x151;
     pub const ASPECT_16_9: i32 = -0x152;
+    pub const ASPECT_16_10: i32 = -0x153;
     /// The game's own "on" / "off" (20314 / 20315, the Subtitles / HelpDesk toggle values).
     pub const ON: i32 = 20314;
     pub const OFF: i32 = 20315;
@@ -83,14 +85,16 @@ pub mod text {
             SHADOWS => b"Shadows",
             RESOLUTION => b"Resolution",
             RES_WINDOW => b"Window",
-            RES_1 => b"416p",
-            RES_2 => b"832p",
-            RES_3 => b"1248p",
-            RES_4 => b"1664p",
+            RES_416 => b"416p",
+            RES_720 => b"720p",
+            RES_1080 => b"1080p",
+            RES_1440 => b"1440p",
+            RES_2160 => b"2160p",
             FULLSCREEN => b"Fullscreen",
             ASPECT => b"Aspect ratio",
             ASPECT_4_3 => b"4:3",
             ASPECT_16_9 => b"16:9",
+            ASPECT_16_10 => b"16:10",
             _ => return None,
         })
     }
@@ -103,11 +107,12 @@ pub enum Setting {
     Msaa,
     /// The moby shadows (docs/plan/shadows.md): value 0 on (the game's look, the default), 1 off.
     Shadows,
-    /// The render resolution (the engine's game frame): value 0 fits the window, 1..4 the multiples of the 416-line screen (at the Aspect row's ratio).
+    /// The render resolution (the engine's game frame): value 0 fits the window, 1..5 a height of 416 (the PS2's lines), 720, 1080, 1440 or 2160 (the width
+    /// follows the Aspect row).
     Resolution,
     /// The window: value 0 windowed, 1 fullscreen.
     Fullscreen,
-    /// The frame's aspect: value 0 the TV's 4:3, 1 16:9 (the 3D view widens; the 2D screen stays 4:3, centred).
+    /// The frame's aspect: value 0 the TV's 4:3, 1 16:10, 2 16:9 (the 3D view widens; the 2D screen stays 4:3, centred).
     Aspect,
 }
 
@@ -123,8 +128,8 @@ pub struct Entry {
 pub const ENTRIES: &[Entry] = &[
     Entry { setting: Setting::Msaa, label: text::ANTI_ALIASING, values: &[text::OFF, text::X2, text::X4, text::X8] },
     Entry { setting: Setting::Shadows, label: text::SHADOWS, values: &[text::ON, text::OFF] },
-    Entry { setting: Setting::Aspect, label: text::ASPECT, values: &[text::ASPECT_4_3, text::ASPECT_16_9] },
-    Entry { setting: Setting::Resolution, label: text::RESOLUTION, values: &[text::RES_WINDOW, text::RES_1, text::RES_2, text::RES_3, text::RES_4] },
+    Entry { setting: Setting::Aspect, label: text::ASPECT, values: &[text::ASPECT_4_3, text::ASPECT_16_10, text::ASPECT_16_9] },
+    Entry { setting: Setting::Resolution, label: text::RESOLUTION, values: &[text::RES_WINDOW, text::RES_416, text::RES_720, text::RES_1080, text::RES_1440, text::RES_2160] },
     Entry { setting: Setting::Fullscreen, label: text::FULLSCREEN, values: &[text::OFF, text::ON] },
 ];
 

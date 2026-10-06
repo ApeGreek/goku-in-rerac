@@ -49,8 +49,8 @@ module that reads it: `grep -rn '"RC_' crates/` lists them all.
 | `RC_DUMP_REALTIME` | `1`: `RC_DUMP_FRAMES` in real-time mode (wall-clock ticks as in play, not frame-exact; dev only) |
 | `RC_DUMP_TICKS` | `n,m,…`: in frame-exact mode, update k runs the k-th entry's game ticks, cycled (`1,0` = a 120 Hz display, `2` = 30 Hz; dev only, for real-time pacing repros) |
 | `RC_NOVSYNC` | `1`: present without vsync, so `fps:` measures headroom |
-| `RC_ASPECT` | `4:3` (default: the original TV picture) or `16:9` (Hor+: the view widens, the HUD's side elements move to the frame's edges, the menus stay in the centred 4:3 box); overrides the Port Options value at start (crate::display) |
-| `RC_RESOLUTION` | `window` (default: the largest frame of the Aspect ratio that fits the window) or `1`..`4` (416, 832, 1248 or 1664 lines at the Aspect ratio, scaled to the window); overrides the Port Options value at start (crate::display) |
+| `RC_ASPECT` | `4:3` (default: the original TV picture), `16:10` or `16:9` (Hor+: the view widens, the HUD's side elements move to the frame's edges, the menus stay in the centred 4:3 box); overrides the Port Options value at start (crate::display) |
+| `RC_RESOLUTION` | `window` (default: the largest frame of the Aspect ratio that fits the window) or `416`, `720`, `1080`, `1440`, `2160` (a frame that many lines high at the Aspect ratio, scaled to the window); overrides the Port Options value at start (crate::display) |
 | `RC_FULLSCREEN` | `1`: borderless fullscreen on the current monitor; `0`: windowed; overrides the Port Options value at start (F11 toggles in game) |
 | `RC_FOG` | `0`: disable fog |
 | `RC_NO_LIGHT` | `1`: skip the load-time lighting passes (tfrag, tie, shrub, moby); stored colours used |

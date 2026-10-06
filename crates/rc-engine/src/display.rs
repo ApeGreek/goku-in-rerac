@@ -7,14 +7,16 @@
 //! frame itself.
 //!
 //! **Aspect.** The PS2 drew 512×416 and the TV showed it at 4:3; the frame is 4:3 ([`Aspect::Original`], the
-//! default) or 16:9 ([`Aspect::Wide`]). The game's 512×416 screen (the HUD, the menus, the item canvases) always maps
-//! onto the frame's centred 4:3 box ([`ui_box`]: the whole frame at 4:3) and the 3D view widens around it: in 16:9
-//! the world cameras' horizontal tangent is the game's ×4/3 ([`hor_scale`], Hor+: the vertical view is the game's).
+//! default), 16:10 ([`Aspect::Wide16x10`], a MacBook's screen) or 16:9 ([`Aspect::Wide16x9`]). The game's 512×416
+//! screen (the HUD, the menus, the item canvases) always maps onto the frame's centred 4:3 box ([`ui_box`]: the whole
+//! frame at 4:3) and the 3D view widens around it: the world cameras' horizontal tangent is the game's ×6/5 at 16:10,
+//! ×4/3 at 16:9 ([`hor_scale`], Hor+: the vertical view is the game's).
 //!
 //! **Settings** ([`DisplaySettings`], the Port Options page; persisted in the port settings file,
 //! `crate::render_settings::save_key`): the aspect, the render resolution — "Window" (the largest frame of the aspect
-//! that fits the window, in physical pixels) or a frame 416·k pixels high (k = 1..4) scaled to the window — and
-//! fullscreen (borderless on the current monitor). `RC_ASPECT=4:3|16:9`, `RC_RESOLUTION=window|1|2|3|4` and
+//! that fits the window, in physical pixels) or a frame of a fixed height (416p, the PS2's lines, or 720p / 1080p /
+//! 1440p / 2160p; the width follows the aspect) scaled to the window — and fullscreen (borderless on the current
+//! monitor). `RC_ASPECT=4:3|16:10|16:9`, `RC_RESOLUTION=window|416|720|1080|1440|2160` and
 //! `RC_FULLSCREEN=0|1` override the file at start; F11 toggles fullscreen and saves it.
 //!
 //! The frame's format is the window's swap-chain format (`Bgra8UnormSrgb`), so every pipeline is specialised as it
@@ -30,7 +32,7 @@ use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy::render::view::Msaa;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode, WindowRef};
 
-use crate::game_camera::{SCREEN_H, SCREEN_W};
+use crate::game_camera::SCREEN_W;
 
 /// The present camera's own layer (nothing else draws in it).
 pub const PRESENT_LAYER: usize = 63;
@@ -42,73 +44,79 @@ pub struct GameFrame {
     pub size: UVec2,
 }
 
-/// The frame's shape: the TV's 4:3 or 16:9.
+/// The frame's shape: the TV's 4:3, or a wide screen's 16:10 / 16:9 (the Port Options row's order).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Aspect {
     Original,
-    Wide,
+    Wide16x10,
+    Wide16x9,
 }
 
 impl Aspect {
-    #[cfg(test)]
-    pub const ALL: [Aspect; 2] = [Aspect::Original, Aspect::Wide];
-    pub fn index(self) -> u8 { self as u8 }
-    pub fn from_index(i: u8) -> Self { if i == 1 { Aspect::Wide } else { Aspect::Original } }
+    /// The Port Options row's values, in order.
+    pub const ALL: [Aspect; 3] = [Aspect::Original, Aspect::Wide16x10, Aspect::Wide16x9];
+    pub fn index(self) -> u8 { Self::ALL.iter().position(|&a| a == self).unwrap_or(0) as u8 }
+    pub fn from_index(i: u8) -> Self { Self::ALL.get(i as usize).copied().unwrap_or(Aspect::Original) }
     /// Width / height.
     pub fn ratio(self) -> f32 {
         match self {
             Aspect::Original => 4.0 / 3.0,
-            Aspect::Wide => 16.0 / 9.0,
+            Aspect::Wide16x10 => 16.0 / 10.0,
+            Aspect::Wide16x9 => 16.0 / 9.0,
         }
     }
-    fn parse(v: &str) -> Option<Self> {
-        match v.trim() {
-            "4:3" => Some(Aspect::Original),
-            "16:9" => Some(Aspect::Wide),
-            _ => None,
-        }
-    }
+    fn parse(v: &str) -> Option<Self> { Self::ALL.into_iter().find(|a| a.key() == v.trim()) }
     fn key(self) -> &'static str {
         match self {
             Aspect::Original => "4:3",
-            Aspect::Wide => "16:9",
+            Aspect::Wide16x10 => "16:10",
+            Aspect::Wide16x9 => "16:9",
         }
     }
 }
 
-/// The factor on the game camera's horizontal tangent (0.63) for `aspect`: 1 at 4:3, 4/3 at 16:9 (the frame is that
-/// much wider at the same height, and the view keeps the TV's proportions).
+/// The factor on the game camera's horizontal tangent (0.63) for `aspect`: 1 at 4:3, 6/5 at 16:10, 4/3 at 16:9 (the
+/// frame is that much wider at the same height, and the view keeps the TV's proportions).
 pub fn hor_scale(aspect: Aspect) -> f32 { aspect.ratio() / Aspect::Original.ratio() }
 
-/// The game pixels the frame extends past the 512-wide game screen on each side (0 at 4:3; 85 at 16:9): the HUD's
+/// The game pixels the frame extends past the 512-wide game screen on each side (0 at 4:3, 51 at 16:10, 85 at 16:9): the HUD's
 /// layer is that much wider (crate::hud_render), its left / right slots move out by it (`rc_game::hud`).
 pub fn side_extra(aspect: Aspect) -> i32 { ((SCREEN_W * hor_scale(aspect) - SCREEN_W) * 0.5).round() as i32 }
 
-/// The render resolution: fit to the window, or a fixed frame height of 416·k pixels.
+/// The render resolution: fit to the window, or a fixed frame height (the width follows the aspect): the PS2's 416
+/// lines or a common screen height.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Resolution {
     Window,
-    Scale(u8),
+    Height(u16),
 }
 
 impl Resolution {
     /// The Port Options row's values, in order.
-    pub const ALL: [Resolution; 5] = [Resolution::Window, Resolution::Scale(1), Resolution::Scale(2), Resolution::Scale(3), Resolution::Scale(4)];
+    pub const ALL: [Resolution; 6] = [
+        Resolution::Window,
+        Resolution::Height(416),
+        Resolution::Height(720),
+        Resolution::Height(1080),
+        Resolution::Height(1440),
+        Resolution::Height(2160),
+    ];
 
     pub fn index(self) -> u8 { Self::ALL.iter().position(|&r| r == self).unwrap_or(0) as u8 }
     pub fn from_index(i: u8) -> Self { Self::ALL.get(i as usize).copied().unwrap_or(Resolution::Window) }
 
+    /// `window`, or a height of the list (`720p` or `720`).
     fn parse(v: &str) -> Option<Self> {
-        match v.trim() {
-            "window" => Some(Resolution::Window),
-            n => n.parse::<u8>().ok().filter(|k| (1..=4).contains(k)).map(Resolution::Scale),
-        }
+        let v = v.trim();
+        if v == "window" { return Some(Resolution::Window); }
+        let h = v.strip_suffix('p').unwrap_or(v).parse::<u16>().ok()?;
+        Self::ALL.into_iter().find(|&r| r == Resolution::Height(h))
     }
 
     fn key(self) -> String {
         match self {
             Resolution::Window => "window".into(),
-            Resolution::Scale(k) => k.to_string(),
+            Resolution::Height(h) => format!("{h}p"),
         }
     }
 }
@@ -147,12 +155,12 @@ impl DisplaySettings {
 }
 
 /// The frame's size for `res` and `aspect` in a window of `window` physical pixels: the largest rectangle of the
-/// aspect that fits, or one 416·k pixels high.
+/// aspect that fits, or one of the chosen height.
 pub fn frame_size(res: Resolution, aspect: Aspect, window: UVec2) -> UVec2 {
     let a = aspect.ratio();
     match res {
-        Resolution::Scale(k) => {
-            let h = SCREEN_H * k as f32;
+        Resolution::Height(h) => {
+            let h = h as f32;
             UVec2::new((h * a).round() as u32, h as u32)
         }
         Resolution::Window => {
@@ -362,11 +370,16 @@ mod tests {
 
     #[test]
     fn sizes() {
-        let (o, w) = (Aspect::Original, Aspect::Wide);
+        let (o, w) = (Aspect::Original, Aspect::Wide16x9);
         assert_eq!(frame_size(Resolution::Window, o, UVec2::new(1024, 768)), UVec2::new(1024, 768));
         assert_eq!(frame_size(Resolution::Window, o, UVec2::new(2560, 1440)), UVec2::new(1920, 1440));
         assert_eq!(frame_size(Resolution::Window, w, UVec2::new(2560, 1440)), UVec2::new(2560, 1440));
-        assert_eq!(frame_size(Resolution::Scale(2), o, UVec2::new(300, 300)), UVec2::new(1109, 832));
+        assert_eq!(frame_size(Resolution::Height(1080), o, UVec2::new(300, 300)), UVec2::new(1440, 1080));
+        assert_eq!(frame_size(Resolution::Height(1080), Aspect::Wide16x10, UVec2::new(300, 300)), UVec2::new(1728, 1080));
+        assert_eq!(frame_size(Resolution::Height(1080), w, UVec2::new(300, 300)), UVec2::new(1920, 1080));
+        assert_eq!(frame_size(Resolution::Window, Aspect::Wide16x10, UVec2::new(3024, 1890)), UVec2::new(3024, 1890));
+        assert_eq!(side_extra(Aspect::Wide16x10), 51);
+        assert_eq!(Resolution::parse("720"), Some(Resolution::Height(720)));
         assert_eq!(ui_box(UVec2::new(2560, 1440)), (Vec2::new(320.0, 0.0), Vec2::new(1920.0, 1440.0)));
         assert_eq!(ui_box(UVec2::new(1024, 768)), (Vec2::ZERO, Vec2::new(1024.0, 768.0)));
         assert_eq!(hor_scale(o), 1.0);
