@@ -43,7 +43,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{ClearColorConfig, RenderTarget, SubCameraView};
 use bevy::core_pipeline::tonemapping::{DebandDither, Tonemapping};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureFormat};
+use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::Msaa;
 use bevy::transform::TransformSystems;
 
@@ -147,7 +147,7 @@ pub struct CanvasPlugin;
 
 impl Plugin for CanvasPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Canvases>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<Canvases>).add_systems(PostUpdate, apply.before(TransformSystems::Propagate));
+        app.init_resource::<Canvases>().add_systems(crate::level_switch::LevelUnload, crate::level_switch::reset::<Canvases>).add_systems(PostUpdate, apply.before(TransformSystems::Propagate).in_set(crate::display::ResizeTargets));
     }
 }
 
@@ -185,8 +185,13 @@ pub(crate) fn apply(
             continue;
         };
         let same = images.get(&s.image).is_some_and(|i| i.texture_descriptor.size.width == size.x && i.texture_descriptor.size.height == size.y);
+        // A fresh image of the new size (crate::display::fresh_target): the node shows it, the camera is spawned again on it.
         if !same {
-            if let Some(mut img) = images.get_mut(&s.image) { img.resize(Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 }); }
+            if let Some(new) = crate::display::fresh_target(&mut images, &s.image, size) {
+                if let Ok((_, mut img, _)) = nodes.get_mut(s.node) { img.image = new.clone(); }
+                if let Some(e) = s.cam.take() { commands.entity(e).despawn(); }
+                s.image = new;
+            }
         }
         let (mut tan_x, mut tan_y, offset) = v.camera();
         if let Some(t) = s.tan { (tan_x, tan_y) = t; }

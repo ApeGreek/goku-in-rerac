@@ -212,7 +212,9 @@ impl Plugin for DisplayPlugin {
             .add_systems(Startup, spawn_present)
             .add_systems(First, sync_frame)
             .add_systems(Update, (toggle_fullscreen, apply_mode, fit_present).chain())
-            .add_systems(PostUpdate, (place_boxed, box_views, fly_view));
+            .add_systems(PostUpdate, (place_boxed, box_views, fly_view, refresh_resized_targets
+                .after(ResizeTargets)
+                .before(bevy::camera::CameraUpdateSystems)));
     }
 }
 
@@ -253,6 +255,33 @@ fn sync_frame(mut frame: ResMut<GameFrame>, settings: Res<DisplaySettings>, wind
     if want == frame.size { return; }
     if let Some(mut img) = images.get_mut(&frame.image) { img.resize(Extent3d { width: want.x, height: want.y, depth_or_array_layers: 1 }); }
     frame.size = want;
+}
+
+/// A copy of the image target `old` at `size`, added as a new image: the caller points its cameras, nodes and
+/// materials at it. A target resized in place keeps a stale render-world size (its content came out scaled by the new /
+/// old width after an aspect switch); a fresh image starts clean. The old image drops with its last handle.
+pub fn fresh_target(images: &mut Assets<Image>, old: &Handle<Image>, size: UVec2) -> Option<Handle<Image>> {
+    let mut img = images.get(old)?.clone();
+    img.resize(Extent3d { width: size.x.max(1), height: size.y.max(1), depth_or_array_layers: 1 });
+    Some(images.add(img))
+}
+
+/// The PostUpdate systems that resize camera image targets (crate::menu_render's layer, crate::screen_canvas):
+/// [`refresh_resized_targets`] runs after them.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ResizeTargets;
+
+/// A camera whose image target was resized this frame (the frame, the HUD layer, the menu layer, the canvases: after
+/// their resizing systems) takes the new size before Bevy's camera update. Bevy re-reads an image target's size only
+/// on the image's asset event, which reaches `camera_system` a frame later, while a camera whose projection changed
+/// (crate::display's tangents on an aspect switch) re-reads it at once: the cameras sharing the frame's depth texture
+/// (sized by whichever comes first) would disagree and wgpu rejects the pass (depth 555×416 against colour 740×416).
+fn refresh_resized_targets(images: Res<Assets<Image>>, mut cams: Query<(&Camera, &RenderTarget, &mut Projection)>) {
+    for (c, t, mut p) in &mut cams {
+        let RenderTarget::Image(i) = t else { continue };
+        let Some(img) = images.get(&i.handle) else { continue };
+        if c.physical_target_size().is_some_and(|s| s != img.size()) { p.set_changed(); }
+    }
 }
 
 /// F11: fullscreen on / off (saved).

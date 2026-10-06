@@ -37,6 +37,8 @@
 //! the same target on that frame (it then blits it to the target after the graph), or, for a window target,
 //! a texture the window's cameras render into on that frame only (a swap-chain texture cannot be sampled),
 //! which is then copied back to the swap chain (`copy`). The world keeps rendering underneath (hidden).
+//! Port-only: when the frame changes size under the menu (Port Options' aspect / resolution, a window resize), the
+//! snapshot is taken again from the next frame's render with the menu layer and the HUD hidden (`MenuRt::resnap`).
 //!
 //! **Menu layer** (`PageMenuDraw` steps 1–3: snapshot, black, then the 14 class-0x472 frame mobys with
 //! `DrawMobyList(m, 1)` under TEST_1 0x5360b over a Z buffer the frame's clear packet set to 0): an
@@ -157,6 +159,9 @@ struct MenuRt {
     snapshot_ready: bool,
     /// The snapshot texture (written on the GPU, module docs).
     snapshot: Handle<Image>,
+    /// Port-only: frames left with the menu layer and the HUD hidden while the snapshot is taken again after the frame
+    /// changed size under the menu (Port Options' aspect / resolution; crate::display).
+    resnap: u8,
     trace: bool,
     /// The menu layer (module docs).
     layer: MenuLayer,
@@ -229,7 +234,7 @@ impl Plugin for MenuPlugin {
             .add_systems(FixedUpdate, crate::saves::card_frame.after(menu_frame))
             .add_systems(FixedUpdate, return_page_reopen.before(crate::gameplay::GameTick))
             .add_systems(Update, (target_main_camera, build_prims).chain().in_set(MenuPrims).before(HudBuild))
-            .add_systems(PostUpdate, menu_layer.before(TransformSystems::Propagate))
+            .add_systems(PostUpdate, menu_layer.before(TransformSystems::Propagate).in_set(crate::display::ResizeTargets))
             .add_systems(PostUpdate, crate::interact_render::hide_hero.after(crate::moby_render::update_moby_occlusion).before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app
@@ -395,6 +400,7 @@ fn setup(
         snapshot_request: false,
         snapshot_ready: false,
         snapshot: snapshot.clone(),
+        resnap: 0,
         trace: std::env::var("RC_MENU_TRACE").is_ok_and(|v| v.trim() == "1"),
         layer,
         post_fade: None,
@@ -1422,6 +1428,7 @@ fn menu_layer(
     spawn_hidden: Query<(), With<crate::moby_spawn::SpawnHidden>>,
     mut images: ResMut<Assets<Image>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    (mut targets, mut image_nodes, hud_nodes): (Query<&mut RenderTarget>, Query<&mut ImageNode>, Query<Entity, With<crate::hud_render::HudCompositeNode>>),
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
@@ -1431,11 +1438,26 @@ fn menu_layer(
     let layer = &mut rt.layer;
     // The layer image and the snapshot follow the main target: the game frame (crate::display).
     if let Some(size) = Some(frame.size).filter(|s| s.x > 0 && s.y > 0) {
-        for h in [&layer.image, &rt.snapshot] {
-            let same = images.get(h).is_some_and(|i| i.texture_descriptor.size.width == size.x && i.texture_descriptor.size.height == size.y);
-            if !same {
-                if let Some(mut img) = images.get_mut(h) { img.resize(Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 }); }
+        // Fresh images of the new size (crate::display::fresh_target): the cameras and nodes showing them move along.
+        // A snapshot of the old size is taken again (an aspect / resolution change from Port Options): the next frame's
+        // render is copied with the layer and the HUD hidden, as the gameplay frame the menu was entered on.
+        if images.get(&layer.image).is_some_and(|i| i.size() != size) {
+            rt.snapshot_ready = false;
+            // Not in the front end (crate::saves): its layer is opaque over the hidden world and shows no snapshot.
+            if active && !crate::saves::front_end_active() {
+                rt.snapshot_request = true;
+                rt.resnap = 2;
             }
+        }
+        for h in [&mut layer.image, &mut rt.snapshot] {
+            let same = images.get(&*h).is_some_and(|i| i.texture_descriptor.size.width == size.x && i.texture_descriptor.size.height == size.y);
+            if same { continue; }
+            let Some(new) = crate::display::fresh_target(&mut images, h, size) else { continue };
+            for mut t in &mut targets {
+                if matches!(&*t, RenderTarget::Image(i) if i.handle.id() == h.id()) { *t = RenderTarget::Image(new.clone().into()); }
+            }
+            for mut n in &mut image_nodes { if n.image.id() == h.id() { n.image = new.clone(); } }
+            *h = new;
         }
     }
     if let Ok(mut c) = cams.get_mut(layer.cam2d) {
@@ -1451,8 +1473,15 @@ fn menu_layer(
         };
         if !matches!(c.clear_color, ClearColorConfig::Custom(k) if k == clear) { c.clear_color = ClearColorConfig::Custom(clear); }
     }
+    let resnap = rt.resnap > 0;
+    rt.resnap = rt.resnap.saturating_sub(1);
     if let Ok(mut v) = vis.get_mut(layer.node) {
-        let want = if active { Visibility::Visible } else { Visibility::Hidden };
+        let want = if active && !resnap { Visibility::Visible } else { Visibility::Hidden };
+        if *v != want { *v = want; }
+    }
+    for e in &hud_nodes {
+        let Ok(mut v) = vis.get_mut(e) else { continue };
+        let want = if resnap { Visibility::Hidden } else { Visibility::Inherited };
         if *v != want { *v = want; }
     }
     // The 3D camera exists only in mode 3 (other systems take "the" Camera3d; it carries the main transform).

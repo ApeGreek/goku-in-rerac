@@ -744,6 +744,7 @@ fn tick_and_build(
     (mut play, mut audio): (Option<ResMut<crate::gameplay::Play>>, Option<ResMut<crate::audio_out::AudioOut>>),
     dyn_images: Option<Res<crate::hud_images::HudImages>>,
     (display, mut images): (Option<Res<crate::display::DisplaySettings>>, ResMut<Assets<Image>>),
+    (mut composites, mut static_composites, mut targets): (ResMut<Assets<HudComposite>>, ResMut<Assets<HudStaticComposite>>, Query<&mut RenderTarget>),
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
@@ -752,9 +753,16 @@ fn tick_and_build(
     if extra != rt.extra {
         rt.extra = extra;
         rt.state.side_extra = extra;
-        let size = Extent3d { width: (W + 2 * extra) as u32, height: H as u32, depth_or_array_layers: 1 };
-        for h in [&rt.target, &rt.static_target] {
-            if let Some(mut img) = images.get_mut(h) { img.resize(size); }
+        // Fresh targets of the new width (crate::display::fresh_target); the two cameras and composites move to them.
+        let size = UVec2::new((W + 2 * extra) as u32, H as u32);
+        for old in [rt.target.clone(), rt.static_target.clone()] {
+            let Some(new) = crate::display::fresh_target(&mut images, &old, size) else { continue };
+            for mut t in &mut targets {
+                if matches!(&*t, RenderTarget::Image(i) if i.handle.id() == old.id()) { *t = RenderTarget::Image(new.clone().into()); }
+            }
+            for (_, m) in composites.iter_mut() { if m.image.id() == old.id() { m.image = new.clone(); } }
+            for (_, m) in static_composites.iter_mut() { if m.image.id() == old.id() { m.image = new.clone(); } }
+            if old.id() == rt.target.id() { rt.target = new; } else { rt.static_target = new; }
         }
     }
     // The slot calls since the last frame: the game's (the classes', `Services::hud`) then the engine's (the menus').
