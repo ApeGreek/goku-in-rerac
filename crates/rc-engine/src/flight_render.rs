@@ -21,7 +21,7 @@
 
 use crate::fly_cam::FlyCam;
 use crate::fx_draw::{FxAssets, FxGroup, FxPrimMaterial, FxSlots, PrimBuf};
-use crate::game_camera::{game_eye, GameFog, GameProjection, TfragFog, NTSC_Y_RATIO};
+use crate::game_camera::{game_eye, GameFog, GameProjection, TfragFog};
 use crate::sky_render::{SkyCamera, SkyMaterial};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::ClearColorConfig;
@@ -203,17 +203,13 @@ fn update_sky(
 }
 
 /// The sky's tan(hfov/2): at least 0.63 (`DrawWorldPaused`), after the sky camera took the main camera's.
-fn sky_tan(f: Res<FlightRender>, mut sky_cam: Query<&mut Projection, With<SkyCamera>>) {
+fn sky_tan(f: Res<FlightRender>, display: Res<crate::display::DisplaySettings>, mut sky_cam: Query<&mut Projection, With<SkyCamera>>) {
     let Some(d) = f.draw.as_ref().filter(|_| f.active && !f.sky.is_empty()) else { return };
+    // Compared in the game's terms (the projection's x tangent carries the Hor+ factor, crate::display).
+    let (min_x, _) = crate::display::view_tans(d.sky_tan, display.aspect);
     for mut p in &mut sky_cam {
-        if let Projection::Custom(c) = &mut *p {
-            if let Some(g) = c.get_mut::<GameProjection>() {
-                if g.tan_x < d.sky_tan {
-                    g.tan_x = d.sky_tan;
-                    g.tan_y = d.sky_tan * NTSC_Y_RATIO;
-                }
-            }
-        }
+        let below = matches!(&*p, Projection::Custom(c) if c.get::<GameProjection>().is_some_and(|g| g.tan_x < min_x));
+        if below { crate::display::set_view_tans(&mut p, d.sky_tan, display.aspect); }
     }
 }
 
@@ -344,6 +340,7 @@ pub(crate) fn hud_prims(f: &mut FlightRender, h: &mut crate::hud_render::Hud2d, 
             scissor: [0, crate::hud_render::W - 1, 0, H - 1],
             repeat: false,
             nearest: false,
+            boxed: false,
         });
     }
 }

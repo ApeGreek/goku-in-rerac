@@ -233,7 +233,7 @@ pub fn collect(
     play: Option<Res<Play>>,
     level: Res<crate::Level>,
     game: Option<Res<ShadowGame>>,
-    cams: Query<&Transform, With<ShadowCamera>>,
+    cams: Query<(&Transform, Option<&Projection>), With<ShadowCamera>>,
     (scene, vendor_hidden): (Option<Res<crate::scene_render::ActiveScene>>, Query<(), With<crate::interact_render::VendorHidden>>),
     mut out: ResMut<ShadowVolumes>,
     mut trace_frame: Local<u64>,
@@ -245,7 +245,9 @@ pub fn collect(
         if !out.tris.is_empty() { out.tris = Arc::new(Vec::new()); }
         out.deferred.clear();
     };
-    let (Some(play), Some(sg), Some(cam)) = (play, game, cams.iter().next()) else { return clear(&mut out) };
+    let (Some(play), Some(sg), Some((cam, proj))) = (play, game, cams.iter().next()) else { return clear(&mut out) };
+    // MobyProc's frustum planes from the view (16:9 widens them, crate::display).
+    let tans = crate::game_camera::projection_tans(proj);
     if !settings.enabled { return clear(&mut out); }
     let (eye, rows) = (crate::game_camera::game_eye(cam), crate::game_camera::game_rows(cam));
     let cam_rows = moby_lod::camera_rows(rows[0], rows[1], rows[2]);
@@ -273,7 +275,7 @@ pub fn collect(
         let c = [d[0] * q + m.bsphere[0], d[1] * q + m.bsphere[1], d[2] * q + m.bsphere[2], r];
         let v = moby_lod::view_centre(c, eye, &cam_rows);
         let inp = ProcInput { position: [m.position[0], m.position[1], m.position[2]], rows: [[0.0; 3]; 3], scale: m.scale, draw_distance: m.b7f as i32, lod_trans: 0xff, shine_distance: 0, alpha: 0x80 };
-        if moby_lod::moby_proc(v, r, &inp).is_err() { continue; }
+        if moby_lod::moby_proc_view(v, r, &inp, tans).is_err() { continue; }
         let size = volume::shadow_size(m.b7f, moby_lod::sphere_depth(v, r));
         list.push(Deferred { id, size, bytes: volume::caster_bytes(block) });
     }

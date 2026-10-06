@@ -21,7 +21,7 @@
 //! `RC_TIE_LOD_TINT=1` tints LOD 1 red and LOD 2 blue; `RC_TIE_CPU_CULL=0` leaves culled instances visible
 //! to Bevy (the vertex shader alone drops them, as before).
 
-use crate::game_camera::{self, LevelFog, NEAR, NTSC_Y_RATIO, UNITS};
+use crate::game_camera::{self, LevelFog, NEAR, UNITS};
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
@@ -87,10 +87,10 @@ pub fn tie_lod(depth: f32, dists: [f32; 3]) -> TieLodPick {
 /// The occlusion bits (+0x18/+0x19 against the mask copy at 0x70003000, level01 0x2a9dd8..0x2a9e2c) are
 /// tested before this, in `update_tie_lods`. Not modelled: the guard-band box test that sends an instance
 /// to the clipping program 224979 (same LOD and qw4, the GPU clips instead).
-pub fn tie_cull(p: Vec3, r: f32, dist: f32, tan_x: f32) -> Option<f32> {
+pub fn tie_cull(p: Vec3, r: f32, dist: f32, tans: (f32, f32)) -> Option<f32> {
     if dist.to_bits() == 0 { return None; }
     if (dist - r) - (p.z - r) < 0.0 || NEAR / UNITS - (p.z + r) >= 0.0 { return None; }
-    let (tx, ty) = (tan_x, tan_x * NTSC_Y_RATIO);
+    let (tx, ty) = tans;
     let (kx, ky) = ((1.0 + tx * tx).sqrt(), (1.0 + ty * ty).sqrt());
     if tx * p.z - (p.x.abs() - r * kx) < 0.0 || ty * p.z - (p.y.abs() - r * ky) < 0.0 { return None; }
     Some(p.z.max(0.0))
@@ -224,13 +224,13 @@ impl TieLodState {
 pub fn tint_enabled() -> bool { std::env::var("RC_TIE_LOD_TINT").is_ok_and(|v| v.trim() == "1") }
 
 /// One instance's record: (LOD | F << 8, k, w, z).
-fn record(inp: &TieLodInput, eye: Vec3, rows: [Vec3; 3], fog: &LevelFog, force_lod0: bool, tan_x: f32) -> ([u32; 4], usize) {
+fn record(inp: &TieLodInput, eye: Vec3, rows: [Vec3; 3], fog: &LevelFog, force_lod0: bool, tans: (f32, f32)) -> ([u32; 4], usize) {
     let [x, y, z, r] = inp.sphere;
     let d = Vec3::new(x, y, z) - eye;
     let p = Vec3::new(rows[0].dot(d), rows[1].dot(d), rows[2].dot(d));
     // The cap 0x160fe0 (720, already in `inp.dist`): 144 in the Visibomb's view (crate::visibomb_view::SHORT_FAR).
     let dist = if crate::visibomb_view::SHORT_FAR.load(std::sync::atomic::Ordering::Relaxed) { inp.dist.min(crate::visibomb_view::SHORT_TIE_CAP) } else { inp.dist };
-    let Some(depth) = tie_cull(p, r, dist, tan_x) else { return ([LOD_CULLED, 0, 0, 0], 0) };
+    let Some(depth) = tie_cull(p, r, dist, tans) else { return ([LOD_CULLED, 0, 0, 0], 0) };
     let pick = if force_lod0 { TieLodPick::fixed(0) } else { tie_lod(depth, inp.dists) };
     let bin = match (pick.lod, pick.w != 0.0) { (0, false) => 1, (0, true) => 2, (1, _) => 3, _ => 4 };
     ([pick.lod | fog_value(depth, fog) << 8, pick.k.to_bits(), pick.w.to_bits(), pick.z.to_bits()], bin)
@@ -246,7 +246,7 @@ pub fn update_tie_lods(
     mut vis: Query<&mut Visibility>,
 ) {
     let (Some(mut state), Some((cam, proj))) = (state, cams.iter().next()) else { return };
-    let tan_x = game_camera::projection_tan_x(proj);
+    let tans = game_camera::projection_tans(proj);
     let (eye, [fwd, left, up]) = (game_camera::game_eye(cam), game_camera::game_rows(cam));
     let rows = [-left, -up, fwd];
     // hist: occluded, culled, LOD0, LOD0 morphing, LOD1, LOD2.
@@ -260,7 +260,7 @@ pub fn update_tie_lods(
             words.extend_from_slice(&[LOD_CULLED, 0, 0, 0]);
             continue;
         }
-        let (rec, bin) = record(inp, eye, rows, &state.fog, state.force_lod0, tan_x);
+        let (rec, bin) = record(inp, eye, rows, &state.fog, state.force_lod0, tans);
         hist[bin + 1] += 1;
         words.extend_from_slice(&rec);
     }
@@ -334,14 +334,14 @@ mod tests {
 
     #[test]
     fn culling() {
-        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 720.0, crate::game_camera::TAN_HALF_FOV_X), Some(50.0));
-        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 0.0, crate::game_camera::TAN_HALF_FOV_X), None);
-        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 49.0, crate::game_camera::TAN_HALF_FOV_X), None); // centre beyond the draw distance
-        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 50.0, crate::game_camera::TAN_HALF_FOV_X), Some(50.0));
-        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, -10.0), 5.0, 720.0, crate::game_camera::TAN_HALF_FOV_X), None); // behind
-        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, -2.0), 5.0, 720.0, crate::game_camera::TAN_HALF_FOV_X), Some(0.0)); // straddles the camera: depth 0
-        assert_eq!(tie_cull(Vec3::new(100.0, 0.0, 50.0), 5.0, 720.0, crate::game_camera::TAN_HALF_FOV_X), None); // right of the frustum
-        assert!(tie_cull(Vec3::new(33.0, 0.0, 50.0), 5.0, 720.0, crate::game_camera::TAN_HALF_FOV_X).is_some()); // overlaps the side plane
+        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 720.0, crate::game_camera::default_tans()), Some(50.0));
+        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 0.0, crate::game_camera::default_tans()), None);
+        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 49.0, crate::game_camera::default_tans()), None); // centre beyond the draw distance
+        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, 50.0), 5.0, 50.0, crate::game_camera::default_tans()), Some(50.0));
+        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, -10.0), 5.0, 720.0, crate::game_camera::default_tans()), None); // behind
+        assert_eq!(tie_cull(Vec3::new(0.0, 0.0, -2.0), 5.0, 720.0, crate::game_camera::default_tans()), Some(0.0)); // straddles the camera: depth 0
+        assert_eq!(tie_cull(Vec3::new(100.0, 0.0, 50.0), 5.0, 720.0, crate::game_camera::default_tans()), None); // right of the frustum
+        assert!(tie_cull(Vec3::new(33.0, 0.0, 50.0), 5.0, 720.0, crate::game_camera::default_tans()).is_some()); // overlaps the side plane
     }
 
     #[test]

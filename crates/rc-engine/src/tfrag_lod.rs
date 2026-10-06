@@ -14,7 +14,7 @@
 //! `RC_LOD_TINT=1` tints LOD 1 red, LOD 2 blue and the clipping path green; `RC_NOVSYNC=1` presents without
 //! vsync so `fps:` measures headroom.
 
-use crate::game_camera::{self, LevelFog, NEAR, FAR, NTSC_Y_RATIO, UNITS};
+use crate::game_camera::{self, LevelFog, NEAR, FAR, UNITS};
 use crate::level_load::LoadedLevel;
 use anyhow::{Context, Result};
 use bevy::asset::RenderAssetUsages;
@@ -237,8 +237,8 @@ fn clip_flags(c: Vec4) -> u32 {
 ///
 /// The occlusion test (hdr 0x3a/0x3b against the mask copy at 0x70003b00, level01 0x2a80b8..0x2a80e4) runs
 /// before this, in `update_tfrag_modes`; an occluded tfrag never reaches these tests.
-fn tfrag_proc(info: &TfragCullInfo, t: &Tfrag, cam: Vec3, rows: [Vec3; 3], thresholds: [i32; 3], tan_x: f32) -> u32 {
-    let (tx, ty) = (tan_x, tan_x * NTSC_Y_RATIO);
+fn tfrag_proc(info: &TfragCullInfo, t: &Tfrag, cam: Vec3, rows: [Vec3; 3], thresholds: [i32; 3], tans: (f32, f32)) -> u32 {
+    let (tx, ty) = tans;
     let (kx, ky) = ((1.0 + tx * tx).sqrt(), (1.0 + ty * ty).sqrt());
     let [sx, sy, sz, r] = info.sphere;
     let d = Vec3::new(sx, sy, sz) - cam;
@@ -274,7 +274,7 @@ fn update_tfrag_modes(
 ) {
     let (Some(mut state), Some((cam, proj))) = (state, cams.iter().next()) else { return };
     // `UpdateViewContext`'s planes (0x18cdb0 / 0x18cee0) from the view's tangent: a flown ship widens it.
-    let tan_x = game_camera::projection_tan_x(proj);
+    let tans = game_camera::projection_tans(proj);
     let (eye, [fwd, left, up]) = (game_camera::game_eye(cam), game_camera::game_rows(cam));
     let rows = [-left, -up, fwd];
     let cam_raw = eye * UNITS;
@@ -293,7 +293,7 @@ fn update_tfrag_modes(
                 hist[0] += 1;
                 return MODE_CULLED;
             }
-            let mut m = tfrag_proc(info, t, cam_raw, rows, state.thresholds, tan_x);
+            let mut m = tfrag_proc(info, t, cam_raw, rows, state.thresholds, tans);
             if state.force_lod0 && m != MODE_CULLED { m = 0x14; }
             hist[match m { 0 => 0, 2 => 1, 6 => 2, 8 => 3, 0xa => 4, 0xe => 5, 0x10 => 6, _ => 7 }] += 1;
             m
@@ -358,7 +358,7 @@ mod tests {
         let m = |info: TfragCullInfo| {
             let mut t = Tfrag::default();
             t.header.bsphere = info.sphere;
-            tfrag_proc(&info, &t, Vec3::ZERO, rows, th, crate::game_camera::TAN_HALF_FOV_X)
+            tfrag_proc(&info, &t, Vec3::ZERO, rows, th, crate::game_camera::default_tans())
         };
         assert_eq!(m(at(20.0, 0.0, 4.0)), 0x14);   // far 24 < D2 = 30
         assert_eq!(m(at(40.0, 0.0, 4.0)), 0x10);

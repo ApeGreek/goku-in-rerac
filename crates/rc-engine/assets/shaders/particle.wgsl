@@ -17,6 +17,10 @@
 #import bevy_pbr::mesh_view_bindings::view
 #import rerac::display_blend::{gs_add, gs_mix}
 
+// Game pixels per NDC unit across: 256 in the game's 4:3 view; × the frame's widening in 16:9 (crate::display: the
+// projection's x tangent is the game's × s, its y tangent the game's × 0.775, so s = 0.775·(1/tan_y)/(1/tan_x)).
+fn half_w() -> f32 { return 256.0 * 0.775 * view.clip_from_view[1][1] / view.clip_from_view[0][0]; }
+
 struct ParticleParams {
     // x = draw (0 = A >= AREF with Z, 1 = the rest), y = AREF.
     misc: vec4<f32>,
@@ -85,11 +89,11 @@ fn vertex(v: ParticleVertex) -> ParticleVertexOutput {
             // One frame-buffer pixel wide: half a pixel either side, perpendicular to the line on the screen.
             let a = position_world_to_clip(p1);
             let b = position_world_to_clip(p2);
-            let d = vec2<f32>((b.x / b.w - a.x / a.w) * 256.0, (a.y / a.w - b.y / b.w) * 208.0);
+            let d = vec2<f32>((b.x / b.w - a.x / a.w) * half_w(), (a.y / a.w - b.y / b.w) * 208.0);
             let len = max(length(d), 1e-6);
             let nrm = vec2<f32>(-d.y, d.x) / len * (0.5 * side);
             var clip = select(a, b, k >= 2u);
-            clip.x += nrm.x * (1.0 / 256.0) * clip.w;
+            clip.x += nrm.x * (1.0 / half_w()) * clip.w;
             clip.y -= nrm.y * (1.0 / 208.0) * clip.w;
             out.position = clip;
         }
@@ -105,7 +109,7 @@ fn vertex(v: ParticleVertex) -> ParticleVertexOutput {
             out.position = position_world_to_clip(s.p.xyz + vec3<f32>(corner.x, 0.0, -corner.y));
         } else {
             var clip = position_world_to_clip(s.p.xyz);
-            clip.x += corner.x * (1.0 / 256.0) * clip.w;
+            clip.x += corner.x * (1.0 / half_w()) * clip.w;
             clip.y -= corner.y * (1.0 / 208.0) * clip.w;
             out.position = clip;
         }

@@ -64,7 +64,8 @@ fn vertex(v: StarVertex) -> StarVertexOutput {
     if (k == 3u) { corner = -a; st = vec2<f32>(1.0, 1.0); }
     let view_dir = (view.view_from_world * vec4<f32>(s.p.xyz, 0.0)).xyz;
     var clip = view.clip_from_view * vec4<f32>(view_dir, 1.0);
-    clip.x += corner.x * (1.0 / 256.0) * clip.w;
+    // Game pixels per NDC unit across: 256, × the 16:9 widening (crate::display; as particle.wgsl).
+    clip.x += corner.x * (1.0 / (256.0 * 0.775 * view.clip_from_view[1][1] / view.clip_from_view[0][0])) * clip.w;
     clip.y -= corner.y * (1.0 / 208.0) * clip.w;
     clip.z = 0.0;
     out.position = clip;

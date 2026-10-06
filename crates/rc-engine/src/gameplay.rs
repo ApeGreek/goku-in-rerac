@@ -2211,7 +2211,7 @@ fn upload(
         let [fwd, left, up] = crate::game_camera::game_rows(t);
         (crate::game_camera::game_eye(t), crate::moby_lod::camera_rows(fwd, left, up))
     });
-    let tan_x = crate::game_camera::projection_tan_x(projs.iter().next());
+    let tans = crate::game_camera::projection_tans(projs.iter().next());
     // MobyProc's LOD pick (crate::moby_lod: low past his class's lod_trans 32, about 44 units of view depth to his
     // sphere's centre). [L] his culls and distance fade are not applied (he is always near the camera in play).
     let hm = &p.game.mobys.mobys[p.hero_id];
@@ -2221,7 +2221,7 @@ fn upload(
             let inp = crate::moby_lod::ProcInput { position: pos3(hm), rows: rows3(&hm.rows), scale: hm.scale, draw_distance: i32::MAX, lod_trans: h.lod_trans, shine_distance: 0, alpha: 0x80 };
             let sphere = crate::moby_lod::world_sphere(&inp, crate::moby_lod::seq_sphere(class, &p.ratchet.state, h.bsphere));
             let v = crate::moby_lod::view_centre(sphere, eye, &rows);
-            crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tan_x).is_ok_and(|q| q.low_lod)
+            crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tans).is_ok_and(|q| q.low_lod)
         });
     // Hidden in first person (mode bit 1, `HeroSyncMoby` 0x229f20 → 0x2486c0).
     let hidden = hero_mode & rc_game::moby_runtime::mode::HIDDEN != 0;
@@ -2238,7 +2238,7 @@ fn upload(
     }
     if let Some(mut buf) = buffers.get_mut(&p.extra.palette) { buf.data = Some(palette); }
     if let Some(mut buf) = buffers.get_mut(&p.extra.instances) { buf.data = Some(record); }
-    upload_dynamic(&mut p, lv, cam, tan_x, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0, deferred);
+    upload_dynamic(&mut p, lv, cam, tans, &mut commands, &mut buffers, &mut meshes, &mut images, &mut materials, &point_lights.0, deferred);
 }
 
 /// moby+0x00 (the sphere centre, integer units) in game units; the position when the moby has no sphere.
@@ -2257,7 +2257,7 @@ fn upload_dynamic(
     p: &mut Play,
     lv: &crate::level_load::LoadedLevel,
     cam: Option<(Vec3, [Vec3; 3])>,
-    tan_x: f32,
+    tans: (f32, f32),
     commands: &mut Commands,
     buffers: &mut Assets<ShaderBuffer>,
     meshes: &mut Assets<Mesh>,
@@ -2297,7 +2297,7 @@ fn upload_dynamic(
             };
             let sphere = crate::moby_lod::world_sphere(&inp, crate::moby_lod::seq_sphere(&m.anim[ci], &mo.anim, c.bsphere));
             let v = crate::moby_lod::view_centre(sphere, eye, &rows);
-            crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tan_x).ok().map(|p| {
+            crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tans).ok().map(|p| {
                 let e = if p.shine > 0 { crate::moby_lod::shine_basis(sphere, eye, &rows, &inp.rows) } else { [[0.0; 3]; 3] };
                 (ci, p.alpha, p.fading, p.shine, e)
             })

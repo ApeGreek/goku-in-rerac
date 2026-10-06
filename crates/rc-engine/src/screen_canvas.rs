@@ -46,7 +46,6 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureFormat};
 use bevy::render::view::Msaa;
 use bevy::transform::TransformSystems;
-use bevy::ui::UiTargetCamera;
 
 use crate::game_camera::{GameProjection, SCREEN_H, SCREEN_W};
 
@@ -152,14 +151,6 @@ impl Plugin for CanvasPlugin {
     }
 }
 
-/// The 512×416 area in a target of `size` (the game frame: always of that aspect, so the origin is 0): origin and
-/// scale, physical pixels.
-fn viewport(size: UVec2) -> (Vec2, f32) {
-    let scale = (size.x as f32 / SCREEN_W).min(size.y as f32 / SCREEN_H);
-    let vp = UVec2::new((SCREEN_W * scale).round() as u32, (SCREEN_H * scale).round() as u32).min(size).max(UVec2::ONE);
-    (((size - vp) / 2).as_vec2(), scale)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply(
     mut commands: Commands,
@@ -169,21 +160,20 @@ pub(crate) fn apply(
     mut transforms: Query<&mut Transform, Without<crate::fly_cam::FlyCam>>,
     mut cams: Query<(&mut Camera, &mut Projection)>,
     mut nodes: Query<(&mut Node, &mut ImageNode, &mut Visibility)>,
-    targets: Query<(), With<UiTargetCamera>>,
-    hud: Query<Entity, With<crate::hud_render::HudCompositeNode>>,
+    hud: Query<Entity, With<crate::hud_render::HudBoxNode>>,
     parents: Query<(), With<ChildOf>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let Some((main_e, main_t)) = main.iter().next().map(|(e, t)| (e, *t)) else { return };
-    // The game frame (crate::display), which the main camera renders into.
-    let size = frame.size.max(UVec2::ONE);
-    let (origin, scale) = viewport(size);
+    let Some(main_t) = main.iter().next().map(|(_, t)| *t) else { return };
+    // The game frame's 4:3 box (crate::display): the canvas image covers it, the 512×416 screen stretched onto it.
+    let (_, bs) = crate::display::ui_box(frame.size);
+    let size = bs.as_uvec2().max(UVec2::ONE);
+    let scale = Vec2::new(size.x as f32 / SCREEN_W, size.y as f32 / SCREEN_H);
     for s in &mut canvases.slots {
         match s.composite {
-            Composite::UnderHud => {
-                if !targets.contains(s.node) { commands.entity(s.node).insert(UiTargetCamera(main_e)); }
-            }
-            Composite::OverHud => {
+            // Both are children of the HUD composite's 4:3 box (crate::display); under the composite by their global z
+            // index (MAX − 2 < the composite's MAX), over it as plain children.
+            Composite::UnderHud | Composite::OverHud => {
                 if !parents.contains(s.node) {
                     if let Some(h) = hud.iter().next() { commands.entity(h).add_child(s.node); }
                 }
@@ -243,8 +233,8 @@ pub(crate) fn apply(
             let pct = |a: f32, full: f32| Val::Percent(a * 100.0 / full);
             let want = (pct(x0, SCREEN_W), pct(y0, SCREEN_H), pct(x1 - x0, SCREEN_W), pct(y1 - y0, SCREEN_H));
             if (n.left, n.top, n.width, n.height) != want { (n.left, n.top, n.width, n.height) = want; }
-            // The camera renders into the image's letterboxed viewport (crate::game_camera sets it on every Camera3d).
-            let r = Rect::new(origin.x + x0 * scale, origin.y + y0 * scale, origin.x + x1 * scale, origin.y + y1 * scale);
+            // The camera renders the 512×416 screen onto the whole image.
+            let r = Rect::new(x0 * scale.x, y0 * scale.y, x1 * scale.x, y1 * scale.y);
             if img.rect != Some(r) { img.rect = Some(r); }
             vis.set_if_neq(if x1 - x0 >= 0.5 && y1 - y0 >= 0.5 { Visibility::Inherited } else { Visibility::Hidden });
         }
@@ -270,10 +260,4 @@ mod tests {
         assert_eq!(h.focal[0], 128.0);
     }
 
-    #[test]
-    fn viewport_letterboxes() {
-        assert_eq!(viewport(UVec2::new(1024, 832)), (Vec2::ZERO, 2.0));
-        let (o, s) = viewport(UVec2::new(1280, 832));
-        assert_eq!((o, s), (Vec2::new(128.0, 0.0), 2.0));
-    }
 }

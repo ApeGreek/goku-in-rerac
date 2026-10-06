@@ -38,7 +38,7 @@
 //! `game_rows`), so the tests use the port's float camera, not the game's matrix bits: thresholds agree to
 //! float noise.
 
-use crate::game_camera::{NEAR, NTSC_Y_RATIO, TAN_HALF_FOV_X, UNITS};
+use crate::game_camera::{NEAR, UNITS};
 use bevy::prelude::*;
 use rc_formats::moby_anim::{AnimState, MobyAnimClass};
 
@@ -128,12 +128,13 @@ pub fn view_centre(sphere: [f32; 4], eye: Vec3, rows: &[Vec3; 3]) -> [f32; 3] {
 }
 
 /// The per-moby tests of MobyProc after the occlusion test (module doc); `v` = camera-space centre, `r` =
-/// radius, both integer units.
-pub fn moby_proc(v: [f32; 3], r: f32, inp: &ProcInput) -> Result<ProcPick, Cull> { moby_proc_view(v, r, inp, TAN_HALF_FOV_X) }
+/// radius, both integer units; the game's 4:3 view.
+#[cfg(test)]
+pub fn moby_proc(v: [f32; 3], r: f32, inp: &ProcInput) -> Result<ProcPick, Cull> { moby_proc_view(v, r, inp, crate::game_camera::default_tans()) }
 
-/// [`moby_proc`] with the view's horizontal half-angle tangent `tan_x` (`UpdateViewContext` writes the frustum planes
-/// vf20 / vf22 from it: a flown ship's wider view culls less at the sides).
-pub fn moby_proc_view(v: [f32; 3], r: f32, inp: &ProcInput, tan_x: f32) -> Result<ProcPick, Cull> {
+/// MobyProc with the view's half-angle tangents `tans` (x, y; `UpdateViewContext` writes the frustum planes vf20 /
+/// vf22 from them: a flown ship's wider view, or the 16:9 frame, culls less at the sides).
+pub fn moby_proc_view(v: [f32; 3], r: f32, inp: &ProcInput, tans: (f32, f32)) -> Result<ProcPick, Cull> {
     // The cap 0x15fff0: 500, 0x90 in the Visibomb's view (crate::visibomb_view::SHORT_FAR).
     let cap = if crate::visibomb_view::SHORT_FAR.load(std::sync::atomic::Ordering::Relaxed) { crate::visibomb_view::SHORT_MOBY_CAP } else { DRAW_DISTANCE_CAP };
     let dd = inp.draw_distance.min(cap);
@@ -142,7 +143,7 @@ pub fn moby_proc_view(v: [f32; 3], r: f32, inp: &ProcInput, tan_x: f32) -> Resul
     let near = NEAR - (v[2] + r);
     if far.is_sign_negative() { return Err(Cull::DrawDistance); }
     if !near.is_sign_negative() { return Err(Cull::Near); }
-    let (tx, ty) = (tan_x, tan_x * NTSC_Y_RATIO);
+    let (tx, ty) = tans;
     let (kx, ky) = ((1.0 + tx * tx).sqrt(), (1.0 + ty * ty).sqrt());
     if (tx * v[2] - (v[0].abs() - r * kx)).is_sign_negative() || (ty * v[2] - (v[1].abs() - r * ky)).is_sign_negative() {
         return Err(Cull::Frustum);

@@ -664,6 +664,7 @@ fn menu_frame(
                 if let Some(r) = render.as_deref() { menu.set_port_value(Setting::Msaa, aa_index(r.msaa)); }
                 if let Some(s) = shadows.as_deref() { menu.set_port_value(Setting::Shadows, !s.enabled as u8); }
                 menu.set_port_value(Setting::Resolution, display.resolution.index());
+                menu.set_port_value(Setting::Aspect, display.aspect.index());
                 menu.set_port_value(Setting::Fullscreen, display.fullscreen as u8);
                 // The card and the save inputs moved into the menu for its tick (crate::saves).
                 saves_in(menu, &play);
@@ -678,12 +679,15 @@ fn menu_frame(
                     }
                 }
                 // The display (crate::display): the game frame's resolution and the window mode.
-                let want = (menu.port_value(Setting::Resolution).map(crate::display::Resolution::from_index), menu.port_value(Setting::Fullscreen).map(|v| v == 1));
-                if let (Some(res), Some(full)) = want {
-                    if display.resolution != res || display.fullscreen != full {
-                        display.resolution = res;
-                        display.fullscreen = full;
-                        println!("menus: frame {frame}: Port Options: resolution {res:?}, fullscreen {full}");
+                let want = (
+                    menu.port_value(Setting::Aspect).map(crate::display::Aspect::from_index),
+                    menu.port_value(Setting::Resolution).map(crate::display::Resolution::from_index),
+                    menu.port_value(Setting::Fullscreen).map(|v| v == 1),
+                );
+                if let (Some(aspect), Some(res), Some(full)) = want {
+                    if display.aspect != aspect || display.resolution != res || display.fullscreen != full {
+                        (display.aspect, display.resolution, display.fullscreen) = (aspect, res, full);
+                        println!("menus: frame {frame}: Port Options: aspect {aspect:?}, resolution {res:?}, fullscreen {full}");
                         display.save();
                     }
                 }
@@ -1381,6 +1385,8 @@ fn build_prims(
     if let Some(p) = pictures.as_deref_mut() { p.frame += 1; }
     let mut resolve = |src: &rc_game::menus::ImageSrc| pictures.as_deref_mut().and_then(|p| p.resolve(src, &mut images));
     let snapshot = convert(&rt.draws, &mut h, &mut statics, &mut st, &lh.glyphs, &mut resolve);
+    // The pages stay clipped to the 512×416 screen in a 16:9 frame (`Prim::boxed`): their unused panels lie off it.
+    for p in h.prims.iter_mut().chain(statics.iter_mut().flatten()) { p.boxed = true; }
     hook.prims = h.prims;
     hook.statics = statics;
     hook.replace_hud = matches!(rt.render_mode, Mode::Menu | Mode::Slideshow) || menu_under_freeze(&rt);
@@ -1465,6 +1471,8 @@ fn menu_layer(
                         RenderLayers::layer(MENU_3D_LAYER),
                         main_t,
                         MenuLayerCam,
+                        // The frame mobys frame the 512×416 screen: the frame's 4:3 box (crate::display).
+                        crate::display::BoxedView,
                         Name::new("menu layer 3D camera (frame mobys)"),
                     ))
                     .id(),
@@ -1590,7 +1598,7 @@ fn convert(
                 } else {
                     [[ax, ay], [ax + 1, ay], [bx, by], [bx + 1, by]]
                 };
-                h.prims.push(Prim { tex: Tex::None, pos, uv: [[0, 0]; 4], rgba: *rgba, scissor: full, repeat: false, nearest: false });
+                h.prims.push(Prim { tex: Tex::None, pos, uv: [[0, 0]; 4], rgba: *rgba, scissor: full, repeat: false, nearest: false, boxed: false });
             }
             MenuDraw::SpriteUv { frame, x0, y0, x1, y1, u0, v0, u1, v1, alpha, repeat_u } => {
                 let rgba = ((*alpha as u32) & 0xff) << 24 | 0x007f_7f7f;
@@ -1598,7 +1606,7 @@ fn convert(
                 let (ua, ub, va, vb) = (u0 / 16, u1 / 16, v0 / 16, v1 / 16);
                 let tw = h.frame_sizes.get(*frame).map_or(0, |s| s.0);
                 let mut quad = |xa: i32, xb: i32, ua: i32, ub: i32| {
-                    h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, py0], [xb, py0], [xa, py1], [xb, py1]], uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]], rgba, scissor: full, repeat: false, nearest: false });
+                    h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, py0], [xb, py0], [xa, py1], [xb, py1]], uv: [[ua, va], [ub, va], [ua, vb], [ub, vb]], rgba, scissor: full, repeat: false, nearest: false, boxed: false });
                 };
                 if *repeat_u && tw > 0 && ub - ua == tw {
                     // CLAMP_1 = REPEAT: split at the texture's wrap.
@@ -1613,7 +1621,7 @@ fn convert(
             MenuDraw::FrameQuad { frame, x, y, w, h: ph, u, v, tw, th, rgba } => {
                 let (xa, ya, xb, yb) = (x + ox, y + oy, x + w + ox, y + ph + oy);
                 let (ub, vb) = (u + tw, v + th);
-                h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, ya], [xb, ya], [xa, yb], [xb, yb]], uv: [[*u, *v], [ub, *v], [*u, vb], [ub, vb]], rgba: *rgba, scissor: full, repeat: false, nearest: false });
+                h.prims.push(Prim { tex: Tex::Frame(*frame), pos: [[xa, ya], [xb, ya], [xa, yb], [xb, yb]], uv: [[*u, *v], [ub, *v], [*u, vb], [ub, vb]], rgba: *rgba, scissor: full, repeat: false, nearest: false, boxed: false });
             }
             MenuDraw::Snapshot => snapshot = true,
             // The menu layer's clear colour until the snapshot arrives, then in the snapshot's bytes.
@@ -1639,7 +1647,7 @@ fn convert(
                 };
                 if let Some(tex) = tex {
                     let pos = pos.map(|[x, y]| [x + ox, y + oy]);
-                    h.prims.push(Prim { tex, pos, uv: *uv, rgba: *rgba, scissor: full, repeat: *repeat, nearest: false });
+                    h.prims.push(Prim { tex, pos, uv: *uv, rgba: *rgba, scissor: full, repeat: *repeat, nearest: false, boxed: false });
                 }
             }
             MenuDraw::Static(s) => {
@@ -1661,7 +1669,7 @@ pub(crate) fn static_prim(s: &StaticDraw, ox: i32, oy: i32) -> Prim {
     };
     let (x0, y0, x1, y1) = (s.x + ox, s.y + oy, s.x + s.w + ox, s.y + s.h + oy);
     let (u0, v0, u1, v1) = (s.u, s.v, s.u + s.tw, s.v + s.th);
-    Prim { tex, pos: [[x0, y0], [x1, y0], [x0, y1], [x1, y1]], uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]], rgba: s.rgba, scissor: [0, W - 1, 0, H - 1], repeat: true, nearest: false }
+    Prim { tex, pos: [[x0, y0], [x1, y0], [x0, y1], [x1, y1]], uv: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]], rgba: s.rgba, scissor: [0, W - 1, 0, H - 1], repeat: true, nearest: false, boxed: false }
 }
 
 // ---- Snapshot, render world (module docs, "Snapshot") ----

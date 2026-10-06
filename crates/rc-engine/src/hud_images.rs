@@ -116,5 +116,6 @@ pub fn prim(slot: usize, x: i32, y: i32, w: i32, h: i32, u: i32, v: i32, tw: i32
         scissor: [0, crate::hud_render::W - 1, 0, crate::hud_render::H - 1],
         repeat: false,
         nearest: false,
+        boxed: false,
     }
 }

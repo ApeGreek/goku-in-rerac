@@ -1272,7 +1272,7 @@ pub fn update_moby_occlusion(
 ) {
     let Some(mut state) = state else { return };
     let mask = occl.as_ref().map(|o| o.mask);
-    let tan_x = crate::game_camera::projection_tan_x(cams.iter().next().and_then(|(_, p)| p));
+    let tans = crate::game_camera::projection_tans(cams.iter().next().and_then(|(_, p)| p));
     let cam = cams.iter().next().map(|(t, _)| {
         let [fwd, left, up] = crate::game_camera::game_rows(t);
         (crate::game_camera::game_eye(t), moby_lod::camera_rows(fwd, left, up))
@@ -1309,7 +1309,7 @@ pub fn update_moby_occlusion(
             let sphere = moby_lod::world_sphere(&inp, seq);
             let v = moby_lod::view_centre(sphere, eye, &rows);
             let result = if s.lod_on {
-                moby_lod::moby_proc_view(v, sphere[3], &inp, tan_x)
+                moby_lod::moby_proc_view(v, sphere[3], &inp, tans)
             } else {
                 Ok(ProcPick { low_lod: false, alpha: inp.alpha, fading: false, shine: moby_lod::shine_alpha(moby_lod::sphere_depth(v, sphere[3]), inp.shine_distance) })
             };

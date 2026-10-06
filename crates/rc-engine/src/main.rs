@@ -144,8 +144,8 @@ fn main() -> anyhow::Result<()> {
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
-                // 2x the NTSC 512x416 GS draw buffer (docs/plan/render_pipeline.md).
-                primary_window: Some(Window { title: "ReRAC".into(), resolution: (1024u32, 832u32).into(), ..default() }),
+                // 4:3, as the TV showed the 512x416 GS draw buffer (crate::display; docs/plan/render_pipeline.md).
+                primary_window: Some(Window { title: "ReRAC".into(), resolution: (1024u32, 768u32).into(), ..default() }),
                 ..default()
             })
             .set(AssetPlugin { file_path: asset_dir(), ..default() }),

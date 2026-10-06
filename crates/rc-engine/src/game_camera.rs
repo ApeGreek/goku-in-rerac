@@ -133,12 +133,22 @@ pub struct GameProjection {
     pub far: f32,
 }
 
-/// The horizontal half-angle tangent of a camera's projection (the game's 0.63 for any other projection).
-pub fn projection_tan_x(p: Option<&Projection>) -> f32 {
+/// The half-angle tangents (x, y) of a camera's projection (the game's 0.63, 0.63·0.775 for any other projection):
+/// `UpdateViewContext`'s frustum planes. In 16:9 x carries the Hor+ factor and y stays the game's (crate::display),
+/// so every cull and LOD test takes both from here rather than deriving y from x.
+pub fn projection_tans(p: Option<&Projection>) -> (f32, f32) {
+    let d = GameProjection::default();
     match p {
-        Some(Projection::Custom(c)) => c.get::<GameProjection>().map_or(TAN_HALF_FOV_X, |g| g.tan_x),
-        _ => TAN_HALF_FOV_X,
+        Some(Projection::Custom(c)) => c.get::<GameProjection>().map_or((d.tan_x, d.tan_y), |g| (g.tan_x, g.tan_y)),
+        _ => (d.tan_x, d.tan_y),
     }
+}
+
+/// The game's default tangents (x, y).
+#[cfg(test)]
+pub fn default_tans() -> (f32, f32) {
+    let d = GameProjection::default();
+    (d.tan_x, d.tan_y)
 }
 
 impl Default for GameProjection {

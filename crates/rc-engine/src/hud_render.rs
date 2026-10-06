@@ -122,7 +122,9 @@ pub struct Prim {
     pub repeat: bool,
     /// TEX1_1 MMAG = MMIN = NEAREST (point sampling) instead of the bilinear the 2D pass inherits: the vendor's ticker,
     /// drawn right after the hologram cone's `FastDrawQuadReal` wrote TEX1_1 = 1 (crate::vendor_render).
-    pub nearest: bool,
+    pub nearest: bool,    /// Port-only: clipped to the 512×416 screen even in a 16:9 frame (crate::display): the page menus, whose unused
+    /// panels lie off the screen. Other primitives with the full screen's scissor reach the frame's edges there.
+    pub boxed: bool,
 }
 
 impl Prim {
@@ -204,7 +206,7 @@ impl Hud2d {
     pub fn reset_scissor(&mut self) { self.scissor = FULL_SCISSOR; }
 
     fn push(&mut self, tex: Tex, pos: [[i32; 2]; 4], uv: [[i32; 2]; 4], rgba: u32) {
-        self.prims.push(Prim { tex, pos, uv, rgba, scissor: self.scissor, repeat: false, nearest: false });
+        self.prims.push(Prim { tex, pos, uv, rgba, scissor: self.scissor, repeat: false, nearest: false, boxed: false });
     }
 
     /// `HudSprite(frame, x, y, w, h, alpha)` and its rotated variants.
@@ -496,6 +498,11 @@ impl HudEnv {
 #[derive(Resource)]
 struct HudRuntime {
     state: HudState,
+    /// The 2D layer's targets (resized with [`Self::extra`]) and the side margin in game pixels (crate::display: the
+    /// layer covers the whole frame; the 512-wide screen sits in its middle).
+    target: Handle<Image>,
+    static_target: Handle<Image>,
+    extra: i32,
     env: HudEnv,
     glyphs: [GlyphTable; 3],
     atlas_frames: Vec<[u32; 4]>,
@@ -527,6 +534,10 @@ struct HudMesh;
 /// The HUD composite's UI node (crate::screen_canvas puts the canvases composed over the HUD under it as its children).
 #[derive(Component)]
 pub(crate) struct HudCompositeNode;
+
+/// The 512×416 screen's box inside the HUD composite (crate::display's 4:3 box).
+#[derive(Component)]
+pub(crate) struct HudBoxNode;
 
 pub struct HudPlugin;
 
@@ -641,7 +652,11 @@ fn setup(
         Name::new("hud primitives"),
     ));
     let full = || Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-    let hud_node = commands.spawn((full(), MaterialNode(composites.add(HudComposite { image: target })), GlobalZIndex(i32::MAX), HudCompositeNode, Name::new("hud composite"))).id();
+    // On the frame's 4:3 box (crate::display: in 16:9 the 512×416 screen is centred, the world widens around it).
+    // The whole frame (crate::display): the 512×416 screen in its middle, wider in 16:9 ([`HudRuntime::extra`]).
+    let hud_node = commands.spawn((full(), MaterialNode(composites.add(HudComposite { image: target.clone() })), GlobalZIndex(i32::MAX), HudCompositeNode, Name::new("hud composite"))).id();
+    // The 512×416 screen's box inside it: the parent of the canvases composed with the HUD (crate::screen_canvas).
+    commands.spawn((full(), crate::display::UiBoxed, HudBoxNode, ChildOf(hud_node), Name::new("hud box")));
     // The static layer: its own 512×416 target, three meshes in pass order (Transparent2d sorts by z), a node over
     // the HUD composite's other children (the canvases composed over the HUD).
     let static_target = images.add(Image::new_target_texture(W as u32, H as u32, TextureFormat::Rgba16Float, None));
@@ -669,7 +684,7 @@ fn setup(
         ));
         m
     });
-    commands.spawn((full(), MaterialNode(static_composites.add(HudStaticComposite { image: static_target })), ZIndex(1), ChildOf(hud_node), Name::new("hud static composite")));
+    commands.spawn((full(), MaterialNode(static_composites.add(HudStaticComposite { image: static_target.clone() })), ZIndex(1), ChildOf(hud_node), Name::new("hud static composite")));
 
     let assets = HudAssets::new(&lh.hud, lh.glyphs, lh.messages.clone());
     let frame_sizes = assets.frame_sizes.clone();
@@ -684,6 +699,9 @@ fn setup(
     );
     commands.insert_resource(HudRuntime {
         state: HudState::new(assets),
+        target,
+        static_target,
+        extra: 0,
         env,
         glyphs: lh.glyphs,
         atlas_frames: atlas.frames,
@@ -725,9 +743,20 @@ fn tick_and_build(
     mut feed: ResMut<HudFeed>,
     (mut play, mut audio): (Option<ResMut<crate::gameplay::Play>>, Option<ResMut<crate::audio_out::AudioOut>>),
     dyn_images: Option<Res<crate::hud_images::HudImages>>,
+    (display, mut images): (Option<Res<crate::display::DisplaySettings>>, ResMut<Assets<Image>>),
 ) {
     let Some(mut rt) = rt else { return };
     let rt = &mut *rt;
+    // The side margin of the frame's aspect (crate::display): the layer's targets and the HUD's left / right slots.
+    let extra = display.map_or(0, |d| crate::display::side_extra(d.aspect));
+    if extra != rt.extra {
+        rt.extra = extra;
+        rt.state.side_extra = extra;
+        let size = Extent3d { width: (W + 2 * extra) as u32, height: H as u32, depth_or_array_layers: 1 };
+        for h in [&rt.target, &rt.static_target] {
+            if let Some(mut img) = images.get_mut(h) { img.resize(size); }
+        }
+    }
     // The slot calls since the last frame: the game's (the classes', `Services::hud`) then the engine's (the menus').
     if let Some(p) = play.as_deref() {
         let (c, cursor) = p.svc.hud.since(rt.calls_cursor);
@@ -822,8 +851,9 @@ fn tick_and_build(
     rt.hud2d.prims.extend(hook.prims.iter().copied());
     rt.hud2d.prims.extend(scene.prims.iter().copied());
     let dyns = dyn_images.as_deref().map_or([None; crate::hud_images::SLOTS], |d| d.rects());
-    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.hud2d.add, &rt.atlas_frames, &rt.atlas_fx, &dyns));
-    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &[], &[], &rt.atlas_frames, &rt.atlas_fx, &dyns)); }
+    let e = rt.extra;
+    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.hud2d.add, &rt.atlas_frames, &rt.atlas_fx, &dyns, e));
+    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &[], &[], &rt.atlas_frames, &rt.atlas_fx, &dyns, e)); }
 }
 
 /// The HUD inputs the hero and the classes hold (rc_game::hud::Inputs: the callers the HUD sees through the state).
@@ -898,7 +928,12 @@ fn empty_mesh() -> Mesh {
 }
 
 /// The primitives as one triangle list in submission order (the GPU blends triangles of one draw in order).
-fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], add: &[usize], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>]) -> Mesh {
+///
+/// `extra` (port-only, crate::display): game pixels the layer extends past the 512-wide screen on each side. The
+/// screen is centred in the `512 + 2·extra` wide target (x + extra, scaled into the shader's 512-wide clip mapping;
+/// the scissors are target pixels); a primitive spanning the whole screen (x ≤ 0 to x ≥ 512: fades, letterbox
+/// bars, the menu's black) reaches the frame's edges, scissor included when it is the full screen's.
+fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], add: &[usize], frames: &[[u32; 4]], fx: &[Option<[u32; 4]>], dyns: &[Option<[u32; 4]>], extra: i32) -> Mesh {
     if prims.is_empty() { return empty_mesh(); }
     let mut fine = fine.iter().peekable();
     let mut add = add.iter().peekable();
@@ -919,12 +954,28 @@ fn build_mesh(prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], add: &[usize], fr
             Some([x, y, w, hh]) => [x | y << 16, w | hh << 16, 1 | if p.repeat { 2 } else { 0 } | if p.nearest { 4 } else { 0 } | blend, 0],
             None => [0, 0x0001_0001, blend, 0],
         };
-        let s = p.scissor.map(|v| v.clamp(-1, 0xffff) as u32);
+        let (x_lo, x_hi) = (p.pos.iter().map(|q| q[0]).min().unwrap_or(0), p.pos.iter().map(|q| q[0]).max().unwrap_or(0));
+        let spans = extra != 0 && x_lo <= 0 && x_hi >= W;
+        let mut sc4 = p.scissor;
+        if extra != 0 {
+            // The full screen's scissor opens to the frame's edges (the HUD's side slots move out there), except on
+            // the boxed menu pages, whose unused panel rectangles lie off the screen; a primitive spanning the screen
+            // stretches to the edges either way.
+            if (spans || !p.boxed) && sc4[0] <= 0 && sc4[1] >= W - 1 { (sc4[0], sc4[1]) = (-extra, W - 1 + extra); }
+            sc4[0] += extra;
+            sc4[1] += extra;
+        }
+        let s = sc4.map(|v| v.clamp(-1, 0xffff) as u32);
+        let kx = W as f32 / (W + 2 * extra) as f32;
+        let wide_x = |x: f32| -> f32 {
+            let x = if spans && x <= 0.0 { x - extra as f32 } else if spans && x >= W as f32 { x + extra as f32 } else { x };
+            if extra == 0 { x } else { (x + extra as f32) * kx }
+        };
         let base = pos.len() as u32;
         for k in 0..4 {
             pos.push(match pos16 {
-                Some(q) => [q[k][0] as f32 / 16.0, q[k][1] as f32 / 16.0, 0.0],
-                None => [p.pos[k][0] as f32, p.pos[k][1] as f32, 0.0],
+                Some(q) => [wide_x(q[k][0] as f32 / 16.0), q[k][1] as f32 / 16.0, 0.0],
+                None => [wide_x(p.pos[k][0] as f32), p.pos[k][1] as f32, 0.0],
             });
             uv.push([p.uv[k][0] as f32, p.uv[k][1] as f32]);
             rgba.push(p.rgba);
@@ -999,7 +1050,7 @@ mod tests {
         h.prims[2].nearest = true;
         h.rect(0, 4, 0, 4, 0x8000_0000);
         let fx = vec![None; 26].into_iter().chain([Some([64u32, 0, 32, 32])]).collect::<Vec<_>>();
-        let m = build_mesh(&h.prims, &[], &[], &[], &fx, &[]);
+        let m = build_mesh(&h.prims, &[], &[], &[], &fx, &[], 0);
         let Some(VertexAttributeValues::Uint32x4(t)) = m.attribute(ATTRIBUTE_TEX) else { panic!("no tex attribute") };
         assert_eq!([t[0][2], t[4][2], t[8][2], t[12][2]], [1, 3, 7, 0]);
     }

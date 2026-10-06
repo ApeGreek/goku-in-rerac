@@ -148,7 +148,8 @@ pub(crate) fn quad_mesh(capacity: u32) -> Mesh {
 }
 
 /// 0x1607ec = W/2 / (tan_x · 210000), with the view's tan_x (`UpdateViewContext` 0x219580 recomputes it from
-/// 0x16cf70 whenever the field of view changes: scenes, first person).
+/// 0x16cf70 whenever the field of view changes: scenes, first person). Game pixels: the game's own tangent: the
+/// projection's tan_x without the 16:9 widening (crate::display; the shader converts game pixels across).
 fn size_to_pixels(tan_x: f32) -> f32 { 256.0 / (tan_x * 210000.0) }
 
 /// The view's (tan_x, tan_y) = 0x16cf70 / 0x16cf74: the main camera's game projection (the default field of view
@@ -482,13 +483,14 @@ fn build_sprites(
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut draws: Query<(&mut Visibility, &ParticleDraw)>,
     fog: Option<Res<crate::game_camera::GameFog>>,
+    display: Option<Res<crate::display::DisplaySettings>>,
 ) {
     let (Some(mut sim), Some(mut mesh)) = (sim, mesh) else { return };
     let Some((t, proj)) = cams.iter().next() else { return };
     let (eye, [fwd, left, up]) = camera(t);
     let (tx, ty) = view_tans(proj);
     sim.view_tan = (tx, ty);
-    let size_px = size_to_pixels(tx);
+    let size_px = size_to_pixels(tx / display.map_or(1.0, |d| crate::display::hor_scale(d.aspect)));
     // 0x167240 for the next ticks' particle updates (type 11): the camera as last drawn.
     sim.sys.camera = eye.map(f32::to_bits);
     let eye = Vec3::from_array(eye);

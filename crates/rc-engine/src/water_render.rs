@@ -557,6 +557,7 @@ fn draw(
     mut images: ResMut<Assets<Image>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut vis: Query<&mut Visibility>,
+    display: Option<Res<crate::display::DisplaySettings>>,
 ) {
     let Some(mut st) = state else { return };
     let st = &mut *st;
@@ -574,7 +575,9 @@ fn draw(
     let cam = game_eye(cam_t).to_array();
     // The view's tangent as the game's camera writes it (0x16cf70: Gemlik's ship widens it), as the main camera's.
     let tan = play.as_deref().map_or(crate::game_camera::TAN_HALF_FOV_X, |p| p.svc.view_tan_x);
-    let proj = GameProjection { tan_x: tan, tan_y: tan * crate::game_camera::NTSC_Y_RATIO, ..GameProjection::default() };
+    // Through crate::display's Hor+ (16:9 widens x, as the main camera's projection).
+    let (tan_x, tan_y) = crate::display::view_tans(tan, display.map_or(crate::display::Aspect::Original, |d| d.aspect));
+    let proj = GameProjection { tan_x, tan_y, ..GameProjection::default() };
     let clip_from_world = proj.get_clip_from_view() * cam_t.to_matrix().inverse();
     // The ripple module and whether its callback was registered this tick (the moby system's; else the fallback).
     let mut fallback = st.fallback.take();

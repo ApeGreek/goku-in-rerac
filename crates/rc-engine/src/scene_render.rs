@@ -63,7 +63,7 @@
 //! and landing) are crate::travel_render's.
 
 use crate::fly_cam::FlyCam;
-use crate::game_camera::{CameraSource, GameProjection, NTSC_Y_RATIO};
+use crate::game_camera::CameraSource;
 use crate::gameplay::{GameTick, Persistent, Play};
 use crate::hud_render::{Hud2d, Prim, SceneLayer};
 use crate::input_map::PadFrame;
@@ -864,21 +864,15 @@ fn upload(mut rt: ResMut<SceneRuntime>, active: Res<ActiveScene>, mut buffers: R
 }
 
 /// The scene camera over the play camera (after `play_camera::apply`, before any reader of the transform).
-fn apply_camera(active: Res<ActiveScene>, source: Option<Res<CameraSource>>, mut cams: Query<(&mut Transform, &mut Projection), With<FlyCam>>) {
+fn apply_camera(active: Res<ActiveScene>, source: Option<Res<CameraSource>>, display: Res<crate::display::DisplaySettings>, mut cams: Query<(&mut Transform, &mut Projection), With<FlyCam>>) {
     let Some(c) = active.camera else { return };
     if source.is_some_and(|s| *s == CameraSource::Fly) { return; }
     let [fwd, _left, up] = c.rows;
     let t = Transform::from_translation(game_to_bevy(c.eye)).looking_to(game_to_bevy(fwd), game_to_bevy(up));
     for (mut tf, mut proj) in &mut cams {
         if *tf != t { *tf = t; }
-        if let Projection::Custom(p) = &mut *proj {
-            if let Some(g) = p.get_mut::<GameProjection>() {
-                if g.tan_x != c.tan_half_fov {
-                    g.tan_x = c.tan_half_fov;
-                    g.tan_y = c.tan_half_fov * NTSC_Y_RATIO;
-                }
-            }
-        }
+        // The scene's tangent (Hor+ in 16:9, crate::display).
+        crate::display::set_view_tans(&mut proj, c.tan_half_fov, display.aspect);
     }
 }
 
@@ -1032,6 +1026,7 @@ fn ring_prim(r: &rc_game::moby_update::classes::units::trespasser_lock::RingPrim
         scissor: [0, W - 1, 0, H - 1],
         repeat: r.repeat,
         nearest: false,
+        boxed: false,
     }
 }
 

@@ -221,10 +221,11 @@ fn setup(mut commands: Commands, mut state: ResMut<MovieState>, mut images: ResM
     img.sampler = ImageSampler::nearest();
     state.image = images.add(img);
     let full = || Node { position_type: PositionType::Absolute, left: Val::Px(0.0), top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() };
-    let picture = commands.spawn((full(), ImageNode::new(state.image.clone()), Visibility::Hidden, Name::new("movie picture"))).id();
+    // On the frame's 4:3 box (crate::display); the root is black around it.
+    let picture = commands.spawn((full(), ImageNode::new(state.image.clone()), Visibility::Hidden, crate::display::UiBoxed, Name::new("movie picture"))).id();
     let fade = commands.spawn((full(), BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.0)), Name::new("movie fade"))).id();
     // Above the HUD composite (same global z, higher local z).
-    let root = commands.spawn((full(), GlobalZIndex(i32::MAX), ZIndex(1), Visibility::Hidden, MovieUi, Name::new("movie"), crate::level_switch::KeepAcrossLevels)).add_children(&[picture, fade]).id();
+    let root = commands.spawn((full(), BackgroundColor(Color::BLACK), GlobalZIndex(i32::MAX), ZIndex(1), Visibility::Hidden, MovieUi, Name::new("movie"), crate::level_switch::KeepAcrossLevels)).add_children(&[picture, fade]).id();
     (state.root, state.picture, state.fade) = (Some(root), Some(picture), Some(fade));
 }
 

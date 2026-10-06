@@ -530,6 +530,9 @@ pub struct HudState {
     giant_up: bool,
     /// The Morph-o-Ray's request as last seen (up, target).
     morph_last: (bool, i32),
+    /// Port-only: the game pixels the frame extends past the 512-wide screen on each side (16:9; 0 at 4:3, the TV's).
+    /// The slots anchored left or right ([`ANCHOR_BITS`] 4 / 8) move out by it, to the frame's edges ([`Self::anchor`]).
+    pub side_extra: i32,
 }
 
 impl HudState {
@@ -556,6 +559,7 @@ impl HudState {
             vsync: 0,
             sounds: Vec::new(),
             giant_up: false,
+            side_extra: 0,
             morph_last: (false, -1),
         }
         .with_sizes()
@@ -785,12 +789,20 @@ impl HudState {
     /// `FUN_0024b108`: the slot's place from its anchor: centred vertically unless anchored top or bottom (`y −= h/2`),
     /// `x −= w` anchored right, `x −= w/2` centred, unchanged anchored left.
     fn align(&self, i: usize) -> (i32, i32) {
-        let (mut x, mut y) = ANCHORS[i];
+        let (mut x, mut y) = self.anchor(i);
         let (w, h) = self.slots[i].size;
         let bits = ANCHOR_BITS[i];
         if bits & 1 == 0 && bits & 2 == 0 { y -= h >> 1; }
         if bits & 4 == 0 { x -= if bits & 8 == 0 { w >> 1 } else { w }; }
         (x, y)
+    }
+
+    /// The slot's static anchor ([`ANCHORS`]), moved out by [`Self::side_extra`] when anchored left (4) or right (8).
+    fn anchor(&self, i: usize) -> (i32, i32) {
+        let (x, y) = ANCHORS[i];
+        let bits = ANCHOR_BITS[i];
+        let dx = if bits & 4 != 0 { -self.side_extra } else if bits & 8 != 0 { self.side_extra } else { 0 };
+        (x + dx, y)
     }
 
     /// `FUN_0024b108` then `FUN_0024b170(slot, &x, &y, +0x6c, 0)`: the slide off its edge, `f = table[clamp(+0x6c, 0,
@@ -1176,7 +1188,7 @@ impl HudState {
     fn draw_health(&self, i: usize, out: &mut Vec<Draw>) {
         let s = &self.slots[i];
         if self.inputs.body == 2 || self.inputs.hero_state == crate::hero::scripted::MOUNTED || s.slide == 0 { return; }
-        let x = ANCHORS[i].0;
+        let x = self.anchor(i).0;
         let y = HEALTH_Y + ELEMENT_Y;
         let (sf, f) = Self::fractions(s, HEALTH_STEPS, HEALTH_STEPS);
         let a_orb = (f * 128.0) as i32;
@@ -1218,7 +1230,7 @@ impl HudState {
         let s = &self.slots[i];
         if self.inputs.hero_state == crate::hero::scripted::MOUNTED || s.slide == 0 { return; }
         let y = ELEMENT_Y;
-        let x = ANCHORS[i].0;
+        let x = self.anchor(i).0;
         let (sf, f) = Self::fractions(s, BOLT_SLIDE_STEPS, BOLT_ALPHA_STEPS);
         let bar_a = ((sf * 128.0) as i32 as f32 * 0.7) as i32;
         let bolts = self.inputs.bolts;
@@ -1336,7 +1348,7 @@ impl HudState {
         let s = &self.slots[i];
         if s.slide == 0 { return; }
         let y = ELEMENT_Y;
-        let x = ANCHORS[i].0;
+        let x = self.anchor(i).0;
         let (sf, f) = Self::fractions(s, WEAPON_STEPS, WEAPON_STEPS);
         let a = (sf * 128.0) as i32;
         let bar_a = (a as f32 * 0.7) as i32;
@@ -1503,7 +1515,7 @@ impl HudState {
     /// at x + 40 with its shadow, dim red 0x80202080 at 0, else 0x80e08060.
     fn draw_race_weapons(&self, out: &mut Vec<Draw>) {
         let inp = &self.inputs;
-        let (x, y) = if inp.race_won { (110, 55) } else { (ANCHORS[5].0, if inp.pal { 10 } else { 0x12 }) };
+        let (x, y) = if inp.race_won { (110, 55) } else { (self.anchor(5).0, if inp.pal { 10 } else { 0x12 }) };
         self.stretch_frame(x - 0x18, y, 110, 0x20, 0x60, out);
         out.push(Self::sprite(self.assets.icon_frame(0x7558, 2), x, y, 0x20, 0x20, 0x80, Rot::None));
         let n = format!("{}", inp.race_weapons).into_bytes();

@@ -113,7 +113,9 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn composite(in: UiVertexOutput) -> @location(0) vec4<f32> {
     // Nearest: the game pixel under this window pixel.
-    let p = clamp(vec2<i32>(floor(in.uv * vec2<f32>(512.0, 416.0))), vec2<i32>(0), vec2<i32>(511, 415));
+    // The target's own size: 512×416, wider in 16:9 (crate::display; crate::hud_render widens the layer).
+    let size = vec2<i32>(textureDimensions(hud_image));
+    let p = clamp(vec2<i32>(floor(in.uv * vec2<f32>(size))), vec2<i32>(0), size - vec2<i32>(1));
     let c = textureLoad(hud_image, p, 0);
     if c.a <= 0.0 {
         discard;
@@ -127,7 +129,9 @@ fn composite(in: UiVertexOutput) -> @location(0) vec4<f32> {
 // adds.
 @fragment
 fn composite_static(in: UiVertexOutput) -> @location(0) vec4<f32> {
-    let p = clamp(vec2<i32>(floor(in.uv * vec2<f32>(512.0, 416.0))), vec2<i32>(0), vec2<i32>(511, 415));
+    // The target's own size: 512×416, wider in 16:9 (crate::display; crate::hud_render widens the layer).
+    let size = vec2<i32>(textureDimensions(hud_image));
+    let p = clamp(vec2<i32>(floor(in.uv * vec2<f32>(size))), vec2<i32>(0), size - vec2<i32>(1));
     let c = textureLoad(hud_image, p, 0);
     let rgb = to_linear(clamp(c.rgb, vec3<f32>(0.0), vec3<f32>(1.0)));
     let a = clamp(c.a, 0.0, 1.0);

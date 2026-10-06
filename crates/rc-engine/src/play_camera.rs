@@ -8,7 +8,7 @@
 //! transform (occlusion, LODs, shrub culling, fog, the sky camera) sees this frame's game camera.
 
 use crate::fly_cam::FlyCam;
-use crate::game_camera::{CameraSource, GameProjection, NTSC_Y_RATIO, TAN_HALF_FOV_X};
+use crate::game_camera::{CameraSource, TAN_HALF_FOV_X};
 use crate::tfrag_render::game_to_bevy;
 use bevy::prelude::*;
 use rc_game::follow_camera::CameraView;
@@ -31,26 +31,17 @@ pub fn view_transform(v: &CameraView) -> Transform {
 pub fn apply(
     view: Option<Res<PlayView>>,
     source: Option<Res<CameraSource>>,
+    display: Res<crate::display::DisplaySettings>,
     mut cams: Query<(&mut Transform, &mut Projection), With<FlyCam>>,
 ) {
+    let aspect = display.aspect;
     let (Some(view), Some(source)) = (view, source) else { return };
     if *source != CameraSource::Play { return; }
     let t = view_transform(&view.view);
     for (mut tf, mut proj) in &mut cams {
         if *tf != t { *tf = t; }
-        // The FOV hook: only touch the projection when the game asks for another tangent.
-        let current = match &*proj {
-            Projection::Custom(c) => c.get::<GameProjection>().map(|p| p.tan_x),
-            _ => None,
-        };
-        if current.is_some_and(|c| c != view.tan_half_fov) {
-            if let Projection::Custom(c) = &mut *proj {
-                if let Some(p) = c.get_mut::<GameProjection>() {
-                    p.tan_x = view.tan_half_fov;
-                    p.tan_y = view.tan_half_fov * NTSC_Y_RATIO;
-                }
-            }
-        }
+        // The FOV hook: the game's tangent (Hor+ in 16:9, crate::display); only touched when it changes.
+        crate::display::set_view_tans(&mut proj, view.tan_half_fov, aspect);
     }
 }
 
