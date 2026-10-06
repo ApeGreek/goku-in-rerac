@@ -1343,12 +1343,14 @@ impl HudState {
     }
 
     /// 0x24f3b0. The middle bar's width is `x + len` (x = the anchor, 20) and the right cap follows it, so the
-    /// bar is `x` pixels longer than `len` would suggest; that is what the code draws.
+    /// bar is `x` pixels longer than `len` would suggest; that is what the code draws. In a wide frame the slot moves
+    /// out by [`Self::side_extra`] but that width term stays the game's 20 (port-only, crate `rc-engine` display).
     fn draw_weapon(&self, i: usize, out: &mut Vec<Draw>) {
         let s = &self.slots[i];
         if s.slide == 0 { return; }
         let y = ELEMENT_Y;
         let x = self.anchor(i).0;
+        let x0 = ANCHORS[i].0;
         let (sf, f) = Self::fractions(s, WEAPON_STEPS, WEAPON_STEPS);
         let a = (sf * 128.0) as i32;
         let bar_a = (a as f32 * 0.7) as i32;
@@ -1356,8 +1358,8 @@ impl HudState {
         let lw = (len as f32 * sf) as i32;
         let (cap, mid) = (self.assets.icon_frame(icon::BAR, 1), self.assets.icon_frame(icon::BAR, 0));
         out.push(Self::sprite(cap, x - 0x1c, y, 32, 32, bar_a, Rot::None));
-        out.push(Self::sprite(mid, x + 4, y, x + lw, 32, bar_a, Rot::None));
-        out.push(Self::sprite(cap, x + 4 + x + lw, y, 32, 32, bar_a, Rot::R180));
+        out.push(Self::sprite(mid, x + 4, y, x0 + lw, 32, bar_a, Rot::None));
+        out.push(Self::sprite(cap, x + 4 + x0 + lw, y, 32, 32, bar_a, Rot::R180));
         self.hud_frame(i, self.assets.icon_frame(s.icon, 3), x, y, 0, a, out);
         let text = format!("{}/{}", s.shown, s.max).into_bytes();
         let colour = if s.shown != 0 { tween_color(f, TEXT_FROM, TEXT_TO) } else { tween_color(f, EMPTY_FROM, EMPTY_TO) };
