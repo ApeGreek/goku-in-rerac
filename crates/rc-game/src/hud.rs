@@ -831,10 +831,14 @@ impl HudState {
     /// The help box of the game tick (`crate::help::Help::bx`), before this tick's draw.
     pub fn set_help(&mut self, b: &crate::help::HelpBox) { self.help.copy_logic_from(b); }
 
-    /// `ShowBanner(msg, ticks)` with the text already formatted; `ticks` defaults to `ScaleTicks(180)`.
+    /// `ShowBanner(msg, ticks)` with the text already formatted; `ticks` defaults to `ScaleTicks(180)`, as does −1 (the
+    /// game's `ShowBanner` 0x2789e0 turns −1 into `ticks(0xb4)`: kept as −1 the countdown would never reach 0).
     pub fn show_banner(&mut self, text: &[u8], ticks: Option<i32>) {
         self.banner.text = text.to_vec();
-        self.banner.countdown = ticks.unwrap_or_else(|| scale_ticks(180));
+        self.banner.countdown = match ticks {
+            None | Some(-1) => scale_ticks(180),
+            Some(t) => t,
+        };
     }
 
     /// `ShowBanner(id, ticks)` 0x2789e0: the level message `id` (`msg_string`) for `ticks` (the gold bolt's "Gold Bolt
@@ -1852,6 +1856,9 @@ mod tests {
         scene.mode = 2;
         for _ in 0..500 { assert!(!banner_up(&h.tick(scene))); }
         assert_eq!(h.banner.countdown, 300, "paused while the mode is not 0");
+        // `ShowBanner(msg, −1)` (Blarg's bridge, the skill points): ticks(180), not a countdown that never ends.
+        h.show_banner(b"Kerwan", Some(-1));
+        assert_eq!(h.banner.countdown, scale_ticks(180));
     }
 
     #[test]
