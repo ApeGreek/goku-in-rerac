@@ -834,7 +834,7 @@ impl ShipMode {
                 w.mm(id).b7f = b7f;
                 clank_actor(w, id);
             }
-            c if (531..=533).contains(&c) => ship_fx(self, w, id),
+            c if (531..=533).contains(&c) => ship_fx(self, w, id, k),
             _ => {}
         }
     }
@@ -1442,10 +1442,13 @@ fn clank_actor(w: &mut World, id: MobyId) {
 pub const FLIGHT_SHELL: [[f32; 4]; 5] = [[0.6, 0.15, 0.0, 1.0], [1.0, 1.0, 0.0, 1.0], [0.9, -0.4, 0.0, 1.0], [-0.3, -0.9, 0.0, 1.0], [0.4, 0.4, 0.0, 1.0]];
 
 /// The ship actor's glow, flames, white flash and exhaust in the take-off / landing scenes (module docs).
-fn ship_fx(mode: &mut ShipMode, w: &mut World, id: MobyId) {
+fn ship_fx(mode: &mut ShipMode, w: &mut World, id: MobyId, k: usize) {
     use crate::moby_update::classes::draw_callbacks::Callback;
     w.svc.draw_callbacks.register2(Callback::ShipGlass, id);
-    let mat = w.joint_matrix(id, 0);
+    // `MobyAttachToJoint(ship, 0)` on the pose the actor plays: its class with the streamed sequence (the class table's
+    // has no such slot: the canopy glass sat at the ship's origin, inside the hull).
+    let anim = mode.actor_anim.get(k).and_then(|a| a.as_ref()).map(|a| a.1.clone());
+    let mat = w.joint_matrix_with(id, 0, anim.as_deref());
     w.svc.draw_callbacks.matrices.insert(id, mat);
     ship::register_shadow(w, id);
     let tick = mode.tick;

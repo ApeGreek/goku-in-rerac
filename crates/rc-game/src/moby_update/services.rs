@@ -1847,10 +1847,15 @@ impl<'a> World<'a> {
     /// `MobyAttachToJoint(moby, list, M)` 0x264508: the world matrix of joint list `list`'s last joint (its pose rows
     /// turned by the moby's rows, row 3 its point: `rc_formats::moby_anim::attach_matrix`). Without the class's joint
     /// list or animation data: the moby's rows and position.
-    pub fn joint_matrix(&self, id: MobyId, list: usize) -> [[f32; 4]; 4] {
+    pub fn joint_matrix(&self, id: MobyId, list: usize) -> [[f32; 4]; 4] { self.joint_matrix_with(id, list, None) }
+
+    /// [`World::joint_matrix`] on the animation class `anim` when given (a scene actor's: its class with the scene's
+    /// streamed sequence in the slot its +0x52 / +0x53 name), else the class table's.
+    pub fn joint_matrix_with(&self, id: MobyId, list: usize, anim: Option<&rc_formats::moby_anim::MobyAnimClass>) -> [[f32; 4]; 4] {
         let m = &self.table.mobys[id];
         let chain = self.svc.joint_lists.get(&m.o_class).and_then(|l| l.get(list)).filter(|c| !c.is_empty());
-        let Some((class, chain)) = self.classes.anim(m.o_class).zip(chain) else {
+        let class = anim.or_else(|| self.classes.anim(m.o_class));
+        let Some((class, chain)) = class.zip(chain) else {
             return [m.rows[0], m.rows[1], m.rows[2], [m.position[0], m.position[1], m.position[2], 1.0]];
         };
         let snap = self.svc.snapshots.get(id).and_then(|s| s.as_ref());
