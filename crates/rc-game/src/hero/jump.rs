@@ -485,7 +485,10 @@ impl Hero {
                 self.vel[2] = z;
             }
         }
-        if self.timer < self.jump.takeoff {
+        // The ledge climbs (Ratchet's 0x1c, Clank's 0x4c) take no gravity for their first 10 ticks: they wind up hanging
+        // from the ledge (0x2345f0's tail), not falling from it.
+        if matches!(self.state, 0x1c | 0x4c) && self.timer < ticks(10) {
+        } else if self.timer < self.jump.takeoff {
             self.vel[2] = Pf::ZERO;
             let z = self.vel[2];
             self.gravity_from(z, DT2 * Pf::b(0x4240_0000));
