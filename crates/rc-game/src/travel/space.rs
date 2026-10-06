@@ -442,6 +442,8 @@ impl ShipMode {
         self.white = 0.0;
         w.svc.game_mode = 6;
         crate::cinematic::hero_state(w, crate::scene_player::HERO_SCENE_STATE, true);
+        // 0x1413f5 = 1 after the SetState (which clears it): Ratchet's held objects hide (the Bomb Glove's bomb).
+        w.hero_fields_mut().hero_hidden = Some(1);
         if let Some(id) = w.svc.travel.moby { w.mm(id).mode |= 1; }
         for m in w.table.mobys.iter_mut() {
             if m.state & 0x80 == 0 && HIDDEN_CLASSES.contains(&m.o_class) { m.mode |= 0x80; }

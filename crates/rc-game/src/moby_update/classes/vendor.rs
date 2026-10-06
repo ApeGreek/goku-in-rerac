@@ -138,6 +138,8 @@ pub fn update(w: &mut World, id: MobyId) {
                     // OpenVendorMenu's `SetState(100, 1)` inside the moby loop: Ratchet's update of this tick already
                     // runs state 100 (nothing moves; he is hidden from the next frame on).
                     crate::cinematic::hero_state(w, 100, true);
+                    // Then `0x1413f5 = 1` (stored after the SetState, which clears it): his held objects hide.
+                    w.hero_fields_mut().hero_hidden = Some(1);
                     w.mm(id).state = 3;
                 }
             }

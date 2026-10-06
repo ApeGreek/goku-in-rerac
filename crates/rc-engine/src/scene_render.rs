@@ -679,7 +679,8 @@ fn actor_joint_lists(level: &crate::level_load::LoadedLevel, classes: &[i32]) ->
 
 /// `DialogStreamStart`'s state changes for the world that keeps running in mode 2 (docs/plan/cutscenes.md §6): game
 /// mode 2 for the classes (0x15f5c4), the tick in its mode-2 form (no follow camera, no free-slot pass: `CutsceneModeUpdate`
-/// 0x2aca80), Ratchet `SetState(100, 2)` (applied by the next tick), the talker hidden (0x179588 mode |= 1) and every
+/// 0x2aca80), Ratchet `SetState(100, 2)` and then `0x1413f5 = 1` (his held objects hide: the Bomb Glove's bomb; both
+/// applied by the next tick), the talker hidden (0x179588 mode |= 1) and every
 /// live moby of class 74 / 203 hidden (mode |= 0x80).
 fn enter_mode2(rt: &mut SceneRuntime, p: &mut Play) {
     use rc_game::moby_update::services::{HeroCall, HeroFields};
@@ -691,10 +692,14 @@ fn enter_mode2(rt: &mut SceneRuntime, p: &mut Play) {
     let counter = p.game.counter;
     let call = HeroCall::SetState { id: rc_game::scene_player::HERO_SCENE_STATE, play: true };
     match p.svc.hero_writes.as_mut() {
-        Some((_, f)) => f.call(call),
+        Some((_, f)) => {
+            f.call(call);
+            f.hero_hidden = Some(1);
+        }
         None => {
             let mut f = HeroFields::of(&p.game.hero);
             f.call(call);
+            f.hero_hidden = Some(1);
             p.svc.hero_writes = Some((counter, f));
         }
     }
