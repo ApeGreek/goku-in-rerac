@@ -194,7 +194,7 @@ impl Travel {
 
 /// Marks the hero's entities while mode 6 hides him.
 #[derive(Component)]
-struct TravelHidden;
+pub(crate) struct TravelHidden;
 
 pub struct TravelPlugin;
 
@@ -1109,18 +1109,19 @@ fn force_hidden(
     t: Res<Travel>,
     hero: Query<(Entity, &Name), (With<MeshMaterial3d<MobyMaterial>>, Without<AttachedTo>, Without<TravelHidden>)>,
     items: Query<Entity, (With<AttachedTo>, Without<TravelHidden>)>,
-    mut hidden: Query<(Entity, &mut Visibility), With<TravelHidden>>,
+    mut hidden: Query<(Entity, &mut Visibility, Has<crate::gameplay::RatchetMesh>), With<TravelHidden>>,
 ) {
     if t.hero_hidden {
         for (e, name) in &hero {
             if name.as_str().starts_with("Ratchet (play)") { commands.entity(e).insert((TravelHidden, Visibility::Hidden)); }
         }
         for e in &items { commands.entity(e).insert((TravelHidden, Visibility::Hidden)); }
-        for (_, mut v) in &mut hidden { if *v != Visibility::Hidden { *v = Visibility::Hidden; } }
+        for (_, mut v, _) in &mut hidden { if *v != Visibility::Hidden { *v = Visibility::Hidden; } }
     } else {
-        for (e, mut v) in &mut hidden {
+        // Ratchet's own meshes go back to crate::gameplay's visibility sync; his items are shown again.
+        for (e, mut v, ratchet) in &mut hidden {
             commands.entity(e).remove::<TravelHidden>();
-            *v = Visibility::Inherited;
+            if !ratchet { *v = Visibility::Inherited; }
         }
     }
 }

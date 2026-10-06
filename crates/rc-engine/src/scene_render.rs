@@ -133,7 +133,7 @@ pub struct SceneFrameSet;
 
 /// Marks entities hidden while a scene runs (the hero and his items).
 #[derive(Component)]
-struct SceneHidden;
+pub(crate) struct SceneHidden;
 
 struct Actor {
     /// The class animation with the streamed sequence in `slot` (shared with the moby loop's [`SceneState`]).
@@ -430,7 +430,7 @@ fn scene_frame(
     frame: Res<crate::determinism::FrameNumber>,
     hero: HeroEntities,
     items: Query<Entity, With<AttachedTo>>,
-    hidden: Query<Entity, With<SceneHidden>>,
+    hidden: Query<(Entity, Has<crate::gameplay::RatchetMesh>), With<SceneHidden>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
@@ -441,7 +441,11 @@ fn scene_frame(
     if rt.player.as_ref().is_some_and(|p| p.done()) {
         rt.player = None;
         for a in rt.actors.drain(..) { for e in a.entities { commands.entity(e).despawn(); } }
-        for e in &hidden { commands.entity(e).remove::<SceneHidden>().insert(Visibility::Inherited); }
+        // Ratchet's own meshes go back to crate::gameplay's visibility sync (his moby's hidden bit: a body may be in);
+        // the rest (his items) are shown again.
+        for (e, ratchet) in &hidden {
+            if ratchet { commands.entity(e).remove::<SceneHidden>(); } else { commands.entity(e).remove::<SceneHidden>().insert(Visibility::Inherited); }
+        }
         if let Some(m) = menu.as_mut() { m.state.set(Mode::Gameplay); }
         *active = ActiveScene::default();
         rt.records.clear();

@@ -663,7 +663,7 @@ pub fn hide_hero(
     mut commands: Commands,
     hero: Query<(Entity, &Name), (With<MeshMaterial3d<crate::moby_render::MobyMaterial>>, Without<crate::moby_attach::AttachedTo>, Without<VendorHidden>)>,
     items: Query<Entity, (With<crate::moby_attach::AttachedTo>, Without<VendorHidden>)>,
-    mut hidden: Query<(Entity, &mut Visibility), With<VendorHidden>>,
+    mut hidden: Query<(Entity, &mut Visibility, Has<crate::gameplay::RatchetMesh>), With<VendorHidden>>,
 ) {
     let want = vr.vendor.as_ref().is_some_and(|v| v.pre_fade == 0);
     if want {
@@ -671,8 +671,11 @@ pub fn hide_hero(
             if name.as_str().starts_with("Ratchet (play)") { commands.entity(e).insert((VendorHidden, Visibility::Hidden)); }
         }
         for e in &items { commands.entity(e).insert((VendorHidden, Visibility::Hidden)); }
-        for (_, mut v) in &mut hidden { if *v != Visibility::Hidden { *v = Visibility::Hidden; } }
+        for (_, mut v, _) in &mut hidden { if *v != Visibility::Hidden { *v = Visibility::Hidden; } }
     } else {
-        for (e, _) in &hidden { commands.entity(e).remove::<VendorHidden>().insert(Visibility::Inherited); }
+        // Ratchet's own meshes go back to crate::gameplay's visibility sync; his items are shown again.
+        for (e, _, ratchet) in &hidden {
+            if ratchet { commands.entity(e).remove::<VendorHidden>(); } else { commands.entity(e).remove::<VendorHidden>().insert(Visibility::Inherited); }
+        }
     }
 }

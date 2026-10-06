@@ -256,7 +256,8 @@ impl Plugin for GameplayPlugin {
                 (setup, input_map::sample_system, set_budget, keys).chain().after(bevy::input::InputSystems),
             )
             .add_systems(FixedUpdate, tick.in_set(GameTick).before(crate::particle_render::tick))
-            .add_systems(Update, show_reloaded)
+            .add_systems(Update, (show_reloaded, debug_dump))
+            .add_systems(PostUpdate, ratchet_visibility.before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate))
             .add_systems(RunFixedMainLoop, play_camera::apply.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop))
             .add_systems(
                 PostUpdate,
@@ -594,6 +595,8 @@ pub struct Play {
     frozen_hint: bool,
     /// Ratchet's entities hidden (his moby's mode bit 1: the first-person view hides him, `HeroSyncMoby`).
     ratchet_hidden: bool,
+    /// Dev builds: the noclip position (N toggles; [`noclip_step`]).
+    noclip: Option<[f32; 3]>,
     /// His caster draws' order as last set (crate::moby_render `queue_late`; None: as spawned, late).
     ratchet_late: Option<bool>,
     /// The instances a death reload made spawn that the level's load did not (their entities still hidden): shown by
@@ -1313,6 +1316,7 @@ fn setup(
     let (ratchet_high, ratchet_metal) = extra.spawn_split(&mut commands, lv, &m.classes[placed.class], 0, t, "Ratchet (play)", &mut meshes, &mut images, &mut materials);
     let ratchet_low = extra.spawn_low(&mut commands, lv, &m.classes[placed.class], 0, t, "Ratchet (play)", &mut meshes, &mut images, &mut materials);
     let entities: Vec<Entity> = ratchet_high.iter().chain(&ratchet_metal).chain(&ratchet_low).copied().collect();
+    for &e in &entities { commands.entity(e).insert(RatchetMesh); }
     // The LOD sets under one parent each (identity transforms): the pick toggles the parents, so the scene / vendor /
     // travel hides, which set the entities themselves, keep working.
     let ratchet_lods = [
@@ -1413,6 +1417,7 @@ fn setup(
         dynamic,
         sounds: HashMap::new(),
         ratchet_hidden: false,
+        noclip: None,
         ratchet_late: None,
         reload_shown: Vec::new(),
         arm_joints,
@@ -1550,9 +1555,46 @@ fn keys(
             }
         };
     }
+    let mut play = play;
     if keys.just_pressed(KeyCode::KeyR) {
-        if let Some(mut p) = play { p.respawn = true; }
+        if let Some(p) = play.as_mut() { p.respawn = true; }
     }
+    // Dev builds: N toggles the hero noclip.
+    if cfg!(feature = "dev") && keys.just_pressed(KeyCode::KeyN) {
+        if let Some(p) = play.as_mut() {
+            p.noclip = match p.noclip {
+                Some(_) => None,
+                None => Some(p.game.hero.pos.map(|v| v.to_f32())[..3].try_into().unwrap()),
+            };
+            println!("noclip: {} (stick: move, R1 / ✕: up, L1: down, R2: fast)", if p.noclip.is_some() { "on" } else { "off" });
+        }
+    }
+}
+
+/// Dev builds: the noclip's move from the pad (the stick along the camera's view, R1 or ✕ up, L1 down, R2 fast), the
+/// hero placed there after the tick with no velocity, so neither collision nor gravity holds him.
+fn noclip_step(p: &mut Play, pad: &PadInput) {
+    use rc_game::pad::button;
+    let Some(mut q) = p.noclip else { return };
+    let axis = |b: u8| ((b as f32 - 127.5) / 127.5).clamp(-1.0, 1.0);
+    let (sx, sy) = (axis(pad.lx), -axis(pad.ly));
+    let held = |b: u32| pad.buttons as u32 & b != 0;
+    let cam = p.game.camera.out.pos_f32();
+    let (dx, dy) = (q[0] - cam[0], q[1] - cam[1]);
+    let l = (dx * dx + dy * dy).sqrt().max(1e-3);
+    let (fx, fy) = (dx / l, dy / l);
+    let speed = if held(button::R2) { 0.6 } else { 0.2 };
+    let up = (held(button::R1) || held(button::CROSS)) as i32 as f32 - held(button::L1) as i32 as f32;
+    q[0] += (fx * sy + fy * sx) * speed;
+    q[1] += (fy * sy - fx * sx) * speed;
+    q[2] += up * speed;
+    p.noclip = Some(q);
+    let h = &mut p.game.hero;
+    h.pos = rc_game::hero::physics::from_f32x3(q);
+    h.vel = rc_game::hero::physics::V0;
+    let hm = h.hero_moby(p.hero_id);
+    let h = &mut p.game.hero;
+    h.write_back(&mut p.game.mobys.mobys[hm]);
 }
 
 /// Ratchet's animation into his `MobyAnim` instance (never advanced there: `skip_advance`).
@@ -1669,6 +1711,65 @@ fn reload_load_pass(p: &mut Play, coll: &rc_formats::collision::Collision, parti
     p.sched = sched;
     p.game.finish_load();
     println!("gameplay: death reload: {n_load} run by the load pass");
+}
+
+/// Ratchet's own mesh entities (his moby drawn as an extra instance): their visibility is [`ratchet_visibility`]'s.
+#[derive(Component)]
+pub(crate) struct RatchetMesh;
+
+/// Ratchet's meshes follow his moby's hidden bit (mode 1: first person, a body in, `HeroSyncMoby` 0x229f20 → 0x2486c0)
+/// every frame, written directly, so no other writer's leftover sticks (a scene's, travel's or the vendor's show at
+/// their end: they leave his meshes to this). Meshes those hides hold are skipped while they hold them.
+#[allow(clippy::type_complexity)]
+fn ratchet_visibility(
+    play: Option<ResMut<Play>>,
+    mut q: Query<(&mut Visibility, Has<crate::scene_render::SceneHidden>, Has<crate::travel_render::TravelHidden>, Has<crate::interact_render::VendorHidden>), With<RatchetMesh>>,
+) {
+    let Some(mut p) = play else { return };
+    let Some(m) = p.game.mobys.mobys.get(p.hero_id) else { return };
+    let hidden = m.mode & rc_game::moby_runtime::mode::HIDDEN != 0;
+    p.ratchet_hidden = hidden;
+    let want = if hidden { Visibility::Hidden } else { Visibility::Inherited };
+    for (mut v, scene, travel, vendor) in &mut q {
+        if scene || travel || vendor { continue; }
+        if *v != want { *v = want; }
+    }
+}
+
+/// Debug: F9 prints the hero, the engine's own Ratchet draw and every moby within 12 units of the hero (id, class,
+/// state, mode bits, collision, position) with the visibility of its generic moby meshes.
+fn debug_dump(
+    keys: Res<ButtonInput<KeyCode>>,
+    play: Option<Res<Play>>,
+    meshes: Query<(&MeshTag, &InheritedVisibility), With<MeshMaterial3d<MobyMaterial>>>,
+    vis: Query<&InheritedVisibility>,
+) {
+    if !keys.just_pressed(KeyCode::F9) { return; }
+    let Some(p) = play else { println!("dump: no gameplay"); return };
+    let h = &p.game.hero;
+    let hp = h.pos.map(|v| v.to_f32());
+    println!(
+        "dump: tick {} hero mode {} state {:#x} pos ({:.2}, {:.2}, {:.2}) body {:?} hero moby {} ratchet moby {}",
+        p.game.counter, h.mode, h.state, hp[0], hp[1], hp[2], h.bodies.moby, h.hero_moby(p.hero_id), p.hero_id
+    );
+    let shown = p.entities.iter().filter(|&&e| vis.get(e).is_ok_and(|v| v.get())).count();
+    println!("dump: engine Ratchet draw: cached hidden {}, {} of {} entities visible", p.ratchet_hidden, shown, p.entities.len());
+    let mut visible: std::collections::HashMap<u32, (usize, usize)> = Default::default();
+    for (tag, v) in &meshes {
+        let e = visible.entry(tag.0).or_default();
+        e.1 += 1;
+        if v.get() { e.0 += 1; }
+    }
+    for (id, m) in p.game.mobys.mobys.iter().enumerate() {
+        if m.is_deleted() { continue; }
+        let d = ((m.position[0] - hp[0]).powi(2) + (m.position[1] - hp[1]).powi(2) + (m.position[2] - hp[2]).powi(2)).sqrt();
+        if d > 12.0 { continue; }
+        let (sv, st) = visible.get(&(id as u32)).copied().unwrap_or((0, 0));
+        println!(
+            "dump:   moby {id:4} class {:5} state {:#04x} mode {:#06x} coll {} pos ({:.2}, {:.2}, {:.2}) dist {:.1} meshes {sv}/{st} visible",
+            m.o_class, m.state, m.mode, m.has_collision, m.position[0], m.position[1], m.position[2], d
+        );
+    }
 }
 
 /// The entities of instances a death reload made spawn (their level load had hidden them: `SpawnHidden`).
@@ -1822,6 +1923,9 @@ fn tick(
         None if *source == CameraSource::Play => pad.0,
         None => PadInput::neutral(),
     };
+    // Dev builds: the noclip takes the pad (the tick sees it neutral; noclip_step moves the hero after it).
+    let noclip_pad = p.noclip.map(|_| input);
+    let input = if noclip_pad.is_some() { PadInput::neutral() } else { input };
     // The view of the last rendered frame (0x16d140, `FastBSphereCheck`): the main camera as last drawn.
     let tans = particles.as_deref().map_or_else(|| crate::particle_render::view_tans(None), |s| s.view_tan);
     let view_cull = cams.iter().next().map(|t| crate::particle_render::bsphere_view(t, tans));
@@ -1985,6 +2089,7 @@ fn tick(
     let mut anim_ctl = rc_game::hero::anim::HeroAnimCtl { ratchet: p.ratchet.ctl(class), body: &mut p.body_anim, classes: &body_class };
     let sound = if has_audio { Some(&mut sound as &mut rc_game::tick::SoundHook) } else { None };
     let report = p.game.tick_with_hero_sounds(Some(&input.bytes()), coll, &mut anim_ctl, &mut hooks, &mut hits, sound, &mut hero_sounds);
+    if let Some(pad) = noclip_pad { noclip_step(p, &pad); }
     // … and back out.
     let g = p.game.item_globals;
     if let Some(gs) = state.as_mut() {
@@ -2212,7 +2317,7 @@ fn upload(
         if let Ok(mut tr) = transforms.get_mut(e) { *tr = t; }
     }
     // MobyProc's deferral (crate::shadow_render): his draws after the shadow pass only while he casts.
-    let (late, hero_mode) = (deferred.contains(&p.hero_id) || hm.mode & 0x800 != 0, hm.mode);
+    let late = deferred.contains(&p.hero_id) || hm.mode & 0x800 != 0;
     if p.ratchet_late != Some(late) {
         p.ratchet_late = Some(late);
         moby_render::queue_late(&mut commands, p.entities.clone(), late);
@@ -2233,13 +2338,6 @@ fn upload(
             let v = crate::moby_lod::view_centre(sphere, eye, &rows);
             crate::moby_lod::moby_proc_view(v, sphere[3], &inp, tans).is_ok_and(|q| q.low_lod)
         });
-    // Hidden in first person (mode bit 1, `HeroSyncMoby` 0x229f20 → 0x2486c0).
-    let hidden = hero_mode & rc_game::moby_runtime::mode::HIDDEN != 0;
-    if hidden != p.ratchet_hidden {
-        p.ratchet_hidden = hidden;
-        let v = if hidden { Visibility::Hidden } else { Visibility::Inherited };
-        for &e in &p.entities { commands.entity(e).insert(v); }
-    }
     if low != p.ratchet_lod_low {
         p.ratchet_lod_low = low;
         let vis = |on: bool| if on { Visibility::Inherited } else { Visibility::Hidden };
