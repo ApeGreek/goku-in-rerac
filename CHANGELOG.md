@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.2.2-alpha
+
+- Fixes a black screen after the opening movies of a new game, after loading a save and after flying to another planet.
+
 ## v0.2.1-alpha
 
 Fixes from the first round of testing, and new display settings.
