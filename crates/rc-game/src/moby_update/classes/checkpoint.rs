@@ -120,7 +120,13 @@ pub(crate) fn record(w: &mut World, r: Record) {
     // 0x1baaa0 → 0x1bb700: the visit records the reload writes back (crate::moby_update::visit).
     w.svc.save.checkpoint_visit = w.svc.save.visit.clone();
     // 0x1bb6f4 = the body 0x1413f4, 0x1bb6fc = 0x14161c (crate::hero::bodies; the reload switches back into the body).
-    w.svc.save.checkpoint_body = (w.hero.mode, w.hero.bodies.state_param);
+    // The game's reload switches inside `0x29adc8`, before any checkpoint updates; the port makes that switch on the
+    // next tick ([`crate::hero::bodies::Bodies::restore`]), after this moby pass: a checkpoint the hero respawns in
+    // keeps the pending body, else a second death would come back as Ratchet.
+    w.svc.save.checkpoint_body = match w.hero.bodies.restore {
+        Some((body, state, _)) => (body, state),
+        None => (w.hero.mode, w.hero.bodies.state_param),
+    };
     // 0x1bb6e0 / 0x1bb6e4: Ratchet's moby's light word and ambient.
     w.svc.save.checkpoint_light = w.hero_moby.and_then(|h| w.table.mobys.get(h)).map(|m| (m.light, m.ambient));
     // 0x1bb6ec..0x1bb6f2: the reverb request saved with the record (crate::audio::reverb), and 0x1bc304 the music
