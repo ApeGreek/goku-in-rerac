@@ -1080,7 +1080,9 @@ pub fn gold_panel_draw(m: &mut PageMenu, w: u32, a: &MenuAssets, gs: &GameState,
     t.extend_from_slice(format!(" {total}").as_bytes());
     let (dx, dy) = super::pages::crop(ww, wh);
     let tw = a.width(Font::Regular, &t);
-    let y = (crate::hud::SCREEN_H >> 1) - 8;
+    // H = 0x13e504, the target's height while the panel draws (`SetRenderToTextureView`), not the screen's: with 416
+    // the count sat far below the panel's target and was clipped away.
+    let y = (super::pages::target_size(ww, wh).1 >> 1) - 8;
     super::super::text(out, Font::Regular, ww - 0x10 - tw + dx, y + dy, super::SHADOW, &t);
     super::super::text(out, Font::Regular, ww - 0x11 - tw + dx, y - 1 + dy, LIGHT_BLUE, &t);
     8

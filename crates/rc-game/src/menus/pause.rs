@@ -1476,7 +1476,9 @@ fn read_widget(ov: &Overlay, a: u32) -> Option<Widget> {
     // The callbacks as their level-01 labels (widgets dispatch on them).
     let (update, draw) = (ov.label(u(0)?), ov.label(u(4)?));
     let data = match (update, draw) {
-        (func::LIST_UPDATE, _) | (0, func::LIST_DRAW) | (media::func::SKETCH_PAGER, func::LIST_DRAW) => Data::List(List {
+        // The confirm page's keys (0x295370) on a list-drawn widget: its hints rows (△ Exit, ○ Play Infobot, ✕ Blast
+        // Off) are the list the draw reads; the keys read no data.
+        (func::LIST_UPDATE, _) | (0, func::LIST_DRAW) | (media::func::SKETCH_PAGER, func::LIST_DRAW) | (func::CONFIRM_UPDATE, func::LIST_DRAW) => Data::List(List {
             flags: raw[0],
             items_addr: raw[1],
             items: read_items(ov, raw[1]),

@@ -121,7 +121,9 @@ pub fn target_size(w: i32, h: i32) -> (i32, i32) {
     (1 << u, 1 << v)
 }
 
-/// The shift of a centre-cropped (return 8) panel's target-pixel draws: `(w − tw) / 2, (h − th) / 2`.
+/// The shift of a centre-cropped (return 8) panel's target-pixel draws: `(w − tw) / 2, (h − th) / 2`. While such a
+/// panel draws, `SetRenderToTextureView` (0x219ba0) has set the frame size 0x13e500 / 0x13e504 to the target's
+/// ([`target_size`]): a draw that centres on "the screen" centres on the target.
 pub fn crop(w: i32, h: i32) -> (i32, i32) {
     let (tw, th) = target_size(w, h);
     ((w - tw) / 2, (h - th) / 2)
@@ -494,7 +496,9 @@ pub fn gold_draw(m: &mut PageMenu, w: u32, a: &MenuAssets, gs: &GameState, lang:
     // Window {y 0..h, x 8..w/3, anchor (8 + w/3)/2, line 16, flags 5 (measure)}, then drawn at y = (H − height)/2.
     let mut win = wtext::Window::new(0, wh as i16, 8, (ww / 3) as i16, ((8 + ww / 3) / 2) as i16, 0, 0x10, wtext::CENTRE_LINES | wtext::MEASURE_ONLY);
     wtext::layout(&mut win, &t, -1, &a.hud.glyphs[Font::Regular as usize], true);
-    win.y_start = ((crate::hud::SCREEN_H - win.height as i32) >> 1) as i16;
+    // H = 0x13e504, the target's height while the panel draws (`SetRenderToTextureView`).
+    let th = target_size(ww, wh).1;
+    win.y_start = ((th - win.height as i32) >> 1) as i16;
     win.flags ^= wtext::MEASURE_ONLY;
     let mv = |w0: wtext::Window| {
         let mut w1 = w0;
