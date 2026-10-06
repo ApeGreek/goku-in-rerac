@@ -1,6 +1,6 @@
 //! **Blarg's bridge, class 1028** (level06 `0x2f55a0` with its placement `0x2f5d78`; 1 placed; census U227; the name
 //! is descriptive [L]). A retracted bridge of 20 deck pairs (class 0x405) and 10 rail pairs (0x406) it makes at
-//! load. Once Clank has done his part (flag 0x13d4d6, as Clank, in gameplay) the screen fades to a cutaway: the deck
+//! load. Once Clank has done his part (the Hydrodisplacer owned, 0x13d4d6, as Clank, in gameplay) the screen fades to a cutaway: the deck
 //! slides out piece by piece to 20, the rails flip up (two stages of a quarter turn each, a sound as each piece
 //! starts), the camera gliding between cuboids +0x60 → +0x64 → +0x68; its mission is done, then a fade back, a hint
 //! (0x1776, record 0x2d), a banner (0x177c) and a save. With the mission done at load it starts extended. The
@@ -13,7 +13,7 @@
 //! | state | what | port |
 //! |---|---|---|
 //! | 0 | mission done → 6, extended (20, 1000°, 1000°); else 1; the 40 deck pieces and 20 rails made at it (draw distance 0x40, drawn, its mode; the first side lit like Ratchet, the second like it); placed | [`update`] |
-//! | 1 | Clank (0x1413f4 = 1), flag 0x13d4d6 and mode 0 → the fade 1, 3, the ride −0.01 | [`update`] |
+//! | 1 | Clank (0x1413f4 = 1), the Hydrodisplacer owned (0x13d4d6) and mode 0 → the fade 1, 3, the ride −0.01 | [`update`] |
 //! | 3 / 5 | the ride `Approach`ed to 1 by 1/`ticks(20)`, the fade 1 − \|ride\|; crossing 0: (3) `HeroTeleport(here, 0x72, 1)`, `CameraScript(cuboid +0x60, its Euler, 1, 0, 0)`; (5) the body's idle, `CameraScript2(3)`; at 1: (3) → 4, the hum (`PlayClassSound(0, 4)` on rail 9 into +0xbc); (5) → 6, `Help_Request(0x1776, 0x2d)`, `ShowBanner(0x177c, −1)`, save | [`update`] |
 //! | 4 | `SetMissionDone`; the deck `0x26a780(20, 15·dt², 15·dt², 10·dt)` (= `0x270830`) below 20; the rails' first flip `(1000, 200·dt², …, 300·dt)` once the deck passes 5, the second once the first passes 300°; at 1000° → 5, the ride −1; the deck out and the hum alive → released; placed; the camera lerped +0x60 → +0x64 by deck/20, then +0x64 → +0x68 by second/1000 | [`update`] |
 //! | `0x2f5d78` | deck i: the offset `max(deck − i, 0)` along row 0; A = rows·(−0.49, 2, 0) + pos + offset, B = rows·(−0.49, −2, 0) + …; rot.x ∓ clamp(first° − 45°·i, 0, 90°); rail j: A at `max(−0.6 + 0.25·(4 − j), deck − 2j)`, B at `max(deck − 2j − 1, …)`; rot.x −a / b and rot.y −c / −d from the two flips (each piece's half 45° behind the other's), a sound (1, then 2) when a piece leaves 0 | [`place`] |
@@ -40,7 +40,9 @@ const SIDE_B: [f32; 3] = [f32::from_bits(0xbefa_e148), -2.0, 0.0];
 const RAIL_BASE: f32 = f32::from_bits(0xbf19_999a);
 const RAIL_STEP: f32 = 0.25;
 const DEG: f32 = 0.017_453_292;
-const FLAG_DONE: u32 = 0x13_d4d6;
+/// 0x13d4d6 = the owned-items table 0x13d4c0 + 22: the Hydrodisplacer, Clank's prize at the end of his part (not a
+/// story flag of 0x13d388: the same byte `blarg_clank_lift` reads).
+const HYDRODISPLACER: usize = 22;
 
 fn gf(w: &World, k: u32) -> f32 { f32::from_bits(w.svc.units.word(k)) }
 fn sf(w: &mut World, k: u32, x: f32) { w.svc.units.set_word(k, x.to_bits()); }
@@ -157,7 +159,7 @@ pub fn update(w: &mut World, id: MobyId) {
             place(w, id);
         }
         1 => {
-            if w.hero.mode != 1 || story::flag(w, story::flag_index(FLAG_DONE)) == 0 || w.svc.game_mode != 0 { return; }
+            if w.hero.mode != 1 || !w.hero.owned.has(HYDRODISPLACER) || w.svc.game_mode != 0 { return; }
             crate::cinematic::set_fade(w, 1.0);
             w.mm(id).state = 3;
             c::set_pf(w, id, 0x6c, f32::from_bits(0xbc23_d70a));

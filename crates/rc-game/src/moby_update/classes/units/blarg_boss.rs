@@ -325,7 +325,8 @@ fn init(w: &mut World, id: MobyId) {
         mm.mode = (mm.mode & !mode::TARGETABLE) | 1;
     }
     let beaten = story::flag(w, story::flag_index(0x13_d3ab)) != 0;
-    let replay = story::flag(w, story::flag_index(0x13_d505)) != 0;
+    // 0x13d505 = the acquired items 0x13d4e8 + 29 (not a global flag).
+    let replay = story::acquired(w, 29);
     if !beaten || replay { set(w, id, 1); } else { w.delete_moby(id); }
 }
 

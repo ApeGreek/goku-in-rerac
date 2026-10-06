@@ -38,7 +38,12 @@ pub const FLAG_ULTRA_NANOTECH: usize = 5;
 pub const fn skill_index(addr: u32) -> usize { (addr - SKILL_POINTS) as usize }
 
 /// Index of the global flag at EE address `addr` (0x13d388 + i).
-pub const fn flag_index(addr: u32) -> usize { (addr - FLAGS) as usize }
+pub const fn flag_index(addr: u32) -> usize {
+    // 0x13d388..0x13d408 (128 flags; the skill points follow). The owned / acquired items (0x13d4c0 / 0x13d4e8) are
+    // not flags: `w.hero.owned` and [`acquired`].
+    debug_assert!(addr >= FLAGS && addr < FLAGS + 0x80, "not a global flag address");
+    (addr - FLAGS) as usize
+}
 
 /// Global flag `i` (0x13d388[i]) as this tick's class writes left it (0 past the table).
 pub fn flag(w: &World, i: usize) -> u8 { w.svc.interact.game.flags.get(i).copied().unwrap_or(0) }
@@ -75,6 +80,9 @@ pub fn set_skill_point(w: &mut World, k: usize) {
 
 /// `0x13d4c0[item] = v`.
 pub fn set_owned(w: &mut World, item: usize, v: u8) { w.svc.interact.writes.push(GameWrite::Owned(item, v)); }
+
+/// `0x13d4e8[item]`: the item was ever acquired.
+pub fn acquired(w: &World, item: usize) -> bool { w.svc.interact.game.acquired.get(item).is_some_and(|&b| b != 0) }
 
 /// `0x13d4e8[item] = v` (and the talk conditions' mirror).
 pub fn set_acquired(w: &mut World, item: usize, v: u8) {
