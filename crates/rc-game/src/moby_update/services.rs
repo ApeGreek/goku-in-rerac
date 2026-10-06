@@ -1440,7 +1440,7 @@ pub struct World<'a> {
     pub table: &'a mut MobyTable,
     /// The hero block (0x13f350..0x141660).
     pub hero: &'a Hero,
-    /// `0x1413d0`: Ratchet's moby.
+    /// `0x1413d0`: the hero moby (Ratchet's, or the body moby while a body is in).
     pub hero_moby: Option<MobyId>,
     /// `0x167240`: camera position (written by the previous tick's camera update).
     pub camera: V4,
@@ -1510,7 +1510,9 @@ impl<'a> World<'a> {
     /// A world with no collision, particles, sound sink, view or external updates, no missions and an
     /// empty inventory; the camera at the hero.
     pub fn new(table: &'a mut MobyTable, hero: &'a Hero, rng: &'a mut Rng, classes: &'a dyn ClassData, svc: &'a mut Services, counter: u64) -> World<'a> {
-        let hero_moby = table.hero();
+        // `0x1413d0`: the body moby while a body is in (Clank, Giant Clank, the disguise), else Ratchet's: the classes'
+        // "is it the hero" tests (the gadgetbots' hits from Clank, ...) see the body (`Hero::hero_moby`).
+        let hero_moby = table.hero().map(|r| hero.hero_moby(r));
         World {
             table,
             hero,
