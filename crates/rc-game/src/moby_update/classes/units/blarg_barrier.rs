@@ -76,17 +76,21 @@ impl Default for Beams {
 }
 
 impl Beams {
-    /// One tick (1123's state 2, the gates' `0x2f7000`): a beam at 0 re-rolls along x from the running x (−length/2,
+    /// One tick (1123's state 2, the gates' `0x2f7000`): a beam at 0 re-rolls along `axis` from the running value (−length/2,
     /// plus length/30 a point; the run continues into the next beam re-rolled this tick), its 30 `rand_vec(0, drift)`
-    /// draws smoothed into 28 velocities, countdown `period`; else points 1..28 drift, countdown − 1.
-    pub fn step(&mut self, w: &mut World, length: f32, drift: f32, period: i32) {
+    /// draws smoothed into 28 velocities, countdown `period`; else points 1..28 drift, countdown − 1. `axis` is the
+    /// component the run is written to: 0 (x) for 1123's beams, 1 (y) for the gates' (`0x2f7000` stores it at +4,
+    /// across their frames' x rotations: the nine frames make the gate's star).
+    pub fn step(&mut self, w: &mut World, length: f32, drift: f32, period: i32, axis: usize) {
         let step = length / 30.0;
         let mut x = -(length * 0.5);
         for k in 0..4 {
             if self.count[k] == 0 {
                 let mut r = [[0.0f32; 4]; POINTS];
                 for (i, ri) in r.iter_mut().enumerate() {
-                    self.pts[k][i] = [x, 0.0, 0.0, 0.0];
+                    // `0x217300` stores vf0, then the run's component.
+                    self.pts[k][i] = [0.0, 0.0, 0.0, 1.0];
+                    self.pts[k][i][axis] = x;
                     x += step;
                     let q = w.rng.rand_vec(0.0, drift);
                     *ri = [q[0], q[1], q[2], 0.0];
@@ -225,7 +229,7 @@ pub fn update(w: &mut World, id: MobyId) {
             if 1.0 < sc { sc -= 1.0; }
             w.svc.units.set_word(SCROLL_KEY, sc.to_bits());
             let mut b = Beams::from_pvars(&w.m(id).pvars);
-            b.step(w, LENGTH, DRIFT * c::DT, PERIOD);
+            b.step(w, LENGTH, DRIFT * c::DT, PERIOD, 0);
             b.to_pvars(&mut w.mm(id).pvars);
             let cam = w.camera.map(|x| f32::from_bits(x.0));
             if c::dist3(c::pos(w, id), cam) < 48.0 {

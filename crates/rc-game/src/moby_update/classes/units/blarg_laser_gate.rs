@@ -1,7 +1,9 @@
 //! **Blarg's laser gates, class 1035** (level06 `0x2f6470` with its beams' tick `0x2f7000` and its draw callback
 //! `0x2f6dd0` through the strip emitter `0x216b88`; 5 placed; census U228; the name is descriptive [L]). A slowly
-//! rolling cylinder of nine crackling beams (the shared four point sets of every gate, drawn through nine frames in a
-//! hexagonal pattern) that fades in within 48 of the camera and hums. Two lines across it hurt for 5; touching it or
+//! turning web of crackling beams across the doorway: the shared four point sets of every gate run along y (`0x2f7000`
+//! writes the run at +4) and are drawn through nine frames, three groups at 0 / ±60° about x (the door's normal), one
+//! on the axis and two on a hexagon around it, so the beams cross as a star. It fades in within 48 of the camera and
+//! hums. Two lines across it hurt for 5; touching it or
 //! hitting it counts against Ratchet (a 30-tick hold between counts), and after three a hint plays (help 0x1774, record
 //! 0x2b). It goes down when its four links (+0x00..+0x0c) are all done: a generator 1302 in state 2, or any other moby
 //! with its command byte set; then the beams burst into sparks and it is deleted. Brought down with no generator
@@ -18,7 +20,7 @@
 //! | 1 | within 48 of the camera: the fade `Approach`ed to 1 by 2·dt, else to 0; within 48 two lines (from 2.25 below, 0.5 along its facing ± 3 across) with the template `0x268698(5, tmpl, m, 0x10001, 0.5·facing)` (= `0x26e808`), each one that hits Ratchet's moby (0x1745d8) counts; Ratchet's capsule on it (0x13f58c) → `0x268898(Ratchet, ±row 0)` (= `0x26e968`, away from it) and a count | [`update`] |
 //! | 1 | fade ≠ 0 → the draw; the hint's record (0x141ac0) at 0: no hold and a hit on it (0x330000) → a count; +0xa4 0xff; more than two → `Help_Request(0x1774, 0x2b)` | [`update`] |
 //! | 1 | every link done → no collision, 2, the hum released, sound 1; the hint's record (help 0x2b): no generator among the links → its count + 1 (unless 0xffff); its time and level mask touched | [`update`] |
-//! | 2 | per frame (0x1db060 Euler, 0x1dafd0 offset through Euler · 1.5): 20 sparks along its x (`randf_sym(0, 2.5)`), `FastTweenColor(randf(0, 1), 0x80802020, 0x80802080)`, size `randf(0.125, 0.333)`, `PartType60Spawn(…, rand_vec(1.2·dt, 2.1·dt), ticks(trunc(randf(30, 60))), randi(255), 0)`; → 3 | [`update`] |
+//! | 2 | per frame (0x1db060 Euler, 0x1dafd0 offset through Euler · 1.5): 20 sparks along its y (`randf_sym(0, 2.5)` on the frame's row 1), `FastTweenColor(randf(0, 1), 0x80802020, 0x80802080)`, size `randf(0.125, 0.333)`, `PartType60Spawn(…, rand_vec(1.2·dt, 2.1·dt), ticks(trunc(randf(30, 60))), randi(255), 0)`; → 3 | [`update`] |
 //! | 3 | deleted | [`update`] |
 //! | `0x2f6dd0` | FX 0xe, additive; per frame the four strips, colours `FastTweenColor(fade, 0x80c04070 & 0xffffff, 0x80c04070)` / 0x00ff0000, S 0.25 per point from the scroll | [`fx_quads`] |
 
@@ -97,7 +99,8 @@ pub fn update(w: &mut World, id: MobyId) {
             let (rot, pos) = (w.m(id).rotation, w.m(id).position);
             for k in 0..9 {
                 let (rows, at) = frame_k(rot, pos, k);
-                let axis = c::set_len3([rows[0][0], rows[0][1], rows[0][2], 0.0], 1.0);
+                // Along the frame's y row (`FastVecNormalize` of +0x10): the gates' beams run along y.
+                let axis = c::set_len3([rows[1][0], rows[1][1], rows[1][2], 0.0], 1.0);
                 for _ in 0..20 {
                     let s = w.rng.randf_sym(0.0, LENGTH * 0.5);
                     let pt = c::add(c::scale(axis, s), [at[0], at[1], at[2], 1.0]);
@@ -132,7 +135,7 @@ fn tick(w: &mut World, id: MobyId) {
     let o = w.m(id).o_class;
     w.mm(id).scale = super::class_scale(w, o) * 1.75;
     let mut b = std::mem::take(&mut w.svc.units.blarg_gates);
-    b.step(w, LENGTH, DRIFT * c::DT, super::blarg_barrier::PERIOD);
+    b.step(w, LENGTH, DRIFT * c::DT, super::blarg_barrier::PERIOD, 1);
     w.svc.units.blarg_gates = b;
     let cam = w.camera.map(|x| f32::from_bits(x.0));
     let mut fade = c::pf(w, id, 0x18);
