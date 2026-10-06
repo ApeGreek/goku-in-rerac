@@ -1861,7 +1861,9 @@ impl<'a> World<'a> {
             return [m.rows[0], m.rows[1], m.rows[2], [m.position[0], m.position[1], m.position[2], 1.0]];
         };
         let snap = self.svc.snapshots.get(id).and_then(|s| s.as_ref());
-        let p = rc_formats::moby_anim::evaluate_chain(class, &m.anim, snap, chain);
+        // `MobyAttachToJoint` 0x24f728 marks the chain through `MobyMarkJointChain` as `0x24f7c8` ([`World::joint_point`])
+        // does: with the moby's joint-modifier list +0x64 (Clank's lean moves his antenna glow 0x4b4 with the dot).
+        let p = rc_formats::moby_anim::evaluate_chains_posed(class, &m.anim, snap, &[chain.as_slice()], &[], &m.joint_mods)[0];
         let rows = [m.rows[0], m.rows[1], m.rows[2]].map(|r| r.map(f32::to_bits));
         rc_formats::moby_anim::attach_matrix(&p, &rows, [m.position[0], m.position[1], m.position[2]], m.scale)
     }
