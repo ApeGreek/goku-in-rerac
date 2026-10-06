@@ -1646,7 +1646,15 @@ fn reload_load_pass(p: &mut Play, coll: &rc_formats::collision::Collision, parti
     p.svc.interact.cooldown = 0;
     let mut sched = Scheduler::new();
     let n_load = {
-        let hero = p.game.hero.clone();
+        let mut hero = p.game.hero.clone();
+        // `0x29adc8` switches into the checkpoint's body before this pass; the port's switch is made by the next tick
+        // (`Bodies::restore`), so the pass sees the hero as the game has him: in the body (0x1413f4, 0x1413d0). Else the
+        // classes take the body for Ratchet's: Blarg's Clank station hides Clank and drops his collision.
+        if let Some((body, _, b)) = hero.bodies.restore {
+            hero.mode = body;
+            hero.bodies.moby = Some(b.id);
+            hero.bodies.class = b.o_class;
+        }
         let inv = load_inventory(&p.svc, p.item_data.as_ref(), vendor, &hero);
         let mut ext = Externals { level: p.level, emitters: &p.emitters, view: None };
         let mut w = World::new(&mut p.game.mobys, &hero, &mut p.game.rng, &*p.classes, &mut p.svc, p.game.counter);
