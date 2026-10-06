@@ -1,5 +1,5 @@
-//! **Port-only** (not in the game): the "Port Options" page, for settings the PS2 never had (anti-aliasing, and
-//! switching the moby shadows off). Spec: docs/plan/menus.md "Port-only settings".
+//! **Port-only** (not in the game): the "Port Options" page, for settings the PS2 never had (anti-aliasing,
+//! switching the moby shadows off, the render resolution and fullscreen). Spec: docs/plan/menus.md "Port-only settings".
 //!
 //! It is built entirely from the game's own machinery so it looks and behaves like the Options sub-pages:
 //! a page record whose frame-moby seqs, filler widgets and "✕ Toggle / △ Exit" hint list are those of a
@@ -58,6 +58,13 @@ pub mod text {
     pub const X4: i32 = -0x112;
     pub const X8: i32 = -0x113;
     pub const SHADOWS: i32 = -0x120;
+    pub const RESOLUTION: i32 = -0x130;
+    pub const RES_WINDOW: i32 = -0x131;
+    pub const RES_1: i32 = -0x132;
+    pub const RES_2: i32 = -0x133;
+    pub const RES_3: i32 = -0x134;
+    pub const RES_4: i32 = -0x135;
+    pub const FULLSCREEN: i32 = -0x140;
     /// The game's own "on" / "off" (20314 / 20315, the Subtitles / HelpDesk toggle values).
     pub const ON: i32 = 20314;
     pub const OFF: i32 = 20315;
@@ -71,6 +78,13 @@ pub mod text {
             X4 => b"4x",
             X8 => b"8x",
             SHADOWS => b"Shadows",
+            RESOLUTION => b"Resolution",
+            RES_WINDOW => b"Window",
+            RES_1 => b"512x416",
+            RES_2 => b"1024x832",
+            RES_3 => b"1536x1248",
+            RES_4 => b"2048x1664",
+            FULLSCREEN => b"Fullscreen",
             _ => return None,
         })
     }
@@ -83,6 +97,10 @@ pub enum Setting {
     Msaa,
     /// The moby shadows (docs/plan/shadows.md): value 0 on (the game's look, the default), 1 off.
     Shadows,
+    /// The render resolution (the engine's game frame): value 0 fits the window, 1..4 the multiples of 512×416.
+    Resolution,
+    /// The window: value 0 windowed, 1 fullscreen.
+    Fullscreen,
 }
 
 /// One row: the setting, its label and the ids of its values (✕ cycles through them).
@@ -97,6 +115,8 @@ pub struct Entry {
 pub const ENTRIES: &[Entry] = &[
     Entry { setting: Setting::Msaa, label: text::ANTI_ALIASING, values: &[text::OFF, text::X2, text::X4, text::X8] },
     Entry { setting: Setting::Shadows, label: text::SHADOWS, values: &[text::ON, text::OFF] },
+    Entry { setting: Setting::Resolution, label: text::RESOLUTION, values: &[text::RES_WINDOW, text::RES_1, text::RES_2, text::RES_3, text::RES_4] },
+    Entry { setting: Setting::Fullscreen, label: text::FULLSCREEN, values: &[text::OFF, text::ON] },
 ];
 
 /// The list's run-time state: cursor, each row's value index and each row's selectable values (bit k = value k;

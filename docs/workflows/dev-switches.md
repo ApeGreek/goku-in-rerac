@@ -49,6 +49,8 @@ module that reads it: `grep -rn '"RC_' crates/` lists them all.
 | `RC_DUMP_REALTIME` | `1`: `RC_DUMP_FRAMES` in real-time mode (wall-clock ticks as in play, not frame-exact; dev only) |
 | `RC_DUMP_TICKS` | `n,m,…`: in frame-exact mode, update k runs the k-th entry's game ticks, cycled (`1,0` = a 120 Hz display, `2` = 30 Hz; dev only, for real-time pacing repros) |
 | `RC_NOVSYNC` | `1`: present without vsync, so `fps:` measures headroom |
+| `RC_RESOLUTION` | `window` (default: the largest 512:416 frame that fits the window) or `1`..`4` (a fixed 512×416 multiple, scaled to the window); overrides the Port Options value at start (crate::display) |
+| `RC_FULLSCREEN` | `1`: borderless fullscreen on the current monitor; `0`: windowed; overrides the Port Options value at start (F11 toggles in game) |
 | `RC_FOG` | `0`: disable fog |
 | `RC_NO_LIGHT` | `1`: skip the load-time lighting passes (tfrag, tie, shrub, moby); stored colours used |
 | `RC_WORLD_LIGHTS` | `0`: point lights (explosions) do not relight tfrags, ties and shrubs |

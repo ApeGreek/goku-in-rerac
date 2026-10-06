@@ -251,7 +251,7 @@ fn setup(
     generation: Res<crate::level_switch::LevelGeneration>,
     mut commands: Commands,
     level: Res<crate::Level>,
-    window: Option<Single<&Window, With<PrimaryWindow>>>,
+    frame: Res<crate::display::GameFrame>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<MobyMaterial>>,
@@ -335,7 +335,8 @@ fn setup(
         menu.as_ref().map_or(0, |m| m.widgets.len()),
     );
     let script = std::env::var("RC_PLAY_SCRIPT").ok().filter(|s| !s.trim().is_empty()).and_then(|s| Script::parse(&s).ok());
-    let size = window.map_or(UVec2::new(1024, 832), |w| w.physical_size()).max(UVec2::ONE);
+    // The game frame's size (crate::display): the layer and the snapshot are laid over it.
+    let size = frame.size.max(UVec2::ONE);
     let mut layer_image = Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None);
     layer_image.sampler = bevy::image::ImageSampler::nearest();
     let image = images.add(layer_image);
@@ -538,7 +539,7 @@ fn menu_frame(
     mut render: Option<ResMut<RenderSettings>>,
     supported: Option<Res<SupportedMsaa>>,
     (mut vr, mut feed, mut view, mut audio): InteractParams,
-    mut shadows: Option<ResMut<crate::shadow_render::ShadowSettings>>,
+    (mut shadows, mut display): (Option<ResMut<crate::shadow_render::ShadowSettings>>, ResMut<crate::display::DisplaySettings>),
     mut widgets3d: ResMut<crate::menu_models::GadgetsPreview>,
     (mut fer, movies): (ResMut<crate::saves::FrontEndRt>, Option<Res<crate::movie_render::MovieState>>),
 ) {
@@ -662,6 +663,8 @@ fn menu_frame(
                 menu.set_port_choices(Setting::Msaa, supported.as_deref().map_or_else(|| aa_choices(&SupportedMsaa::default()), aa_choices));
                 if let Some(r) = render.as_deref() { menu.set_port_value(Setting::Msaa, aa_index(r.msaa)); }
                 if let Some(s) = shadows.as_deref() { menu.set_port_value(Setting::Shadows, !s.enabled as u8); }
+                menu.set_port_value(Setting::Resolution, display.resolution.index());
+                menu.set_port_value(Setting::Fullscreen, display.fullscreen as u8);
                 // The card and the save inputs moved into the menu for its tick (crate::saves).
                 saves_in(menu, &play);
                 // 0x15172a as the widgets read it (the Helpdesk girl).
@@ -672,6 +675,16 @@ fn menu_frame(
                         s.enabled = v == 0;
                         println!("menus: frame {frame}: Port Options: shadows {}", if s.enabled { "on" } else { "off" });
                         s.save();
+                    }
+                }
+                // The display (crate::display): the game frame's resolution and the window mode.
+                let want = (menu.port_value(Setting::Resolution).map(crate::display::Resolution::from_index), menu.port_value(Setting::Fullscreen).map(|v| v == 1));
+                if let (Some(res), Some(full)) = want {
+                    if display.resolution != res || display.fullscreen != full {
+                        display.resolution = res;
+                        display.fullscreen = full;
+                        println!("menus: frame {frame}: Port Options: resolution {res:?}, fullscreen {full}");
+                        display.save();
                     }
                 }
                 if let (Some(v), Some(r)) = (menu.port_value(Setting::Msaa), render.as_mut()) {
@@ -1395,7 +1408,7 @@ fn build_prims(
 fn menu_layer(
     mut commands: Commands,
     rt: Option<ResMut<MenuRt>>,
-    window: Option<Single<&Window, With<PrimaryWindow>>>,
+    frame: Res<crate::display::GameFrame>,
     main: Query<&Transform, With<crate::fly_cam::FlyCam>>,
     mut transforms: Query<&mut Transform, Without<crate::fly_cam::FlyCam>>,
     mut cams: Query<&mut Camera>,
@@ -1410,8 +1423,8 @@ fn menu_layer(
     let active = rt.render_mode == Mode::Menu || menu_under_freeze(rt);
     let Some(main_t) = main.iter().next().copied() else { return };
     let layer = &mut rt.layer;
-    // The layer image and the snapshot follow the main target (the window, or the capture image kept at its size).
-    if let Some(size) = window.map(|w| w.physical_size()).filter(|s| s.x > 0 && s.y > 0) {
+    // The layer image and the snapshot follow the main target: the game frame (crate::display).
+    if let Some(size) = Some(frame.size).filter(|s| s.x > 0 && s.y > 0) {
         for h in [&layer.image, &rt.snapshot] {
             let same = images.get(h).is_some_and(|i| i.texture_descriptor.size.width == size.x && i.texture_descriptor.size.height == size.y);
             if !same {

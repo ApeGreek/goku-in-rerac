@@ -526,7 +526,9 @@ sub-pages (`crates/rc-game/src/menus/pause/port.rs`, `PageMenu::install_port_pag
   disc's ids are 0..21500); "off" is the game's 20315. Records use addresses 0x7f00_xxxx, which no EE pointer can hold.
 * **Rows** (`port::ENTRIES`, one entry per option): Anti-aliasing: off / 2x / 4x / 8x → `render_settings::RenderSettings::msaa`
   (engine `menu_render.rs` syncs the row with the resource around each menu tick; a change is applied by
-  `render_settings::apply` and saved). The world is not re-rendered under the menu (the snapshot is shown), so the new
+  `render_settings::apply` and saved). Shadows: on / off. Resolution: Window / 512x416 / 1024x832 / 1536x1248 /
+  2048x1664 and Fullscreen: off / on → `display::DisplaySettings` (the game frame every camera renders into, presented
+  on black at the window's size; keys `resolution` / `fullscreen` in the settings file). The world is not re-rendered under the menu (the snapshot is shown), so the new
   setting is visible from the first gameplay frame after the close.
 * **Device support**: the row offers only the sample counts the GPU can use for every multisampled world attachment
   (`render_settings::SupportedMsaa`, detected at start from `RenderAdapter::get_texture_format_features` for

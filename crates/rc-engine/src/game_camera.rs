@@ -9,11 +9,10 @@
 //! the unit tfrag positions are stored in). Bevy view space is x right, y up, -z forward in game units,
 //! so `x_game = x_view`, `y_game = -y_view`, `z_game = -1024 z_view`.
 
-use bevy::camera::{CameraProjection, SubCameraView, Viewport};
+use bevy::camera::{CameraProjection, SubCameraView};
 use bevy::math::Vec3A;
 use bevy::prelude::*;
 use bevy::render::render_resource::ShaderType;
-use bevy::window::PrimaryWindow;
 
 /// NTSC GS draw buffer (`SetupFS_AA_buffer(0x200, 0x1a0, ...)` in `SetPalMode`, render_pipeline.md §4).
 pub const SCREEN_W: f32 = 512.0;
@@ -35,7 +34,7 @@ pub const XY_CENTRE: f32 = 2048.0;
 /// qw656.w: added to the fog lane to set ADC (bit 15 after `ftoi4`) for guard-band-clipped triangles.
 pub const ADC_ADD: f32 = 3072.0;
 
-/// Which camera moves the main view's transform; both feed the same projection, letterbox and fog.
+/// Which camera moves the main view's transform; both feed the same projection and fog.
 /// Absent (`RC_PLAY=0`) = the fly camera only. `Play` = the game's follow camera (crate::play_camera; the fly
 /// camera is frozen), `Fly` = the debug fly camera while the game keeps ticking. Tab switches (crate::gameplay).
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,7 +96,7 @@ impl Plugin for GameCameraPlugin {
         let buf = bevy::render::storage::ShaderBuffer::new(&fog_bytes(&fog.uniform), bevy::asset::RenderAssetUsages::default());
         let h = app.world_mut().resource_mut::<Assets<bevy::render::storage::ShaderBuffer>>().add(buf);
         let _ = FOG_BUFFER.set(h);
-        app.insert_resource(fog).add_systems(Update, (letterbox, print_game_camera)).add_systems(PostUpdate, upload_fog.before(bevy::asset::AssetEventSystems));
+        app.insert_resource(fog).add_systems(Update, print_game_camera).add_systems(PostUpdate, upload_fog.before(bevy::asset::AssetEventSystems));
     }
 }
 
@@ -203,7 +202,8 @@ impl CameraProjection for GameProjection {
         crop * self.get_clip_from_view()
     }
 
-    /// The frustum is the 512×416 draw buffer's regardless of window size; `letterbox` keeps the aspect.
+    /// The frustum is the 512×416 draw buffer's regardless of the target's size: the target is the game frame
+    /// (crate::display), always of that aspect.
     fn update(&mut self, _width: f32, _height: f32) {}
 
     fn far(&self) -> f32 { self.far / UNITS }
@@ -226,24 +226,6 @@ impl CameraProjection for GameProjection {
 
 /// The camera's `Projection` component.
 pub fn game_projection() -> Projection { Projection::custom(GameProjection::default()) }
-
-/// Keeps the camera's viewport at the draw buffer's 512:416 aspect, centred (a no-op at 1024×832).
-fn letterbox(window: Single<&Window, With<PrimaryWindow>>, mut cams: Query<&mut Camera, With<Camera3d>>) {
-    let size = window.physical_size();
-    if size.x == 0 || size.y == 0 { return; }
-    let scale = (size.x as f32 / SCREEN_W).min(size.y as f32 / SCREEN_H);
-    let vp = UVec2::new((SCREEN_W * scale).round() as u32, (SCREEN_H * scale).round() as u32).min(size).max(UVec2::ONE);
-    let pos = (size - vp) / 2;
-    for mut cam in &mut cams {
-        let want = (vp != size).then(|| Viewport { physical_position: pos, physical_size: vp, ..default() });
-        let same = match (&cam.viewport, &want) {
-            (Some(a), Some(b)) => a.physical_position == b.physical_position && a.physical_size == b.physical_size,
-            (None, None) => true,
-            _ => false,
-        };
-        if !same { cam.viewport = want; }
-    }
-}
 
 /// The u32 at byte `off` of the level-settings section (gameplay file pointer 0, wad_layouts_rac1.md §3.3).
 fn level_settings_word(gameplay: &[u8], off: usize) -> anyhow::Result<u32> {

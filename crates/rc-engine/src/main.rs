@@ -31,6 +31,7 @@
 mod crash_log;
 mod audio_out;
 mod determinism;
+mod display;
 mod display_blend;
 mod disc_source;
 mod fly_cam;
@@ -149,6 +150,9 @@ fn main() -> anyhow::Result<()> {
             })
             .set(AssetPlugin { file_path: asset_dir(), ..default() }),
     )
+    // The game frame every camera renders into and its presentation in the window (before anything spawns a camera,
+    // and before the capture, which captures the frame).
+    .add_plugins(display::DisplayPlugin)
     // Frame-exact ticks / capture and the deterministic phase order, before anything spawns a camera.
     .add_plugins(determinism::DeterminismPlugin)
     // MSAA of the world cameras (default off; `RenderSettings` can change it at run time).
@@ -278,6 +282,8 @@ fn setup_camera(mut commands: Commands, level: Res<Level>) {
         Tonemapping::None,
         DebandDither::Disabled,
         render_settings::WorldCamera,
+        // The UI nodes without a target camera draw on the game frame (not on the present camera).
+        bevy::ui::IsDefaultUiCamera,
         FlyCam::from_transform(&transform, (extent / 20.0).clamp(5.0, 200.0)),
         transform,
         level_switch::KeepAcrossLevels,
@@ -302,6 +308,7 @@ fn report_fps(time: Res<Time>, mut acc: Local<(f32, u32)>) {
 fn take_screenshot(
     mut commands: Commands,
     req: Res<ScreenshotRequest>,
+    frame: Res<display::GameFrame>,
     time: Res<Time<Real>>,
     mut frames: Local<u32>,
     mut requested: Local<bool>,
@@ -310,7 +317,8 @@ fn take_screenshot(
     if *requested || *frames < req.min_frames || time.elapsed() < req.delay { return; }
     *requested = true;
     let path = req.path.clone();
-    commands.spawn(Screenshot::primary_window()).observe(move |shot: On<ScreenshotCaptured>, mut exit: MessageWriter<AppExit>| {
+    // The game frame (crate::display), not the window: no bars, and no blank capture of an occluded window.
+    commands.spawn(Screenshot::image(frame.image.clone())).observe(move |shot: On<ScreenshotCaptured>, mut exit: MessageWriter<AppExit>| {
         match shot.image.clone().try_into_dynamic() {
             Ok(img) => match img.to_rgb8().save(&path) {
                 Ok(()) => println!("screenshot saved to {}", path.display()),

@@ -36,11 +36,10 @@
 //! - **Offscreen target.** On macOS a window that is fully covered, on another Space or behind a
 //!   full-screen app is "occluded": wgpu-hal's Metal surface then refuses to hand out a drawable
 //!   (`SurfaceError::Occluded`), Bevy renders nothing to the window, and a window screenshot comes back all
-//!   zeros for as long as the window stays hidden (2,000+ frames seen). With `RC_SCREENSHOT_FRAME` every
-//!   camera that targets the primary window renders instead to an offscreen image of the window's physical
-//!   size and swapchain format (`Bgra8UnormSrgb`), kept in sync with the window, and that image is captured:
-//!   frame N no longer depends on the window being visible. The window itself stays blank.
-//!   `RC_CAPTURE_WINDOW=1` captures the window as before.
+//!   zeros for as long as the window stays hidden (2,000+ frames seen). Every game camera renders into the
+//!   game frame (crate::display: an offscreen image in the swapchain format `Bgra8UnormSrgb`), and the capture
+//!   is of that image: frame N does not depend on the window being visible. `RC_CAPTURE_WINDOW=1` captures the
+//!   window (the frame as presented, on black).
 //! - **Bounded retry.** A capture that still comes back blank is retried on later frames for at most
 //!   [`MAX_RETRY_FRAMES`] frames past N; then whatever came back is saved, a warning names the frame, and the
 //!   process exits with status 3 (the image is not frame N). A later-frame success also exits 3.
@@ -57,11 +56,8 @@ use bevy::math::FloatOrd;
 use bevy::prelude::*;
 use bevy::render::render_phase::{sort_phase_system, ViewSortedRenderPhases};
 use bevy::render::render_resource::PipelineCache;
-use bevy::asset::RenderAssetUsages;
-use bevy::camera::RenderTarget;
-use bevy::render::render_resource::{Extent3d, TextureFormat, TextureUsages};
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
-use bevy::window::{OnMonitor, PrimaryWindow, WindowRef};
+use bevy::window::OnMonitor;
 use bevy::render::view::NoIndirectDrawing;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::time::TimeUpdateStrategy;
@@ -127,10 +123,6 @@ struct FrameShot {
     /// The offscreen image the cameras render to (None with `RC_CAPTURE_WINDOW=1`).
     target: Option<Handle<Image>>,
 }
-
-/// The offscreen image the cameras render to in a capture run (module docs, "Offscreen target").
-#[derive(Resource)]
-struct CaptureTarget(Handle<Image>);
 
 /// `RC_DUMP_FRAMES`: the range, the folder and the number of frames saved so far.
 #[derive(Resource)]
@@ -199,16 +191,10 @@ impl Plugin for DeterminismPlugin {
             eprintln!("RC_SCREENSHOT_FRAME is set without RC_SCREENSHOT: no capture");
             return;
         }
-        let target = (env("RC_CAPTURE_WINDOW").as_deref() != Some("1")).then(|| {
-            let mut img = Image::new_target_texture(1024, 832, TextureFormat::Bgra8UnormSrgb, None);
-            img.asset_usage = RenderAssetUsages::RENDER_WORLD;
-            img.texture_descriptor.usage |= TextureUsages::COPY_SRC;
-            app.world_mut().resource_mut::<Assets<Image>>().add(img)
-        });
-        if let Some(t) = &target {
-            println!("determinism: capturing an offscreen copy of the window (RC_CAPTURE_WINDOW=1 captures the window)");
-            app.insert_resource(CaptureTarget(t.clone())).add_observer(render_offscreen).add_systems(PostUpdate, sync_capture_size);
-        }
+        // The game frame (crate::display: every game camera renders into it, at its size); RC_CAPTURE_WINDOW=1 captures
+        // the window (the frame presented on black).
+        let target = (env("RC_CAPTURE_WINDOW").as_deref() != Some("1")).then(|| app.world().resource::<crate::display::GameFrame>().image.clone());
+        if target.is_some() { println!("determinism: capturing the game frame (RC_CAPTURE_WINDOW=1 captures the window)"); }
         let status = PipelineStatus::default();
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.insert_resource(status.clone()).add_systems(Render, record_pipelines.in_set(RenderSystems::Cleanup));
@@ -286,24 +272,6 @@ fn record_pipelines(cache: Res<PipelineCache>, status: Res<PipelineStatus>) {
 /// See the module docs ("Monitor blips"): a window must not be despawned with a monitor entity.
 fn unlink_monitor(add: On<Insert, OnMonitor>, mut commands: Commands) {
     commands.entity(add.entity).try_remove::<OnMonitor>();
-}
-
-/// Capture mode: a camera spawned for the primary window renders to the offscreen capture image.
-fn render_offscreen(add: On<Add, Camera>, target: Res<CaptureTarget>, targets: Query<&RenderTarget>, mut commands: Commands) {
-    if matches!(targets.get(add.entity), Ok(RenderTarget::Window(WindowRef::Primary))) {
-        commands.entity(add.entity).insert(RenderTarget::Image(target.0.clone().into()));
-    }
-}
-
-/// Keeps the capture image at the primary window's physical size (the letterbox viewport and the projection
-/// are computed from the window).
-fn sync_capture_size(target: Res<CaptureTarget>, window: Option<Single<&Window, With<PrimaryWindow>>>, mut images: ResMut<Assets<Image>>) {
-    let (h, Some(w)) = (&target.0, window) else { return };
-    let size = w.physical_size();
-    if size.x == 0 || size.y == 0 { return; }
-    let Some(img) = images.get(h) else { return };
-    if img.texture_descriptor.size.width == size.x && img.texture_descriptor.size.height == size.y { return; }
-    if let Some(mut img) = images.get_mut(h) { img.resize(Extent3d { width: size.x, height: size.y, depth_or_array_layers: 1 }); }
 }
 
 /// H1: the run ends (window closed, monitor blip) before the capture was saved: exit status 2.

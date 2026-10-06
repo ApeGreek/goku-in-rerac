@@ -47,7 +47,6 @@ use bevy::render::render_resource::{Extent3d, TextureFormat};
 use bevy::render::view::Msaa;
 use bevy::transform::TransformSystems;
 use bevy::ui::UiTargetCamera;
-use bevy::window::PrimaryWindow;
 
 use crate::game_camera::{GameProjection, SCREEN_H, SCREEN_W};
 
@@ -153,7 +152,8 @@ impl Plugin for CanvasPlugin {
     }
 }
 
-/// The letterboxed 512×416 viewport in the window (crate::game_camera's rule): origin and scale, physical pixels.
+/// The 512×416 area in a target of `size` (the game frame: always of that aspect, so the origin is 0): origin and
+/// scale, physical pixels.
 fn viewport(size: UVec2) -> (Vec2, f32) {
     let scale = (size.x as f32 / SCREEN_W).min(size.y as f32 / SCREEN_H);
     let vp = UVec2::new((SCREEN_W * scale).round() as u32, (SCREEN_H * scale).round() as u32).min(size).max(UVec2::ONE);
@@ -164,7 +164,7 @@ fn viewport(size: UVec2) -> (Vec2, f32) {
 pub(crate) fn apply(
     mut commands: Commands,
     mut canvases: ResMut<Canvases>,
-    window: Option<Single<&Window, With<PrimaryWindow>>>,
+    frame: Res<crate::display::GameFrame>,
     main: Query<(Entity, &Transform), With<crate::fly_cam::FlyCam>>,
     mut transforms: Query<&mut Transform, Without<crate::fly_cam::FlyCam>>,
     mut cams: Query<(&mut Camera, &mut Projection)>,
@@ -175,7 +175,8 @@ pub(crate) fn apply(
     mut images: ResMut<Assets<Image>>,
 ) {
     let Some((main_e, main_t)) = main.iter().next().map(|(e, t)| (e, *t)) else { return };
-    let size = window.map(|w| w.physical_size()).filter(|s| s.x > 0 && s.y > 0).unwrap_or(UVec2::new(1024, 832));
+    // The game frame (crate::display), which the main camera renders into.
+    let size = frame.size.max(UVec2::ONE);
     let (origin, scale) = viewport(size);
     for s in &mut canvases.slots {
         match s.composite {
