@@ -863,8 +863,10 @@ fn draw_list1(
                         for pt in pts { glow_quad(&mut b, 0.2, 0.08, pt, rgba, cam); }
                         out.push(FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b });
                     }
-                    // The hero's draw callback `0x229440` (rc_game::hero::glow): on foot the antenna dot then the glow list,
-                    // in bodies 1 / 2 their dot; each sprite where its item sits as last placed (crate::moby_attach).
+                    // The hero's draw callback `0x229440` (rc_game::hero::glow): in the scene / space modes 2 / 6 (0x15f5c4)
+                    // the glow list only, whatever the body (the dot's point is the hidden back Clank's: it floated over a
+                    // cutscene's set); else on foot the antenna dot then the glow list, in bodies 1 / 2 their dot; each
+                    // sprite where its item sits as last placed (crate::moby_attach).
                     Callback::HeroGlow => {
                         let g = &p.game.hero.glow;
                         let at = |a: rc_game::hero::glow::At| match a {
@@ -872,8 +874,10 @@ fn draw_list1(
                             other => attach.as_deref().and_then(|m| m.glow_point(other)),
                         };
                         let mut b = PrimBuf::default();
-                        let list: &[rc_game::hero::glow::Sprite] = if p.game.hero.mode == 0 { &g.list } else { &[] };
-                        for s in g.dot.iter().chain(list) {
+                        let scene = matches!(p.svc.game_mode, 2 | 6);
+                        let list: &[rc_game::hero::glow::Sprite] = if scene || p.game.hero.mode == 0 { &g.list } else { &[] };
+                        let dot = if scene { None } else { g.dot.as_ref() };
+                        for s in dot.into_iter().chain(list) {
                             if let Some(pt) = at(s.at) { glow_quad(&mut b, s.size, s.pull, pt, s.rgba, cam); }
                         }
                         out.push(FxGroup { fx: GLOW_FX, additive: true, subtract: false, prims: b });
