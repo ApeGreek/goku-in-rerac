@@ -1968,7 +1968,9 @@ fn tick(
         class,
         body_classes: Some(&body_class),
         listener: class_sounds::listener_of(&p.game.camera.out),
-        hero: hero_id,
+        // `0x1413d0`, the sounds' owner: the body moby while a body is in (Clank's command voices and steps follow
+        // him, not Ratchet's moby left behind).
+        hero: p.game.hero.hero_moby(hero_id),
         counter: p.game.counter,
     };
     // The hero's animation: Ratchet's, or the body moby's while a body is the hero moby (rc_game::hero::bodies).
