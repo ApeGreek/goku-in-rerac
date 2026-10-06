@@ -1369,10 +1369,13 @@ impl HudState {
         self.text_right(tx, ty, colour, &text, out);
     }
 
-    /// The banner part of 0x24fb50 (ramp ±0x80/ScaleTicks(8) per tick) and its draw 0x251b88.
+    /// The banner part of 0x24fb50 (ramp ±0x80/ScaleTicks(8) per tick) and its draw 0x251b88. Not drawn (and not
+    /// counted down) while the game mode 0x15f5c4 is not 0 (a scene, a movie); a countdown reaching 1000 drops to 0:
+    /// the long banners (`ShowPlanetBanner`'s `ticks(0x49c)`) show for their first 180 ticks.
     fn draw_banner(&mut self, out: &mut Vec<Draw>) {
+        let mode = self.inputs.mode;
         let b = &mut self.banner;
-        if b.countdown == 0 && b.alpha == 0 {
+        if (b.countdown == 0 && b.alpha == 0) || mode != 0 {
             b.y = 100;
             return;
         }
@@ -1386,6 +1389,7 @@ impl HudState {
         let colour = (b.alpha as u32) << 24 | 0x00f0_f0f0;
         let (x, y, text) = (0x100, b.y, b.text.clone());
         if b.countdown != 0 { b.countdown -= 1; }
+        if b.countdown == 1000 { b.countdown = 0; }
         self.draw_banner_text(x, y, colour, text, out);
     }
 
@@ -1830,6 +1834,24 @@ mod tests {
         assert!(h.tick(mounted).is_empty(), "mounted: nothing drawn");
         assert!(h.slots.iter().any(|s| s.element == Element::Health && s.slide != 0), "the slot stays up");
         assert!(!h.tick(inputs(3, 1234)).is_empty(), "drawn again");
+    }
+
+    /// `HudDraw` 0x24a7f8: a countdown reaching 1000 drops to 0, so `ShowPlanetBanner`'s `ticks(0x49c)` shows for 180
+    /// ticks (then fades over 8), not 1180; outside game mode 0 the banner is neither drawn nor counted down.
+    #[test]
+    fn long_banners_stop_at_1000_and_wait_outside_gameplay() {
+        let banner_up = |d: &[Draw]| d.iter().any(|x| matches!(x, Draw::Text { text, .. } if text == b"Kerwan"));
+        let mut h = HudState::new(assets());
+        h.show_banner(b"Kerwan", Some(0x49c));
+        let mut shown = 0;
+        for _ in 0..400 { if banner_up(&h.tick(inputs(4, 0))) { shown += 1; } }
+        assert!((180..=190).contains(&shown), "shown {shown} ticks");
+        let mut h = HudState::new(assets());
+        h.show_banner(b"Kerwan", Some(300));
+        let mut scene = inputs(4, 0);
+        scene.mode = 2;
+        for _ in 0..500 { assert!(!banner_up(&h.tick(scene))); }
+        assert_eq!(h.banner.countdown, 300, "paused while the mode is not 0");
     }
 
     #[test]
