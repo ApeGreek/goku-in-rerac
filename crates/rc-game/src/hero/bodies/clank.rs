@@ -941,11 +941,13 @@ pub(crate) fn after_update(h: &mut Hero, table: &mut MobyTable, body: MobyId, hi
                 m.position = [mtx[3][0], mtx[3][1], mtx[3][2], m.position[3]];
             }
             w.build_matrix(r);
-            // The joint's rows × the rows of the Euler (0, 0, −yaw) (`fun_001fa050`, `fun_001fa378`).
+            // `sceVu0MulMatrix(M, M, R)` with R = the Euler (0, 0, −yaw) (`0x1ffa70`, `0x1ffdd8`): R first, in the joint's
+            // frame, then the joint's rows (rows = R · M, as `blarg_barrier::frame`); the other order turned the rotor in
+            // world space and lost it from the joint when the glide tilts him.
             let rz = euler_rows([Pf::ZERO, Pf::ZERO, p(-yaw), Pf::ZERO]).map(|r| r.map(Pf::to_f32));
             let rows: [[f32; 4]; 3] = std::array::from_fn(|i| {
                 let mut o = [0.0; 4];
-                for (j, oo) in o.iter_mut().enumerate().take(3) { *oo = mtx[i][0] * rz[0][j] + mtx[i][1] * rz[1][j] + mtx[i][2] * rz[2][j]; }
+                for (j, oo) in o.iter_mut().enumerate().take(3) { *oo = rz[i][0] * mtx[0][j] + rz[i][1] * mtx[1][j] + rz[i][2] * mtx[2][j]; }
                 o
             });
             let light = w.m(body).light;
