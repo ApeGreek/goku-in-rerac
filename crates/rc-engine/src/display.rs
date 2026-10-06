@@ -234,9 +234,12 @@ fn redirect(add: On<Add, Camera>, frame: Res<GameFrame>, targets: Query<&RenderT
     }
 }
 
+/// The present camera and sprite live for the whole run: a level change keeps them (crate::level_switch despawns
+/// every other camera), else the window shows nothing after the first change.
 fn spawn_present(mut commands: Commands, frame: Res<GameFrame>) {
     commands.spawn((
         Camera2d,
+        crate::level_switch::KeepAcrossLevels,
         Camera { order: 1000, clear_color: ClearColorConfig::Custom(Color::BLACK), ..default() },
         RenderTarget::Window(WindowRef::Primary),
         Msaa::Off,
@@ -248,6 +251,7 @@ fn spawn_present(mut commands: Commands, frame: Res<GameFrame>) {
     ));
     commands.spawn((
         Sprite { image: frame.image.clone(), custom_size: Some(Vec2::new(1024.0, 768.0)), ..default() },
+        crate::level_switch::KeepAcrossLevels,
         RenderLayers::layer(PRESENT_LAYER),
         PresentSprite,
         Name::new("game frame"),
