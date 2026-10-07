@@ -455,6 +455,9 @@ pub struct Interact {
     pub prompt: Prompt,
     /// `PromptTick`'s slot-12 request this tick (an owner held a message after the countdown).
     pub prompt_hud: bool,
+    /// 0x15f594 as the hero update saw it (before this tick's moby loop): the quick-select ring's open test reads it
+    /// there, so a class that takes △ and releases its prompt in the same tick (Blarg's button) still blocks the ring.
+    pub owner_at_hero: i32,
     /// The talk system's own slot-12 request this tick (`NpcTalkUpdate` bumps handle 0x160130 while the hero is in
     /// range and △ is not pressed).
     pub talk_shown: bool,
@@ -546,6 +549,7 @@ impl Interact {
         } else {
             self.prompt_hud = false;
         }
+        self.owner_at_hero = self.prompt.owner;
     }
 
     /// `try_set_help_message(owner, msg)`.

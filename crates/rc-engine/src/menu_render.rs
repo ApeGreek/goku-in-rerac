@@ -574,9 +574,21 @@ fn menu_frame(
     match mode {
         Mode::Gameplay => {
             let inp = MenuInput::from_pad(&play.game.pad, true);
-            // 0x15f594: a context-prompt owner blocks the ring (the vendor's △ is not also a ring open).
+            // 0x15f594 as the hero update saw it: a context-prompt owner blocks the ring (the vendor's △, Blarg's
+            // button are not also a ring open). 0x1403fc the hand swap; 0x1413fc no control (the scripted holds
+            // 0x72 / 0x32 / 0x78: the camera runs, the tube ride) and 0x1413f7 unless 0x1413f4 = 1 or 0x13f502;
             // 0x1413f4: the ring opens on foot or in the disguise; Clank's △ opens his command menu (the same slot).
-            let gate = HeroGate { early_exit: sess.hp < 1, held_item: held_item(&gs.global), f594: play.svc.interact.prompt.owner, b13f4: play.game.hero.mode, ..Default::default() };
+            let h = &play.game.hero;
+            let gate = HeroGate {
+                early_exit: sess.hp < 1,
+                swap_state: h.items.slot.swap,
+                f594: play.svc.interact.owner_at_hero,
+                b13fc: h.items.f13fc,
+                b13f7: h.items.f13f7,
+                b13f4: h.mode,
+                s3f502: h.f502,
+                held_item: held_item(&gs.global),
+            };
             if let Some(qs) = rt.qs.as_mut() {
                 let listeners = play.svc.units.bot_listeners;
                 let h = qs.hero(&inp, &gate, &mut gs.global, sess);
