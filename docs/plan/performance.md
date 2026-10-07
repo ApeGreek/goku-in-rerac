@@ -170,6 +170,13 @@ determinism). The menu snapshot, the frame-exact offscreen capture, the HUD comp
 
 ## 8. Review of 2026-10-06 (4K and stutter reports): open issues
 
+**Not good enough yet (user, 2026-10-07).** The dev build runs Metropolis (Kerwan) at about 90–100 fps and uses
+about 1 GB of RAM. That is playable, but the original ran the same game at 60 fps on a PS2: 32 MB of main RAM and
+4 MB of video memory, with a level in roughly 20 MB. A modern machine should do far better on both. Frame time is
+covered below. Memory has not been profiled yet: find out where the gigabyte goes (Bevy's per-entity overhead on
+~25k entities, CPU-side copies of mesh and texture data kept after upload, decoded atlases, audio, the dev build's
+debug info) before deciding what to cut.
+
 A read-only pass after testers reported stutters (Veldin, Novalis, a Windows build). On this Mac the dev build held
 65–76 fps at 2160p on Novalis, so pixel count is not the limit. The cost is Bevy overhead the port triggers, not
 the ported game code: the tick, the moby loop, the collision kernels and the LOD/occlusion replays stay well under
