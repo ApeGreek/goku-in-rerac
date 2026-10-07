@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.2.3-alpha
+
+Mostly Blarg Station, plus fixes for Clank's sections and a few other planets.
+
+- Blarg Station: the energy doors' beams cross the right way, Clank's bridge extends once he has the Hydrodisplacer, and freed gadgetbots no longer fly off and die. Their command voices play.
+- Blarg Station: the big red button's cover opens once the room is clear, and the self-destruct countdown shows on screen.
+- Blarg Station: the countdown voice lines play, and the escape, the shuttle flight and the launch tube have their explosion sounds.
+- The queen's health bar on Blarg and the Umbris boss's health bar go away when the boss dies.
+- Dying in a Clank section no longer brings you back as Ratchet, leaves Clank unhurtable or leaves a frozen Ratchet standing around.
+- Clank: the pause menu greys out what he can't use, ledge climbs work, and his antenna glow and heli-pack stay in place when he turns.
+- Ratchet's ship is solid again: you can no longer walk through it.
+- The info bot movie from Drek's henchman on Eudora plays once.
+- The quick select no longer opens during scripted scenes or when △ is used on a prompt.
+- Info bot and other messages at the top of the screen no longer stay up too long.
+- The weapon counter keeps its shape in widescreen.
+- Oltanis's lightning thunders.
+
 ## v0.2.2-alpha
 
 - Fixes a black screen after the opening movies of a new game, after loading a save and after flying to another planet.
