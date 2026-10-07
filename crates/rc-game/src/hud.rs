@@ -598,11 +598,15 @@ impl HudState {
         (s.last.same(r) && s.last.element != Element::Empty).then_some(s.handle)
     }
 
-    /// `fun_001ff480(handle)` 0x24afa0: the slot holding `handle` gets the empty request (icon 0xffff, max 0): its timer and
-    /// ramps go to 0 and the empty element replaces it once hidden. True when a slot held it.
+    /// `fun_001ff480(handle)` 0x24afa0: the slot holding `handle` gets the empty request (icon 0xffff, max 0), its
+    /// visible timer +0x7c = 0 and its counter +0x6c = −6, so the empty element replaces it at once (docs/plan/menus.md
+    /// "Close"). Waiting for the element to hide instead never ends under flag 0x10, which keeps the timer up (the
+    /// boss meters). True when a slot held it.
     pub fn release(&mut self, handle: u32) -> bool {
         let Some(i) = self.slots.iter().position(|s| s.handle == handle && s.last.element != Element::Empty) else { return false };
         self.queue(i as u32, 0xffff, Element::Empty, 0);
+        self.slots[i].counter = -6;
+        self.apply(i);
         true
     }
 
@@ -1859,6 +1863,22 @@ mod tests {
         // `ShowBanner(msg, −1)` (Blarg's bridge, the skill points): ticks(180), not a countdown that never ends.
         h.show_banner(b"Kerwan", Some(-1));
         assert_eq!(h.banner.countdown, scale_ticks(180));
+    }
+
+    /// A boss meter (slot 6, flag 0x10: its timer is kept up) leaves at once on `fun_001ff480`'s release; waiting for it
+    /// to hide never ended (the Blarg queen's and Umbris's meters stayed after the fight).
+    #[test]
+    fn released_boss_meter_leaves() {
+        let mut h = HudState::new(assets());
+        let r = Request::boss(7, 0x1ef);
+        for t in 0..200 {
+            h.apply_calls(&[Call::Data(7, 300 - t), Call::Queue(r)]);
+            h.tick(inputs(4, 0));
+        }
+        assert!(!h.tick(inputs(4, 0)).is_empty(), "the meter is up");
+        h.apply_calls(&[Call::Data(7, 0), Call::Release(r)]);
+        assert_eq!(h.slots[6].element, Element::Empty);
+        for _ in 0..10 { assert!(h.tick(inputs(4, 0)).is_empty(), "nothing left on screen"); }
     }
 
     #[test]
