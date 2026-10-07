@@ -49,16 +49,21 @@ pub const VOICE_PER_LANGUAGE: i32 = 150;
 pub const QWARK_BASE: i32 = 50000;
 /// `qwark_boss_audio` entries per line (one per language).
 pub const QWARK_LANGUAGES: i32 = 6;
+/// The level's own lines (Blarg's queen 1051 and its escape 1108, the only level with any): `PlayDialogue` ids
+/// 20000..29999 (`fun_002157d0`): the stream `bindata[id − 20000]` of the loaded level's header (0x13a508, 8 bytes a
+/// slot), no language column (the classes pick the language's line).
+pub const LEVEL_BASE: i32 = 20000;
 
-/// The extracted file `PlayDialogue` 0x279cd8 streams for dialogue id `id` in language `lang`: ≥ 60000
+/// The extracted file `PlayDialogue` 0x279cd8 streams for dialogue id `id` in language `lang` on level `level`: ≥ 60000
 /// `post_credits_audio[id − 60000]` (`fun_00215440`), 50000.. `qwark_boss_audio` ([`QWARK_BASE`]), 30000..
-/// `help_audio[lang·150 + id − 30000]` (`fun_002156d8`); None for the ranges with their own players (scenes, the
-/// vendor, space).
-pub fn dialogue_stream(id: i32, lang: u32) -> Option<String> {
+/// `help_audio[lang·150 + id − 30000]` (`fun_002156d8`), 20000.. the loaded level's `bindata[id − 20000]`
+/// ([`LEVEL_BASE`]); None for the ranges with their own players (scenes, the vendor, space).
+pub fn dialogue_stream(id: i32, lang: u32, level: u32) -> Option<String> {
     match id {
         60000.. => Some(format!("global/post_credits_audio/{:03}.bin", id - 60000)),
         QWARK_BASE..=59999 => Some(format!("global/qwark_boss_audio/{:03}.bin", (id - QWARK_BASE) * QWARK_LANGUAGES + lang as i32)),
         VOICE_BASE..=39999 => Some(format!("global/help_audio/{:03}.bin", lang as i32 * VOICE_PER_LANGUAGE + id - VOICE_BASE)),
+        LEVEL_BASE..=29999 => Some(format!("levels/{level:02}/bindata/{:03}.bin", id - LEVEL_BASE)),
         _ => None,
     }
 }
@@ -840,6 +845,16 @@ mod tests {
         h.request(1000, 4);
         h.update(&HelpInputs { mode: 3, ..Default::default() });
         assert_eq!((h.bx.state, h.request), (0, -1));
+    }
+
+    /// `PlayDialogue`'s ranges: 20000.. the loaded level's `bindata` (Blarg's escape 1108: lines 0..29), no language
+    /// column; 30000.. `help_audio` by language.
+    #[test]
+    fn dialogue_streams_by_range() {
+        assert_eq!(dialogue_stream(20000, 2, 6).as_deref(), Some("levels/06/bindata/000.bin"));
+        assert_eq!(dialogue_stream(20029, 0, 6).as_deref(), Some("levels/06/bindata/029.bin"));
+        assert_eq!(dialogue_stream(30004, 1, 6).as_deref(), Some("global/help_audio/154.bin"));
+        assert_eq!(dialogue_stream(19999, 0, 6), None);
     }
 
     #[test]

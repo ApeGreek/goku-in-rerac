@@ -41,7 +41,10 @@ census of 2026-10-03 left these placed classes without a port; this page tracks 
   found in the level code, so once a bot has been in earshot the menu stays armed for the level [L].
 - 302's draw blends at a fixed alpha 0x20 in the game; the port draws it as an alpha blend at 0x20 (the texture's
   alpha also counts) [L].
-- 1051's camera type 0x12 release in its state 0xf is not modelled; the 20000-range voice streams are not extracted.
+- 1051's camera type 0x12 release in its state 0xf is not modelled.
+- The escape 1108's lines are `PlayDialogue` 20000.. = this level's `bindata` (30 VAGs: 5 lines × 6 languages).
+- `0x29aec0(index, flags, moby)` (1108, 1109, 1118) plays the level def 2 + index (`World::play_level_def`), not
+  `PlayLevelSoundAtMoby`'s defs 0 / 1 (the help box's opening and the skill point jingle).
 - 827's probe falls back to its own up where the game reads a stale collision normal [L].
 
 ## Open

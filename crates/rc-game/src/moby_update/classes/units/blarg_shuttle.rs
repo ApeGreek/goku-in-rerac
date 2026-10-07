@@ -44,7 +44,7 @@
 //! | address | what | port |
 //! |---|---|---|
 //! | 0x302fd8 | the route by the stop: 1 → 1; 2 → 4; 0 → mission +0xf8 not done → 0, else +0xfc not done → 3, else −1; with 0x141c00 = 0, route 0 and the help text or voice on: `Help_Request(0x177a, 0x53)`, route −1; else `try_set_help_message(10, 0x1782 / 0x1785 / 0x1786 / 0x1784)` | [`prompt`] |
-//! | 0x303160 | progress `Approach(1, 1/ticks(1200))`; the camera on its path (lerp), the shuttle on its (the fraction of the camera path's index [L: the game's]); its yaw / pitch blended between the segments, pitch ·cos(+0xb0), yaw + +0xb0; the camera's look from the look path; scale from +0xc4 to +0xc8; past 0.8 the turnaround (`0x270cc0(π, 4π·dt², …, 2π·dt)`); the camera path's point w ≥ 0 (or the previous one's): both set to −1, w < 8 → `PlayLevelSound(0)` and a burst (`0x303748(6, m, cuboid +0xd0[w], its first row, 6)`), w = 10 → `PlayLevelSound(1)` and the blast (`0x303b68`); done at 1 | [`flight`] |
+//! | 0x303160 | progress `Approach(1, 1/ticks(1200))`; the camera on its path (lerp), the shuttle on its (the fraction of the camera path's index [L: the game's]); its yaw / pitch blended between the segments, pitch ·cos(+0xb0), yaw + +0xb0; the camera's look from the look path; scale from +0xc4 to +0xc8; past 0.8 the turnaround (`0x270cc0(π, 4π·dt², …, 2π·dt)`); the camera path's point w ≥ 0 (or the previous one's): both set to −1, w < 8 → `0x29aec0(0)` (the level def 2 + 0, `World::play_level_def`) and a burst (`0x303748(6, m, cuboid +0xd0[w], its first row, 6)`), w = 10 → `0x29aec0(1)` and the blast (`0x303b68`); done at 1 | [`flight`] |
 //! | 0x303748 | the death burst (`0x273f50(2, 13, m, p, −1)`); n type-11 spark pairs (`SPARK_A` / `SPARK_B`, 400000·s, 10·dt·s); 5n type-02 pieces (`randf(0, 30)` / `randf(0, 10)`·dt speeds, sizes `randf(0.05, 0.1)`·s / `randf(0.025, 0.05)`·s, colours tween 0x600040ff..0x6000ffff / 0x30002080..0x30008080, phases `randf(20, 40)`, `randf(60, 72)`, `randf(203.2, 254)`, def 0x1000e) | [`burst`] |
 //! | 0x303b68 | the flash 1898 at (426, 189.75, 173.07); each member of the group +0xcc a burst (30, …, 1); then each drifts out from the group's centre (30·dt, more for the smaller), spin `rand_vec(15°·dt, 5°·dt)` (`0x300f70`: state 2, `bob_block`), 20 sparks (type 02, def 0x10019); the last member's +0xbc = 30 | [`blast`] |
 //! | 0x304028 | the group +0xcc's members deleted | [`delete_group`] |
@@ -433,14 +433,14 @@ fn flight(w: &mut World, id: MobyId, route: i32) -> bool {
             }
         }
         if k < 8 && prev < 8 {
-            w.play_level_sound(0, 0, Some(id));
+            w.play_level_def(0, 0, id);
             let c = pi(w, id, (pvo::BURSTS as i32 + 4 * k) as usize);
             if let Some(s) = w.svc.volumes.shape(rc_formats::volumes::ShapeKind::Cuboid, c) {
                 let (centre, row0) = (s.centre(), s.matrix[0]);
                 burst(w, 6.0, id, [centre[0], centre[1], centre[2], 0.0], row0, 6);
             }
         } else if k == 10 || prev == 10 {
-            w.play_level_sound(1, 0, Some(id));
+            w.play_level_def(1, 0, id);
             blast(w, id);
         }
     }

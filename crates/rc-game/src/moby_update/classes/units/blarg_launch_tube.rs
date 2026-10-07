@@ -17,7 +17,7 @@
 //! | 2 | the ride spring (`0x26a780(1, dt², dt², dt)` = `0x270830`); rot.x += speed·45°, each door's −= it (their matrices rebuilt); at 1 → 3, sound 1, flag 0x13d3aa | [`update`] (`turn::spring`) |
 //! | 3 | Ratchet within 3.7 (xy): the prompt (owner 4, 0x1783); △ with it → sound 2, `PromptRelease(4)`, 4, timer `ticks(30)` | [`update`] |
 //! | 4 | the timer out → 5, the ride 0, `FadeToBlack(ticks(15))`, `CameraScript(cuboid +0x00, its Euler, 2, ticks(300), 0)`, the springs (`0x312b40(0.0001, 1, 0, 0.001, 1, 0)`), the targets, the letterbox on; under `ticks(10)` left: the fade 1 − left/`ticks(10)` | [`update`] |
-//! | 5 | the fade back (+1 a tick to `ticks(10)`); the ride spring (2, …, dt/2); the camera at cuboid +0x00 up 18·ride; each spark cuboid whose Euler z lies between the last and this ride ·100° → a burst (`0x304818`) and `PlayLevelSound(0)`; at 1.075 → `HeroTeleport(cuboid +0x04, 0x72, 0)`, `FadeToBlack(ticks(10))`, 6, `CameraScript2(3)`, `CameraScript(+0x04's centre − 2.5 y + 1 z, (0, −15°, Ratchet's yaw), 2, ticks(300), 0)`, a shake (0.3 up, `ticks(45)`), `PlayLevelSound(0)` | [`update`] |
+//! | 5 | the fade back (+1 a tick to `ticks(10)`); the ride spring (2, …, dt/2); the camera at cuboid +0x00 up 18·ride; each spark cuboid whose Euler z lies between the last and this ride ·100° → a burst (`0x304818`) and `0x29aec0(0)` (the level def 2 + 0, `World::play_level_def`); at 1.075 → `HeroTeleport(cuboid +0x04, 0x72, 0)`, `FadeToBlack(ticks(10))`, 6, `CameraScript2(3)`, `CameraScript(+0x04's centre − 2.5 y + 1 z, (0, −15°, Ratchet's yaw), 2, ticks(300), 0)`, a shake (0.3 up, `ticks(45)`), `0x29aec0(0)` | [`update`] |
 //! | 6 | the ride spring (2, …, 2·dt); the camera targets as set; at 2 → 7, +0x44 `ticks(3600)`, `HeroTeleport(cuboid +0x04, 0, 0)`, `CameraScript2(3)`, the moby +0x34's state 2 | [`update`] |
 //! | `0x304818(m, p)` | 8 type-11 spark pairs at p (`SPARK_A` / `SPARK_B` by `randi(6)`, 4000000, `randf(8, 10)`·dt·10, lives `rand_range(ticks(15), ticks(20))` / `rand_range(ticks(25), ticks(30))`) | [`burst`] |
 
@@ -141,7 +141,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 let Some((p, e)) = story::cuboid(w, pi(w, id, 0x08 + 4 * k)) else { continue };
                 if lo < e[2] && e[2] < hi {
                     burst(w, p);
-                    w.play_level_sound(0, 0, Some(id));
+                    w.play_level_def(0, 0, id);
                 }
             }
             if t < 1.075 { return; }
@@ -156,7 +156,7 @@ pub fn update(w: &mut World, id: MobyId) {
             }
             let ticks = w.ticks(0x2d);
             w.shake_camera(crate::follow_camera::ShakeRequest { axis: crate::follow_camera::ShakeAxis::Up, amp: f32::from_bits(0x3e99_999a), ticks });
-            w.play_level_sound(0, 0, Some(id));
+            w.play_level_def(0, 0, id);
         }
         6 => {
             let (mut t, mut v) = (c::pf(w, id, 0x2c), c::pf(w, id, 0x30));

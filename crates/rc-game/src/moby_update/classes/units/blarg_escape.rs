@@ -20,7 +20,7 @@
 //! | 1 | `MobyGroupCount(+0x1c, −1)` = 0 → the tube (`0x3047b8`: 1 → 2, its sound 0); the tube past 3 (and not 7) → 2, the line set 0 | [`update`] |
 //! | 2 | the tube in 7 → 3, point 1; `MusicRequestTrack(6, 9)`; a line buffered → on; group +0x10 to 0x11 (`0x2ffc38`), groups +0x14 / +0x18 hidden in 0xf (`0x2e9e30`), +0x00's 4 → 0 (`0x2f45a0`), +0x04 / +0x08's 0x12 → 0 (`0x2f99b0`), the moby +0x20 to 3, cuboid +0x0c up 10; `CameraScript(the path's point 1 looking at its point 0, 2, ticks(300), 0)`, springs (0.0001, 1, 0, 0.001, 1, 0), the targets; `HeroTeleport(cuboid +0x28, 0x72, 0)` | [`update`] |
 //! | 3 | the camera at point +0xb0 (then + 1) looking back at point −30; the 0x5e8 group +0x34 (`0x309240`: each in state 1 within view of its z + 0.25 → 2, timer `scale(randf(30, 60))`); the last point → 4, the line set 1, the countdown `scale(2700)`, `CameraScript2(2)`, `SetState(0, 1)`, the letterbox off | [`update`] |
-//! | 4 | at `ticks(1800)` / `ticks(300)` a buffered line goes on; at `ticks(900)` the line set 2; blasts: `PlayLevelSound(0)` on Ratchet, a shake (0.4 up, `ticks(60)`), the next in `scale(randf(480, 600))`; mode 0 → the countdown draw; Ratchet in 0x72 → 6; mode 0 and the countdown out → 5, the white 0 after `ticks(15)`, the moby +0x30 to 5, `PlayLevelSound(1)` on Ratchet | [`update`] |
+//! | 4 | at `ticks(1800)` / `ticks(300)` a buffered line goes on; at `ticks(900)` the line set 2; blasts: `0x29aec0(0)` on Ratchet (the level def 2 + 0, `World::play_level_def`), a shake (0.4 up, `ticks(60)`), the next in `scale(randf(480, 600))`; mode 0 → the countdown draw; Ratchet in 0x72 → 6; mode 0 and the countdown out → 5, the white 0 after `ticks(15)`, the moby +0x30 to 5, `0x29aec0(1)` on Ratchet | [`update`] |
 //! | 5 | the white at 1 → Ratchet dies (`0x228230` = `0x2319b0`), the white 0; else after its delay `Approach(1, 6·dt)` | [`update`] (`HeroCall::Death`, `cinematic::set_white`) |
 //! | `0x302400(m, set)` | set 0 / 2: +0x38 / +0x50 by the language (0x15ed88 − 1, at least 0); set 1: a random one of three not yet used (all used: reset), +0x68 + language·4 + choice·0x18; a line ≠ −1 → the dialogue request 20000 + it | [`line`] |
 //! | `0x3021d8` | the countdown "0M:SS:Cr" at (250, 375) | [`frame`] (`veldin_pads::push_countdown`) |
@@ -219,7 +219,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 line(w, id, 2);
             }
             if c::dec_timer_pvar_i32(w, id, 0xc0) != 0 {
-                if let Some(h) = w.hero_moby { w.play_level_sound(0, 0, Some(h)); }
+                if let Some(h) = w.hero_moby { w.play_level_def(0, 0, h); }
                 let f = w.rng.randf(480.0, 600.0);
                 let t = w.svc.timing.scale(crate::ps2v::Pf::f(f)).to_f32() as i32;
                 c::set_pi32(w, id, 0xc0, t);
@@ -237,7 +237,7 @@ pub fn update(w: &mut World, id: MobyId) {
                 let t = w.ticks(0xf);
                 c::set_pi32(w, id, 0xbc, t);
                 if let Some(m) = story::link(w, pi(w, id, 0x30)) { w.mm(m).state = 5; }
-                if let Some(h) = w.hero_moby { w.play_level_sound(1, 0, Some(h)); }
+                if let Some(h) = w.hero_moby { w.play_level_def(1, 0, h); }
             }
         }
         5 => {

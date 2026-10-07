@@ -675,8 +675,8 @@ fn help_frame(p: &mut Play, report: &rc_game::tick::TickReport, other_frame: boo
     for cmd in out.voice {
         match cmd {
             VoiceCmd::Load { id } => {
-                // `PlayDialogue`'s stream (the help lines, Qwark's boss lines: rc_game::help::dialogue_stream).
-                let file = help::dialogue_stream(id, p.svc.help.text.lang);
+                // `PlayDialogue`'s stream (the help lines, Qwark's boss lines, the level's lines: rc_game::help::dialogue_stream).
+                let file = help::dialogue_stream(id, p.svc.help.text.lang, p.svc.level);
                 let root = crate::level_load::extracted_root();
                 let vag = file.as_ref().and_then(|f| crate::disc_source::read(&root, f).ok());
                 let len = vag.as_deref().and_then(help::vag_ticks);

@@ -1007,7 +1007,7 @@ fn menu_sound_frame(play: &mut Play, audio: &mut crate::audio_out::AudioOut) {
 }
 
 /// The stream a dialogue id plays (`rc_game::help::dialogue_stream`).
-fn dialogue_stream(id: i32, lang: u32) -> Option<String> { rc_game::help::dialogue_stream(id, lang) }
+fn dialogue_stream(id: i32, lang: u32, level: u32) -> Option<String> { rc_game::help::dialogue_stream(id, lang, level) }
 
 /// One menu frame of the dialogue player 0x151720 (`rc_game::help::Voice`): a widget's request (0x1516ec), its
 /// `continue_audio_stream_if_ready` (the line starts at full volume: `fun_00215440` ignores the HelpDesk voice option)
@@ -1025,13 +1025,13 @@ fn menu_voice_frame(play: &mut Play, mut audio: Option<&mut crate::audio_out::Au
     }
     if stop && help.voice.state.wrapping_sub(6) > 1 { help.voice.state = 5; }
     help.voice_frame();
-    let lang = help.text.lang;
+    let (lang, level) = (help.text.lang, play.svc.level);
     cmds.extend(std::mem::take(&mut help.out.voice));
     for cmd in cmds {
         match cmd {
             VoiceCmd::Load { id } => {
                 let root = crate::level_load::extracted_root();
-                let b = dialogue_stream(id, lang).and_then(|f| crate::disc_source::read(&root, &f).ok());
+                let b = dialogue_stream(id, lang, level).and_then(|f| crate::disc_source::read(&root, &f).ok());
                 let len = b.as_deref().and_then(rc_game::help::vag_ticks);
                 println!("menus: frame {frame}: dialogue line {id}: {}", len.map_or("missing".to_string(), |t| format!("{t} ticks")));
                 *vag = b.filter(|_| len.is_some()).map(std::sync::Arc::from);
