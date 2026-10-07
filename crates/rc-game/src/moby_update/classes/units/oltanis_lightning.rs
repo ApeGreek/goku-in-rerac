@@ -9,7 +9,7 @@
 //!   39th between its neighbours), lighting up one after another over `ticks(10)` (their timers start at
 //!   `−ticks(10)·i/40` and count up); three branches from points 5..21 of 16 steps 1..10 long, turning up to 40° a
 //!   step on their side (within 80°), their timers from their points'; it lasts `ticks(rand_range(56, 90))` (a thunder
-//!   sound, level sound 0); after the first `ticks(10)` it flickers (one sine over 20 ticks: the alpha cut
+//!   sound, `0x294028(0)`: the level def 2 + 0, `World::play_level_def`); after the first `ticks(10)` it flickers (one sine over 20 ticks: the alpha cut
 //!   `(255 + 128·sin) & 0xff`) and, while the cut is under 50, sparks fly off the strike point (three pairs of type
 //!   53 a tick). The last five points ease straight.
 //! * **The draw** (`0x2edc18`): the bolt as camera-facing ribbons (FX 0x2d grey 0x7f7f7f, FX 0x2c red 0x7f4040 at
@@ -245,7 +245,7 @@ pub fn strike(w: &mut World, id: MobyId) {
         s.cut = (base + s.wave as i32) as u8;
         if s.sound {
             s.sound = false;
-            w.play_level_sound(0, 0, Some(id));
+            w.play_level_def(0, 0, id);
         }
         if st(w).cut < 0x32 { sparks(w); }
     } else {
