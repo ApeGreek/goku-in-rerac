@@ -348,6 +348,9 @@ pub fn start_movie(w: &mut World, movie: i32) {
     // StartPssMovie 0x2ad0c0 closes the help box (`FUN_002258b0`).
     w.svc.help.kill();
     w.svc.cinematic.requests.push(EngineRequest::StartMovie { movie });
+    // StartPssMovie stores game mode 1 (0x15f5c4) at once: the rest of this moby loop reads it (a talker's
+    // `NpcTalkUpdate` does nothing outside mode 0); `MovieExitToGameplay` sets 0 again (crate `rc-engine` movie_render).
+    w.svc.game_mode = 1;
 }
 
 /// `0x15f3fc = f` from a class update in gameplay ([`Cinematic::fade`]).

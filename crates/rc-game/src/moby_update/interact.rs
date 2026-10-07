@@ -750,6 +750,9 @@ fn start_scene(w: &mut World, id: MobyId, scene: i16) {
         w.svc.interact.handoffs.push(Handoff::Scene { scene: scene as i32, npc: Some(id) });
     } else {
         w.svc.interact.handoffs.push(Handoff::Movie { movie: (scene as u16 ^ 0x4000) as i32, npc: Some(id) });
+        // StartPssMovie's game mode 1 at once (`cinematic::start_movie`): without it the talker's own update in the
+        // same tick ran `NpcTalkUpdate` on the auto movie node again and the movie played twice (Eudora's informant).
+        w.svc.game_mode = 1;
     }
 }
 
