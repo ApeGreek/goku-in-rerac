@@ -484,6 +484,15 @@ fn moby_collision_blobs(index: u32) -> anyhow::Result<Vec<(i32, rc_formats::moby
     Ok(rc_formats::moby_collision::parse_level(&core, &data)?)
 }
 
+/// The collision blob of spaceship class `o_class` (530..=533) from the global `spaceships` file (entry o_class − 530).
+fn spaceship_collision(o_class: i32) -> anyhow::Result<Option<rc_formats::moby_collision::MobyCollision>> {
+    anyhow::ensure!((530..=533).contains(&o_class), "class {o_class} is not a spaceship class");
+    let root = crate::level_load::extracted_root();
+    let file = crate::disc_source::read(&root, &format!("global/spaceships/{:03}.bin", o_class - 530))?;
+    let s = rc_formats::moby_spawn::parse_spaceship(&file)?;
+    Ok(rc_formats::moby_collision::MobyCollision::of_class(s.class)?)
+}
+
 /// The hand-swap globals from the saved game and the session (0x141408 request, 0x141660 saved hand item,
 /// 0x15ed8c previous, 0x15ed90 wrench flag).
 fn item_globals(state: Option<&GameState>, session: Option<&SessionState>) -> ItemGlobals {
@@ -1306,7 +1315,17 @@ fn setup(
     }
     // Moby collision: the class blobs and the loader's grid registrations (MobyBuildMatrix per instance).
     match moby_collision_blobs(level_index) {
-        Ok(b) => svc.set_moby_collision(b),
+        Ok(mut b) => {
+            // The loader's ship from the global `spaceships` file (crate::moby_spawn) brings its class's blob too.
+            if let Some(oc) = ship_id.map(|id| game.mobys.mobys[id].o_class as i32).filter(|oc| !b.iter().any(|(c, _)| c == oc)) {
+                match spaceship_collision(oc) {
+                    Ok(Some(c)) => b.push((oc, c)),
+                    Ok(None) => {}
+                    Err(e) => eprintln!("gameplay: the ship class {oc}'s collision not loaded: {e:#}"),
+                }
+            }
+            svc.set_moby_collision(b)
+        }
         Err(e) => eprintln!("gameplay: no moby collision ({e:#}): the collision queries see no mobys"),
     }
     svc.build_grid(&mut game.mobys);
