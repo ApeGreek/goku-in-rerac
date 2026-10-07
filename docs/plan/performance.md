@@ -136,8 +136,7 @@ at a time, window visible, paired base/toggle runs, HUD `metal-HUD:` medians and
 
 ## 7. Applied (2026-09-26): F2 (MSAA), F3 (tie CPU culling), F5 (particles, stars, water ripples), F4, F6
 
-Not applied: F1/F8 (`Cargo.toml`, user decision), F5 for the HUD mesh (`hud_render.rs`: the edit was refused by the
-session's permission policy; still `meshes.insert` every frame), F7, F9, F10.
+Not applied: F1/F8 (`Cargo.toml`, user decision), F5 for the HUD mesh (applied 2026-10-07, §8), F7, F9, F10.
 
 | fix | change | files |
 |---|---|---|
@@ -168,3 +167,27 @@ Metal fast-math codegen of the rewritten vertex shader (positions/fog at ULP lev
 (3.0 %) at spawn, 55,514 px in the menu, all on polygon edges (38 % differ by ≤ 2 levels). A run switched from
 MSAA 4 to off at frame 60 is byte-identical to a run started with MSAA off (run-time switching and
 determinism). The menu snapshot, the frame-exact offscreen capture, the HUD composite work in both modes.
+
+## 8. Review of 2026-10-06 (4K and stutter reports): open issues
+
+A read-only pass after testers reported stutters (Veldin, Novalis, a Windows build). On this Mac the dev build held
+65–76 fps at 2160p on Novalis, so pixel count is not the limit. The cost is Bevy overhead the port triggers, not
+the ported game code: the tick, the moby loop, the collision kernels and the LOD/occlusion replays stay well under
+1 ms per frame, and the moby palette evaluation is 0.1 ms per tick. None of the fixes below changes behaviour or
+pixels; they only stop repeated work.
+
+| # | issue | where | cost | fix | status |
+|---|---|---|---|---|---|
+| P1 | **HUD meshes re-inserted every frame.** Each inserted `Mesh` defeats the short-circuit of `AssetChanged<Mesh3d>`, so every material type's specialization check walks all mesh entities (~25,800 in a level) every frame | `hud_render.rs` `tick_and_build` (main mesh + 3 static passes) | ~2.5 ms main CPU per frame (the Sep 26 `check_entities_needing_specialization`), plus mesh allocator churn | `Built`: a mesh is re-inserted only when its inputs (prims, fine corners, additive list, streamed-image rects, side margin) change | **fixed 2026-10-07** |
+| P1b | The same pattern in the effect primitives, whenever they are shown: `meshes.get_mut` per frame | `sea_render.rs` (`g.prims.write`), `fx_draw.rs` (draws, reactive, tesla, walloper), `water_render.rs:925`, `moby_attach.rs` (rope mesh) | as P1, while one is on screen | skip the write when the primitives did not change, or move to a persistent mesh + storage buffer as F5 did for particles | open |
+| P2 | **Entity and draw count.** Shrubs 9,649 entities (5,624 in the fading list) over 231 blended materials, ties 5,820, mobys 9,215. Every GS alpha split's second half lands in the sorted transparent phase and cannot batch | all world renderers | the largest remaining CPU lever (F7) | fewer materials and bind-group switches (shared texture arrays), merged transparent halves where the GS order allows | open (large) |
+| P3 | **First-sight stalls.** A moby class's draw groups are spawned, and their pipelines compiled, the first time it passes the culls. No pipeline pre-warm at level load | `moby_render.rs` spawn path, Bevy pipeline cache | 130–170 ms frames right after load; 28–34 ms frames as new classes appear | spawn every class's draw groups (hidden) at level load so pipelines compile during loading, or pre-specialize their pipeline keys | open; the most likely cause of the reported stutters |
+| P4 | **Dev-profile numbers.** Debug assertions in the dependencies (objc2 message checks in wgpu's Metal backend, ~5 ms per frame) and opt-level 1 for our crates | `Cargo.toml` (F1, F8) | dev builds only; release builds have neither | none needed for players. Measure a **current** release build before sizing P2–P5 (the Sep 29 release binary fails shader validation against today's assets: rebuild it) | caveat |
+| P5a | Bevy's light-clustering compute passes run for both 3D cameras with no lights in use | camera spawn (`main.rs`, `sky_render.rs`) | small GPU + CPU | Bevy 0.19's cluster config can turn them off (F10) | open |
+| P5b | tfrag and tie LOD buffers rebuilt and re-uploaded every frame even when nothing changed | `tfrag_*`, `tie_lod.rs` | cheap (in-place uploads), churn at high fps | upload only on change | open |
+| P5c | Dynamic moby palettes built byte by byte per tick | `gameplay.rs` (the `DynMobys` palette, ~2309) | small per tick | the F6 treatment: persistent bytes, `copy_from_slice` | open |
+
+Fragment cost at 4K is reasonable: each world shader does one pow-based sRGB conversion per fragment, and the alpha
+split batches rasterize twice by design. There are no full-resolution readbacks or extra world passes beyond the
+shadow count target and a few full-screen blends. Measurement caveat: `RC_NOVSYNC` was not honoured in fullscreen,
+and the windowed run sat at exactly 60.0 fps, so the window-resolution numbers are not a headroom measurement.

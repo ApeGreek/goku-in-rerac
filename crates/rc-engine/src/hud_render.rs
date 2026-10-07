@@ -510,6 +510,8 @@ struct HudRuntime {
     mesh: Handle<Mesh>,
     /// The static layer's three passes ([`Hud2dHook::statics`]).
     static_meshes: [Handle<Mesh>; 3],
+    /// What [`Self::mesh`] and the three [`Self::static_meshes`] were last built from ([`Built`]).
+    built: [Built; 4],
     ticks_done: u64,
     draws: Vec<Draw>,
     hud2d: Hud2d,
@@ -526,6 +528,32 @@ struct HudRuntime {
     pending: Vec<rc_game::hud::Call>,
     /// The CLUT cut each FX texture's atlas region holds (none: the stored CLUT) ([`apply_fx_cuts`]).
     fx_cuts: std::collections::HashMap<usize, u8>,
+}
+
+/// The inputs a HUD mesh was last built from. [`tick_and_build`] re-inserts a mesh only when they change: every
+/// inserted `Mesh` makes Bevy re-check all the mesh entities of every material for specialization (about 2.5 ms per
+/// frame over a level's ~25k entities, docs/plan/performance.md F5), and most frames draw the same HUD.
+#[derive(Default)]
+struct Built {
+    prims: Vec<Prim>,
+    fine: Vec<(usize, [[i32; 2]; 4])>,
+    add: Vec<usize>,
+    dyns: Vec<Option<[u32; 4]>>,
+    extra: i32,
+}
+
+impl Built {
+    /// True (and the new inputs kept) when they differ from the last build's.
+    fn update(&mut self, prims: &[Prim], fine: &[(usize, [[i32; 2]; 4])], add: &[usize], dyns: &[Option<[u32; 4]>], extra: i32) -> bool {
+        if self.prims == prims && self.fine == fine && self.add == add && self.dyns == dyns && self.extra == extra { return false; }
+        fn copy<T: Copy>(v: &mut Vec<T>, new: &[T]) { v.clear(); v.extend_from_slice(new); }
+        copy(&mut self.prims, prims);
+        copy(&mut self.fine, fine);
+        copy(&mut self.add, add);
+        copy(&mut self.dyns, dyns);
+        self.extra = extra;
+        true
+    }
 }
 
 #[derive(Component)]
@@ -708,6 +736,7 @@ fn setup(
         atlas_fx: atlas.fx,
         mesh,
         static_meshes,
+        built: Default::default(),
         ticks_done: 0,
         draws: Vec::new(),
         hud2d: Hud2d { frame_sizes, ..default() },
@@ -860,8 +889,13 @@ fn tick_and_build(
     rt.hud2d.prims.extend(scene.prims.iter().copied());
     let dyns = dyn_images.as_deref().map_or([None; crate::hud_images::SLOTS], |d| d.rects());
     let e = rt.extra;
-    let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.hud2d.add, &rt.atlas_frames, &rt.atlas_fx, &dyns, e));
-    for (m, prims) in rt.static_meshes.iter().zip(&hook.statics) { let _ = meshes.insert(m, build_mesh(prims, &[], &[], &rt.atlas_frames, &rt.atlas_fx, &dyns, e)); }
+    // Only the meshes whose inputs changed ([`Built`]).
+    if rt.built[0].update(&rt.hud2d.prims, &rt.hud2d.fine, &rt.hud2d.add, &dyns, e) {
+        let _ = meshes.insert(&rt.mesh, build_mesh(&rt.hud2d.prims, &rt.hud2d.fine, &rt.hud2d.add, &rt.atlas_frames, &rt.atlas_fx, &dyns, e));
+    }
+    for ((m, prims), b) in rt.static_meshes.iter().zip(&hook.statics).zip(&mut rt.built[1..]) {
+        if b.update(prims, &[], &[], &dyns, e) { let _ = meshes.insert(m, build_mesh(prims, &[], &[], &rt.atlas_frames, &rt.atlas_fx, &dyns, e)); }
+    }
 }
 
 /// The HUD inputs the hero and the classes hold (rc_game::hud::Inputs: the callers the HUD sees through the state).
