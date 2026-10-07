@@ -565,6 +565,10 @@ pub struct Play {
     /// `MobyAnim` instance, and
     /// the light block inputs they were last lit with.
     driven: Vec<(MobyId, usize, Option<usize>)>,
+    /// The other static mobys with their gameplay instance and what they were loaded with ([`StaticSig`]): one that
+    /// another class moves, turns, hides or deletes (Blarg's button 1118 turning its doors 1145 open) joins
+    /// [`Self::driven`] from then on ([`promote_statics`]).
+    watched: Vec<(MobyId, usize, StaticSig)>,
     /// Static moby → gameplay instance (the renderer's records, entities and occlusion are per instance).
     moby_to_instance: Vec<usize>,
     /// The level's mission state (0x15fc88, 0x14c050, the deaths 0x14ee90): kept across respawns (the death
@@ -936,6 +940,41 @@ fn class_gaits(lv: &crate::level_load::LoadedLevel, want: impl Fn(i16) -> bool) 
         for (seq, rec) in rc_formats::moby_anim::gait_records(blob, &c.class) { out.insert((c.o_class as i16, seq), rec); }
     }
     Ok(out)
+}
+
+/// What the renderer draws a static moby with: rows, position, scale, mode, state and alpha (as bits).
+type StaticSig = ([u32; 16], u16, u8, u8);
+
+fn static_sig(m: &Moby) -> StaticSig {
+    let mut v = [0u32; 16];
+    for i in 0..3 { for j in 0..3 { v[i * 3 + j] = m.rows[i][j].to_bits(); } }
+    for j in 0..3 { v[9 + j] = m.position[j].to_bits(); }
+    v[12] = m.scale.to_bits();
+    (v, m.mode, m.state, m.alpha)
+}
+
+/// The static mobys not in `driven`, with their instance and their loaded [`StaticSig`].
+fn watched_statics(table: &MobyTable, moby_to_instance: &[usize], driven: &[(MobyId, usize, Option<usize>)]) -> Vec<(MobyId, usize, StaticSig)> {
+    let ids: std::collections::HashSet<MobyId> = driven.iter().map(|d| d.0).collect();
+    (0..table.first_dynamic)
+        .filter(|id| !ids.contains(id))
+        .filter_map(|id| Some((id, *moby_to_instance.get(id)?, static_sig(table.mobys.get(id)?))))
+        .collect()
+}
+
+/// The game draws every moby from its table entry each frame; the renderer draws only [`Play::driven`] from the table
+/// (the others keep their loaded records). A watched static whose entry changed (another class moved, turned, hid or
+/// deleted it) is driven from now on: its placement and visibility, not its animation (no ported update advances
+/// it; the renderer keeps playing it).
+fn promote_statics(p: &mut Play) {
+    let table = &p.game.mobys;
+    let mut moved = Vec::new();
+    p.watched.retain(|&(id, ii, sig)| {
+        let changed = table.mobys.get(id).is_some_and(|m| static_sig(m) != sig);
+        if changed { moved.push((id, ii, None)); }
+        !changed
+    });
+    p.driven.extend(moved);
 }
 
 fn rows_bits(rows: &[[f32; 4]; 4]) -> [V4; 3] { [0, 1, 2].map(|i| rows[i].map(f32::to_bits)) }
@@ -1356,6 +1395,7 @@ fn setup(
         .collect();
     // The ship (`ShipUpdate`, rc_game::travel::ship) is driven from the table like the ported statics: its update, the
     // mode-6 scenes and the fly-away move, hide and animate it (its instance is the one crate::moby_spawn appended).
+    let watched = watched_statics(&game.mobys, &statics.moby_to_instance, &driven);
     let mut driven = driven;
     if let (Some(id), Some(ii)) = (ship_id, ship_ii) {
         driven.push((id, ii, occl.anim_index(ii)));
@@ -1408,6 +1448,7 @@ fn setup(
         classes: std::sync::Arc::new(classes),
         svc,
         driven,
+        watched,
         moby_to_instance: statics.moby_to_instance.clone(),
         missions,
         lit: HashMap::new(),
@@ -1493,6 +1534,7 @@ fn caster_order(play: Option<Res<Play>>, shadows: Option<Res<crate::shadow_rende
 /// The table → the renderer for the scheduler-driven static mobys (module doc): placement, light block (for
 /// changed rows / ambient / light word), hide, anim state and snapshot.
 fn drive_statics(p: &mut Play, lv: &crate::level_load::LoadedLevel, occl: &mut MobyOcclusion, mut anim: Option<&mut MobyAnim>) {
+    promote_statics(p);
     let table = &p.game.mobys;
     let lighting = lv.mobys.lighting.as_ref();
     for &(id, ii, k) in &p.driven {
@@ -1662,6 +1704,7 @@ fn death_reload(p: &mut Play, lv: &crate::level_load::LoadedLevel, state: Option
         })
         .map(|id| { let ii = statics.moby_to_instance[id]; (id, ii, occl.as_deref().and_then(|o| o.anim_index(ii))) })
         .collect();
+    p.watched = watched_statics(&p.game.mobys, &statics.moby_to_instance, &driven);
     if let (Some(id), Some(ii)) = (ship_id, ship_ii) { driven.push((id, ii, occl.as_deref().and_then(|o| o.anim_index(ii)))); }
     p.driven = driven;
     p.lit.clear();
