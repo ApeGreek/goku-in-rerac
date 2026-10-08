@@ -33,11 +33,13 @@ pub fn apply(
     source: Option<Res<CameraSource>>,
     display: Res<crate::display::DisplaySettings>,
     mut cams: Query<(&mut Transform, &mut Projection), With<FlyCam>>,
+    play: Option<Res<crate::gameplay::Play>>,
 ) {
     let aspect = display.aspect;
     let (Some(view), Some(source)) = (view, source) else { return };
     if *source != CameraSource::Play { return; }
     let t = view_transform(&view.view);
+    let t = play.map_or(t, |p| crate::hero_glb::over_shoulder(t, &p));
     for (mut tf, mut proj) in &mut cams {
         if *tf != t { *tf = t; }
         // The FOV hook: the game's tangent (Hor+ in 16:9, crate::display); only touched when it changes.

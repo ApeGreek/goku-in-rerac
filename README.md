@@ -6,6 +6,10 @@
 
 <p align="center">An unofficial native PC port of Ratchet & Clank (2002).</p>
 
+> [!NOTE]
+> This fork adds a personal mod that puts Goku (Dragon Ball Z: Budokai Tenkaichi 3) in place of Ratchet. See
+> [GOKU.md](GOKU.md). No game data is included.
+
 ## Please read first
 
 > [!IMPORTANT]

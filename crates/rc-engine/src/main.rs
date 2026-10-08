@@ -29,6 +29,8 @@
 //! - `RC_SHADOWS=0|1`, `RC_SHADOW_DEBUG=1`, `RC_SHADOW_TRACE=1` the moby shadows, crate::shadow_render
 
 mod crash_log;
+mod hero_glb;
+mod export_obj;
 mod audio_out;
 mod determinism;
 mod display;
@@ -190,6 +192,8 @@ fn main() -> anyhow::Result<()> {
     .add_plugins(hud_render::HudPlugin)
     // The game tick (hero, pad, follow camera) driving Ratchet and the view; RC_PLAY=0 keeps the fly camera only.
     .add_plugins(gameplay::GameplayPlugin { boot: std::sync::Mutex::new(boot) })
+    .add_plugins(hero_glb::HeroGlbPlugin)
+    .add_plugins(export_obj::ExportObjPlugin)
     .add_plugins(menu_render::MenuPlugin)
     .add_plugins((screen_canvas::CanvasPlugin, vendor_render::VendorRenderPlugin))
     // The Gadgets / Weapons pages' 3D Ratchet and item preview (crate::menu_models, on crate::screen_canvas).

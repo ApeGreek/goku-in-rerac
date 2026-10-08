@@ -18,3 +18,9 @@
 
 # Release packages (tools/package/package.sh)
 /dist/
+
+# Goku mod: game-derived data, generated locally (GOKU.md)
+/crates/rc-engine/assets/goku.glb
+/bt3/
+/frames/
+__pycache__/

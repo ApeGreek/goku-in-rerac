@@ -91,6 +91,8 @@ fn draw(
     // A runtime level change (crate::level_switch): the ghosts' entities are gone.
     if generation.is_changed() { *state = None; }
     let Some(p) = play else { return };
+    // crate::hero_glb: no ghosts of Ratchet's or the wrench's models behind the replacement model.
+    if crate::hero_glb::path().is_some() { return; }
     let lv = &level.0;
     let g = state.get_or_insert_with(|| {
         let owners = owners(lv);

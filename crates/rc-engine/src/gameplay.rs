@@ -1791,10 +1791,18 @@ fn ratchet_visibility(
     let Some(m) = p.game.mobys.mobys.get(p.hero_id) else { return };
     let hidden = m.mode & rc_game::moby_runtime::mode::HIDDEN != 0;
     p.ratchet_hidden = hidden;
-    let want = if hidden { Visibility::Hidden } else { Visibility::Inherited };
+    let want = if hidden || crate::hero_glb::path().is_some() { Visibility::Hidden } else { Visibility::Inherited };
     for (mut v, scene, travel, vendor) in &mut q {
         if scene || travel || vendor { continue; }
         if *v != want { *v = want; }
+    }
+}
+
+impl Play {
+    /// Ratchet's moby for crate::hero_glb: position, rotation rows, hidden.
+    pub fn hero_pose(&self) -> Option<([f32; 3], [[f32; 3]; 3], bool)> {
+        let m = self.game.mobys.mobys.get(self.hero_id)?;
+        Some((pos3(m), rows3(&m.rows), self.ratchet_hidden))
     }
 }
 
@@ -2444,6 +2452,9 @@ fn upload_dynamic(
     let (mut rec_changed, mut pal_changed) = (false, false);
     let (mut live, mut drawn) = (0, 0);
     let pal_bytes = d.pal_slots as usize * 64;
+    // crate::hero_glb: the object in the glove (the bomb) is drawn in the weapon on the model's hand.
+    let held = p.game.hero.weapons.glove.held;
+    let glove = p.game.hero.items.slot.item.as_ref().map(|i| (i.rows.map(|r| [0, 1, 2].map(|k| f32::from_bits(r[k]))), i.position));
     for slot in 0..d.shown.len() {
         let id = first + slot;
         let Some(mo) = table.mobys.get(id) else { break };
@@ -2475,7 +2486,8 @@ fn upload_dynamic(
         let ci = pick.map(|p| p.0);
         d.visible[slot] = ci.is_some() as u8;
         d.shown[slot] = ci;
-        let model = moby_render::extra_model(rows3(&mo.rows), mo.scale, pos3(mo));
+        let at = glove.filter(|_| Some(id) == held).and_then(|gl| crate::hero_glb::in_model_hand(gl, pos3(mo))).unwrap_or(pos3(mo));
+        let model = moby_render::extra_model(rows3(&mo.rows), mo.scale, at);
         let look = pick.map(|(ci, alpha, fading, shine, e)| (&m.classes[ci], moby_render::SlotLook { model, alpha, fading, mode: mo.mode, glow: mo.glow, shine, e, late: deferred.contains(&id) || mo.mode & 0x800 != 0 }));
         d.extra.show_slot(commands, lv, slot as u32, look, meshes, images, materials, buffers);
         let Some(ci) = ci else { continue };

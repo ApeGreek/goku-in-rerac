@@ -154,6 +154,8 @@ pub struct MobyAttach {
     palette_len: u32,
     ticks: u64,
     uploaded: Option<u64>,
+    /// The hero's idle counter as the last tick passed it to [`place_antenna`] (crate::hero_glb re-places the antenna).
+    antenna_counter: Option<i32>,
 }
 
 impl MobyAttach {
@@ -186,6 +188,22 @@ impl MobyAttach {
     pub fn set_host(&mut self, rows: [V4; 3], position: [f32; 3]) {
         self.host_rows = rows;
         self.host_pos = position;
+    }
+
+    /// crate::hero_glb: the items of `slot` (Back: Clank and the pack; Hand: the weapon, never the wrench) hang from
+    /// this frame (game-space rotation rows, unit scale, and position) instead of Ratchet's joints; Clank's antenna
+    /// follows him.
+    pub fn set_anchor(&mut self, slot: Slot, rows: [[f32; 3]; 3], position: [f32; 3]) {
+        for item in self.items.iter_mut().filter(|i| i.attach.slot == slot && i.o_class != WRENCH_O_CLASS_I16) {
+            item.rows = rows.map(|r| [r[0].to_bits(), r[1].to_bits(), r[2].to_bits(), 0]);
+            item.position = position;
+        }
+        if slot == Slot::Back {
+            let counter = self.antenna_counter;
+            place_antenna(self, counter);
+        }
+        // Re-upload every frame: the model's animation moves the anchors between ticks too.
+        self.uploaded = None;
     }
 }
 
@@ -391,7 +409,7 @@ fn build(
         host_k, host_class: placed.class, chains,
         host_rows: crate::moby_light::instance_rows(inst), host_pos: inst.position, host_scale: placed.scale,
         host_light: inst.light_word(), host_ambient: inst.ambient_rgb(),
-        items, extra, clank_targets: clank_targets(), clank_antenna_chain: clank_antenna_chain(), palette_len, ticks: 0, uploaded: None,
+        items, extra, clank_targets: clank_targets(), clank_antenna_chain: clank_antenna_chain(), palette_len, ticks: 0, uploaded: None, antenna_counter: None,
     };
     // Placement before the first tick (the game creates the items in the first hero update).
     let host = &anim.instances[host_k];
@@ -500,7 +518,7 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
     let hand = play.as_ref().map(|p| p.game.hero.items.slot.item.clone());
     // First person (0x1413f5): `0x2486c0` hides Ratchet's items, the thrown wrench excepted; so does every tick of another
     // body (`0x22a110` → `0x2486c0`, rc_game::hero::bodies: Clank or Giant Clank is the hero, Ratchet and his items hidden).
-    let fp = play.as_ref().is_some_and(|p| p.game.hero.f13f5 != 0 || p.game.hero.mode != 0);
+    let fp = play.as_ref().is_some_and(|p| (p.game.hero.f13f5 != 0 && !crate::hero_glb::third_person_look(p)) || p.game.hero.mode != 0);
     // 0x1413ff (the gold bolt's pickup): `FUN_002487a8` hides the hand item.
     let hand_off = play.as_ref().is_some_and(|p| p.game.hero.f13ff != 0);
     // The Swingshot's hook (a moby of its own in the game: advanced every tick, placed by the item's update).
@@ -519,7 +537,9 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
             } else {
                 None
             };
-            item.visible = m.is_some() && !hidden && !fp;
+            // crate::hero_glb: in the look stance kept on the model's back, Clank only.
+            let pack_off = item.o_class != CLANK_O_CLASS as i16 && play.as_ref().is_some_and(|p| crate::hero_glb::third_person_look(p));
+            item.visible = m.is_some() && !hidden && !fp && !pack_off;
             if let Some(m) = m {
                 item.state = m.anim;
                 item.snapshot = m.snapshot.clone();
@@ -539,7 +559,9 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
     let (k, class) = (a.host_k, &level.0.mobys.anim[a.host_class]);
     let mods = play.as_ref().map(|p| p.game.mobys.mobys[p.game.hero_moby].joint_mods.clone()).unwrap_or_default();
     place(&mut a, class, &anim.instances[k].state, anim.snapshots[k].as_ref(), back.is_none(), hand.is_none(), &mods);
-    place_antenna(&mut a, play.as_ref().map(|p| p.game.hero.idle.counter));
+    a.antenna_counter = play.as_ref().map(|p| p.game.hero.idle.counter);
+    let counter = a.antenna_counter;
+    place_antenna(&mut a, counter);
     // The worn items (item slots 1 and 2, rc_game::hero::worn): the class of the slot's item shows while the slot
     // has its moby (states 2 and 3), hidden with Ratchet's items (first person; Clank hidden does not hide them).
     // Ready (2): the keyframe of Ratchet's joints (`HeroItemPoseFromRatchet`); the head item's put-away (3): its own
@@ -586,7 +608,8 @@ fn update(attach: Option<ResMut<MobyAttach>>, anim: Option<Res<MobyAnim>>, level
             (gl.hand_id == p.game.hero.items.slot.id).then_some(gl.hand_word).flatten()
         });
         for item in a.items.iter_mut().filter(|i| i.attach.slot == Slot::Hand) {
-            item.visible = hand_shows(item.o_class, h.as_ref(), fp, hand_off);
+            // crate::hero_glb: the replacement model punches, so the wrench is not drawn.
+            item.visible = hand_shows(item.o_class, h.as_ref(), fp, hand_off) && !(crate::hero_glb::path().is_some() && item.o_class == WRENCH_O_CLASS_I16);
             if let Some(m) = h.as_ref().filter(|m| m.o_class == item.o_class) {
                 item.state = m.anim;
                 item.snapshot = m.snapshot.clone();
@@ -617,7 +640,7 @@ pub(crate) fn hand_shows(o_class: i16, held: Option<&rc_game::hero::items::HandI
 }
 
 /// Palettes and records of the items after a tick, and the entities' transforms (blended-pass sorting).
-fn upload(
+pub(crate) fn upload(
     attach: Option<ResMut<MobyAttach>>,
     level: Res<crate::Level>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
